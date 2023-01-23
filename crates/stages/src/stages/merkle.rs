@@ -1,7 +1,9 @@
 use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, trie::DBTrieLoader, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
+    StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_db::database::Database;
+use reth_db::{database::Database, tables, transaction::DbTx};
+use reth_interfaces::consensus;
 use std::fmt::Debug;
 use tracing::*;
 
@@ -17,6 +19,9 @@ pub struct MerkleStage {
     /// Flag if true would do `execute` but skip unwind but if it false it would skip execution but
     /// do unwind.
     pub is_execute: bool,
+    /// The threshold for switching from incremental trie building
+    /// of changes to whole rebuild. Num of transitions.
+    pub clean_threshold: u64,
 }
 
 #[async_trait::async_trait]
@@ -33,7 +38,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Execute the stage.
     async fn execute(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if !self.is_execute {
@@ -41,7 +46,39 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
         }
 
-        // Iterate over changeset (similar to Hashing stages) and take new values
+        let stage_progress = input.stage_progress.unwrap_or_default();
+        let previous_stage_progress = input.previous_stage_progress();
+
+        let from_transition = tx.get_block_transition(stage_progress)?;
+        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+
+        let previous_numhash = tx.get_block_numhash(previous_stage_progress)?;
+
+        let block_root = tx
+            .get::<tables::Headers>(previous_numhash)?
+            .ok_or_else(|| {
+                StageError::DatabaseIntegrity(DatabaseIntegrityError::Header {
+                    number: previous_stage_progress,
+                    hash: previous_numhash.hash(),
+                })
+            })?
+            .state_root;
+
+        let trie_root = if to_transition - from_transition > self.clean_threshold {
+            // if there are more blocks then threshold it is faster to rebuild the trie
+            let mut loader = DBTrieLoader {};
+            loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
+        } else {
+            // Iterate over changeset (similar to Hashing stages) and take new values
+            todo!()
+        };
+
+        if block_root != trie_root {
+            return Err(StageError::Validation {
+                block: previous_stage_progress,
+                error: consensus::Error::BodyStateRootDiff { got: block_root, expected: trie_root },
+            })
+        }
 
         info!(target: "sync::stages::merkle::exec", "Stage finished");
         Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })

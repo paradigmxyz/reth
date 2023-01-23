@@ -184,11 +184,11 @@ impl Command {
                 commit_threshold: config.stages.execution.commit_threshold,
             })
             // This Merkle stage is used only on unwind
-            .push(MerkleStage { is_execute: false })
+            .push(MerkleStage { is_execute: false, clean_threshold: 0 /* 500_000 */ })
             .push(AccountHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
             .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
             // This merkle stage is used only for execute
-            .push(MerkleStage { is_execute: true });
+            .push(MerkleStage { is_execute: true, clean_threshold: 0 /* 500_000 */ });
 
         if let Some(tip) = self.tip {
             debug!(target: "reth::cli", %tip, "Tip manually set");

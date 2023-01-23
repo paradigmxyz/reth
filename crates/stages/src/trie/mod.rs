@@ -20,10 +20,12 @@ use trie_db::{
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub(crate) enum TrieError {
+    // TODO: decompose into various different errors
+    #[error("Some error occurred")]
+    #[allow(unused)]
+    InternalError,
     #[error("{0:?}")]
-    ImplError(#[from] Box<trie_db::TrieError<reth_primitives::H256, parity_scale_codec::Error>>),
-    #[error("{0:?}")]
-    DecodeError(#[from] reth_db::Error),
+    DatabaseError(#[from] reth_db::Error),
 }
 
 struct DBTrieLayout;
@@ -230,16 +232,18 @@ impl From<Account> for EthAccount {
 }
 
 #[derive(Debug)]
-struct DBTrieLoader;
+pub(crate) struct DBTrieLoader;
 
-#[allow(dead_code)]
 impl DBTrieLoader {
     pub(crate) fn calculate_root<DB: Database>(
         &mut self,
         tx: &Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
+        // TODO: replace unwraps with '?'
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>().unwrap();
         let mut walker = accounts_cursor.walk(H256::zero()).unwrap();
+
+        // TODO: implement HashDB to use DB instead of MemoryDB
         // let trie_cursor = tx.cursor_read::<tables::AccountsTrie>().unwrap();
 
         let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
@@ -263,7 +267,6 @@ impl DBTrieLoader {
         Ok(*trie.root())
     }
 
-    // Result<H256>
     fn calculate_storage_root<DB: Database>(
         &mut self,
         tx: &Transaction<'_, DB>,
