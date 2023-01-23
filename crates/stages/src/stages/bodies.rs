@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -72,13 +72,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), _) = match input.next_action(None) {
-            ExecAction::Run { range, capped } => (range.into_inner(), capped),
-            ExecAction::Done { stage_progress, target } => {
-                info!(target: "sync::stages::bodies", stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
-            }
-        };
+        let (start_block, end_block) = exec_or_return!(input, "sync::stages::bodies");
 
         // Update the header range on the downloader
         self.downloader.set_download_range(start_block..end_block + 1)?;
