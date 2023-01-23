@@ -34,7 +34,7 @@ pub struct ConcurrentDownloader<B, C, DB> {
     /// The database handle
     db: Arc<DB>,
     /// The maximum number of non-empty blocks per one request
-    request_limit: usize,
+    request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     stream_batch_size: usize,
     /// The allowed range for number of concurrent requests.
@@ -63,7 +63,7 @@ where
         client: Arc<B>,
         consensus: Arc<C>,
         db: Arc<DB>,
-        request_limit: usize,
+        request_limit: u64,
         stream_batch_size: usize,
         max_buffered_responses: usize,
         concurrent_requests_range: RangeInclusive<usize>,
@@ -91,8 +91,12 @@ where
             None => self.download_range.start,
         };
 
-        let request = self.query_headers(start_at, self.request_limit)?;
+        let limit = self.download_range.end.saturating_sub(start_at).min(self.request_limit);
+        if limit == 0 {
+            return Ok(None)
+        }
 
+        let request = self.query_headers(start_at, limit)?;
         if request.is_empty() {
             return Ok(None)
         }
@@ -103,7 +107,7 @@ where
     fn query_headers(
         &self,
         start: BlockNumber,
-        count: usize,
+        count: u64,
     ) -> Result<Vec<SealedHeader>, db::Error> {
         let tx = self.db.tx()?;
 
@@ -268,7 +272,7 @@ where
                         self.in_progress_queue.push_new_request(
                             Arc::clone(&self.client),
                             Arc::clone(&self.consensus),
-                            self.query_headers(request_range.start, request_range.count())?,
+                            self.query_headers(request_range.start, request_range.count() as u64)?,
                         );
                         // Clear the current request range
                         request_range = Range::default();
@@ -423,7 +427,7 @@ impl Ord for OrderedBodiesResponse {
 /// Builder for [ConcurrentDownloader].
 pub struct ConcurrentDownloaderBuilder {
     /// The batch size of non-empty blocks per one request
-    request_limit: usize,
+    request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     stream_batch_size: usize,
     /// Maximum amount of received bodies to buffer internally.
@@ -445,7 +449,7 @@ impl Default for ConcurrentDownloaderBuilder {
 
 impl ConcurrentDownloaderBuilder {
     /// Set request batch size on the downloader.
-    pub fn with_request_limit(mut self, request_limit: usize) -> Self {
+    pub fn with_request_limit(mut self, request_limit: u64) -> Self {
         self.request_limit = request_limit;
         self
     }
@@ -546,7 +550,7 @@ mod tests {
 
         assert_matches!(
             downloader.next().await,
-            Some(res) => assert_eq!(res, zip_blocks(headers.iter(),&mut bodies))
+            Some(res) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
         );
         assert_eq!(client.times_requested(), 1);
     }
@@ -588,6 +592,39 @@ mod tests {
             client.times_requested(),
             // div_ceil equivalent
             ((headers.iter().filter(|x| !x.is_empty()).count() + 9) / 10) as u64,
+        );
+    }
+
+    // Check that the downloader picks up the new range and downloads bodies after previous range
+    // was completed.
+    #[tokio::test]
+    async fn can_download_new_range_after_termination() {
+        // Generate some random blocks
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let (headers, mut bodies) = generate_bodies(0..200);
+
+        insert_headers(db.borrow(), &headers);
+
+        let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+        let mut downloader = ConcurrentDownloaderBuilder::default()
+            .with_stream_batch_size(100)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+
+        // Set and download the first range
+        downloader.set_download_range(0..100).expect("failed to set header range");
+        assert_matches!(
+            downloader.next().await,
+            Some(res) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
+        );
+
+        // Check that the stream is terminated
+        assert_eq!(downloader.next().await, None);
+
+        // Set and download the second range
+        downloader.set_download_range(100..200).expect("failed to set header range");
+        assert_matches!(
+            downloader.next().await,
+            Some(res) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
         );
     }
 }

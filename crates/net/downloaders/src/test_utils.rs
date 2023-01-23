@@ -93,6 +93,7 @@ impl BodiesClient for TestBodiesClient {
         }
         self.times_requested.fetch_add(1, Ordering::Relaxed);
         let bodies = &mut *self.bodies.lock().await;
+        println!("HASHES {}", hashes.len());
         Ok((
             PeerId::default(),
             hashes

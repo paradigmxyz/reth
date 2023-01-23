@@ -97,7 +97,7 @@ impl Default for TotalDifficultyConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
-    pub downloader_request_limit: usize,
+    pub downloader_request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
     pub downloader_stream_batch_size: usize,
     /// Maximum amount of received bodies to buffer internally.
