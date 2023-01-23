@@ -8,7 +8,7 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
-use std::{borrow::Borrow, sync::Arc, collections::BTreeMap};
+use std::{borrow::Borrow, sync::Arc};
 
 use crate::db::Transaction;
 
@@ -69,14 +69,12 @@ impl TestTransaction {
     }
 
     /// Return full table as BTreeMap
-    pub(crate) fn table<T: Table>(&self) -> Result<BTreeMap<T::Key, T::Value>, DbError>
+    pub(crate) fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
     where
         T::Key: Default + Ord,
     {
         self.query(|tx| {
-            tx.cursor_read::<T>()?
-                .walk(T::Key::default())?
-                .collect::<Result<BTreeMap<_, _>, DbError>>()
+            tx.cursor_read::<T>()?.walk(T::Key::default())?.collect::<Result<Vec<_>, DbError>>()
         })
     }
 

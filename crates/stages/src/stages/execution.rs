@@ -3,7 +3,7 @@ use crate::{
     Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
     tables,
@@ -145,7 +145,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into());
+                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
             }
@@ -161,7 +161,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Signer gap");
                     return Err(
                         DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
-                    );
+                    )
                 }
                 signers.push(tx);
             }
@@ -326,7 +326,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: input.unwind_to });
+            return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
@@ -372,7 +372,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
         while let Some((transition_id, _)) = rev_acc_changeset_walker.next().transpose()? {
             if transition_id < from_transition_rev {
-                break;
+                break
             }
             tx.delete::<tables::AccountChangeSet>(transition_id, None)?;
         }
@@ -380,7 +380,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.transition_id() < from_transition_rev {
-                break;
+                break
             }
             tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
@@ -396,7 +396,10 @@ mod tests {
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
 
     use super::*;
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_db::{
+        mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
+        models::AccountBeforeTx,
+    };
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, U256,
     };
@@ -587,6 +590,7 @@ mod tests {
         // variables
         let caller_address = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
         let destroyed_address = H160(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87"));
+        let beneficiary_address = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
 
         let code = hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00");
         let balance = U256::from(0x0de0b6b3a7640000u64);
@@ -609,6 +613,12 @@ mod tests {
                 StorageEntry { key: H256::zero(), value: U256::ZERO },
             )
             .unwrap();
+        db_tx
+            .put::<tables::PlainStorageState>(
+                destroyed_address,
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1u64) },
+            )
+            .unwrap();
 
         tx.commit().unwrap();
 
@@ -621,21 +631,88 @@ mod tests {
         tx.commit().unwrap();
 
         // assert unwind stage
-        let db_tx = tx.deref();
         assert_eq!(
-            db_tx.get::<tables::PlainAccountState>(destroyed_address),
+            tx.deref().get::<tables::PlainAccountState>(destroyed_address),
             Ok(None),
             "Account was destroyed"
         );
 
         assert_eq!(
-            db_tx.get::<tables::PlainStorageState>(destroyed_address),
+            tx.deref().get::<tables::PlainStorageState>(destroyed_address),
             Ok(None),
             "There is storage for destroyed account"
         );
+        // drops tx so that it return write privilege to test_tx
+        drop(tx);
+        let plain_accounts = test_tx.table::<tables::PlainAccountState>().unwrap();
+        let plain_storage = test_tx.table::<tables::PlainStorageState>().unwrap();
+
+        assert_eq!(
+            plain_accounts,
+            vec![
+                (H160::zero(), Account::default()),
+                (
+                    beneficiary_address,
+                    Account {
+                        nonce: 0,
+                        balance: U256::from(0x1bc16d674eca30a0u64),
+                        bytecode_hash: None
+                    }
+                ),
+                (
+                    caller_address,
+                    Account {
+                        nonce: 1,
+                        balance: U256::from(0xde0b6b3a761cf60u64),
+                        bytecode_hash: None
+                    }
+                )
+            ]
+        );
+        assert!(plain_storage.is_empty());
 
         let account_changesets = test_tx.table::<tables::AccountChangeSet>().unwrap();
-        let storge_changesets = test_tx.table::<tables::StorageChangeSet>().unwrap();
+        let storage_changesets = test_tx.table::<tables::StorageChangeSet>().unwrap();
 
+        assert_eq!(
+            account_changesets,
+            vec![
+                (
+                    1,
+                    AccountBeforeTx {
+                        address: H160(hex!("0000000000000000000000000000000000000000")),
+                        info: None
+                    }
+                ),
+                (1, AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) }),
+                (1, AccountBeforeTx { address: beneficiary_address, info: None }),
+                (1, AccountBeforeTx { address: caller_address, info: Some(caller_info) }),
+                (
+                    2,
+                    AccountBeforeTx {
+                        address: beneficiary_address,
+                        info: Some(Account {
+                            nonce: 0,
+                            balance: U256::from(0x230a0),
+                            bytecode_hash: None
+                        })
+                    }
+                )
+            ]
+        );
+
+        assert_eq!(
+            storage_changesets,
+            vec![
+                (
+                    (1, destroyed_address).into(),
+                    StorageEntry { key: H256::zero(), value: U256::ZERO }
+                ),
+                (
+                    (1, destroyed_address).into(),
+                    StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1u64) }
+                )
+            ]
+        );
     }
 }
