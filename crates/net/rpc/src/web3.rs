@@ -25,7 +25,8 @@ impl Web3Api {
 #[async_trait]
 impl Web3ApiServer for Web3Api {
     async fn client_version(&self) -> RpcResult<String> {
-        self.network.client_version().await.map_internal_err(|e| e.to_string())
+        let status = self.network.network_status().await.map_internal_err(|e| e.to_string())?;
+        Ok(status.client_version)
     }
 
     fn sha3(&self, input: Bytes) -> RpcResult<H256> {

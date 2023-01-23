@@ -26,9 +26,6 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns the current status of the network being ran by the local node.
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError>;
-
-    /// Returns the client version
-    async fn client_version(&self) -> Result<String, NetworkError>;
 }
 
 /// Provides general purpose information about Peers in the network.
@@ -45,8 +42,8 @@ pub trait PeersInfo: Send + Sync {
 /// The status of the network being ran by the local node.
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct NetworkStatus {
-    /// The local node client name.
-    pub client_name: String,
+    /// The local node client version.
+    pub client_version: String,
     /// Information about the Ethereum Wire Protocol.
     pub eth_protocol_info: EthProtocolInfo,
 }
