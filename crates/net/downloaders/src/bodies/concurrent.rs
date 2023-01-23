@@ -111,7 +111,6 @@ where
         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
-        // TODO: experimental
         let mut non_empty_headers = 0;
         let mut headers = Vec::<SealedHeader>::default();
         let mut canonical_entry = canonical_cursor.seek_exact(start)?;

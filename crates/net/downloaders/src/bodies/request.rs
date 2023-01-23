@@ -188,8 +188,9 @@ where
                         tracing::trace!(
                             target: "downloaders::bodies", request_len, response_len, ?peer_id, "Received bodies"
                         );
-                        // Draining the hashes here so that on the next `submit_request` call we only
-                        // request the remaining bodies, instead of the ones we already received
+                        // Draining the hashes here so that on the next `submit_request` call we
+                        // only request the remaining bodies, instead of the
+                        // ones we already received
                         this.hashes_to_download.drain(..response_len);
                         this.buffer.extend(bodies.into_iter().map(|b| (peer_id, b)));
 
