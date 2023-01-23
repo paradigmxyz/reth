@@ -19,7 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_net_common::bandwidth_meter::{BandwidthMeter, BandwidthMeterMetrics, MeteredStream};
+use reth_net_common::ingress_egress_meter::{IngressEgressMeterMetrics, MeteredStream};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
@@ -97,8 +97,6 @@ pub(crate) struct SessionManager {
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
-    /// Used to measure inbound & outbound bandwidth across all managed streams
-    bandwidth_meter: BandwidthMeter,
 }
 
 // === impl SessionManager ===
@@ -112,7 +110,6 @@ impl SessionManager {
         status: Status,
         hello_message: HelloMessage,
         fork_filter: ForkFilter,
-        bandwidth_meter: BandwidthMeter,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -133,7 +130,6 @@ impl SessionManager {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx,
             active_session_rx: ReceiverStream::new(active_session_rx),
-            bandwidth_meter,
         }
     }
 
@@ -204,16 +200,10 @@ impl SessionManager {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        // Instantiating a new [`BandwidthMeterMetrics`] struct here to get per-stream metrics.
-        // NOTE: This means the metric values will be <= the in/outbound values in the
-        // [`BandwidthMeter`], as it is shared by all streams.
-        let bandwidth_metrics =
-            BandwidthMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
-        let metered_stream = MeteredStream::new_with_meter_and_metrics(
-            stream,
-            self.bandwidth_meter.clone(),
-            bandwidth_metrics,
-        );
+        let ingress_egress_metrics =
+            IngressEgressMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
+        let mut metered_stream = MeteredStream::builder(stream);
+        metered_stream.add_metrics(ingress_egress_metrics);
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
@@ -248,7 +238,6 @@ impl SessionManager {
             self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
-            self.bandwidth_meter.clone(),
         ));
 
         let handle = PendingSessionHandle {
@@ -675,16 +664,14 @@ async fn start_pending_outbound_session(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
-    bandwidth_meter: BandwidthMeter,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
-            // Instantiating a new [`BandwidthMeterMetrics`] struct here to get per-stream metrics.
-            // NOTE: This means the metric values will be <= the in/outbound values in the
-            // [`BandwidthMeter`], as it is shared by all streams.
-            let bandwidth_metrics =
-                BandwidthMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
-            MeteredStream::new_with_meter_and_metrics(stream, bandwidth_meter, bandwidth_metrics)
+            let ingress_egress_metrics =
+                IngressEgressMeterMetrics::new(&format!("bandwidth_session_{session_id}"));
+            let mut metered_stream = MeteredStream::builder(stream);
+            metered_stream.add_metrics(ingress_egress_metrics);
+            metered_stream
         }
         Err(error) => {
             let _ = events

@@ -19,7 +19,7 @@ use reth_eth_wire::{
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
-use reth_net_common::bandwidth_meter::MeteredStream;
+use reth_net_common::ingress_egress_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{
     collections::VecDeque,
@@ -567,7 +567,6 @@ mod tests {
         EthVersion, HelloMessage, NewPooledTransactionHashes, ProtocolVersion, Status,
         StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
@@ -595,7 +594,6 @@ mod tests {
         status: Status,
         fork_filter: ForkFilter,
         next_id: usize,
-        bandwidth_meter: BandwidthMeter,
     }
 
     impl SessionBuilder {
@@ -641,7 +639,7 @@ mod tests {
             let (_disconnect_tx, disconnect_rx) = oneshot::channel();
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
             let metered_stream =
-                MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
+                MeteredStream::builder(stream);
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
@@ -717,7 +715,6 @@ mod tests {
                 fork_filter: Hardfork::Frontier
                     .fork_filter(&MAINNET)
                     .expect("The Frontier fork filter should exist on mainnet"),
-                bandwidth_meter: BandwidthMeter::default(),
             }
         }
     }

@@ -38,7 +38,6 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, Status,
 };
-use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
@@ -128,12 +127,6 @@ impl<C> NetworkManager<C> {
     pub fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
-
-    /// Returns a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
-    /// inside of the [`NetworkHandle`]
-    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
-        self.handle.bandwidth_meter()
-    }
 }
 
 impl<C> NetworkManager<C>
@@ -185,7 +178,6 @@ where
         let local_peer_id = discovery.local_id();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
-        let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
 
         let sessions = SessionManager::new(
             secret_key,
@@ -194,7 +186,6 @@ where
             status,
             hello_message,
             fork_filter,
-            bandwidth_meter.clone(),
         );
 
         let state = NetworkState::new(
@@ -216,7 +207,6 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
-            bandwidth_meter,
         );
 
         Ok(Self {

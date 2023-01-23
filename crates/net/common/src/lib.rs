@@ -8,7 +8,7 @@
 //! Shared types across reth-net
 
 pub mod ban_list;
-pub mod bandwidth_meter;
+pub mod ingress_egress_meter;
 /// Traits related to tokio streams
 pub mod stream;
 
