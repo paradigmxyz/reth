@@ -179,7 +179,7 @@ where
                             continue
                         }
 
-                        // TODO: fix this. temp stub for testing
+                        // TODO: Consider limiting
                         if request_len != 1 && response_len == 1 {
                             this.on_error(BodyRequestError::EmptyResponse, Some(peer_id));
                             continue
@@ -254,11 +254,11 @@ mod tests {
 
     /// Check that the request future
     #[tokio::test]
-    async fn request_retries_until_fullfilled() {
+    async fn request_submits_until_fullfilled() {
         // Generate some random blocks
         let (headers, mut bodies) = generate_bodies(0..20);
 
-        let batch_size = 1;
+        let batch_size = 2;
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_max_batch_size(batch_size),
         );
@@ -268,7 +268,8 @@ mod tests {
         assert_eq!(fut.await, zip_blocks(headers.iter(), &mut bodies));
         assert_eq!(
             client.times_requested(),
-            headers.into_iter().filter(|h| !h.is_empty()).count() as u64
+            // div_ceild
+            (headers.into_iter().filter(|h| !h.is_empty()).count() as u64 + 1) / 2
         );
     }
 }

@@ -679,7 +679,6 @@ mod tests {
             }
         }
 
-        // TODO(onbjerg): Move
         /// A [BodiesClient] that should not be called.
         #[derive(Debug)]
         pub(crate) struct NoopClient;
@@ -705,7 +704,6 @@ mod tests {
             }
         }
 
-        // TODO(onbjerg): Move
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
