@@ -2,6 +2,7 @@
 
 use jsonrpsee::core::{Error as RpcError, RpcResult};
 use reth_network_api::NetworkError;
+use std::fmt::Display;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {
@@ -9,21 +10,21 @@ pub(crate) trait ToRpcResult<Ok, Err> {
     fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(Err) -> (i32, M, Option<&'a [u8]>),
-        M: Into<String>;
+        M: Display;
 
     /// Converts this type into an [`RpcResult`] with the
     /// [`jsonrpsee::types::error::INTERNAL_ERROR_CODE` and the given message.
     fn map_internal_err<F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(Err) -> M,
-        M: Into<String>;
+        M: Display;
 
     /// Converts this type into an [`RpcResult`] with the
     /// [`jsonrpsee::types::error::INTERNAL_ERROR_CODE`] and given message and data.
     fn map_internal_err_with_data<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(Err) -> (M, &'a [u8]),
-        M: Into<String>;
+        M: Display;
 
     /// Adds a message to the error variant and returns an internal Error.
     ///
@@ -36,7 +37,7 @@ impl<Ok> ToRpcResult<Ok, reth_interfaces::Error> for reth_interfaces::Result<Ok>
     fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(reth_interfaces::Error) -> (i32, M, Option<&'a [u8]>),
-        M: Into<String>,
+        M: Display,
     {
         match self {
             Ok(t) => Ok(t),
@@ -51,7 +52,7 @@ impl<Ok> ToRpcResult<Ok, reth_interfaces::Error> for reth_interfaces::Result<Ok>
     fn map_internal_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(reth_interfaces::Error) -> M,
-        M: Into<String>,
+        M: Display,
     {
         match self {
             Ok(t) => Ok(t),
@@ -63,7 +64,7 @@ impl<Ok> ToRpcResult<Ok, reth_interfaces::Error> for reth_interfaces::Result<Ok>
     fn map_internal_err_with_data<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(reth_interfaces::Error) -> (M, &'a [u8]),
-        M: Into<String>,
+        M: Display,
     {
         match self {
             Ok(t) => Ok(t),
@@ -91,7 +92,7 @@ impl<Ok> ToRpcResult<Ok, NetworkError> for Result<Ok, NetworkError> {
     fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(NetworkError) -> (i32, M, Option<&'a [u8]>),
-        M: Into<String>,
+        M: Display,
     {
         match self {
             Ok(t) => Ok(t),
@@ -106,7 +107,7 @@ impl<Ok> ToRpcResult<Ok, NetworkError> for Result<Ok, NetworkError> {
     fn map_internal_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(NetworkError) -> M,
-        M: Into<String>,
+        M: Display,
     {
         match self {
             Ok(t) => Ok(t),
@@ -118,7 +119,7 @@ impl<Ok> ToRpcResult<Ok, NetworkError> for Result<Ok, NetworkError> {
     fn map_internal_err_with_data<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
         F: FnOnce(NetworkError) -> (M, &'a [u8]),
-        M: Into<String>,
+        M: Display,
     {
         match self {
             Ok(t) => Ok(t),
@@ -142,24 +143,21 @@ impl<Ok> ToRpcResult<Ok, NetworkError> for Result<Ok, NetworkError> {
 }
 
 /// Constructs an internal JSON-RPC error.
-pub(crate) fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error {
+pub(crate) fn internal_rpc_err(msg: impl Display) -> jsonrpsee::core::Error {
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, None)
 }
 
 /// Constructs an internal JSON-RPC error with data
-pub(crate) fn internal_rpc_err_with_data(
-    msg: impl Into<String>,
-    data: &[u8],
-) -> jsonrpsee::core::Error {
+pub(crate) fn internal_rpc_err_with_data(msg: impl Display, data: &[u8]) -> jsonrpsee::core::Error {
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, Some(data))
 }
 
 /// Constructs a JSON-RPC error, consisting of `code`, `message` and optional `data`.
-pub(crate) fn rpc_err(code: i32, msg: impl Into<String>, data: Option<&[u8]>) -> RpcError {
+pub(crate) fn rpc_err(code: i32, msg: impl Display, data: Option<&[u8]>) -> RpcError {
     RpcError::Call(jsonrpsee::types::error::CallError::Custom(
         jsonrpsee::types::error::ErrorObject::owned(
             code,
-            msg.into(),
+            msg.to_string(),
             data.map(|data| {
                 jsonrpsee::core::to_json_raw_value(&format!("0x{}", hex::encode(data)))
                     .expect("serializing String does fail")
