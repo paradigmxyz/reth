@@ -21,7 +21,7 @@ use reth_primitives::{
     TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
-use self::models::StoredBlockBody;
+use self::models::{storage_sharded_key::StorageShardedKey, StoredBlockBody};
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
@@ -245,7 +245,7 @@ table!(
 
 table!(
     /// Stores pointers to transactions that changed each storage key.
-    ( StorageHistory ) AddressStorageKey | TransitionList
+    ( StorageHistory ) StorageShardedKey | TransitionList
 );
 
 dupsort!(
@@ -313,7 +313,5 @@ pub type ConfigKey = Vec<u8>;
 pub type ConfigValue = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type BlockNumHashTxNumber = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type AddressStorageKey = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type Bytecode = Vec<u8>;

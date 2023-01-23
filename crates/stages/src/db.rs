@@ -7,13 +7,13 @@ use std::{
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
-    models::{BlockNumHash, StoredBlockBody},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumHash, ShardedKey, StoredBlockBody},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error,
+    Error, TransitionList,
 };
-use reth_primitives::{BlockHash, BlockNumber, TransitionId, TxNumber};
+use reth_primitives::{Address, BlockHash, BlockNumber, TransitionId, TxNumber, H256};
 
 use crate::{DatabaseIntegrityError, StageError};
 
@@ -144,6 +144,44 @@ where
             .get::<tables::BlockTransitionIndex>(key)?
             .ok_or(DatabaseIntegrityError::BlockTransition { number: key })?;
         Ok(last_transition_id)
+    }
+
+    pub(crate) fn get_account_history_biggest_sharded_index(
+        &self,
+        key: Address,
+    ) -> Result<Option<(ShardedKey<Address>, TransitionList)>, StageError> {
+        let mut cursor = self.cursor_read::<tables::AccountHistory>()?;
+        let _none = cursor.seek_exact(ShardedKey::new(key, u64::MAX))?;
+
+        let ret = cursor.prev()?;
+
+        match ret {
+            None => Ok(None),
+            Some((sharded_key, _)) if sharded_key.key != key => Ok(None),
+            Some(_) => Ok(ret),
+        }
+    }
+
+    pub(crate) fn get_storage_history_biggest_sharded_index(
+        &self,
+        address_key: Address,
+        storage_key: H256,
+    ) -> Result<Option<(StorageShardedKey, TransitionList)>, StageError> {
+        let mut cursor = self.cursor_read::<tables::StorageHistory>()?;
+        let _none =
+            cursor.seek_exact(StorageShardedKey::new(address_key, storage_key, u64::MAX))?;
+
+        let ret = cursor.prev()?;
+
+        match ret {
+            None => Ok(None),
+            Some((StorageShardedKey { address, sharded_key }, _))
+                if address != address_key || sharded_key.key != storage_key =>
+            {
+                Ok(None)
+            }
+            Some(_) => Ok(ret),
+        }
     }
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous
