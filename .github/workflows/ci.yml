@@ -195,5 +195,6 @@ jobs:
           clean: false
 
       - name: Compare main's benchmark
+        shell: 'script -q -e -c "bash {0}"'
         run: |
           ./.github/scripts/compare_iai.sh
