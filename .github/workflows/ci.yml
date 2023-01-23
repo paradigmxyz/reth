@@ -192,6 +192,7 @@ jobs:
         with:
           # ref: main
           submodules: true
+          clean: false
 
       - name: Compare main's benchmark
         uses: actions-rs/cargo@v1
