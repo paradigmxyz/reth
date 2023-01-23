@@ -22,7 +22,6 @@ use trie_db::{
 pub(crate) enum TrieError {
     // TODO: decompose into various different errors
     #[error("Some error occurred")]
-    #[allow(unused)]
     InternalError,
     #[error("{0:?}")]
     DatabaseError(#[from] reth_db::Error),
@@ -33,9 +32,7 @@ struct DBTrieLayout;
 impl TrieLayout for DBTrieLayout {
     const USE_EXTENSION: bool = true;
 
-    // TODO: modify?
     const ALLOW_EMPTY: bool = false;
-    // I think non-inlined nodes aren't supported
     const MAX_INLINE_VALUE: Option<u32> = None;
 
     type Hash = KeccakHasher;
@@ -89,8 +86,8 @@ fn encode_partial(
     let mut flag_byte = if terminating { 0x20 } else { 0x00 };
 
     if nibbles % 2 != 0 {
-        // should never be None
         flag_byte |= 0x10;
+        // should never be None
         flag_byte |= partial.next().unwrap_or_default();
     }
     out.push(flag_byte);
@@ -156,13 +153,9 @@ where
         let encoded_partial = encoded_vec.as_ref();
 
         let value = match child {
-            ChildReference::Hash(ref hash) => {
-                // 0x80 + length (RLP header)
-                hash.as_ref()
-            }
+            ChildReference::Hash(ref hash) => hash.as_ref(),
             ChildReference::Inline(ref _inline_data, _len) => {
                 unreachable!("can't happen")
-                // inline_data.as_ref()[..len].as_ref()
             }
         };
 
@@ -181,7 +174,7 @@ where
                 match c.borrow() {
                     Some(ChildReference::Hash(hash)) => hash.as_ref().to_vec(),
                     Some(ChildReference::Inline(_value, _len)) => {
-                        unimplemented!("can't happen because all keys are equal length");
+                        unreachable!("can't happen because all keys are equal length");
                     }
                     None => vec![],
                 }
@@ -203,7 +196,7 @@ where
         _children: impl Iterator<Item = impl Borrow<Option<ChildReference<<H as Hasher>::Out>>>>,
         _value: Option<Value<'_>>,
     ) -> Vec<u8> {
-        unimplemented!("doesn't use");
+        unimplemented!("unused");
     }
 }
 
@@ -239,12 +232,11 @@ impl DBTrieLoader {
         &mut self,
         tx: &Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
-        // TODO: replace unwraps with '?'
-        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>().unwrap();
-        let mut walker = accounts_cursor.walk(H256::zero()).unwrap();
+        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+        let mut walker = accounts_cursor.walk(H256::zero())?;
 
         // TODO: implement HashDB to use DB instead of MemoryDB
-        // let trie_cursor = tx.cursor_read::<tables::AccountsTrie>().unwrap();
+        // let trie_cursor = tx.cursor_read::<tables::AccountsTrie>()?;
 
         let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
             RLPNodeCodec::<KeccakHasher>::empty_node(),
@@ -254,14 +246,15 @@ impl DBTrieLoader {
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
 
-        while let Some((hashed_address, account)) = walker.next().transpose().unwrap() {
+        while let Some((hashed_address, account)) = walker.next().transpose()? {
             let mut value = EthAccount::from(account);
 
-            value.storage_root = self.calculate_storage_root(tx, hashed_address).unwrap();
+            value.storage_root = self.calculate_storage_root(tx, hashed_address)?;
 
             let mut bytes = BytesMut::new();
             Encodable::encode(&value, &mut bytes);
-            trie.insert(hashed_address.as_bytes(), bytes.as_ref()).unwrap();
+            trie.insert(hashed_address.as_bytes(), bytes.as_ref())
+                .map_err(|_| TrieError::InternalError)?;
         }
 
         Ok(*trie.root())
@@ -280,15 +273,13 @@ impl DBTrieLoader {
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
 
-        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>().unwrap();
-        let mut walker = storage_cursor.walk_dup(address, H256::zero()).unwrap();
+        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
 
-        while let Some((_, StorageEntry { key: storage_key, value })) =
-            walker.next().transpose().unwrap()
-        {
+        while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
             let mut bytes = BytesMut::new();
             Encodable::encode(&value, &mut bytes);
-            trie.insert(storage_key.as_bytes(), &bytes).unwrap();
+            trie.insert(storage_key.as_bytes(), &bytes).map_err(|_| TrieError::InternalError)?;
         }
 
         Ok(*trie.root())
