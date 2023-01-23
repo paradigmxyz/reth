@@ -484,7 +484,6 @@ mod tests {
     }
 
     // these tests check that the forkid computation is accurate
-    
     #[test]
     fn test_mainnet_forkids() {
         let frontier_forkid = MAINNET.fork_id(0);
@@ -567,6 +566,5 @@ mod tests {
         let mergenetsplit_forkid = SEPOLIA.fork_id(1735371);
         assert_eq!([0xb9, 0x6c, 0xbd, 0x13], mergenetsplit_forkid.hash.0);
         assert_eq!(0, mergenetsplit_forkid.next);
-
     }
 }
