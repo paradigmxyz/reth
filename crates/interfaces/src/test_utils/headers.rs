@@ -8,6 +8,7 @@ use crate::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
             downloader::{HeaderDownloader, SyncTarget},
         },
+        priority::Priority,
     },
 };
 use futures::{Future, FutureExt, Stream, StreamExt};
@@ -235,7 +236,11 @@ impl DownloadClient for TestHeadersClient {
 
 #[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
+    async fn get_headers_with_priority(
+        &self,
+        request: HeadersRequest,
+        _priority: Priority,
+    ) -> PeerRequestResult<BlockHeaders> {
         self.request_attempts.fetch_add(1, Ordering::SeqCst);
         if let Some(err) = &mut *self.error.lock().await {
             return Err(err.clone())

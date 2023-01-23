@@ -11,6 +11,7 @@ use reth_interfaces::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
             downloader::{HeaderDownloader, SyncTarget},
         },
+        priority::Priority,
     },
 };
 use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, H256};
@@ -386,7 +387,7 @@ where
         self.penalize_peer(peer_id, &error);
 
         // re-submit the request
-        self.submit_request(request);
+        self.submit_request(request, Priority::High);
     }
 
     /// Attempts to validate the buffered responses
@@ -424,15 +425,15 @@ where
     }
 
     /// Starts a request future
-    fn submit_request(&mut self, request: HeadersRequest) {
-        self.in_progress_queue.push(self.request_fut(request));
+    fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+        self.in_progress_queue.push(self.request_fut(request, priority));
     }
 
-    fn request_fut(&self, request: HeadersRequest) -> HeadersRequestFuture {
+    fn request_fut(&self, request: HeadersRequest, priority: Priority) -> HeadersRequestFuture {
         let client = Arc::clone(&self.client);
         HeadersRequestFuture {
             request: Some(request.clone()),
-            fut: Box::pin(async move { client.get_headers(request).await }),
+            fut: Box::pin(async move { client.get_headers_with_priority(request, priority).await }),
         }
     }
 
@@ -511,7 +512,7 @@ where
 
                     trace!(target: "downloaders::headers", new=?target, "Request new sync target");
                     self.sync_target_request =
-                        Some(self.request_fut(self.get_sync_target_request()));
+                        Some(self.request_fut(self.get_sync_target_request(), Priority::High));
                 }
             }
             SyncTarget::Gap(existing) => {
@@ -554,7 +555,8 @@ where
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
                         this.penalize_peer(err.peer_id, &err.error);
-                        this.sync_target_request = Some(this.request_fut(err.request));
+                        this.sync_target_request =
+                            Some(this.request_fut(err.request, Priority::High));
                     } else {
                         break
                     }
@@ -597,7 +599,7 @@ where
                         "Requesting headers {request:?}"
                     );
                     progress = true;
-                    this.submit_request(request);
+                    this.submit_request(request, Priority::Normal);
                 } else {
                     // no more requests
                     break
@@ -852,7 +854,7 @@ impl LinearDownloadBuilder {
         };
 
         downloader.sync_target_request =
-            Some(downloader.request_fut(downloader.get_sync_target_request()));
+            Some(downloader.request_fut(downloader.get_sync_target_request(), Priority::High));
 
         downloader
     }

@@ -451,9 +451,10 @@ mod tests {
             self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
-                let mut row = changeset_cursor.last()?;
 
-                while let Some((tid_address, entry)) = row {
+                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
+
+                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
                     if tid_address.transition_id() <= target_transition {
                         break
                     }
@@ -464,8 +465,6 @@ mod tests {
                     if entry.value != U256::ZERO {
                         storage_cursor.append_dup(tid_address.address(), entry)?;
                     }
-
-                    row = changeset_cursor.prev()?;
                 }
                 Ok(())
             })?;

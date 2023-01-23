@@ -4,8 +4,9 @@ use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
 use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
-    error::{PeerRequestResult, RequestError, RequestResult},
+    error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
+    priority::Priority,
 };
 use reth_primitives::{Header, PeerId, H256};
 use std::{
@@ -159,9 +160,14 @@ impl StateFetcher {
             loop {
                 // poll incoming requests
                 match self.download_requests_rx.poll_next_unpin(cx) {
-                    Poll::Ready(Some(request)) => {
-                        self.queued_requests.push_back(request);
-                    }
+                    Poll::Ready(Some(request)) => match request.get_priority() {
+                        Priority::High => {
+                            self.queued_requests.push_front(request);
+                        }
+                        Priority::Normal => {
+                            self.queued_requests.push_back(request);
+                        }
+                    },
                     Poll::Ready(None) => {
                         unreachable!("channel can't close")
                     }
@@ -185,7 +191,7 @@ impl StateFetcher {
         }
 
         match req {
-            DownloadRequest::GetBlockHeaders { request, response } => {
+            DownloadRequest::GetBlockHeaders { request, response, .. } => {
                 let inflight = Request { request: request.clone(), response };
                 self.inflight_headers_requests.insert(peer_id, inflight);
                 let HeadersRequest { start, limit, direction } = request;
@@ -196,7 +202,7 @@ impl StateFetcher {
                     direction,
                 })
             }
-            DownloadRequest::GetBlockBodies { request, response } => {
+            DownloadRequest::GetBlockBodies { request, response, .. } => {
                 let inflight = Request { request: request.clone(), response };
                 self.inflight_bodies_requests.insert(peer_id, inflight);
                 BlockRequest::GetBlockBodies(GetBlockBodies(request))
@@ -220,7 +226,14 @@ impl StateFetcher {
         res: RequestResult<Vec<Header>>,
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
-        if let Some(resp) = self.inflight_headers_requests.remove(&peer_id) {
+
+        let resp = self.inflight_headers_requests.remove(&peer_id);
+        let is_likely_bad_response = resp
+            .as_ref()
+            .map(|r| res.is_likely_bad_headers_response(&r.request))
+            .unwrap_or_default();
+
+        if let Some(resp) = resp {
             let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
         }
 
@@ -235,10 +248,11 @@ impl StateFetcher {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             // If the peer is still ready to be accept new requests, we try to send a followup
             // request immediately.
-            if peer.state.on_request_finished() {
+            if peer.state.on_request_finished() && !is_likely_bad_response {
                 return self.followup_request(peer_id)
             }
         }
+
         None
     }
 
@@ -344,11 +358,13 @@ pub(crate) enum DownloadRequest {
     GetBlockHeaders {
         request: HeadersRequest,
         response: oneshot::Sender<PeerRequestResult<Vec<Header>>>,
+        priority: Priority,
     },
     /// Download the requested headers and send response through channel
     GetBlockBodies {
         request: Vec<H256>,
         response: oneshot::Sender<PeerRequestResult<Vec<BlockBody>>>,
+        priority: Priority,
     },
 }
 
@@ -360,6 +376,13 @@ impl DownloadRequest {
         match self {
             DownloadRequest::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
             DownloadRequest::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+        }
+    }
+
+    fn get_priority(&self) -> &Priority {
+        match self {
+            DownloadRequest::GetBlockHeaders { priority, .. } => priority,
+            DownloadRequest::GetBlockBodies { priority, .. } => priority,
         }
     }
 }
@@ -401,9 +424,11 @@ mod tests {
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());
             let (tx, _rx) = oneshot::channel();
-            fetcher
-                .queued_requests
-                .push_back(DownloadRequest::GetBlockBodies { request: vec![], response: tx });
+            fetcher.queued_requests.push_back(DownloadRequest::GetBlockBodies {
+                request: vec![],
+                response: tx,
+                priority: Priority::default(),
+            });
             assert!(fetcher.poll(cx).is_pending());
 
             Poll::Ready(())
