@@ -6,7 +6,7 @@ use std::{
 
 use reth_db::{
     common::VecPairResult,
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
     models::{BlockNumHash, StoredBlockBody},
     table::Table,
