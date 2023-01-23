@@ -157,6 +157,8 @@ where
         let this = self.get_mut();
 
         loop {
+            // Check if there is a pending requests. It might not exist if all
+            // headers are empty and there is nothing to download.
             if let Some(fut) = this.fut.as_mut() {
                 match ready!(fut.poll_unpin(cx)) {
                     Ok(response) => {
@@ -219,7 +221,7 @@ where
                 }
                 // Sanity check
             } else if this.fut.is_none() {
-                panic!("Body request logic failure")
+                unreachable!("Body request logic failure")
             }
         }
     }
