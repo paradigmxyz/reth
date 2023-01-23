@@ -66,7 +66,6 @@ impl ActiveSessionHandle {
 
 /// Info about an active peer session.
 #[derive(Debug, Clone)]
-#[allow(unused)]
 pub struct PeerInfo {
     /// Announced capabilities of the peer
     pub capabilities: Arc<Capabilities>,
