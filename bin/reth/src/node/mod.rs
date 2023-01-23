@@ -163,17 +163,18 @@ impl Command {
                 commit_threshold: config.stages.total_difficulty.commit_threshold,
             })
             .push(BodyStage {
-                downloader: Arc::new(
-                    bodies::concurrent::ConcurrentDownloader::new(
-                        fetch_client.clone(),
-                        consensus.clone(),
+                downloader: bodies::concurrent::ConcurrentDownloaderBuilder::default()
+                    .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
+                    .with_request_limit(config.stages.bodies.downloader_request_limit)
+                    .with_max_buffered_responses(
+                        config.stages.bodies.downloader_max_buffered_responses,
                     )
-                    .with_batch_size(config.stages.bodies.downloader_batch_size)
-                    .with_retries(config.stages.bodies.downloader_retries)
-                    .with_concurrency(config.stages.bodies.downloader_concurrency),
-                ),
+                    .with_concurrent_requests_range(
+                        config.stages.bodies.downloader_min_concurrent_requests..=
+                            config.stages.bodies.downloader_max_concurrent_requests,
+                    )
+                    .build(fetch_client.clone(), consensus.clone(), db.clone()),
                 consensus: consensus.clone(),
-                commit_threshold: config.stages.bodies.commit_threshold,
             })
             .push(SenderRecoveryStage {
                 batch_size: config.stages.sender_recovery.batch_size,

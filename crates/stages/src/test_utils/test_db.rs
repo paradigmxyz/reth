@@ -19,6 +19,7 @@ use crate::db::Transaction;
 /// let tx = TestTransaction::default();
 /// stage.execute(&mut tx.container(), input);
 /// ```
+#[derive(Debug)]
 pub(crate) struct TestTransaction {
     tx: Arc<Env<WriteMap>>,
 }
