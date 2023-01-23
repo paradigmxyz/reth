@@ -41,7 +41,6 @@ pub struct NetworkHandle {
 
 impl NetworkHandle {
     /// Creates a single new instance.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
@@ -50,7 +49,6 @@ impl NetworkHandle {
         peers: PeersHandle,
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
-        client_version: String,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -61,7 +59,6 @@ impl NetworkHandle {
             network_mode,
             bandwidth_meter,
             is_syncing: Arc::new(Default::default()),
-            client_version,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -248,8 +245,9 @@ impl NetworkInfo for NetworkHandle {
         })
     }
 
-    fn client_version(&self) -> String {
-        self.inner.client_version.clone()
+    async fn client_version(&self) -> Result<String, NetworkError> {
+        let status = self.network_status().await?;
+        Ok(status.client_name)
     }
 }
 
@@ -291,8 +289,6 @@ struct NetworkInner {
     bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
-    /// The client version needed by Web3 rpc API
-    client_version: String,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).

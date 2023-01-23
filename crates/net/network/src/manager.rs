@@ -159,7 +159,6 @@ where
             boot_nodes,
             executor,
             hello_message,
-            client_version,
             status,
             fork_filter,
             dns_discovery_config,
@@ -218,7 +217,6 @@ where
             peers_handle,
             network_mode,
             bandwidth_meter,
-            client_version,
         );
 
         Ok(Self {

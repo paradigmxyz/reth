@@ -1,8 +1,11 @@
+use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{keccak256, Bytes, H256};
 use reth_rpc_api::Web3ApiServer;
+
+use crate::result::ToRpcResult;
 
 /// `web3` API implementation.
 ///
@@ -19,9 +22,10 @@ impl Web3Api {
     }
 }
 
+#[async_trait]
 impl Web3ApiServer for Web3Api {
-    fn client_version(&self) -> RpcResult<String> {
-        Ok(self.network.client_version())
+    async fn client_version(&self) -> RpcResult<String> {
+        self.network.client_version().await.map_internal_err(|e| e.to_string())
     }
 
     fn sha3(&self, input: Bytes) -> RpcResult<H256> {

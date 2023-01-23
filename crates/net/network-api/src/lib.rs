@@ -28,7 +28,7 @@ pub trait NetworkInfo: Send + Sync {
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError>;
 
     /// Returns the client version
-    fn client_version(&self) -> String;
+    async fn client_version(&self) -> Result<String, NetworkError>;
 }
 
 /// Provides general purpose information about Peers in the network.
