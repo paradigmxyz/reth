@@ -1,9 +1,19 @@
 //! Additional helpers for converting errors.
 
 use jsonrpsee::core::{Error as RpcError, RpcResult};
+use std::fmt::Display;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {
+    /// Converts the error of the [Result] to an [RpcResult] via the `Err` [Display] impl.
+    fn to_rpc_result(self) -> RpcResult<Ok>
+    where
+        Err: Display,
+        Self: Sized,
+    {
+        self.map_internal_err(|err| err.to_string())
+    }
+
     /// Converts this type into an [`RpcResult`]
     fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
     where
