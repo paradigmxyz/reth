@@ -165,8 +165,8 @@ where
         Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
     }
 
-    /// Get the result vector with range [start_key:end_key).
-    /// Please note that start_key is inclusive and end_key is expclusive.
+    /// Get the result vector with range `[start_key:end_key)`.
+    /// Please note that `start_key` is inclusive and `end_key` is exclusive.
     pub(crate) fn get_range<T: Table>(&self, start_key: T::Key, end_key: T::Key) -> VecPairResult<T>
     where
         T: Table,
