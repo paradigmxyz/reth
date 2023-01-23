@@ -65,15 +65,18 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             .state_root;
 
         let trie_root = if to_transition - from_transition > self.clean_threshold {
-            // if there are more blocks then threshold it is faster to rebuild the trie
+            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
+            // if there are more blocks than threshold it is faster to rebuild the trie
             let mut loader = DBTrieLoader {};
             loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
+            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
             todo!()
         };
 
         if block_root != trie_root {
+            warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?block_root, expected = ?trie_root, "Block's root state failed verification");
             return Err(StageError::Validation {
                 block: previous_stage_progress,
                 error: consensus::Error::BodyStateRootDiff { got: block_root, expected: trie_root },
