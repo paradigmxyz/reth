@@ -169,15 +169,7 @@ where
 
         let ret = cursor.prev()?;
 
-        match ret {
-            None => Ok(None),
-            Some((StorageShardedKey { address, sharded_key }, _))
-                if address != address_key || sharded_key.key != storage_key =>
-            {
-                Ok(None)
-            }
-            Some(_) => Ok(ret),
-        }
+        Ok(ret.filter(|sharded| sharded.address == address && sharded.sharded_key.key == storage_key))
     }
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous
