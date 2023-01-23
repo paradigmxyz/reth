@@ -130,10 +130,20 @@ impl NetworkHandle {
     }
 
     /// Get the current status of the node.
-    pub async fn get_status(&self) -> Result<Status, oneshot::error::RecvError> {
+    pub async fn get_status(&self) -> Result<NetworkStatus, oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
-        rx.await
+        let status = rx.await?;
+
+        Ok(NetworkStatus {
+            client_version: "Reth".to_string(),
+            eth_protocol_info: EthProtocolInfo {
+                difficulty: status.total_difficulty,
+                head: status.blockhash,
+                network: status.chain.id(),
+                genesis: status.genesis,
+            },
+        })
     }
 
     /// Announce a block over devp2p
@@ -232,17 +242,7 @@ impl NetworkInfo for NetworkHandle {
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
-        let status = self.get_status().await?;
-
-        Ok(NetworkStatus {
-            client_version: "Reth".to_string(),
-            eth_protocol_info: EthProtocolInfo {
-                difficulty: status.total_difficulty,
-                head: status.blockhash,
-                network: status.chain.id(),
-                genesis: status.genesis,
-            },
-        })
+        self.get_status().await.map_err(Into::into)
     }
 }
 
