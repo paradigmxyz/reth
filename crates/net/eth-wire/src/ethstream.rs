@@ -6,6 +6,7 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
+use reth_net_common::network_io_meter::{MeterableStream, NetworkIOMeterMetrics};
 use reth_primitives::ForkFilter;
 use reth_rlp::{Decodable, Encodable};
 use std::{
@@ -250,6 +251,15 @@ where
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_close(cx).map_err(Into::into)
+    }
+}
+
+impl<S> MeterableStream for EthStream<S>
+where
+    S: MeterableStream,
+{
+    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
+        self.inner.expose_metrics(metrics);
     }
 }
 

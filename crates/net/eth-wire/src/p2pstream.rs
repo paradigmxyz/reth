@@ -10,6 +10,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use metrics::counter;
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
+use reth_net_common::network_io_meter::{MeterableStream, NetworkIOMeterMetrics};
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -490,6 +491,15 @@ where
         ready!(self.as_mut().poll_flush(cx))?;
 
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<S> MeterableStream for P2PStream<S>
+where
+    S: MeterableStream,
+{
+    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
+        self.inner.expose_metrics(metrics);
     }
 }
 

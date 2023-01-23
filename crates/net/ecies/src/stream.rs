@@ -4,7 +4,10 @@ use crate::{
 };
 use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
-use reth_net_common::stream::HasRemoteAddr;
+use reth_net_common::{
+    network_io_meter::{MeterableStream, NetworkIOMeterMetrics},
+    stream::HasRemoteAddr,
+};
 use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
 use std::{
@@ -139,6 +142,15 @@ where
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.project().stream.poll_close(cx)
+    }
+}
+
+impl<S> MeterableStream for ECIESStream<S>
+where
+    S: MeterableStream,
+{
+    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
+        self.stream.get_mut().expose_metrics(metrics);
     }
 }
 

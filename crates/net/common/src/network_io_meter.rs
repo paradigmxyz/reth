@@ -89,9 +89,9 @@ impl Default for NetworkIOMeter {
 #[metrics(dynamic = true)]
 struct NetworkIOMeterMetricsInner {
     /// Counts inbound bytes
-    ingress: Counter,
+    ingress_bytes: Counter,
     /// Counts outbound bytes
-    egress: Counter,
+    egress_bytes: Counter,
 }
 
 /// Public shareable struct used for exposing network IO metrics
@@ -125,20 +125,13 @@ pub struct MeteredStream<S> {
 impl<S> MeteredStream<S> {
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
     /// along with a new [`NetworkIOMeter`]
-    pub fn builder(inner: S) -> Self {
+    pub fn new(inner: S) -> Self {
         Self { inner, meter: NetworkIOMeter::default(), metrics: None }
     }
 
     /// Attaches the provided [`NetworkIOMeter`]
-    pub fn add_meter(&mut self, meter: NetworkIOMeter) -> &mut Self {
+    pub fn set_meter(&mut self, meter: NetworkIOMeter) {
         self.meter = meter;
-        self
-    }
-
-    /// Attaches the provided [`NetworkIOMeterMetrics`]
-    pub fn add_metrics(&mut self, metrics: NetworkIOMeterMetrics) -> &mut Self {
-        self.metrics = Some(metrics);
-        self
     }
 
     /// Provides a reference to the [`NetworkIOMeter`] attached to this [`MeteredStream`]
@@ -159,10 +152,11 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
             ready!(this.inner.poll_read(cx, buf))?;
             u64::try_from(buf.filled().len() - init_num_bytes).unwrap_or(u64::max_value())
         };
-        this.meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed);
+        let current_ingress =
+            this.meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
 
         if let Some(network_io_meter_metrics) = &this.metrics {
-            network_io_meter_metrics.inner.ingress.increment(num_bytes_u64);
+            network_io_meter_metrics.inner.ingress_bytes.absolute(current_ingress);
         }
 
         Poll::Ready(Ok(()))
@@ -178,10 +172,11 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
         let this = self.project();
         let num_bytes = ready!(this.inner.poll_write(cx, buf))?;
         let num_bytes_u64 = { u64::try_from(num_bytes).unwrap_or(u64::max_value()) };
-        this.meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed);
+        let current_egress =
+            this.meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
 
         if let Some(network_io_meter_metrics) = &this.metrics {
-            network_io_meter_metrics.inner.egress.increment(num_bytes_u64);
+            network_io_meter_metrics.inner.egress_bytes.absolute(current_egress);
         }
 
         Poll::Ready(Ok(num_bytes))
@@ -204,6 +199,18 @@ impl HasRemoteAddr for MeteredStream<TcpStream> {
     }
 }
 
+/// Allows exporting metrics for a type that contains a nested [`MeteredStream`]
+pub trait MeterableStream {
+    /// Attaches the provided [`NetworkIOMeterMetrics`]
+    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics);
+}
+
+impl<S> MeterableStream for MeteredStream<S> {
+    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
+        self.metrics = Some(metrics);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,10 +225,10 @@ mod tests {
     ) -> (MeteredStream<DuplexStream>, MeteredStream<DuplexStream>) {
         let (client, server) = duplex(64);
         let (mut metered_client, mut metered_server) =
-            (MeteredStream::builder(client), MeteredStream::builder(server));
+            (MeteredStream::new(client), MeteredStream::new(server));
 
-        metered_client.add_meter(client_meter);
-        metered_server.add_meter(server_meter);
+        metered_client.set_meter(client_meter);
+        metered_server.set_meter(server_meter);
 
         (metered_client, metered_server)
     }
@@ -276,13 +283,13 @@ mod tests {
         let server_addr = listener.local_addr().unwrap();
 
         let client_stream = TcpStream::connect(server_addr).await.unwrap();
-        let mut metered_client_stream = MeteredStream::builder(client_stream);
+        let mut metered_client_stream = MeteredStream::new(client_stream);
 
         let client_meter = metered_client_stream.meter.clone();
 
         let handle = tokio::spawn(async move {
             let (server_stream, _) = listener.accept().await.unwrap();
-            let mut metered_server_stream = MeteredStream::builder(server_stream);
+            let mut metered_server_stream = MeteredStream::new(server_stream);
 
             let mut buf = [0u8; 4];
 

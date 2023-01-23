@@ -4187,6 +4187,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-ecies",
+ "reth-net-common",
  "reth-primitives",
  "reth-rlp",
  "reth-tracing",

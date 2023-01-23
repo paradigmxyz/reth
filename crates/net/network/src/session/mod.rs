@@ -19,7 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_net_common::network_io_meter::{MeteredStream, NetworkIOMeterMetrics};
+use reth_net_common::network_io_meter::{MeterableStream, MeteredStream, NetworkIOMeterMetrics};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
@@ -200,12 +200,7 @@ impl SessionManager {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        let ingress_egress_metrics = NetworkIOMeterMetrics::new(
-            "session_net_io",
-            &[("session_id", format!("{session_id}"))],
-        );
-        let mut metered_stream = MeteredStream::builder(stream);
-        metered_stream.add_metrics(ingress_egress_metrics);
+        let metered_stream = MeteredStream::new(stream);
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
@@ -668,15 +663,7 @@ async fn start_pending_outbound_session(
     fork_filter: ForkFilter,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
-        Ok(stream) => {
-            let ingress_egress_metrics = NetworkIOMeterMetrics::new(
-                "session_net_io",
-                &[("session_id", format!("{session_id}"))],
-            );
-            let mut metered_stream = MeteredStream::builder(stream);
-            metered_stream.add_metrics(ingress_egress_metrics);
-            metered_stream
-        }
+        Ok(stream) => MeteredStream::new(stream),
         Err(error) => {
             let _ = events
                 .send(PendingSessionEvent::OutgoingConnectionError {
@@ -750,12 +737,14 @@ async fn authenticate(
             }
         }
     };
+    let peer_id = stream.remote_id();
     let unauthed = UnauthedP2PStream::new(stream);
 
     let auth = authenticate_stream(
         unauthed,
         session_id,
         remote_addr,
+        peer_id,
         direction,
         hello,
         status,
@@ -788,6 +777,7 @@ async fn authenticate_stream(
     stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
+    peer_id: PeerId,
     direction: Direction,
     hello: HelloMessage,
     status: Status,
@@ -819,6 +809,13 @@ async fn authenticate_stream(
             }
         }
     };
+
+    let mut eth_stream = eth_stream;
+    eth_stream.expose_metrics(NetworkIOMeterMetrics::new(
+        "session_net_io",
+        &[("peer_id", format!("{peer_id}"))],
+    ));
+
     PendingSessionEvent::Established {
         session_id,
         remote_addr,
