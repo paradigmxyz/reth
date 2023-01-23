@@ -135,26 +135,27 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
     )?;
 
-    let (mut current_tx_id, mut transition_id) = if let Some(embed) = parent_tx_num_transition_id {
-        embed
-    } else if block.number == 0 {
-        (0, 0)
-    } else {
-        let prev_block_num = block.number - 1;
-        let prev_block_hash = tx
-            .get::<tables::CanonicalHeaders>(prev_block_num)?
-            .ok_or(ProviderError::BlockNumber { block_number: prev_block_num })?;
-        let prev_body = tx
-            .get::<tables::BlockBodies>((prev_block_num, prev_block_hash).into())?
-            .ok_or(ProviderError::BlockBody {
-                block_number: prev_block_num,
-                block_hash: prev_block_hash,
-            })?;
-        let last_transition_id = tx
-            .get::<tables::BlockTransitionIndex>(prev_block_num)?
-            .ok_or(ProviderError::BlockTransition { block_number: prev_block_num })?;
-        (prev_body.start_tx_id + prev_body.tx_count, last_transition_id)
-    };
+    let (mut current_tx_id, mut transition_id) =
+        if let Some(parent_tx_num_transition_id) = parent_tx_num_transition_id {
+            parent_tx_num_transition_id
+        } else if block.number == 0 {
+            (0, 0)
+        } else {
+            let prev_block_num = block.number - 1;
+            let prev_block_hash = tx
+                .get::<tables::CanonicalHeaders>(prev_block_num)?
+                .ok_or(ProviderError::BlockNumber { block_number: prev_block_num })?;
+            let prev_body = tx
+                .get::<tables::BlockBodies>((prev_block_num, prev_block_hash).into())?
+                .ok_or(ProviderError::BlockBody {
+                    block_number: prev_block_num,
+                    block_hash: prev_block_hash,
+                })?;
+            let last_transition_id = tx
+                .get::<tables::BlockTransitionIndex>(prev_block_num)?
+                .ok_or(ProviderError::BlockTransition { block_number: prev_block_num })?;
+            (prev_body.start_tx_id + prev_body.tx_count, last_transition_id)
+        };
 
     // insert body data
     tx.put::<tables::BlockBodies>(

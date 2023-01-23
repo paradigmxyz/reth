@@ -15,7 +15,7 @@ use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
-use reth_network_api::{EthProtocolInfo, NetworkInfo, NetworkStatus, PeersInfo};
+use reth_network_api::{EthProtocolInfo, NetworkError, NetworkInfo, NetworkStatus, PeersInfo};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -219,13 +219,11 @@ impl PeersInfo for NetworkHandle {
 
 #[async_trait]
 impl NetworkInfo for NetworkHandle {
-    type Error = oneshot::error::RecvError;
-
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
     }
 
-    async fn network_status(&self) -> Result<NetworkStatus, Self::Error> {
+    async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
         let status = self.get_status().await?;
 
         Ok(NetworkStatus {

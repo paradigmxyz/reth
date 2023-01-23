@@ -37,7 +37,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{instrument, trace, warn};
+use tracing::{instrument, trace};
 
 mod active;
 mod config;
@@ -467,7 +467,7 @@ impl SessionManager {
             }
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
                 self.remove_pending_session(&session_id);
-                warn!(
+                trace!(
                     target : "net::session",
                     ?error,
                     ?session_id,
@@ -602,8 +602,8 @@ pub(crate) enum PendingSessionHandshakeError {
 }
 
 /// The direction of the connection.
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum Direction {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Direction {
     /// Incoming connection.
     Incoming,
     /// Outgoing connection to a specific node.

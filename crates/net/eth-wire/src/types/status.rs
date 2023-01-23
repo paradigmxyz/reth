@@ -1,4 +1,4 @@
-use crate::{EthVersion, StatusBuilder};
+use crate::{BlockHashNumber, EthVersion, StatusBuilder};
 
 use ethers_core::utils::Genesis;
 use reth_codecs::derive_arbitrary;
@@ -81,6 +81,23 @@ impl Status {
     /// Helper for returning a builder for the status message.
     pub fn builder() -> StatusBuilder {
         Default::default()
+    }
+
+    /// Create a [`StatusBuilder`] from the given [`ChainSpec`](reth_primitives::ChainSpec) and
+    /// head block number.
+    ///
+    /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
+    /// and head.
+    ///
+    /// The user should set the `total_difficulty` field if desired. Otherwise, the total
+    /// difficulty will be set to the [`Default`](std::default::Default) implementation for
+    /// [`Status`].
+    pub fn spec_builder(spec: &ChainSpec, head: &BlockHashNumber) -> StatusBuilder {
+        Self::builder()
+            .chain(spec.chain)
+            .genesis(spec.genesis_hash())
+            .blockhash(head.hash)
+            .forkid(spec.fork_id(head.number))
     }
 }
 

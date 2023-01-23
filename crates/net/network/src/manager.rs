@@ -679,7 +679,7 @@ where
                         .set(this.swarm.state().peers().num_inbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
-                    warn!(
+                    trace!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,
@@ -706,7 +706,7 @@ where
                         .set(this.swarm.state().peers().num_outbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
-                    warn!(
+                    trace!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,

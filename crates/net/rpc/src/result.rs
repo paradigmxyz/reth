@@ -30,60 +30,68 @@ pub(crate) trait ToRpcResult<Ok, Err> {
     fn with_message(self, msg: &str) -> RpcResult<Ok>;
 }
 
-impl<Ok> ToRpcResult<Ok, reth_interfaces::Error> for reth_interfaces::Result<Ok> {
-    #[inline]
-    fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
-    where
-        F: FnOnce(reth_interfaces::Error) -> (i32, M, Option<&'a [u8]>),
-        M: Into<String>,
-    {
-        match self {
-            Ok(t) => Ok(t),
-            Err(err) => {
-                let (code, msg, data) = op(err);
-                Err(rpc_err(code, msg, data))
+/// A macro that implements the `ToRpcResult` for a specific error type
+macro_rules! impl_to_rpc_result {
+    ($err:ty) => {
+        impl<Ok> ToRpcResult<Ok, $err> for Result<Ok, $err> {
+            #[inline]
+            fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
+            where
+                F: FnOnce($err) -> (i32, M, Option<&'a [u8]>),
+                M: Into<String>,
+            {
+                match self {
+                    Ok(t) => Ok(t),
+                    Err(err) => {
+                        let (code, msg, data) = op(err);
+                        Err(rpc_err(code, msg, data))
+                    }
+                }
+            }
+
+            #[inline]
+            fn map_internal_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
+            where
+                F: FnOnce($err) -> M,
+                M: Into<String>,
+            {
+                match self {
+                    Ok(t) => Ok(t),
+                    Err(err) => Err(internal_rpc_err(op(err))),
+                }
+            }
+
+            #[inline]
+            fn map_internal_err_with_data<'a, F, M>(self, op: F) -> RpcResult<Ok>
+            where
+                F: FnOnce($err) -> (M, &'a [u8]),
+                M: Into<String>,
+            {
+                match self {
+                    Ok(t) => Ok(t),
+                    Err(err) => {
+                        let (msg, data) = op(err);
+                        Err(internal_rpc_err_with_data(msg, data))
+                    }
+                }
+            }
+
+            #[inline]
+            fn with_message(self, msg: &str) -> RpcResult<Ok> {
+                match self {
+                    Ok(t) => Ok(t),
+                    Err(err) => {
+                        let msg = format!("{msg}: {err:?}");
+                        Err(internal_rpc_err(msg))
+                    }
+                }
             }
         }
-    }
-
-    #[inline]
-    fn map_internal_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
-    where
-        F: FnOnce(reth_interfaces::Error) -> M,
-        M: Into<String>,
-    {
-        match self {
-            Ok(t) => Ok(t),
-            Err(err) => Err(internal_rpc_err(op(err))),
-        }
-    }
-
-    #[inline]
-    fn map_internal_err_with_data<'a, F, M>(self, op: F) -> RpcResult<Ok>
-    where
-        F: FnOnce(reth_interfaces::Error) -> (M, &'a [u8]),
-        M: Into<String>,
-    {
-        match self {
-            Ok(t) => Ok(t),
-            Err(err) => {
-                let (msg, data) = op(err);
-                Err(internal_rpc_err_with_data(msg, data))
-            }
-        }
-    }
-
-    #[inline]
-    fn with_message(self, msg: &str) -> RpcResult<Ok> {
-        match self {
-            Ok(t) => Ok(t),
-            Err(err) => {
-                let msg = format!("{msg}: {err:?}");
-                Err(internal_rpc_err(msg))
-            }
-        }
-    }
+    };
 }
+
+impl_to_rpc_result!(reth_interfaces::Error);
+impl_to_rpc_result!(reth_network_api::NetworkError);
 
 /// Constructs an internal JSON-RPC error.
 pub(crate) fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error {
