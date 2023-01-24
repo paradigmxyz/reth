@@ -6,6 +6,8 @@ use reth_metrics_derive::Metrics;
 #[derive(Metrics)]
 #[metrics(scope = "downloaders_headers")]
 pub struct HeaderDownloaderMetrics {
+    /// The number of headers that were successfully returned by the downloader.
+    total_returned: Counter,
     /// Number of headers that were successfully downloaded
     total_downloaded: Counter,
     /// Number of timeout errors while requesting headers
@@ -17,6 +19,11 @@ pub struct HeaderDownloaderMetrics {
 }
 
 impl HeaderDownloaderMetrics {
+    /// Increment the number of total downloaded headers.
+    pub(crate) fn update_total_returned(&self, number: usize) {
+        self.total_returned.increment(number as u64)
+    }
+
     /// Increment the number of total downloaded headers.
     pub(crate) fn update_total_downloaded(&self, number: usize) {
         self.total_downloaded.increment(number as u64)

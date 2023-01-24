@@ -612,6 +612,7 @@ where
 
                 trace!(target: "downloaders::headers", batch=%next_batch.len(), "Returning validated batch");
 
+                this.metrics.update_total_returned(next_batch.len());
                 return Poll::Ready(Some(next_batch))
             }
 
@@ -627,6 +628,7 @@ where
                 this.clear();
                 return Poll::Ready(None)
             }
+            this.metrics.update_total_returned(next_batch.len());
             return Poll::Ready(Some(next_batch))
         }
 
