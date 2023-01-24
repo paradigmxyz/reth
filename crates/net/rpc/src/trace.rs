@@ -11,10 +11,8 @@ use std::collections::HashSet;
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
-pub struct TraceApi {
-    // TODO: [`reth_network::NetworkHandle`] is being refactored,
-    // add a proper handler for tracing impl
-}
+#[non_exhaustive]
+pub struct TraceApi {}
 
 #[async_trait]
 impl TraceApiServer for TraceApi {
