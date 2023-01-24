@@ -13,24 +13,25 @@ pub(crate) fn generate_db_vectors() -> Result<()> {
     let mut runner = TestRunner::new(ProptestConfig::default());
     std::fs::create_dir_all(VECTORS_FOLDER)?;
 
-    generate_table_vectors::<tables::CanonicalHeaders>(&mut runner)?;
-    generate_table_vectors::<tables::HeaderTD>(&mut runner)?;
-    generate_table_vectors::<tables::HeaderNumbers>(&mut runner)?;
-    generate_table_vectors::<tables::Headers>(&mut runner)?;
-    generate_table_vectors::<tables::BlockBodies>(&mut runner)?;
-    generate_table_vectors::<tables::BlockOmmers>(&mut runner)?;
-    generate_table_vectors::<tables::TxHashNumber>(&mut runner)?;
-    generate_table_vectors::<tables::BlockTransitionIndex>(&mut runner)?;
-    generate_table_vectors::<tables::TxTransitionIndex>(&mut runner)?;
-    generate_table_vectors::<tables::SyncStage>(&mut runner)?;
-    generate_table_vectors::<tables::Transactions>(&mut runner)?;
-    generate_table_vectors::<tables::PlainStorageState>(&mut runner)?;
-    generate_table_vectors::<tables::PlainAccountState>(&mut runner)?;
+    let per_table = 1000;
+
+    generate_table_vectors::<tables::CanonicalHeaders>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::HeaderTD>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::HeaderNumbers>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::Headers>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::BlockBodies>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::BlockOmmers>(&mut runner, 100)?;
+    generate_table_vectors::<tables::TxHashNumber>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::BlockTransitionIndex>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::TxTransitionIndex>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::Transactions>(&mut runner, 100)?;
+    generate_table_vectors::<tables::PlainStorageState>(&mut runner, per_table)?;
+    generate_table_vectors::<tables::PlainAccountState>(&mut runner, per_table)?;
 
     Ok(())
 }
 
-fn generate_table_vectors<T: Table>(runner: &mut TestRunner) -> Result<()>
+fn generate_table_vectors<T: Table>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
     T::Key: Arbitrary + serde::Serialize + Ord,
     T::Value: Arbitrary + serde::Serialize,
