@@ -1,7 +1,7 @@
 use futures::{Future, FutureExt};
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
-    consensus::{Consensus as ConsensusTrait, Error as ConsensusError},
+    consensus::{Consensus as ConsensusTrait, Consensus, Error as ConsensusError},
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
         error::{PeerRequestResult, RequestError},
@@ -48,9 +48,9 @@ enum BodyRequestError {
 /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
 /// that try to give us bodies that do not match the requested order are going to be penalized
 /// and eventually disconnected.
-pub(crate) struct BodiesRequestFuture<B, C> {
+pub(crate) struct BodiesRequestFuture<B> {
     client: Arc<B>,
-    consensus: Arc<C>,
+    consensus: Arc<dyn Consensus>,
     // All requested headers
     headers: Vec<SealedHeader>,
     // Remaining hashes to download
@@ -59,13 +59,12 @@ pub(crate) struct BodiesRequestFuture<B, C> {
     fut: Option<BodiesFut>,
 }
 
-impl<B, C> BodiesRequestFuture<B, C>
+impl<B> BodiesRequestFuture<B>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
 {
     /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
-    pub(crate) fn new(client: Arc<B>, consensus: Arc<C>) -> Self {
+    pub(crate) fn new(client: Arc<B>, consensus: Arc<dyn Consensus>) -> Self {
         Self {
             client,
             consensus,
@@ -146,10 +145,9 @@ where
     }
 }
 
-impl<B, C> Future for BodiesRequestFuture<B, C>
+impl<B> Future for BodiesRequestFuture<B>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
 {
     type Output = Vec<BlockResponse>;
 

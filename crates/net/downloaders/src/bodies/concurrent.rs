@@ -3,16 +3,12 @@ use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    consensus::Consensus as ConsensusTrait,
+    consensus::Consensus,
     db,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
-        downloader::Downloader,
-    },
+    p2p::bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
-    borrow::Borrow,
     cmp::Ordering,
     collections::BinaryHeap,
     ops::{Range, RangeInclusive},
@@ -34,11 +30,11 @@ const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
 ///
 /// All blocks in a batch are fetched at the same time.
 #[derive(Debug)]
-pub struct ConcurrentDownloader<B, C, DB> {
+pub struct ConcurrentDownloader<B, DB> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
-    consensus: Arc<C>,
+    consensus: Arc<dyn Consensus>,
     // TODO: make this a [HeaderProvider]
     /// The database handle
     db: Arc<DB>,
@@ -55,22 +51,21 @@ pub struct ConcurrentDownloader<B, C, DB> {
     /// The latest block number returned.
     latest_queued_block_number: Option<BlockNumber>,
     /// Requests in progress
-    in_progress_queue: BodiesRequestQueue<B, C>,
+    in_progress_queue: BodiesRequestQueue<B>,
     /// Buffered responses
     buffered_responses: BinaryHeap<OrderedBodiesResponse>,
     /// Queued body responses
     queued_bodies: Vec<BlockResponse>,
 }
 
-impl<B, C, DB> ConcurrentDownloader<B, C, DB>
+impl<B, DB> ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
     fn new(
         client: Arc<B>,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
         request_limit: u64,
         stream_batch_size: usize,
@@ -224,28 +219,9 @@ where
     }
 }
 
-impl<B, C, DB> Downloader for ConcurrentDownloader<B, C, DB>
-where
-    B: BodiesClient,
-    C: ConsensusTrait,
-    DB: Database,
-{
-    type Client = B;
-    type Consensus = C;
-
-    fn client(&self) -> &Self::Client {
-        self.client.borrow()
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        self.consensus.borrow()
-    }
-}
-
-impl<B, C, DB> BodyDownloader for ConcurrentDownloader<B, C, DB>
+impl<B, DB> BodyDownloader for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
     /// Set a new download range (exclusive).
@@ -320,10 +296,9 @@ where
     }
 }
 
-impl<B, C, DB> Stream for ConcurrentDownloader<B, C, DB>
+impl<B, DB> Stream for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
     type Item = Vec<BlockResponse>;
@@ -402,10 +377,9 @@ where
 /// whatsoever: All the mutations are performed through an exclusive reference on
 /// `ConcurrentDownloader` when the Stream is polled. This means it suffices that
 /// `ConcurrentDownloader` is Sync:
-unsafe impl<B, C, DB> Sync for ConcurrentDownloader<B, C, DB>
+unsafe impl<B, DB> Sync for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient,
-    C: ConsensusTrait,
     DB: Database,
 {
 }
@@ -503,14 +477,13 @@ impl ConcurrentDownloaderBuilder {
     }
 
     /// Consume self and return the concurrent donwloader.
-    pub fn build<B, C, DB>(
+    pub fn build<B, DB>(
         self,
         client: Arc<B>,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
-    ) -> ConcurrentDownloader<B, C, DB>
+    ) -> ConcurrentDownloader<B, DB>
     where
-        C: ConsensusTrait + 'static,
         B: BodiesClient + 'static,
         DB: Database,
     {
@@ -563,7 +536,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..20);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
@@ -590,7 +563,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..100);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let stream_batch_size = 20;
         let request_limit = 10;
@@ -630,7 +603,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..200);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let mut downloader = ConcurrentDownloaderBuilder::default()

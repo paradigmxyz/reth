@@ -5,18 +5,16 @@ use futures_util::{stream::FuturesUnordered, StreamExt};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
-        downloader::Downloader,
-        error::{DownloadError, PeerRequestResult},
+        error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
+            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
     },
 };
 use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, H256};
 use std::{
-    borrow::Borrow,
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     future::Future,
@@ -42,9 +40,9 @@ const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-pub struct LinearDownloader<C, H> {
+pub struct LinearDownloader<H> {
     /// Consensus client used to validate headers
-    consensus: Arc<C>,
+    consensus: Arc<dyn Consensus>,
     /// Client used to download headers.
     client: Arc<H>,
     /// The local head of the chain.
@@ -84,9 +82,8 @@ pub struct LinearDownloader<C, H> {
 
 // === impl LinearDownloader ===
 
-impl<C, H> LinearDownloader<C, H>
+impl<H> LinearDownloader<H>
 where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     /// Returns the block number the local node is at.
@@ -451,26 +448,8 @@ where
     }
 }
 
-impl<C, H> Downloader for LinearDownloader<C, H>
+impl<H> HeaderDownloader for LinearDownloader<H>
 where
-    C: Consensus,
-    H: HeadersClient,
-{
-    type Client = H;
-    type Consensus = C;
-
-    fn client(&self) -> &Self::Client {
-        self.client.borrow()
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        self.consensus.borrow()
-    }
-}
-
-impl<C, H> HeaderDownloader for LinearDownloader<C, H>
-where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     fn update_local_head(&mut self, head: SealedHeader) {
@@ -533,11 +512,15 @@ where
     fn set_batch_size(&mut self, batch_size: usize) {
         self.stream_batch_size = batch_size;
     }
+
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)?;
+        Ok(())
+    }
 }
 
-impl<C, H> Stream for LinearDownloader<C, H>
+impl<H> Stream for LinearDownloader<H>
 where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     type Item = Vec<SealedHeader>;
@@ -642,12 +625,7 @@ where
 /// enforce `Sync` (async_trait). The future itself does not use any interior mutability whatsoever:
 /// All the mutations are performed through an exclusive reference on `LinearDownloader` when
 /// the Stream is polled. This means it suffices that `LinearDownloader` is Sync:
-unsafe impl<C, H> Sync for LinearDownloader<C, H>
-where
-    C: Consensus,
-    H: HeadersClient,
-{
-}
+unsafe impl<H> Sync for LinearDownloader<H> where H: HeadersClient {}
 
 type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
 
@@ -811,15 +789,14 @@ impl LinearDownloadBuilder {
 
     /// Build [LinearDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<C, H>(
+    pub fn build<H>(
         self,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         client: Arc<H>,
         local_head: SealedHeader,
         sync_target_block_hash: H256,
-    ) -> LinearDownloader<C, H>
+    ) -> LinearDownloader<H>
     where
-        C: Consensus + 'static,
         H: HeadersClient + 'static,
     {
         let Self {
@@ -883,7 +860,7 @@ mod tests {
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
 
-    static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
+    static CONSENSUS: Lazy<Arc<dyn Consensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
 
     fn child_header(parent: &SealedHeader) -> SealedHeader {
         let mut child = parent.as_ref().clone();
