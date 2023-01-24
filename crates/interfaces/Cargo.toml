@@ -10,6 +10,7 @@ readme = "README.md"
 reth-codecs = { path = "../storage/codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../net/rpc-types" }
+reth-network-api = { path = "../net/network-api"}
 async-trait = "0.1.57"
 thiserror = "1.0.37"
 auto_impl = "1.0"

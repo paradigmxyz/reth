@@ -2,7 +2,6 @@
 //!
 //! Starts the client
 use crate::{
-    config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
@@ -12,7 +11,6 @@ use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
-use reth_cli_utils::init::init_genesis;
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -20,6 +18,7 @@ use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
+use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
@@ -116,7 +115,7 @@ impl Command {
             prometheus_exporter::initialize(listen_addr)?;
         }
 
-        let genesis = init_genesis(db.clone(), self.chain.genesis().clone())?;
+        let genesis = init_genesis(db.clone(), self.chain.clone())?;
         info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
         let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
@@ -157,25 +156,25 @@ impl Command {
                         Default::default(),
                     ),
                 consensus: consensus.clone(),
-                client: fetch_client.clone(),
-                network_handle: network.clone(),
+                sync_status_updates: network.clone(),
                 metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {
                 commit_threshold: config.stages.total_difficulty.commit_threshold,
             })
             .push(BodyStage {
-                downloader: Arc::new(
-                    bodies::concurrent::ConcurrentDownloader::new(
-                        fetch_client.clone(),
-                        consensus.clone(),
+                downloader: bodies::concurrent::ConcurrentDownloaderBuilder::default()
+                    .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
+                    .with_request_limit(config.stages.bodies.downloader_request_limit)
+                    .with_max_buffered_responses(
+                        config.stages.bodies.downloader_max_buffered_responses,
                     )
-                    .with_batch_size(config.stages.bodies.downloader_batch_size)
-                    .with_retries(config.stages.bodies.downloader_retries)
-                    .with_concurrency(config.stages.bodies.downloader_concurrency),
-                ),
+                    .with_concurrent_requests_range(
+                        config.stages.bodies.downloader_min_concurrent_requests..=
+                            config.stages.bodies.downloader_max_concurrent_requests,
+                    )
+                    .build(fetch_client.clone(), consensus.clone(), db.clone()),
                 consensus: consensus.clone(),
-                commit_threshold: config.stages.bodies.commit_threshold,
             })
             .push(SenderRecoveryStage {
                 batch_size: config.stages.sender_recovery.batch_size,

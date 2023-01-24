@@ -1,46 +1,14 @@
-use crate::p2p::downloader::{DownloadStream, Downloader};
-use reth_primitives::{SealedBlock, SealedHeader};
+use super::response::BlockResponse;
+use crate::{db, p2p::downloader::Downloader};
+use futures::Stream;
+use reth_primitives::BlockNumber;
+use std::ops::Range;
 
-/// The block response
-#[derive(PartialEq, Eq, Debug)]
-pub enum BlockResponse {
-    /// Full block response (with transactions or ommers)
-    Full(SealedBlock),
-    /// The empty block response
-    Empty(SealedHeader),
-}
-
-impl BlockResponse {
-    /// Return the reference to the response header
-    pub fn header(&self) -> &SealedHeader {
-        match self {
-            BlockResponse::Full(block) => &block.header,
-            BlockResponse::Empty(header) => header,
-        }
-    }
-}
-
-/// A downloader capable of fetching block bodies from header hashes.
+/// A downloader capable of fetching and yielding block bodies from block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block bodies,
 /// while a [BodiesClient] represents a client capable of fulfilling these requests.
-pub trait BodyDownloader: Downloader {
-    /// Download the bodies from `starting_block` (inclusive) up until `target_block` (inclusive).
-    ///
-    /// The returned stream will always emit bodies in the order they were requested, but multiple
-    /// requests may be in flight at the same time.
-    ///
-    /// The stream may exit early in some cases. Thus, a downloader can only at a minimum guarantee:
-    ///
-    /// - All emitted bodies map onto a request
-    /// - The emitted bodies are emitted in order: i.e. the body for the first block is emitted
-    ///   first, even if it was not fetched first.
-    ///
-    /// It is *not* guaranteed that all the requested bodies are fetched: the downloader may close
-    /// the stream before the entire range has been fetched for any reason
-    fn bodies_stream<'a, 'b, I>(&'a self, headers: I) -> DownloadStream<'a, BlockResponse>
-    where
-        I: IntoIterator<Item = &'b SealedHeader>,
-        <I as IntoIterator>::IntoIter: Send + 'b,
-        'b: 'a;
+pub trait BodyDownloader: Downloader + Stream<Item = Vec<BlockResponse>> + Unpin {
+    /// Method for setting the download range.
+    fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error>;
 }
