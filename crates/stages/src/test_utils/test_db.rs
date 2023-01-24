@@ -19,6 +19,7 @@ use crate::db::Transaction;
 /// let tx = TestTransaction::default();
 /// stage.execute(&mut tx.container(), input);
 /// ```
+#[derive(Debug)]
 pub(crate) struct TestTransaction {
     tx: Arc<Env<WriteMap>>,
 }
@@ -65,6 +66,16 @@ impl TestTransaction {
         self.query(|tx| {
             let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
+        })
+    }
+
+    /// Return full table as BTreeMap
+    pub(crate) fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
+    where
+        T::Key: Default + Ord,
+    {
+        self.query(|tx| {
+            tx.cursor_read::<T>()?.walk(T::Key::default())?.collect::<Result<Vec<_>, DbError>>()
         })
     }
 

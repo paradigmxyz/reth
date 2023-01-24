@@ -595,8 +595,8 @@ pub(crate) enum PendingSessionHandshakeError {
 }
 
 /// The direction of the connection.
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum Direction {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Direction {
     /// Incoming connection.
     Incoming,
     /// Outgoing connection to a specific node.

@@ -854,4 +854,86 @@ mod tests {
             Ok(Some(AccountBeforeTx { address, info: Some(acc2) }))
         );
     }
+
+    #[test]
+    fn test_selfdestruct() {
+        // Modified version of eth test. Storage is added for selfdestructed account to see
+        // that changeset is set.
+        // Got rlp block from: src/GeneralStateTestsFiller/stArgsZeroOneBalance/suicideNonConst.json
+
+        let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        let mut db = StateProviderTest::default();
+
+        let address_caller = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+        let address_selfdestruct = H160(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87"));
+
+        // pre state
+        let pre_account_caller = Account {
+            balance: U256::from(0x0de0b6b3a7640000u64),
+            nonce: 0x00,
+            bytecode_hash: None,
+        };
+
+        db.insert_account(address_caller, pre_account_caller, None, HashMap::new());
+
+        // insert account that will selfd
+
+        let pre_account_selfdestroyed = Account {
+            balance: U256::ZERO,
+            nonce: 0x00,
+            bytecode_hash: Some(H256(hex!(
+                "56a7d44a4ecf086c34482ad1feb1007087fc56fae6dbefbd3f416002933f1705"
+            ))),
+        };
+
+        let selfdestroyed_storage =
+            BTreeMap::from([(H256::zero(), U256::ZERO), (H256::from_low_u64_be(1), U256::from(1))]);
+        db.insert_account(
+            address_selfdestruct,
+            pre_account_selfdestroyed,
+            Some(hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00").into()),
+            selfdestroyed_storage.clone().into_iter().collect::<HashMap<_, _>>(),
+        );
+
+        // spec at berlin fork
+        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
+
+        let mut db = SubState::new(State::new(db));
+        let transactions: Vec<TransactionSignedEcRecovered> =
+            block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
+
+        // execute chain and verify receipts
+        let out =
+            execute_and_verify_receipt(&block.header, &transactions, &[], &chain_spec, &mut db)
+                .unwrap();
+
+        assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
+
+        let changesets = out.changesets[0].clone();
+        assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
+
+        let post_account_caller = Account {
+            balance: U256::from(0x0de0b6b3a761cf60u64),
+            nonce: 0x01,
+            bytecode_hash: None,
+        };
+
+        assert_eq!(
+            changesets.changeset.get(&address_caller).unwrap().account,
+            AccountInfoChangeSet::Changed { new: post_account_caller, old: pre_account_caller },
+            "Caller account has changed and fee is deduced"
+        );
+
+        let selfdestroyer_changeset = changesets.changeset.get(&address_selfdestruct).unwrap();
+
+        // check account
+        assert_eq!(
+            selfdestroyer_changeset.account,
+            AccountInfoChangeSet::Destroyed { old: pre_account_selfdestroyed },
+            "Selfdestroyed account"
+        );
+
+        assert_eq!(selfdestroyer_changeset.wipe_storage, true);
+    }
 }

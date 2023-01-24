@@ -1,6 +1,5 @@
 use crate::eth::EthApiSpec;
 use jsonrpsee::core::RpcResult as Result;
-use reth_network::NetworkHandle;
 use reth_network_api::PeersInfo;
 use reth_rpc_api::NetApiServer;
 use reth_rpc_types::PeerCount;
@@ -8,21 +7,28 @@ use reth_rpc_types::PeerCount;
 /// `Net` API implementation.
 ///
 /// This type provides the functionality for handling `net` related requests.
-pub struct NetApi {
+pub struct NetApi<Net, Eth> {
     /// An interface to interact with the network
-    network: NetworkHandle,
+    network: Net,
     /// The implementation of `eth` API
-    eth: Box<dyn EthApiSpec>,
+    eth: Eth,
 }
 
-impl std::fmt::Debug for NetApi {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NetApi").finish_non_exhaustive()
+// === impl NetApi ===
+
+impl<Net, Eth> NetApi<Net, Eth> {
+    /// Returns a new instance with the given network and eth interface implementations
+    pub fn new(network: Net, eth: Eth) -> Self {
+        Self { network, eth }
     }
 }
 
 /// Net rpc implementation
-impl NetApiServer for NetApi {
+impl<Net, Eth> NetApiServer for NetApi<Net, Eth>
+where
+    Net: PeersInfo + 'static,
+    Eth: EthApiSpec + 'static,
+{
     fn version(&self) -> Result<String> {
         Ok(self.eth.chain_id().to_string())
     }
@@ -33,5 +39,11 @@ impl NetApiServer for NetApi {
 
     fn is_listening(&self) -> Result<bool> {
         Ok(true)
+    }
+}
+
+impl<Net, Eth> std::fmt::Debug for NetApi<Net, Eth> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NetApi").finish_non_exhaustive()
     }
 }

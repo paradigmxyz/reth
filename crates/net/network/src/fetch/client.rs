@@ -57,7 +57,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 //         end
 //     end
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FetchClient {
     /// Sender half of the request channel.
     pub(crate) request_tx: UnboundedSender<DownloadRequest>,
