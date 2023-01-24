@@ -13,7 +13,7 @@ use rand::{
 };
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, Transaction,
-    TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, H256, U256,
+    TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, H256, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -83,7 +83,7 @@ pub enum MockTransaction {
         hash: H256,
         sender: Address,
         nonce: u64,
-        gas_price: U256,
+        gas_price: u128,
         gas_limit: u64,
         value: U256,
     },
@@ -91,8 +91,8 @@ pub enum MockTransaction {
         hash: H256,
         sender: Address,
         nonce: u64,
-        max_fee_per_gas: U256,
-        max_priority_fee_per_gas: U256,
+        max_fee_per_gas: u128,
+        max_priority_fee_per_gas: u128,
         gas_limit: u64,
         value: U256,
     },
@@ -115,7 +115,7 @@ impl MockTransaction {
             hash: H256::random(),
             sender: Address::random(),
             nonce: 0,
-            gas_price: U256::ZERO,
+            gas_price: 0,
             gas_limit: 0,
             value: Default::default(),
         }
@@ -134,21 +134,21 @@ impl MockTransaction {
         }
     }
 
-    pub fn set_priority_fee(&mut self, val: U256) -> &mut Self {
+    pub fn set_priority_fee(&mut self, val: u128) -> &mut Self {
         if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } = self {
             *max_priority_fee_per_gas = val;
         }
         self
     }
 
-    pub fn with_priority_fee(mut self, val: U256) -> Self {
+    pub fn with_priority_fee(mut self, val: u128) -> Self {
         if let MockTransaction::Eip1559 { ref mut max_priority_fee_per_gas, .. } = self {
             *max_priority_fee_per_gas = val;
         }
         self
     }
 
-    pub fn get_priority_fee(&self) -> Option<U256> {
+    pub fn get_priority_fee(&self) -> Option<u128> {
         if let MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } = self {
             Some(*max_priority_fee_per_gas)
         } else {
@@ -156,21 +156,21 @@ impl MockTransaction {
         }
     }
 
-    pub fn set_max_fee(&mut self, val: U256) -> &mut Self {
+    pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
         if let MockTransaction::Eip1559 { max_fee_per_gas, .. } = self {
             *max_fee_per_gas = val;
         }
         self
     }
 
-    pub fn with_max_fee(mut self, val: U256) -> Self {
+    pub fn with_max_fee(mut self, val: u128) -> Self {
         if let MockTransaction::Eip1559 { ref mut max_fee_per_gas, .. } = self {
             *max_fee_per_gas = val;
         }
         self
     }
 
-    pub fn get_max_fee(&self) -> Option<U256> {
+    pub fn get_max_fee(&self) -> Option<u128> {
         if let MockTransaction::Eip1559 { max_fee_per_gas, .. } = self {
             Some(*max_fee_per_gas)
         } else {
@@ -178,7 +178,7 @@ impl MockTransaction {
         }
     }
 
-    pub fn set_gas_price(&mut self, val: U256) -> &mut Self {
+    pub fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
             MockTransaction::Legacy { gas_price, .. } => {
                 *gas_price = val;
@@ -191,7 +191,7 @@ impl MockTransaction {
         self
     }
 
-    pub fn with_gas_price(mut self, val: U256) -> Self {
+    pub fn with_gas_price(mut self, val: u128) -> Self {
         match self {
             MockTransaction::Legacy { ref mut gas_price, .. } => {
                 *gas_price = val;
@@ -208,7 +208,7 @@ impl MockTransaction {
         self
     }
 
-    pub fn get_gas_price(&self) -> U256 {
+    pub fn get_gas_price(&self) -> u128 {
         match self {
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
@@ -247,7 +247,7 @@ impl MockTransaction {
     /// Returns a new transaction with a higher gas price +1
     pub fn inc_price(&self) -> Self {
         let mut next = self.clone();
-        let gas = self.get_gas_price().checked_add(U256::from(1)).unwrap();
+        let gas = self.get_gas_price().checked_add(1).unwrap();
         next.with_gas_price(gas)
     }
 
@@ -299,15 +299,15 @@ impl PoolTransaction for MockTransaction {
     fn cost(&self) -> U256 {
         match self {
             MockTransaction::Legacy { gas_price, value, gas_limit, .. } => {
-                U256::from(*gas_limit) * *gas_price + *value
+                U256::from(*gas_limit) * U256::from(*gas_price) + *value
             }
             MockTransaction::Eip1559 { max_fee_per_gas, value, gas_limit, .. } => {
-                U256::from(*gas_limit) * *max_fee_per_gas + *value
+                U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
             }
         }
     }
 
-    fn effective_gas_price(&self) -> U256 {
+    fn effective_gas_price(&self) -> u128 {
         self.get_gas_price()
     }
 
@@ -315,14 +315,14 @@ impl PoolTransaction for MockTransaction {
         self.get_gas_limit()
     }
 
-    fn max_fee_per_gas(&self) -> Option<U256> {
+    fn max_fee_per_gas(&self) -> Option<u128> {
         match self {
             MockTransaction::Legacy { .. } => None,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
         }
     }
 
-    fn max_priority_fee_per_gas(&self) -> Option<U256> {
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             MockTransaction::Legacy { .. } => None,
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => {
@@ -354,7 +354,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 hash,
                 sender,
                 nonce,
-                gas_price: U256::from(gas_price),
+                gas_price,
                 gas_limit,
                 value: U256::from(value),
             },
@@ -372,8 +372,8 @@ impl FromRecoveredTransaction for MockTransaction {
                 hash,
                 sender,
                 nonce,
-                max_fee_per_gas: U256::from(max_fee_per_gas),
-                max_priority_fee_per_gas: U256::from(max_priority_fee_per_gas),
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
                 gas_limit,
                 value: U256::from(value),
             },
