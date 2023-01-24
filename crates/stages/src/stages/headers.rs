@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -44,8 +44,6 @@ pub struct HeaderStage<D: HeaderDownloader, S: StatusUpdater> {
     pub consensus: Arc<dyn Consensus>,
     /// Emits updates about the sync status
     pub sync_status_updates: S,
-    /// Header metrics
-    pub metrics: HeaderMetrics,
 }
 
 // === impl HeaderStage ===
@@ -224,7 +222,6 @@ where
         };
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
-        self.metrics.headers_counter.increment(downloaded_headers.len() as u64);
 
         // Write the headers to db
         self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
@@ -290,7 +287,6 @@ mod tests {
 
     mod test_runner {
         use crate::{
-            metrics::HeaderMetrics,
             stages::headers::HeaderStage,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
@@ -351,7 +347,6 @@ mod tests {
                     consensus: self.consensus.clone(),
                     downloader: (*self.downloader_factory)(),
                     sync_status_updates: self.network_handle.clone(),
-                    metrics: HeaderMetrics::default(),
                 }
             }
         }

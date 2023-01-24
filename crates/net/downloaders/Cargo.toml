@@ -13,6 +13,7 @@ reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-eth-wire = { path= "../eth-wire" }
 reth-db = { path = "../../storage/db" }
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # async
 futures = "0.3"
@@ -21,6 +22,7 @@ futures-util = "0.3.25"
 # misc
 tracing = "0.1.37"
 thiserror = "1.0"
+metrics = "0.20.1"
 
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
