@@ -515,7 +515,8 @@ where
             }
             NetworkHandleMessage::Shutdown => {
                 // Set connection status to `Shutdown`. This will prevent the node to accept
-                // new incoming connections and send connection request to newly discovered nodes.
+                // new incoming connections as well as sending connection requests to newly
+                // discovered nodes.
                 self.swarm.set_shutdown_connection_state();
 
                 // drop pending connections

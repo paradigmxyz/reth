@@ -415,13 +415,9 @@ pub(crate) enum SwarmEvent {
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
 }
 
+#[derive(Default)]
 pub(crate) enum NodeConnectionState {
+    #[default]
     Active,
     ShuttingDown,
-}
-
-impl Default for NodeConnectionState {
-    fn default() -> Self {
-        NodeConnectionState::Active
-    }
 }
