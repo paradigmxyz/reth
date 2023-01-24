@@ -1,8 +1,6 @@
 use crate::{
-    forkkind::{ForkDiscriminant, TerminalTotalDifficulty},
-    proofs::genesis_state_root,
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, ForkKind, Genesis, GenesisAccount, Hardfork,
-    Header, H160, H256, U256,
+    forkkind::ForkDiscriminant, proofs::genesis_state_root, BlockNumber, Chain, ForkFilter,
+    ForkHash, ForkId, ForkKind, Genesis, GenesisAccount, Hardfork, Header, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
@@ -31,16 +29,11 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::London, ForkKind::Block(12965000)),
         (Hardfork::ArrowGlacier, ForkKind::Block(13773000)),
         (Hardfork::GrayGlacier, ForkKind::Block(15050000)),
-        (
-            Hardfork::MergeNetsplit,
-            ForkKind::TTD(TerminalTotalDifficulty::new(
-                U256::from(58750000000000000000000_u128),
-                Some(15537394),
-            )),
-        ),
+        (Hardfork::Paris, ForkKind::TTD(Some(15537394))),
         (Hardfork::Latest, ForkKind::Block(15050000)),
     ]),
     dao_fork_support: true,
+    paris_ttd: Some(U256::from(58_750_000_000_000_000_000_000_u128)),
 });
 
 /// The Goerli spec
@@ -54,12 +47,10 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::Istanbul, ForkKind::Block(1561651)),
         (Hardfork::Berlin, ForkKind::Block(4460644)),
         (Hardfork::London, ForkKind::Block(5062605)),
-        (
-            Hardfork::MergeNetsplit,
-            ForkKind::TTD(TerminalTotalDifficulty::new(U256::from(10790000), Some(7382818))),
-        ),
+        (Hardfork::Paris, ForkKind::TTD(Some(7382818))),
     ]),
     dao_fork_support: true,
+    paris_ttd: Some(U256::from(10_790_000)),
 });
 
 /// The Sepolia spec
@@ -68,14 +59,9 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
     genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
-    hardforks: BTreeMap::from([(
-        Hardfork::MergeNetsplit,
-        ForkKind::TTD(TerminalTotalDifficulty::new(
-            U256::from(17000000000000000_u64),
-            Some(1450408),
-        )),
-    )]),
+    hardforks: BTreeMap::from([(Hardfork::Paris, ForkKind::Block(1450408))]),
     dao_fork_support: true,
+    paris_ttd: Some(U256::from(17_000_000_000_000_000_u64)),
 });
 
 /// The Ethereum chain spec
@@ -95,6 +81,9 @@ pub struct ChainSpec {
 
     /// Whether or not the DAO fork is supported
     pub dao_fork_support: bool,
+
+    /// The merge terminal total difficulty
+    pub paris_ttd: Option<U256>,
 }
 
 impl ChainSpec {
@@ -120,13 +109,11 @@ impl ChainSpec {
 
     /// Get the first block number of the hardfork.
     pub fn fork_block(&self, fork: Hardfork) -> Option<BlockNumber> {
-        self.hardforks
-            .get(&fork)
-            .and_then(|kind| match kind {
-                ForkKind::Block(number) => Some(*number),
-                ForkKind::TTD(ttd) => ttd.block,
-                _ => None,
-            })
+        self.hardforks.get(&fork).and_then(|kind| match kind {
+            ForkKind::Block(block_number) => Some(*block_number),
+            ForkKind::TTD(block_number) => *block_number,
+            _ => None,
+        })
     }
 
     /// Get the first block number of the hardfork.
@@ -139,9 +126,9 @@ impl ChainSpec {
         match self.hardforks.get(&fork) {
             Some(kind) => match kind {
                 ForkKind::Block(block_number) => *block_number <= discriminant.block_number,
-                ForkKind::TTD(ttd) => {
-                    ttd.total_difficulty <= discriminant.total_difficulty &&
-                        ttd.block <= Some(discriminant.block_number)
+                ForkKind::TTD(block_number) => {
+                    self.paris_ttd <= Some(discriminant.total_difficulty) ||
+                        *block_number <= Some(discriminant.block_number)
                 }
                 ForkKind::Time(timestamp) => *timestamp <= discriminant.timestamp,
             },
@@ -156,14 +143,7 @@ impl ChainSpec {
 
     /// The merge terminal total difficulty
     pub fn terminal_total_difficulty(&self) -> Option<U256> {
-        if let Some(kind) = self.hardforks.get(&Hardfork::MergeNetsplit) {
-            match kind {
-                ForkKind::TTD(ttd) => Some(ttd.total_difficulty),
-                _ => None,
-            }
-        } else {
-            None
-        }
+        self.paris_ttd
     }
 
     /// Get an iterator of all harforks with theirs respectives block number
@@ -245,6 +225,7 @@ impl From<EthersGenesis> for ChainSpec {
         };
 
         let genesis_hash = Header::from(genesis_block.clone()).seal().hash();
+        let paris_ttd = genesis.config.terminal_total_difficulty.map(|ttd| ttd.into());
         let hardfork_opts = vec![
             (Hardfork::Homestead, genesis.config.homestead_block),
             (Hardfork::Dao, genesis.config.dao_fork_block),
@@ -259,22 +240,13 @@ impl From<EthersGenesis> for ChainSpec {
             (Hardfork::London, genesis.config.london_block),
             (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
             (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
+            (Hardfork::Paris, genesis.config.merge_netsplit_block),
         ];
 
-        let mut configured_hardforks = hardfork_opts
+        let configured_hardforks = hardfork_opts
             .iter()
             .filter_map(|(hardfork, opt)| opt.map(|block| (*hardfork, ForkKind::Block(block))))
             .collect::<BTreeMap<_, _>>();
-
-        if let Some(paris_ttd) = genesis.config.terminal_total_difficulty {
-            configured_hardforks.insert(
-                Hardfork::MergeNetsplit,
-                ForkKind::TTD(TerminalTotalDifficulty::new(
-                    paris_ttd.into(),
-                    genesis.config.merge_netsplit_block,
-                )),
-            );
-        }
 
         Self {
             chain: genesis.config.chain_id.into(),
@@ -282,6 +254,7 @@ impl From<EthersGenesis> for ChainSpec {
             genesis: genesis_block,
             hardforks: configured_hardforks,
             genesis_hash,
+            paris_ttd,
         }
     }
 }
@@ -294,6 +267,7 @@ pub struct ChainSpecBuilder {
     genesis_hash: Option<H256>,
     hardforks: BTreeMap<Hardfork, ForkKind>,
     dao_fork_support: bool,
+    paris_ttd: Option<U256>,
 }
 
 impl ChainSpecBuilder {
@@ -305,6 +279,7 @@ impl ChainSpecBuilder {
             genesis_hash: Some(MAINNET.genesis_hash),
             hardforks: MAINNET.hardforks.clone(),
             dao_fork_support: MAINNET.dao_fork_support,
+            paris_ttd: MAINNET.paris_ttd,
         }
     }
 
@@ -397,10 +372,7 @@ impl ChainSpecBuilder {
     /// Enables Paris
     pub fn paris_activated(mut self) -> Self {
         self = self.berlin_activated();
-        self.hardforks.insert(
-            Hardfork::MergeNetsplit,
-            ForkKind::TTD(TerminalTotalDifficulty::new(U256::from(0), Some(0))),
-        );
+        self.hardforks.insert(Hardfork::Paris, ForkKind::TTD(Some(0)));
         self
     }
 
@@ -425,6 +397,7 @@ impl ChainSpecBuilder {
             genesis_hash: self.genesis_hash.expect("The genesis hash is required"),
             hardforks: self.hardforks,
             dao_fork_support: self.dao_fork_support,
+            paris_ttd: self.paris_ttd,
         }
     }
 }
@@ -437,6 +410,7 @@ impl From<&ChainSpec> for ChainSpecBuilder {
             genesis_hash: Some(value.genesis_hash),
             hardforks: value.hardforks.clone(),
             dao_fork_support: value.dao_fork_support,
+            paris_ttd: value.paris_ttd,
         }
     }
 }

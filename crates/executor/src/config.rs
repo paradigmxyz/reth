@@ -13,7 +13,7 @@ pub const WEI_5ETH: u128 = 5000000000000000000u128;
 pub fn revm_spec(chain_spec: &ChainSpec, discriminant: ForkDiscriminant) -> revm::SpecId {
     match discriminant {
         d if chain_spec.fork_active(Hardfork::Shanghai, d) => revm::MERGE_EOF,
-        d if chain_spec.fork_active(Hardfork::MergeNetsplit, d) => revm::MERGE,
+        d if chain_spec.fork_active(Hardfork::Paris, d) => revm::MERGE,
         d if chain_spec.fork_active(Hardfork::London, d) => revm::LONDON,
         d if chain_spec.fork_active(Hardfork::Berlin, d) => revm::BERLIN,
         d if chain_spec.fork_active(Hardfork::Istanbul, d) => revm::ISTANBUL,
@@ -88,114 +88,47 @@ mod tests {
 
     #[test]
     fn test_eth_spec() {
+        let post_merge_td = MAINNET.terminal_total_difficulty().unwrap();
+        let pre_merge_td = post_merge_td.saturating_sub(U256::from(10));
+
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    15537394 + 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(15537394 + 10, post_merge_td, 1674477448)),
             revm::MERGE
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    15537394 - 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(15537394 - 10, pre_merge_td, 1674477448)),
             revm::LONDON
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    12244000 + 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(12244000 + 10, pre_merge_td, 1674477448)),
             revm::BERLIN
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    12244000 - 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(12244000 - 10, pre_merge_td, 1674477448)),
             revm::ISTANBUL
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    7280000 + 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(7280000 + 10, pre_merge_td, 1674477448)),
             revm::PETERSBURG
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    7280000 - 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(7280000 - 10, pre_merge_td, 1674477448)),
             revm::BYZANTIUM
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    2675000 + 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(2675000 + 10, pre_merge_td, 1674477448)),
             revm::SPURIOUS_DRAGON
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    2675000 - 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(2675000 - 10, pre_merge_td, 1674477448)),
             revm::TANGERINE
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    1150000 + 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(1150000 + 10, pre_merge_td, 1674477448)),
             revm::HOMESTEAD
         );
         assert_eq!(
-            revm_spec(
-                &MAINNET,
-                ForkDiscriminant::new(
-                    1150000 - 10,
-                    MAINNET.terminal_total_difficulty().unwrap(),
-                    1674477448
-                )
-            ),
+            revm_spec(&MAINNET, ForkDiscriminant::new(1150000 - 10, pre_merge_td, 1674477448)),
             revm::FRONTIER
         );
     }

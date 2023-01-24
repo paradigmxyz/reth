@@ -23,7 +23,7 @@ pub enum Hardfork {
     London,
     ArrowGlacier,
     GrayGlacier,
-    MergeNetsplit,
+    Paris,
     Shanghai,
     #[default]
     Latest,
@@ -37,7 +37,10 @@ impl Hardfork {
     ///
     /// If the hard fork is not present in the [`ChainSpec`] then `None` is returned.
     pub fn fork_id(&self, chain_spec: &ChainSpec) -> Option<ForkId> {
-        chain_spec.fork_kind(*self).map(ForkDiscriminant::from).map(|d| chain_spec.fork_id(d))
+        chain_spec
+            .fork_kind(*self)
+            .map(|k| ForkDiscriminant::from_kind(k, chain_spec))
+            .map(|d| chain_spec.fork_id(d))
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
@@ -47,7 +50,10 @@ impl Hardfork {
     ///
     /// This returns `None` if the hardfork is not present in the given [`ChainSpec`].
     pub fn fork_filter(&self, chain_spec: &ChainSpec) -> Option<ForkFilter> {
-        chain_spec.fork_kind(*self).map(ForkDiscriminant::from).map(|d| chain_spec.fork_filter(d))
+        chain_spec
+            .fork_kind(*self)
+            .map(|k| ForkDiscriminant::from_kind(k, chain_spec))
+            .map(|d| chain_spec.fork_filter(d))
     }
 }
 

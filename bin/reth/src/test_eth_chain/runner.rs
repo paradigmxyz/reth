@@ -125,7 +125,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         let chain_spec: ChainSpec = suite.network.into();
         // if paris aka merge is not activated we dont have block rewards;
-        let has_block_reward = chain_spec.fork_block(Hardfork::MergeNetsplit).is_some();
+        let has_block_reward = chain_spec.fork_block(Hardfork::Paris).is_some();
 
         // Create db and acquire transaction
         let db = create_test_rw_db::<WriteMap>();

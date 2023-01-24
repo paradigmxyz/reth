@@ -1,8 +1,9 @@
 //! ALl functions for verification of block
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
-    BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, Transaction,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, U256,
+    BlockNumber, ChainSpec, ForkDiscriminant, Hardfork, Header, SealedBlock, SealedHeader,
+    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT,
+    U256,
 };
 use reth_provider::{AccountProvider, HeaderProvider};
 use std::{
@@ -47,7 +48,13 @@ pub fn validate_header_standalone(
 
     // EIP-3675: Upgrade consensus to Proof-of-Stake:
     // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if chain_spec.fork_active(Hardfork::MergeNetsplit, header.number.into()) {
+    if chain_spec.fork_active(
+        Hardfork::Paris,
+        ForkDiscriminant::tdd(
+            chain_spec.terminal_total_difficulty().unwrap_or_default(),
+            Some(header.number),
+        ),
+    ) {
         if header.difficulty != U256::ZERO {
             return Err(Error::TheMergeDifficultyIsNotZero)
         }
@@ -260,7 +267,13 @@ pub fn validate_header_regarding_parent(
     }
 
     // difficulty check is done by consensus.
-    if !chain_spec.fork_active(Hardfork::MergeNetsplit, child.number.into()) {
+    if !chain_spec.fork_active(
+        Hardfork::Paris,
+        ForkDiscriminant::tdd(
+            chain_spec.terminal_total_difficulty().unwrap_or_default(),
+            Some(child.number),
+        ),
+    ) {
         // TODO how this needs to be checked? As ice age did increment it by some formula
     }
 
