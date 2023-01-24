@@ -5,7 +5,10 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     db,
-    p2p::bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
+    p2p::{
+        bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
+        error::DownloadResult,
+    },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
@@ -178,14 +181,31 @@ where
         max_dynamic.min(*self.concurrent_requests_range.end())
     }
 
+    // Check if the stream is terminated
     fn is_terminated(&self) -> bool {
-        self.in_progress_queue
-            .last_requested_block_number
-            .map(|last| last + 1 == self.download_range.end)
-            .unwrap_or_default() &&
+        // There is nothing to request if the range is empty
+        let nothing_to_request = self.download_range.is_empty() ||
+            // or all blocks have already been requested. 
+            self.in_progress_queue
+                .last_requested_block_number
+                .map(|last| last + 1 == self.download_range.end)
+                .unwrap_or_default();
+
+        nothing_to_request &&
             self.in_progress_queue.is_empty() &&
             self.buffered_responses.is_empty() &&
             self.queued_bodies.is_empty()
+    }
+
+    /// Clear all download related data.
+    ///
+    /// Should be invoked upon encountering fatal error.
+    fn clear(&mut self) {
+        self.download_range = Range::default();
+        self.latest_queued_block_number.take();
+        self.in_progress_queue.clear();
+        self.buffered_responses.clear();
+        self.queued_bodies.clear();
     }
 
     /// Queues bodies and sets the latest queued block number
@@ -304,7 +324,7 @@ where
     C: ConsensusTrait + 'static,
     DB: Database,
 {
-    type Item = Vec<BlockResponse>;
+    type Item = DownloadResult<Vec<BlockResponse>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -340,6 +360,8 @@ where
                     Ok(None) => break 'inner,
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", ?error, "Failed to form next request");
+                        this.clear();
+                        return Poll::Ready(Some(Err(error.into())))
                     }
                 };
             }
@@ -351,7 +373,7 @@ where
             // Yield next batch
             if this.queued_bodies.len() >= this.stream_batch_size {
                 let next_batch = this.queued_bodies.drain(..this.stream_batch_size);
-                return Poll::Ready(Some(next_batch.collect()))
+                return Poll::Ready(Some(Ok(next_batch.collect())))
             }
 
             if !new_request_submitted {
@@ -367,7 +389,7 @@ where
 
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size);
-            return Poll::Ready(Some(next_batch.collect()))
+            return Poll::Ready(Some(Ok(next_batch.collect())))
         }
 
         Poll::Pending
@@ -555,7 +577,7 @@ mod tests {
 
         assert_matches!(
             downloader.next().await,
-            Some(res) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
         );
         assert_eq!(client.times_requested(), 1);
     }
@@ -587,7 +609,7 @@ mod tests {
 
             assert_matches!(
                 downloader.next().await,
-                Some(res) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &mut bodies))
+                Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &mut bodies))
             );
             assert!(downloader.latest_queued_block_number >= Some(range_start));
             range_start += stream_batch_size as u64;
@@ -619,17 +641,17 @@ mod tests {
         downloader.set_download_range(0..100).expect("failed to set header range");
         assert_matches!(
             downloader.next().await,
-            Some(res) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
         );
 
         // Check that the stream is terminated
-        assert_eq!(downloader.next().await, None);
+        assert!(downloader.next().await.is_none());
 
         // Set and download the second range
         downloader.set_download_range(100..200).expect("failed to set header range");
         assert_matches!(
             downloader.next().await,
-            Some(res) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
         );
     }
 }
