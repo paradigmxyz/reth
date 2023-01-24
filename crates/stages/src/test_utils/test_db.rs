@@ -196,7 +196,6 @@ impl TestTransaction {
     {
         self.commit(|tx| {
             let mut current_tx_id = tx_offset.unwrap_or_default();
-            let blocks = blocks.collect::<Vec<_>>();
 
             for block in blocks {
                 let key: BlockNumHash = block.num_hash().into();

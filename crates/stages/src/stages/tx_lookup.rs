@@ -15,7 +15,7 @@ const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 /// The transaction lookup stage.
 ///
 /// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
-/// block to the correesponding `TransitionId` at each block. This is written to the
+/// block to the corresponding `TransitionId` at each block. This is written to the
 /// [`tables::TxHashNumber`] This is used for looking up changesets via the transaction hash.
 #[derive(Debug)]
 pub struct TransactionLookupStage {
@@ -45,6 +45,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let start_key = tx.get_block_numhash(start_block)?;
 
+        // Walk over block bodies within a specified range.
         let bodies = cursor_bodies
             .walk(start_key)?
             .take_while(|entry| {
@@ -55,6 +56,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Collect tranasctions for each body and insert the reverse lookup for hash -> tx_id.
         for (_, body) in bodies {
             let transactions = tx_cursor
                 .walk(body.start_tx_id)?
