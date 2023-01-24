@@ -163,7 +163,6 @@ impl PeersManager {
         if !self.connection_info.has_in_capacity() {
             return Err(InboundConnectionError::ExceedsLimit(self.connection_info.max_inbound))
         }
-
         // keep track of new connection
         self.connection_info.inc_in();
         Ok(())

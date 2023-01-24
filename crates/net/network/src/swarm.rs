@@ -69,6 +69,8 @@ pub(crate) struct Swarm<C> {
     sessions: SessionManager,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
+    /// Tracks the connection state of the node
+    node_connection_state: NodeConnectionState,
 }
 
 // === impl Swarm ===
@@ -82,8 +84,9 @@ where
         incoming: ConnectionListener,
         sessions: SessionManager,
         state: NetworkState<C>,
+        node_connection_state: NodeConnectionState,
     ) -> Self {
-        Self { incoming, sessions, state }
+        Self { incoming, sessions, state, node_connection_state }
     }
 
     /// Access to the state.
@@ -189,6 +192,10 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
+                // Reject incoming connection if node is shutting down.
+                if self.is_node_shutting_down() {
+                    return None
+                }
                 // ensure we can handle an incoming connection from this address
                 if let Err(err) =
                     self.state_mut().peers_mut().on_incoming_pending_session(remote_addr.ip())
@@ -244,6 +251,9 @@ where
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
             StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+                if self.is_node_shutting_down() {
+                    return None
+                }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
                     self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
@@ -258,6 +268,15 @@ where
             }
         }
         None
+    }
+
+    /// Set node connection state to `ShuttingDown`
+    pub(crate) fn set_shutdown_connection_state(&mut self) {
+        self.node_connection_state = NodeConnectionState::ShuttingDown;
+    }
+
+    fn is_node_shutting_down(&self) -> bool {
+        matches!(self.node_connection_state, NodeConnectionState::Active)
     }
 }
 
@@ -393,4 +412,15 @@ pub(crate) enum SwarmEvent {
     },
     /// Failed to establish a tcp stream to the given address/node
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
+}
+
+pub(crate) enum NodeConnectionState {
+    Active,
+    ShuttingDown,
+}
+
+impl Default for NodeConnectionState {
+    fn default() -> Self {
+        NodeConnectionState::Active
+    }
 }

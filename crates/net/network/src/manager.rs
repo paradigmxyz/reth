@@ -28,7 +28,7 @@ use crate::{
     peers::{PeersHandle, PeersManager},
     session::SessionManager,
     state::NetworkState,
-    swarm::{Swarm, SwarmEvent},
+    swarm::{NodeConnectionState, Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
@@ -206,7 +206,7 @@ where
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state);
+        let swarm = Swarm::new(incoming, sessions, state, NodeConnectionState::default());
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
@@ -519,6 +519,7 @@ where
                 // drop pending connections
 
                 // tell incoming connections that we will shut down
+                self.swarm.set_shutdown_connection_state();
 
                 // Disconnect all active connections
                 self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
