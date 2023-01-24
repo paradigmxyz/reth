@@ -311,6 +311,7 @@ impl ChainSpecBuilder {
 
     /// Enables Frontier
     pub fn frontier_activated(mut self) -> Self {
+        self.hardforks.clear();
         self.hardforks.insert(Hardfork::Frontier, ForkKind::Block(0));
         self
     }
