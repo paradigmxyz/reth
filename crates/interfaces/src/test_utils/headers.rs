@@ -2,11 +2,11 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadClient, Downloader},
+        download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
-            downloader::{HeaderDownloader, SyncTarget},
+            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
     },
@@ -62,19 +62,6 @@ impl TestHeaderDownloader {
     }
 }
 
-impl Downloader for TestHeaderDownloader {
-    type Client = TestHeadersClient;
-    type Consensus = TestConsensus;
-
-    fn client(&self) -> &Self::Client {
-        &self.client
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        &self.consensus
-    }
-}
-
 impl HeaderDownloader for TestHeaderDownloader {
     fn update_local_head(&mut self, _head: SealedHeader) {}
 
@@ -82,6 +69,11 @@ impl HeaderDownloader for TestHeaderDownloader {
 
     fn set_batch_size(&mut self, limit: usize) {
         self.batch_size = limit;
+    }
+
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)?;
+        Ok(())
     }
 }
 

@@ -1,3 +1,6 @@
+/// Shared abstractions for downloader implementations.
+pub mod download;
+
 /// Traits for implementing P2P block body clients.
 pub mod bodies;
 
