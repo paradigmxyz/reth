@@ -4,10 +4,10 @@ use crate::{
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
+    database::{Database, DatabaseGAT},
     models::{sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
 use reth_primitives::{Address, TransitionId, H256};
@@ -123,9 +123,11 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::index_storage_history", to_block = input.unwind_to, "Unwinding");
+        info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+
+        let mut cursor = tx.cursor_write::<tables::StorageHistory>()?;
 
         tx.cursor_read::<tables::StorageChangeSet>()?
             .walk((from_transition_rev, Address::zero()).into())?
@@ -148,55 +150,69 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             .into_iter()
             // try to unwind the index
             .try_for_each(|((address, storage_key), rem_index)| -> Result<(), StageError> {
-                let mut cursor = tx.cursor_write::<tables::StorageHistory>()?;
-                let _last_shard =
-                    cursor.seek_exact(StorageShardedKey::new(address, storage_key, u64::MAX))?;
+                let shard_part = unwind_storage_history_shards::<DB>(
+                    &mut cursor,
+                    address,
+                    storage_key,
+                    rem_index,
+                )?;
 
-                let mut boundary = None;
-                while let Some((storage_sharded_key, list)) = cursor.prev()? {
-                    if storage_sharded_key.address != address ||
-                        storage_sharded_key.sharded_key.key != storage_key
-                    {
-                        // there is no more shard for address and storage_key.
-                        break
-                    }
-                    // check first item and if it is more and eq than `rem_index` delete current
-                    // item.
-                    let first = list.iter(0).next().expect("List can't empty");
-                    if first >= rem_index as usize {
-                        cursor.delete_current()?;
-                    } else if rem_index <= storage_sharded_key.sharded_key.highest_transition_id {
-                        // if eq, last element needs to be removed.
-                        cursor.delete_current()?;
-                        boundary = Some(list);
-                        break
-                    } else {
-                        break
-                    }
-                }
-
-                // check boundary, if present some items in current list needs to be removed.
-                if let Some(old_list) = boundary {
-                    let new_list = old_list
-                        .iter(0)
-                        .take_while(|i| *i < rem_index as usize)
-                        .collect::<Vec<_>>();
-                    // While loop above checks if first and last element [first, .., last]
-                    // if first element is in scope whole list would be removed.
-                    // so at least this first element is present.
-                    let biggest_index =
-                        *new_list.last().expect("There is at least one element in list");
-                    let new_list = TransitionList::new(new_list)
-                        .expect("There is at least one element in list and it is sorted.");
+                // check last shard_part, if present, items needs to be reinserted.
+                if let Some(biggest_index) = shard_part.last() {
+                    // there are items in list
                     tx.put::<tables::StorageHistory>(
-                        StorageShardedKey::new(address, storage_key, biggest_index as u64),
-                        new_list,
+                        StorageShardedKey::new(address, storage_key, *biggest_index as u64),
+                        TransitionList::new(shard_part)
+                            .expect("There is at least one element in list and it is sorted."),
                     )?;
                 }
                 Ok(())
             })?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
+}
+
+/// Unwind all history shards. For boundary shard, remove it from database and
+/// return last part of shard with still valid items. If all full shard were removed, return list
+/// would be empty but this does not mean that there is none shard left but that there is no
+/// splitted shards.
+pub fn unwind_storage_history_shards<DB: Database>(
+    cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
+        tables::StorageHistory,
+    >,
+    address: Address,
+    storage_key: H256,
+    transition_id: TransitionId,
+) -> Result<Vec<usize>, StageError> {
+    cursor.seek_exact(StorageShardedKey::new(address, storage_key, u64::MAX))?;
+
+    while let Some((storage_sharded_key, list)) = cursor.prev()? {
+        // there is no more shard for address
+        if storage_sharded_key.address != address ||
+            storage_sharded_key.sharded_key.key != storage_key
+        {
+            // there is no more shard for address and storage_key.
+            break
+        }
+        // check first item and if it is more and eq than `transition_id` delete current
+        // item.
+        let first = list.iter(0).next().expect("List can't empty");
+        if first >= transition_id as usize {
+            cursor.delete_current()?;
+        } else if transition_id <= storage_sharded_key.sharded_key.highest_transition_id {
+            // if eq, last element needs to be removed.
+            cursor.delete_current()?;
+
+            // if first element is in scope whole list would be removed.
+            // so at least this first element is present.
+            let new_list =
+                list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>();
+            return Ok(new_list)
+        } else {
+            return Ok(Vec::new())
+        }
+    }
+    Ok(Vec::new())
 }
 #[cfg(test)]
 mod tests {

@@ -4,10 +4,10 @@ use crate::{
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
+    database::{Database, DatabaseGAT},
     models::{sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
 use reth_primitives::{Address, TransitionId};
@@ -117,6 +117,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let mut cursor = tx.cursor_write::<tables::AccountHistory>()?;
 
+        //<<DB as DatabaseGat>::TXMut as DbTxMutGAT>::CursorMut
         tx.cursor_read::<tables::AccountChangeSet>()?
             .walk(from_transition_rev)?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition_rev).unwrap_or_default())
@@ -133,45 +134,16 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             .into_iter()
             // try to unwind the index
             .try_for_each(|(address, rem_index)| -> Result<(), StageError> {
-                cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
+                let shard_part =
+                    unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
 
-                let mut boundary = None;
-                while let Some((sharded_key, list)) = cursor.prev()? {
-                    // there is no more shard for address
-                    if sharded_key.key != address {
-                        break
-                    }
-                    // check first item and if it is more and eq than `rem_index` delete current
-                    // item.
-                    let first = list.iter(0).next().expect("List can't empty");
-                    if first >= rem_index as usize {
-                        cursor.delete_current()?;
-                    } else if rem_index <= sharded_key.highest_transition_id {
-                        // if eq, last element needs to be removed.
-                        cursor.delete_current()?;
-                        boundary = Some(list);
-                        break
-                    } else {
-                        break
-                    }
-                }
-
-                // check boundary, if present some items in current list needs to be removed.
-                if let Some(old_list) = boundary {
-                    let new_list = old_list
-                        .iter(0)
-                        .take_while(|i| *i < rem_index as usize)
-                        .collect::<Vec<_>>();
-                    // While loop above checks if first and last element [first, .., last]
-                    // if first element is in scope whole list would be removed.
-                    // so at least this first element is present.
-                    let biggest_index =
-                        *new_list.last().expect("There is at least one element in list");
-                    let new_list = TransitionList::new(new_list)
-                        .expect("There is at least one element in list and it is sorted.");
+                // check last shard_part, if present, items needs to be reinserted.
+                if let Some(biggest_index) = shard_part.last() {
+                    // there are items in list
                     tx.put::<tables::AccountHistory>(
-                        ShardedKey::new(address, biggest_index as u64),
-                        new_list,
+                        ShardedKey::new(address, *biggest_index as u64),
+                        TransitionList::new(shard_part)
+                            .expect("There is at least one element in list and it is sorted."),
                     )?;
                 }
                 Ok(())
@@ -179,6 +151,45 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
+}
+
+/// Unwind all history shards. For boundary shard, remove it from database and
+/// return last part of shard with still valid items. If all full shard were removed, return list
+/// would be empty but this does not mean that there is none shard left but that there is not
+/// splitted shards.
+pub fn unwind_account_history_shards<DB: Database>(
+    cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
+        tables::AccountHistory,
+    >,
+    address: Address,
+    transition_id: TransitionId,
+) -> Result<Vec<usize>, StageError> {
+    cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
+
+    while let Some((sharded_key, list)) = cursor.prev()? {
+        // there is no more shard for address
+        if sharded_key.key != address {
+            break
+        }
+        // check first item and if it is more and eq than `transition_id` delete current
+        // item.
+        let first = list.iter(0).next().expect("List can't empty");
+        if first >= transition_id as usize {
+            cursor.delete_current()?;
+        } else if transition_id <= sharded_key.highest_transition_id {
+            // if eq, last element needs to be removed.
+            cursor.delete_current()?;
+
+            // if first element is in scope whole list would be removed.
+            // so at least this first element is present.
+            let new_list =
+                list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>();
+            return Ok(new_list)
+        } else {
+            return Ok(Vec::new())
+        }
+    }
+    Ok(Vec::new())
 }
 
 #[cfg(test)]
