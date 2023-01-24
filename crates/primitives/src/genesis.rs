@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     keccak256,
-    proofs::{KeccakHasher, EMPTY_ROOT, genesis_state_root},
+    proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
     utils::serde_helpers::deserialize_stringified_u64,
     Address, Bytes, Header, H256, KECCAK_EMPTY, U256,
 };

@@ -1,6 +1,6 @@
 use crate::{
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
-    GenesisAccount, Hardfork, Header, H160, H256, U256,
+    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
+    H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
