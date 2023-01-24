@@ -68,20 +68,34 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             .into_iter()
             // insert indexes to AccontHistory.
             .try_for_each(|(address, mut indices)| -> Result<(), StageError> {
-                let mut last_shard = take_last_notfull_account_shard(tx, address)?;
+                let mut last_shard = take_last_account_shard(tx, address)?;
                 last_shard.append(&mut indices);
                 // chunk indices and insert them in shards of N size.
-                last_shard.into_iter().chunks(NUM_OF_INDICES_IN_SHARD).into_iter().try_for_each(
-                    |chuck| {
-                        let list = chuck.map(|i| i as usize).collect::<Vec<_>>();
-                        let biggest_id =
-                            *list.last().expect("Chuck does not return empty list") as TransitionId;
-                        let list =
-                            TransitionList::new(list).expect("Indices are presorted and not empty");
-                        tx.put::<tables::AccountHistory>(ShardedKey::new(address, biggest_id), list)
-                    },
-                )?;
-                // get
+                let mut chunks = last_shard
+                    .iter()
+                    .chunks(NUM_OF_INDICES_IN_SHARD)
+                    .into_iter()
+                    .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
+                    .collect::<Vec<_>>();
+                let last_chunk = chunks.pop();
+
+                chunks.into_iter().try_for_each(|list| {
+                    tx.put::<tables::AccountHistory>(
+                        ShardedKey::new(
+                            address,
+                            *list.last().expect("Chuck does not return empty list") as TransitionId,
+                        ),
+                        TransitionList::new(list).expect("Indices are presorted and not empty"),
+                    )
+                })?;
+                // Insert last list with u64::MAX
+                if let Some(last_list) = last_chunk {
+                    tx.put::<tables::AccountHistory>(
+                        ShardedKey::new(address, u64::MAX),
+                        TransitionList::new(last_list)
+                            .expect("Indices are presorted and not empty"),
+                    )?
+                }
                 Ok(())
             })?;
 
@@ -122,10 +136,10 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
                     unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
 
                 // check last shard_part, if present, items needs to be reinserted.
-                if let Some(biggest_index) = shard_part.last() {
+                if !shard_part.is_empty() {
                     // there are items in list
                     tx.put::<tables::AccountHistory>(
-                        ShardedKey::new(address, *biggest_index as u64),
+                        ShardedKey::new(address, u64::MAX),
                         TransitionList::new(shard_part)
                             .expect("There is at least one element in list and it is sorted."),
                     )?;
@@ -139,28 +153,24 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
 /// Load last shard and check if it is full and remove if it is not. If list is empty, last shard
 /// was full or there is no shards at all.
-pub fn take_last_notfull_account_shard<DB: Database>(
+pub fn take_last_account_shard<DB: Database>(
     tx: &Transaction<'_, DB>,
     address: Address,
 ) -> Result<Vec<u64>, StageError> {
-    if let Some((shard_key, list)) = tx.get_account_history_biggest_sharded_index(address)? {
-        if list.len() >= NUM_OF_INDICES_IN_SHARD {
-            // if latest shard is full, just return empty vec
-            return Ok(Vec::new())
-        } else {
-            // delete old shard so new one can be inserted.
-            tx.delete::<tables::AccountHistory>(shard_key, None)?;
-            let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list)
-        }
+    let mut cursor = tx.cursor_read::<tables::AccountHistory>()?;
+    let last = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
+    if let Some((shard_key, list)) = last {
+        // delete old shard so new one can be inserted.
+        tx.delete::<tables::AccountHistory>(shard_key, None)?;
+        let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
+        return Ok(list)
     }
     Ok(Vec::new())
 }
 
 /// Unwind all history shards. For boundary shard, remove it from database and
 /// return last part of shard with still valid items. If all full shard were removed, return list
-/// would be empty but this does not mean that there is none shard left but that there is not
-/// splitted shards.
+/// would be empty.
 pub fn unwind_account_history_shards<DB: Database>(
     cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
         tables::AccountHistory,
@@ -168,29 +178,27 @@ pub fn unwind_account_history_shards<DB: Database>(
     address: Address,
     transition_id: TransitionId,
 ) -> Result<Vec<usize>, StageError> {
-    cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
+    let mut item = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
 
-    while let Some((sharded_key, list)) = cursor.prev()? {
+    while let Some((sharded_key, list)) = item {
         // there is no more shard for address
         if sharded_key.key != address {
             break
         }
+        cursor.delete_current()?;
         // check first item and if it is more and eq than `transition_id` delete current
         // item.
         let first = list.iter(0).next().expect("List can't empty");
         if first >= transition_id as usize {
-            cursor.delete_current()?;
+            item = cursor.prev()?;
+            continue
         } else if transition_id <= sharded_key.highest_transition_id {
-            // if eq, last element needs to be removed.
-            cursor.delete_current()?;
-
             // if first element is in scope whole list would be removed.
             // so at least this first element is present.
-            let new_list =
-                list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>();
-            return Ok(new_list)
+            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
         } else {
-            return Ok(Vec::new())
+            let new_list = list.iter(0).collect::<Vec<_>>();
+            return Ok(new_list)
         }
     }
     Ok(Vec::new())
@@ -279,7 +287,7 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(6), vec![4, 6]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 6]),]));
 
         // unwind
         unwind(&tx, 5, 0).await;
@@ -297,7 +305,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(3), list(&[1, 2, 3])).unwrap();
+            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&[1, 2, 3])).unwrap();
             Ok(())
         })
         .unwrap();
@@ -307,14 +315,14 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(6), vec![1, 2, 3, 4, 6]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 6]),]));
 
         // unwind
         unwind(&tx, 5, 0).await;
 
         // verify initial state
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(3), vec![1, 2, 3]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3]),]));
     }
 
     #[tokio::test]
@@ -326,7 +334,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(3), list(&full_list)).unwrap();
+            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -336,14 +344,17 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(3), full_list.clone()), (shard(6), vec![4, 6])]));
+        assert_eq!(
+            table,
+            BTreeMap::from([(shard(3), full_list.clone()), (shard(u64::MAX), vec![4, 6])])
+        );
 
         // unwind
         unwind(&tx, 5, 0).await;
 
         // verify initial state
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(3), full_list),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), full_list)]));
     }
 
     #[tokio::test]
@@ -355,7 +366,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(3), list(&close_full_list)).unwrap();
+            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -367,7 +378,7 @@ mod tests {
         close_full_list.push(4);
         close_full_list.push(6);
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(6), close_full_list.clone()),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list.clone()),]));
 
         // unwind
         unwind(&tx, 5, 0).await;
@@ -376,7 +387,7 @@ mod tests {
         close_full_list.pop();
         close_full_list.pop();
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(1), close_full_list),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list),]));
 
         // verify initial state
     }
@@ -390,7 +401,7 @@ mod tests {
         // setup
         partial_setup(&tx);
         tx.commit(|tx| {
-            tx.put::<tables::AccountHistory>(shard(1), list(&close_full_list)).unwrap();
+            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&close_full_list)).unwrap();
             Ok(())
         })
         .unwrap();
@@ -403,7 +414,7 @@ mod tests {
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
         assert_eq!(
             table,
-            BTreeMap::from([(shard(4), close_full_list.clone()), (shard(6), vec![6])])
+            BTreeMap::from([(shard(4), close_full_list.clone()), (shard(u64::MAX), vec![6])])
         );
 
         // unwind
@@ -412,7 +423,7 @@ mod tests {
         // verify initial state
         close_full_list.pop();
         let table = cast(tx.table::<tables::AccountHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(1), close_full_list),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list),]));
     }
 
     #[tokio::test]
@@ -426,7 +437,7 @@ mod tests {
         tx.commit(|tx| {
             tx.put::<tables::AccountHistory>(shard(1), list(&full_list)).unwrap();
             tx.put::<tables::AccountHistory>(shard(2), list(&full_list)).unwrap();
-            tx.put::<tables::AccountHistory>(shard(3), list(&[2, 3])).unwrap();
+            tx.put::<tables::AccountHistory>(shard(u64::MAX), list(&[2, 3])).unwrap();
             Ok(())
         })
         .unwrap();
@@ -440,7 +451,7 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(6), vec![2, 3, 4, 6])
+                (shard(u64::MAX), vec![2, 3, 4, 6])
             ])
         );
 
@@ -454,7 +465,7 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(3), vec![2, 3])
+                (shard(u64::MAX), vec![2, 3])
             ])
         );
     }

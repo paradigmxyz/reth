@@ -7,13 +7,13 @@ use std::{
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
-    models::{storage_sharded_key::StorageShardedKey, BlockNumHash, ShardedKey, StoredBlockBody},
+    models::{BlockNumHash, StoredBlockBody},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error, TransitionList,
+    Error,
 };
-use reth_primitives::{Address, BlockHash, BlockNumber, TransitionId, TxNumber, H256};
+use reth_primitives::{BlockHash, BlockNumber, TransitionId, TxNumber};
 
 use crate::{DatabaseIntegrityError, StageError};
 
@@ -144,34 +144,6 @@ where
             .get::<tables::BlockTransitionIndex>(key)?
             .ok_or(DatabaseIntegrityError::BlockTransition { number: key })?;
         Ok(last_transition_id)
-    }
-
-    pub(crate) fn get_account_history_biggest_sharded_index(
-        &self,
-        key: Address,
-    ) -> Result<Option<(ShardedKey<Address>, TransitionList)>, StageError> {
-        let mut cursor = self.cursor_read::<tables::AccountHistory>()?;
-        cursor.seek_exact(ShardedKey::new(key, u64::MAX))?;
-
-        let ret = cursor.prev()?;
-
-        Ok(ret.filter(|(sharded_key, _)| sharded_key.key == key))
-    }
-
-    pub(crate) fn get_storage_history_biggest_sharded_index(
-        &self,
-        address_key: Address,
-        storage_key: H256,
-    ) -> Result<Option<(StorageShardedKey, TransitionList)>, StageError> {
-        let mut cursor = self.cursor_read::<tables::StorageHistory>()?;
-        cursor.seek_exact(StorageShardedKey::new(address_key, storage_key, u64::MAX))?;
-
-        let ret = cursor.prev()?;
-
-        Ok(ret.filter(|(storage_sharded_key, _)| {
-            storage_sharded_key.address == address_key &&
-                storage_sharded_key.sharded_key.key == storage_key
-        }))
     }
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous
