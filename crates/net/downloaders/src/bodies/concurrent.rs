@@ -5,14 +5,10 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     db,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
-        downloader::Downloader,
-    },
+    p2p::bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
-    borrow::Borrow,
     cmp::Ordering,
     collections::BinaryHeap,
     ops::{Range, RangeInclusive},
@@ -221,24 +217,6 @@ where
             }
         }
         None
-    }
-}
-
-impl<B, C, DB> Downloader for ConcurrentDownloader<B, C, DB>
-where
-    B: BodiesClient,
-    C: ConsensusTrait,
-    DB: Database,
-{
-    type Client = B;
-    type Consensus = C;
-
-    fn client(&self) -> &Self::Client {
-        self.client.borrow()
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        self.consensus.borrow()
     }
 }
 
@@ -563,7 +541,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..20);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
@@ -590,7 +568,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..100);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let stream_batch_size = 20;
         let request_limit = 10;
@@ -630,7 +608,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..200);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let mut downloader = ConcurrentDownloaderBuilder::default()
