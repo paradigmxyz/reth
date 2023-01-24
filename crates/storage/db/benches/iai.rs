@@ -13,40 +13,24 @@ macro_rules! impl_iai_inner {
                     include!("./utils.rs");
 
                     pub fn $compress() {
-                        let pair = load_vectors::<reth_db::tables::$name>();
-
-                        black_box(
-                            for (_, _, v, _) in pair {
-                                v.compress();
-                            }
-                        );
+                        for (_, _, v, _) in black_box(load_vectors::<reth_db::tables::$name>()) {
+                            black_box(v.compress());
+                        }
                     }
                     pub fn $decompress() {
-                        let pair = load_vectors::<reth_db::tables::$name>();
-
-                        black_box(
-                            for (_, _, _, comp) in pair {
-                                let _ = <reth_db::tables::$name as Table>::Value::decompress(comp);
-                            }
-                        );
+                        for (_, _, _, comp) in black_box(load_vectors::<reth_db::tables::$name>()) {
+                            let _ = black_box(<reth_db::tables::$name as Table>::Value::decompress(comp));
+                        }
                     }
                     pub fn $encode() {
-                        let pair = load_vectors::<reth_db::tables::$name>();
-
-                        black_box(
-                            for (k, _, _, _) in pair {
-                                k.encode();
-                            }
-                        );
+                        for (k, _, _, _) in black_box(load_vectors::<reth_db::tables::$name>()) {
+                            black_box(k.encode());
+                        }
                     }
                     pub fn $decode() {
-                        let pair = load_vectors::<reth_db::tables::$name>();
-
-                        black_box(
-                            for (_, enc, _, _) in pair {
-                                let _ = <reth_db::tables::$name as Table>::Key::decode(enc);
-                            }
-                        );
+                        for (_, enc, _, _) in black_box(load_vectors::<reth_db::tables::$name>()) {
+                            let _ = black_box(<reth_db::tables::$name as Table>::Key::decode(enc));
+                        }
                     }
                     pub fn $seqread() {}
                     pub fn $randread() {}
