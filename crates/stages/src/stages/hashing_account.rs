@@ -14,18 +14,24 @@ use std::{
 };
 use tracing::*;
 
-const ACCOUNT_HASHING: StageId = StageId("AccountHashingStage");
+/// The [`StageId`] of the account hashing stage.
+pub const ACCOUNT_HASHING: StageId = StageId("AccountHashingStage");
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
 #[derive(Debug)]
 pub struct AccountHashingStage {
-    /// The threshold for switching from incremental hashing
-    /// of changes to whole storage hashing. Num of transitions.
+    /// The threshold (in number of state transitions) for switching between incremental
+    /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The size of inserted items after which the control
-    /// flow will be returned to the pipeline for commit.
+    /// The maximum number of blocks to process before committing.
     pub commit_threshold: u64,
+}
+
+impl Default for AccountHashingStage {
+    fn default() -> Self {
+        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+    }
 }
 
 #[async_trait::async_trait]
