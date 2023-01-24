@@ -27,19 +27,18 @@ impl BeaconConsensus {
             chain_spec,
         }
     }
-
-    /// Notifies all listeners of the latest [ForkchoiceState].
-    pub fn notify_fork_choice_state(
-        &self,
-        state: ForkchoiceState,
-    ) -> Result<(), SendError<ForkchoiceState>> {
-        self.channel.0.send(state)
-    }
 }
 
 impl Consensus for BeaconConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
+    }
+
+    fn notify_fork_choice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), SendError<ForkchoiceState>> {
+        self.channel.0.send(state)
     }
 
     fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {

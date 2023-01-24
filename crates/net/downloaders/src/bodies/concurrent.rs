@@ -3,7 +3,7 @@ use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    consensus::Consensus as ConsensusTrait,
+    consensus::Consensus,
     db,
     p2p::bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
 };
@@ -11,6 +11,7 @@ use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
+    fmt::{Debug, Formatter},
     ops::{Range, RangeInclusive},
     pin::Pin,
     sync::Arc,
@@ -29,12 +30,11 @@ const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
-#[derive(Debug)]
-pub struct ConcurrentDownloader<B, C, DB> {
+pub struct ConcurrentDownloader<B, DB> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
-    consensus: Arc<C>,
+    consensus: Arc<dyn Consensus>,
     // TODO: make this a [HeaderProvider]
     /// The database handle
     db: Arc<DB>,
@@ -51,22 +51,34 @@ pub struct ConcurrentDownloader<B, C, DB> {
     /// The latest block number returned.
     latest_queued_block_number: Option<BlockNumber>,
     /// Requests in progress
-    in_progress_queue: BodiesRequestQueue<B, C>,
+    in_progress_queue: BodiesRequestQueue<B>,
     /// Buffered responses
     buffered_responses: BinaryHeap<OrderedBodiesResponse>,
     /// Queued body responses
     queued_bodies: Vec<BlockResponse>,
 }
 
-impl<B, C, DB> ConcurrentDownloader<B, C, DB>
+impl<B, DB> Debug for ConcurrentDownloader<B, DB> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConcurrentDownloader")
+            .field("request_limit", &self.request_limit)
+            .field("stream_batch_size", &self.stream_batch_size)
+            .field("concurrent_requests_range", &self.concurrent_requests_range)
+            .field("max_buffered_responses", &self.max_buffered_responses)
+            .field("download_range", &self.download_range)
+            .field("latest_queued_block_number", &self.latest_queued_block_number)
+            .finish()
+    }
+}
+
+impl<B, DB> ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
     fn new(
         client: Arc<B>,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
         request_limit: u64,
         stream_batch_size: usize,
@@ -220,10 +232,9 @@ where
     }
 }
 
-impl<B, C, DB> BodyDownloader for ConcurrentDownloader<B, C, DB>
+impl<B, DB> BodyDownloader for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
     /// Set a new download range (exclusive).
@@ -298,10 +309,9 @@ where
     }
 }
 
-impl<B, C, DB> Stream for ConcurrentDownloader<B, C, DB>
+impl<B, DB> Stream for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
     type Item = Vec<BlockResponse>;
@@ -380,10 +390,9 @@ where
 /// whatsoever: All the mutations are performed through an exclusive reference on
 /// `ConcurrentDownloader` when the Stream is polled. This means it suffices that
 /// `ConcurrentDownloader` is Sync:
-unsafe impl<B, C, DB> Sync for ConcurrentDownloader<B, C, DB>
+unsafe impl<B, DB> Sync for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient,
-    C: ConsensusTrait,
     DB: Database,
 {
 }
@@ -481,14 +490,13 @@ impl ConcurrentDownloaderBuilder {
     }
 
     /// Consume self and return the concurrent donwloader.
-    pub fn build<B, C, DB>(
+    pub fn build<B, DB>(
         self,
         client: Arc<B>,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
-    ) -> ConcurrentDownloader<B, C, DB>
+    ) -> ConcurrentDownloader<B, DB>
     where
-        C: ConsensusTrait + 'static,
         B: BodiesClient + 'static,
         DB: Database,
     {
