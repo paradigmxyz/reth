@@ -17,8 +17,8 @@ pub use traits::{
 /// Provider trait implementations.
 pub mod providers;
 pub use providers::{
-    DatabaseProvider, HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
-    LatestStateProviderRef,
+    HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
+    LatestStateProviderRef, ShareableDatabase,
 };
 
 /// Common database utilities.

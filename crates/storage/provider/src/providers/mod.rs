@@ -17,19 +17,19 @@ pub use latest::{LatestStateProvider, LatestStateProviderRef};
 /// A common provider that fetches data from a database.
 ///
 /// This provider implements most provider or provider factory traits.
-pub struct DatabaseProvider<DB: Database> {
+pub struct ShareableDatabase<DB: Database> {
     /// Database
     db: Arc<DB>,
 }
 
-impl<DB: Database> DatabaseProvider<DB> {
+impl<DB: Database> ShareableDatabase<DB> {
     /// create new database provider
     pub fn new(db: Arc<DB>) -> Self {
         Self { db }
     }
 }
 
-impl<DB: Database> HeaderProvider for DatabaseProvider<DB> {
+impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
         self.db.view(|tx| tx.get::<tables::Headers>((0, *block_hash).into()))?.map_err(Into::into)
     }
@@ -52,7 +52,7 @@ impl<DB: Database> HeaderProvider for DatabaseProvider<DB> {
     }
 }
 
-impl<DB: Database> BlockHashProvider for DatabaseProvider<DB> {
+impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
         // TODO: This unwrap is potentially unsafe
         self.db
@@ -61,7 +61,7 @@ impl<DB: Database> BlockHashProvider for DatabaseProvider<DB> {
     }
 }
 
-impl<DB: Database> BlockProvider for DatabaseProvider<DB> {
+impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         Ok(ChainInfo {
             best_hash: Default::default(),
@@ -81,7 +81,7 @@ impl<DB: Database> BlockProvider for DatabaseProvider<DB> {
     }
 }
 
-impl<DB: Database> StateProviderFactory for DatabaseProvider<DB> {
+impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
     type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
     type LatestSP<'a> = LatestStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
     /// Storage provider for latest block
@@ -132,13 +132,13 @@ impl<DB: Database> StateProviderFactory for DatabaseProvider<DB> {
 mod tests {
     use crate::StateProviderFactory;
 
-    use super::DatabaseProvider;
+    use super::ShareableDatabase;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
 
     #[test]
     fn common_history_provider() {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = DatabaseProvider::new(db);
+        let provider = ShareableDatabase::new(db);
         let _ = provider.latest();
     }
 }
