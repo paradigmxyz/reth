@@ -22,6 +22,7 @@
 
 use std::{
     convert::TryFrom as _,
+    future::Future,
     io,
     net::SocketAddr,
     pin::Pin,
@@ -30,10 +31,12 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll},
+    time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
+    time::{interval, Interval},
 };
 
 use crate::stream::HasRemoteAddr;
@@ -43,8 +46,20 @@ use crate::stream::HasRemoteAddr;
 struct BandwidthMeterInner {
     /// Measures the number of inbound packets
     inbound: AtomicU64,
+    /// Number of bytes received during throughput recording period
+    ingress_delta: AtomicU64,
+    /// Last measured throughput of bytes received in terms of bytes/s.
+    /// Stored as an [`AtomicU64`] but interpreted as an [`f64`] using `f64::from_bits`
+    ingress_throughput: AtomicU64,
     /// Measures the number of outbound packets
     outbound: AtomicU64,
+    /// Number of bytes sent during throughput recording period
+    egress_delta: AtomicU64,
+    /// Last measured throughput of bytes sent in terms of bytes/s.
+    /// Stored as an [`AtomicU64`] but interpreted as an [`f64`] using `f64::from_bits`
+    egress_throughput: AtomicU64,
+    /// Duration of interval over which throughput is evaluated
+    throughput_period: Duration,
 }
 
 /// Public shareable struct used for getting bandwidth metering info
@@ -69,16 +84,74 @@ impl BandwidthMeter {
     pub fn total_outbound(&self) -> u64 {
         self.inner.outbound.load(Ordering::Relaxed)
     }
+
+    pub fn ingress_throughput(&self) -> f64 {
+        f64::from_bits(self.inner.ingress_throughput.load(Ordering::Relaxed))
+    }
+
+    pub fn egress_throughput(&self) -> f64 {
+        f64::from_bits(self.inner.egress_throughput.load(Ordering::Relaxed))
+    }
 }
 
 impl Default for BandwidthMeter {
     fn default() -> Self {
-        Self {
+        let bandwidth_meter = Self {
             inner: Arc::new(BandwidthMeterInner {
                 inbound: AtomicU64::new(0),
+                ingress_delta: AtomicU64::new(0),
+                ingress_throughput: AtomicU64::new(0),
                 outbound: AtomicU64::new(0),
+                egress_delta: AtomicU64::new(0),
+                egress_throughput: AtomicU64::new(0),
+                throughput_period: Duration::from_secs(1),
             }),
+        };
+
+        tokio::spawn(ThroughputTask::new(
+            bandwidth_meter.inner.throughput_period,
+            bandwidth_meter.clone(),
+        ));
+
+        bandwidth_meter
+    }
+}
+
+/// An endless Future used to calculate ingress & egress throughputs
+/// for the given [`BandiwdthMeter`] on the given [`Interval`].
+struct ThroughputTask {
+    interval: Interval,
+    meter: BandwidthMeter,
+}
+
+impl ThroughputTask {
+    fn new(period: Duration, meter: BandwidthMeter) -> Self {
+        Self { interval: interval(period), meter }
+    }
+}
+
+impl Future for ThroughputTask {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        if this.interval.poll_tick(cx).is_ready() {
+            let ingress_delta = this.meter.inner.ingress_delta.swap(0, Ordering::Relaxed);
+            let egress_delta = this.meter.inner.egress_delta.swap(0, Ordering::Relaxed);
+
+            this.meter.inner.ingress_throughput.store(
+                f64::to_bits((ingress_delta as f64) / this.interval.period().as_secs_f64()),
+                Ordering::Relaxed,
+            );
+
+            this.meter.inner.egress_throughput.store(
+                f64::to_bits((egress_delta as f64) / this.interval.period().as_secs_f64()),
+                Ordering::Relaxed,
+            );
         }
+
+        Poll::Pending
     }
 }
 
@@ -120,15 +193,16 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.project();
-        let num_bytes = {
+        let num_bytes_u64 = {
             let init_num_bytes = buf.filled().len();
             ready!(this.inner.poll_read(cx, buf))?;
-            buf.filled().len() - init_num_bytes
+            u64::try_from(buf.filled().len() - init_num_bytes).unwrap_or(u64::max_value())
         };
         this.meter
             .inner
             .inbound
-            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
+            .fetch_add(num_bytes_u64, Ordering::Relaxed);
+        this.meter.inner.ingress_delta.fetch_add(num_bytes_u64, Ordering::Relaxed);
         Poll::Ready(Ok(()))
     }
 }
@@ -141,10 +215,12 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
     ) -> Poll<io::Result<usize>> {
         let this = self.project();
         let num_bytes = ready!(this.inner.poll_write(cx, buf))?;
+        let num_bytes_u64 = { u64::try_from(num_bytes).unwrap_or(u64::max_value()) };
         this.meter
             .inner
             .outbound
-            .fetch_add(u64::try_from(num_bytes).unwrap_or(u64::max_value()), Ordering::Relaxed);
+            .fetch_add(num_bytes_u64, Ordering::Relaxed);
+        this.meter.inner.egress_delta.fetch_add(num_bytes_u64, Ordering::Relaxed);
         Poll::Ready(Ok(num_bytes))
     }
 
@@ -267,5 +343,75 @@ mod tests {
 
         assert_bandwidth_counts(&shared_client_bandwidth_meter, 8, 8);
         assert_bandwidth_counts(&shared_server_bandwidth_meter, 8, 8);
+    }
+
+    struct ThroughputStatsTask<'a> {
+        interval: Interval,
+        meter: &'a BandwidthMeter,
+        max_throughputs: (f64, f64),
+    }
+
+    impl<'a> ThroughputStatsTask<'a> {
+        pub fn new(
+            interval: Interval,
+            meter: &'a BandwidthMeter,
+        ) -> Self {
+            Self {
+                interval,
+                meter,
+                max_throughputs: (0.0, 0.0)
+            }
+        }
+    }
+
+    impl<'a> Future for ThroughputStatsTask<'a> {
+        type Output = (f64, f64);
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let this = self.get_mut();
+
+            let ingress_throughput = this.meter.ingress_throughput();
+            let egress_throughput = this.meter.egress_throughput();
+
+            this.max_throughputs = (
+                if ingress_throughput > this.max_throughputs.0 { ingress_throughput } else { this.max_throughputs.0 },
+                if egress_throughput > this.max_throughputs.1 { egress_throughput } else { this.max_throughputs.1 },
+            );
+
+            if this.interval.poll_tick(cx).is_ready() {
+                return Poll::Ready(this.max_throughputs)
+            }
+
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn test_throughput_basic() {
+        let (client, server) = duplex(64);
+        let (mut metered_client, mut _metered_server) =
+            (MeteredStream::new(client), MeteredStream::new(server));
+
+        let network_io_meter = metered_client.get_bandwidth_meter().clone();
+
+        // Concurrently collect throughput stats & write out from stream.
+        // Want to be sure that stats task starts first, but can't use `spawn` due to `'static` lifetime constraint...
+        let ((_, max_egress_throughput), _) = tokio::join!(
+            async {
+                let mut one_s_interval = interval(Duration::from_secs(1));
+                // Resolves immediately, want this to actually poll for 1s
+                one_s_interval.tick().await;
+
+                ThroughputStatsTask::new(
+                    one_s_interval,
+                    &network_io_meter,
+                ).await
+            },
+            async {
+                metered_client.write_all(b"ping").await.unwrap()
+            }
+        );
+
+        assert_eq!(max_egress_throughput, 4.0);
     }
 }
