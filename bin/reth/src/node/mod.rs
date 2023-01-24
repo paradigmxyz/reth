@@ -189,11 +189,10 @@ impl Command {
                     }),
             )
             .build();
-        let events = pipeline.events();
 
         tokio::spawn(handle_events(stream_select(
             network.event_listener().map(Into::into),
-            UnboundedReceiverStream::new(events).map(Into::into),
+            UnboundedReceiverStream::new(pipeline.events()).map(Into::into),
         )));
 
         // Run pipeline
