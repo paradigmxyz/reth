@@ -5,10 +5,7 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{
     consensus::Consensus as ConsensusTrait,
     db,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
-        error::DownloadResult,
-    },
+    p2p::bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
@@ -324,7 +321,7 @@ where
     C: ConsensusTrait + 'static,
     DB: Database,
 {
-    type Item = DownloadResult<Vec<BlockResponse>>;
+    type Item = Result<Vec<BlockResponse>, db::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -361,7 +358,7 @@ where
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", ?error, "Failed to form next request");
                         this.clear();
-                        return Poll::Ready(Some(Err(error.into())))
+                        return Poll::Ready(Some(Err(error)))
                     }
                 };
             }

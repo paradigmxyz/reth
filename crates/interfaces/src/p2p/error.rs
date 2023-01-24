@@ -1,4 +1,4 @@
-use crate::{consensus, db};
+use crate::consensus;
 use reth_primitives::{rpc::BlockNumber, BlockHashOrNumber, Header, WithPeerId, H256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -151,9 +151,6 @@ pub enum DownloadError {
         /// How many headers we expected.
         expected: u64,
     },
-    /// Error while querying the database.
-    #[error(transparent)]
-    DatabaseError(#[from] db::Error),
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),

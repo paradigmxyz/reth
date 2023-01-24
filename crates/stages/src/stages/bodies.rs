@@ -414,7 +414,7 @@ mod tests {
                     client::BodiesClient, downloader::BodyDownloader, response::BlockResponse,
                 },
                 download::DownloadClient,
-                error::{DownloadResult, PeerRequestResult},
+                error::PeerRequestResult,
                 priority::Priority,
             },
             test_utils::{
@@ -741,7 +741,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = DownloadResult<Vec<BlockResponse>>;
+            type Item = Result<Vec<BlockResponse>, db::Error>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 
