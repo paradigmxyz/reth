@@ -11,17 +11,14 @@ description = "Implementations of various block downloaders"
 # reth
 reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
-reth-rpc-types = { path = "../rpc-types" }
 reth-eth-wire = { path= "../eth-wire" }
 reth-db = { path = "../../storage/db" }
 
 # async
-async-trait = "0.1.58"
 futures = "0.3"
 futures-util = "0.3.25"
 
 # misc
-backon = "0.2.0"
 tracing = "0.1.37"
 thiserror = "1.0"
 
@@ -29,6 +26,8 @@ thiserror = "1.0"
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
+
+async-trait = "0.1.58"
 assert_matches = "1.5.0"
 once_cell = "1.17.0"
 tokio = { version = "1.21.2", features = ["full"] }
