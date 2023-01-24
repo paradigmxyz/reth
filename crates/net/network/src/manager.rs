@@ -514,12 +514,11 @@ where
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
             NetworkHandleMessage::Shutdown => {
-                // stop connecting to peers
+                // Set connection status to `Shutdown`. This will prevent the node to accept
+                // new incoming connections and send connection request to newly discovered nodes.
+                self.swarm.set_shutdown_connection_state();
 
                 // drop pending connections
-
-                // tell incoming connections that we will shut down
-                self.swarm.set_shutdown_connection_state();
 
                 // Disconnect all active connections
                 self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
