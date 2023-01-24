@@ -22,7 +22,6 @@ pub fn db(c: &mut Criterion) {
     measure_table_db::<TxHashNumber>(&mut group);
     measure_table_db::<BlockTransitionIndex>(&mut group);
     measure_table_db::<TxTransitionIndex>(&mut group);
-    measure_table_db::<SyncStage>(&mut group);
     measure_table_db::<Transactions>(&mut group);
     measure_table_db::<PlainStorageState>(&mut group);
     measure_table_db::<PlainAccountState>(&mut group);
@@ -42,7 +41,6 @@ pub fn serialization(c: &mut Criterion) {
     measure_table_serialization::<TxHashNumber>(&mut group);
     measure_table_serialization::<BlockTransitionIndex>(&mut group);
     measure_table_serialization::<TxTransitionIndex>(&mut group);
-    measure_table_serialization::<SyncStage>(&mut group);
     measure_table_serialization::<Transactions>(&mut group);
     measure_table_serialization::<PlainStorageState>(&mut group);
     measure_table_serialization::<PlainAccountState>(&mut group);
@@ -56,55 +54,55 @@ where
 {
     let pair = &load_vectors::<T>();
     group.bench_function(format!("{}.KeyEncode", T::NAME), move |b| {
-        b.iter_custom(|_| {
-            let pair = pair.clone();
-            let timer = Instant::now();
-            black_box({
-                for (k, _, _, _) in pair {
-                    k.encode();
-                }
-            });
-            timer.elapsed()
-        })
+        b.iter_with_setup(
+            || pair.clone(),
+            |pair| {
+                black_box({
+                    for (k, _, _, _) in pair {
+                        k.encode();
+                    }
+                });
+            },
+        )
     });
 
     group.bench_function(format!("{}.KeyDecode", T::NAME), |b| {
-        b.iter_custom(|_| {
-            let pair = pair.clone();
-            let timer = Instant::now();
-            black_box({
-                for (_, k, _, _) in pair {
-                    let _ = <T as Table>::Key::decode(k);
-                }
-            });
-            timer.elapsed()
-        })
+        b.iter_with_setup(
+            || pair.clone(),
+            |pair| {
+                black_box({
+                    for (_, k, _, _) in pair {
+                        let _ = <T as Table>::Key::decode(k);
+                    }
+                });
+            },
+        )
     });
 
     group.bench_function(format!("{}.ValueCompress", T::NAME), move |b| {
-        b.iter_custom(|_| {
-            let pair = pair.clone();
-            let timer = Instant::now();
-            black_box({
-                for (_, _, v, _) in pair {
-                    v.compress();
-                }
-            });
-            timer.elapsed()
-        })
+        b.iter_with_setup(
+            || pair.clone(),
+            |pair| {
+                black_box({
+                    for (_, _, v, _) in pair {
+                        v.compress();
+                    }
+                });
+            },
+        )
     });
 
     group.bench_function(format!("{}.ValueDecompress", T::NAME), |b| {
-        b.iter_custom(|_| {
-            let pair = pair.clone();
-            let timer = Instant::now();
-            black_box({
-                for (_, _, _, v) in pair {
-                    let _ = <T as Table>::Value::decompress(v);
-                }
-            });
-            timer.elapsed()
-        })
+        b.iter_with_setup(
+            || pair.clone(),
+            |pair| {
+                black_box({
+                    for (_, _, _, v) in pair {
+                        let _ = <T as Table>::Value::decompress(v);
+                    }
+                });
+            },
+        )
     });
 }
 
@@ -118,67 +116,69 @@ where
     let bench_db_path = Path::new(BENCH_DB_PATH);
 
     group.bench_function(format!("{}.SeqWrite", T::NAME), |b| {
-        b.iter_custom(|_| {
-            let pair = pair.clone();
+        b.iter_with_setup(
+            || {
+                // Reset DB
+                let _ = std::fs::remove_dir_all(bench_db_path);
+                let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
-            // Reset DB
-            let _ = std::fs::remove_dir_all(bench_db_path);
-            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+                (pair.clone(), db)
+            },
+            |(pair, db)| {
+                // Create TX
+                let tx = db.tx_mut().expect("tx");
+                let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
-            // Create TX
-            let tx = db.tx_mut().expect("tx");
-            let mut crsr = tx.cursor_write::<T>().expect("cursor");
+                black_box({
+                    for (k, _, v, _) in pair {
+                        crsr.append(k, v).expect("submit");
+                    }
 
-            let timer = Instant::now();
-            black_box({
-                for (k, _, v, _) in pair {
-                    crsr.append(k, v).expect("submit");
-                }
-
-                tx.inner.commit().unwrap();
-            });
-            timer.elapsed()
-        })
+                    tx.inner.commit().unwrap();
+                });
+            },
+        )
     });
 
     group.bench_function(format!("{}.RandomWrite", T::NAME), |b| {
-        b.iter_custom(|_| {
-            let pair = pair.clone();
+        b.iter_with_setup(
+            || {
+                // Reset DB
+                let _ = std::fs::remove_dir_all(bench_db_path);
+                let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
-            // Reset DB
-            let _ = std::fs::remove_dir_all(bench_db_path);
-            let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
+                (
+                    pair.iter()
+                        .enumerate()
+                        .filter(|(i, _)| RANDOM_INDEXES.contains(i))
+                        .map(|(i, e)| (i, e.clone()))
+                        .collect::<Vec<_>>(),
+                    db,
+                )
+            },
+            |(pair, db)| {
+                // Create TX
+                let tx = db.tx_mut().expect("tx");
+                let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
-            // Create TX
-            let tx = db.tx_mut().expect("tx");
-            let mut crsr = tx.cursor_write::<T>().expect("cursor");
+                black_box({
+                    for (_, (k, _, v, _)) in pair {
+                        crsr.insert(k, v).expect("submit");
+                    }
 
-            let timer = Instant::now();
-            let pair = pair
-                .into_iter()
-                .enumerate()
-                .filter(|(i, _)| RANDOM_INDEXES.contains(i))
-                .collect::<Vec<_>>();
-
-            black_box({
-                for (_, (k, _, v, _)) in pair {
-                    crsr.insert(k, v).expect("submit");
-                }
-
-                tx.inner.commit().unwrap();
-            });
-            timer.elapsed()
-        })
+                    tx.inner.commit().unwrap();
+                });
+            },
+        )
     });
 
     group.bench_function(format!("{}.SeqRead", T::NAME), |b| {
         let db = set_up_db::<T>(bench_db_path, pair);
 
-        b.iter_custom(|_| {
+        b.iter(|| {
             // Create TX
             let tx = db.tx().expect("tx");
 
-            let timer = Instant::now();
             black_box({
                 let mut cursor = tx.cursor_read::<T>().expect("cursor");
                 let walker = cursor.walk(pair.first().unwrap().0.clone()).unwrap();
@@ -186,25 +186,22 @@ where
                     element.unwrap();
                 }
             });
-            timer.elapsed()
         })
     });
 
     group.bench_function(format!("{}.RandomRead", T::NAME), |b| {
         let db = set_up_db::<T>(bench_db_path, pair);
 
-        b.iter_custom(|_| {
+        b.iter(|| {
             // Create TX
             let tx = db.tx().expect("tx");
 
-            let timer = Instant::now();
             black_box({
                 for index in RANDOM_INDEXES {
                     let mut cursor = tx.cursor_read::<T>().expect("cursor");
                     cursor.seek_exact(pair.get(index).unwrap().0.clone()).unwrap();
                 }
             });
-            timer.elapsed()
         })
     });
 }
