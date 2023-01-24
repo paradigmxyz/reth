@@ -102,12 +102,14 @@ impl ChainSpec {
         self.genesis_hash
     }
 
-    /// Returns the supported hardforks and their fork block numbers
+    /// Returns the supported hardforks and their [ForkKind]
     pub fn hardforks(&self) -> &BTreeMap<Hardfork, ForkKind> {
         &self.hardforks
     }
 
-    /// Get the first block number of the hardfork.
+    /// Get the first block number of the given hardfork. This method returns `None` for
+    /// timestamp-based forks and if the merge netsplit block is not known (when the given fork
+    /// is TTD-based)
     pub fn fork_block(&self, fork: Hardfork) -> Option<BlockNumber> {
         self.hardforks.get(&fork).and_then(|kind| match kind {
             ForkKind::Block(block_number) => Some(*block_number),
@@ -146,7 +148,7 @@ impl ChainSpec {
         self.paris_ttd
     }
 
-    /// Get an iterator of all harforks with theirs respectives block number
+    /// Get an iterator of all harforks with theirs respectives [ForkKind]
     pub fn forks_iter(&self) -> impl Iterator<Item = (Hardfork, ForkKind)> + '_ {
         self.hardforks.iter().map(|(f, b)| (*f, *b))
     }
@@ -166,7 +168,7 @@ impl ChainSpec {
         ForkFilter::new(discriminant.block_number, self.genesis_hash(), future_forks)
     }
 
-    /// Compute the forkid for the given [BlockNumber]
+    /// Compute the forkid for the given [ForkDiscriminant]
     pub fn fork_id(&self, discriminant: ForkDiscriminant) -> ForkId {
         let mut curr_forkhash = ForkHash::from(self.genesis_hash());
         let mut forks =
@@ -417,7 +419,10 @@ impl From<&ChainSpec> for ChainSpecBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Chain, ChainSpec, ForkHash, ForkKind, Genesis, Hardfork, Header, GOERLI, MAINNET, SEPOLIA};
+    use crate::{
+        Chain, ChainSpec, ForkDiscriminant, ForkHash, ForkKind, Genesis, Hardfork, Header, GOERLI,
+        MAINNET, SEPOLIA,
+    };
 
     #[test]
     fn test_empty_forkid() {

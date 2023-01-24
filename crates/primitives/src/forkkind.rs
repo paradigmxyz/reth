@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{BlockNumber, ChainSpec, U256};
 
-/// Hardforks can be based on block numbers (pre-merge), TDD (Paris)
+/// Hardforks can be based on block numbers (pre-merge), TTD (Paris)
 /// or timestamp (post-merge)
 #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ForkKind {

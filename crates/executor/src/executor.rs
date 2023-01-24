@@ -458,10 +458,16 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // amount. We raise the block’s beneficiary account by Rblock; for each ommer, we raise the
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
-    match header.number {
-        n if Some(n) >= chain_spec.fork_block(Hardfork::Paris) => None,
-        n if Some(n) >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
-        n if Some(n) >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
+    let discriminant = ForkDiscriminant::new(
+        header.number,
+        chain_spec.terminal_total_difficulty().unwrap_or_default(),
+        header.timestamp,
+    );
+
+    match discriminant {
+        d if chain_spec.fork_active(Hardfork::Paris, d) => None,
+        d if chain_spec.fork_active(Hardfork::Petersburg, d) => Some(WEI_2ETH),
+        d if chain_spec.fork_active(Hardfork::Byzantium, d) => Some(WEI_3ETH),
         _ => Some(WEI_5ETH),
     }
     .map(|reward| -> Result<_, _> {
