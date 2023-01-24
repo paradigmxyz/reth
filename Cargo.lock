@@ -2948,16 +2948,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "memory-db"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e0c7cba9ce19ac7ffd2053ac9f49843bbd3f4318feedfd74e85c19d5fb0ba66"
-dependencies = [
- "hash-db",
- "hashbrown 0.12.3",
-]
-
-[[package]]
 name = "metrics"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4596,11 +4586,9 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-trait",
- "bytes",
  "futures-util",
  "hash-db",
  "itertools 0.10.5",
- "memory-db",
  "metrics",
  "parity-scale-codec",
  "paste",

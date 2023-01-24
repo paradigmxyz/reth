@@ -38,9 +38,7 @@ rayon = "1.6.0"
 # trie
 trie-db = "0.24.0"
 hash-db = "0.15.2"
-memory-db = "0.31.0"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-bytes = "1.2.1"
 
 [dev-dependencies]
 # reth

@@ -1,18 +1,18 @@
 use crate::Transaction;
-use bytes::BytesMut;
-use memory_db::{HashKey, MemoryDB};
+use hash_db::{AsHashDB, HashDB, Prefix};
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     tables,
-    transaction::DbTx,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
     proofs::{KeccakHasher, EMPTY_ROOT},
-    Account, StorageEntry, H256, KECCAK_EMPTY, U256,
+    Account, StorageEntry, StorageTrieEntry, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{encode_iter, Encodable, RlpDecodable, RlpEncodable};
 use std::{borrow::Borrow, marker::PhantomData};
+use tracing::*;
 use trie_db::{
     node::{NodePlan, Value},
     ChildReference, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout, TrieMut,
@@ -23,6 +23,8 @@ pub(crate) enum TrieError {
     // TODO: decompose into various different errors
     #[error("Some error occurred")]
     InternalError,
+    #[error("The root node wasn't found in the DB")]
+    MissingRoot(H256),
     #[error("{0:?}")]
     DatabaseError(#[from] reth_db::Error),
 }
@@ -39,41 +41,186 @@ impl TrieLayout for DBTrieLayout {
     type Codec = RLPNodeCodec<Self::Hash>;
 }
 
-// pub struct HashDatabase<DB: Database> {
-//     db: Arc<DB>,
-// }
+/// Database wrapper implementing HashDB trait.
+struct HashDatabase<'tx, 'itx, DB: Database> {
+    tx: &'tx Transaction<'itx, DB>,
+}
 
-// impl<H: Hasher, DB: Database, T> HashDB<H, T> for HashDatabase<DB> {
-//     fn get(&self, key: &H::Out, prefix: Prefix<'_>) -> Option<T> {
-//         todo!()
-//     }
+impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
+    fn new(tx: &'tx Transaction<'itx, DB>) -> Result<Self, TrieError> {
+        let root = RLPNodeCodec::<KeccakHasher>::hashed_null_node();
+        if tx.get::<tables::AccountsTrie>(root)?.is_none() {
+            tx.put::<tables::AccountsTrie>(
+                root,
+                RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
+            )?;
+        }
+        Ok(Self { tx })
+    }
 
-//     fn contains(&self, key: &H::Out, prefix: Prefix<'_>) -> bool {
-//         todo!()
-//     }
+    #[allow(dead_code)]
+    fn new_with_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
+        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
+        Ok(Self { tx })
+    }
+}
 
-//     fn insert(&mut self, prefix: Prefix<'_>, value: &[u8]) -> H::Out {
-//         todo!()
-//     }
+impl<H, DB, V> HashDB<H, V> for HashDatabase<'_, '_, DB>
+where
+    H: Hasher,
+    DB: Database,
+    V: From<Vec<u8>>,
+    H::Out: Into<H256>,
+{
+    fn get(&self, key: &H::Out, _prefix: Prefix<'_>) -> Option<V> {
+        // TODO: see if there's a better way to transmit database errors
+        match self.tx.get::<tables::AccountsTrie>((*key).into()) {
+            Ok(v) => v.map(V::from),
+            Err(e) => {
+                error!(target: "sync::trie::db", ?key, ?e, "Error while fetching value from Database");
+                None
+            }
+        }
+    }
 
-//     fn emplace(&mut self, key: H::Out, prefix: Prefix<'_>, value: T) {
-//         todo!()
-//     }
+    fn contains(&self, key: &H::Out, prefix: Prefix<'_>) -> bool {
+        <Self as HashDB<H, V>>::get(self, key, prefix).is_some()
+    }
 
-//     fn remove(&mut self, key: &H::Out, prefix: Prefix<'_>) {
-//         todo!()
-//     }
-// }
+    fn insert(&mut self, _prefix: Prefix<'_>, value: &[u8]) -> H::Out {
+        let hash = H::hash(value);
+        if let Err(e) = self.tx.put::<tables::AccountsTrie>(hash.into(), value.to_vec()) {
+            error!(target: "sync::trie::db", ?value, ?e, "Error while inserting value in Database");
+            panic!("failed to insert value in Database")
+        }
+        hash
+    }
 
-// impl<H: Hasher, T, DB: Database> AsHashDB<H, T> for HashDatabase<DB> {
-//     fn as_hash_db(&self) -> &dyn HashDB<H, T> {
-//         self
-//     }
+    fn emplace(&mut self, _key: H::Out, _prefix: Prefix<'_>, _value: V) {
+        todo!()
+    }
 
-//     fn as_hash_db_mut<'a>(&'a mut self) -> &'a mut (dyn HashDB<H, T> + 'a) {
-//         self
-//     }
-// }
+    fn remove(&mut self, key: &H::Out, _prefix: Prefix<'_>) {
+        let _ = self.tx.delete::<tables::AccountsTrie>((*key).into(), None);
+    }
+}
+
+impl<H: Hasher, DB: Database, T> AsHashDB<H, T> for HashDatabase<'_, '_, DB>
+where
+    H: Hasher,
+    DB: Database,
+    T: From<Vec<u8>>,
+    H::Out: Into<H256>,
+{
+    fn as_hash_db(&self) -> &dyn HashDB<H, T> {
+        self
+    }
+
+    fn as_hash_db_mut<'a>(&'a mut self) -> &'a mut (dyn HashDB<H, T> + 'a) {
+        self
+    }
+}
+
+/// Database wrapper implementing HashDB trait.
+struct DupHashDatabase<'tx, 'itx, DB: Database> {
+    tx: &'tx Transaction<'itx, DB>,
+    key: H256,
+}
+
+impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
+    fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
+        let root = RLPNodeCodec::<KeccakHasher>::hashed_null_node();
+        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        if cursor.seek_by_key_subkey(key, root)?.is_none() {
+            cursor.append_dup(
+                key,
+                StorageTrieEntry {
+                    hash: root,
+                    node: RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
+                },
+            )?;
+        }
+        Ok(Self { tx, key })
+    }
+
+    #[allow(dead_code)]
+    fn new_with_root(
+        tx: &'tx Transaction<'itx, DB>,
+        key: H256,
+        root: H256,
+    ) -> Result<Self, TrieError> {
+        tx.cursor_dup_write::<tables::StoragesTrie>()?
+            .seek_by_key_subkey(key, root)?
+            .ok_or(TrieError::MissingRoot(root))?;
+        Ok(Self { tx, key })
+    }
+}
+
+impl<H, DB, V> HashDB<H, V> for DupHashDatabase<'_, '_, DB>
+where
+    H: Hasher,
+    DB: Database,
+    V: From<Vec<u8>>,
+    H::Out: Into<H256>,
+{
+    fn get(&self, key: &H::Out, _prefix: Prefix<'_>) -> Option<V> {
+        // TODO: see if there's a better way to transmit database errors
+        let res = self
+            .tx
+            .cursor_dup_read::<tables::StoragesTrie>()
+            .and_then(|mut c| c.seek_by_key_subkey(self.key, (*key).into()));
+        match res {
+            Ok(v) => v.map(|entry| V::from(entry.node)),
+            Err(e) => {
+                error!(target: "sync::trie::db", ?key, ?e, "Error while fetching value from Database");
+                None
+            }
+        }
+    }
+
+    fn contains(&self, key: &H::Out, prefix: Prefix<'_>) -> bool {
+        <Self as HashDB<H, V>>::get(self, key, prefix).is_some()
+    }
+
+    fn insert(&mut self, _prefix: Prefix<'_>, value: &[u8]) -> H::Out {
+        let hash = H::hash(value);
+        let res = self.tx.cursor_dup_write::<tables::StoragesTrie>().and_then(|mut c| {
+            c.seek_by_key_subkey(self.key, hash.into())?.map(|_| c.delete_current()).transpose()?;
+            c.append_dup(self.key, StorageTrieEntry { hash: hash.into(), node: value.to_vec() })
+        });
+        if let Err(e) = res {
+            error!(target: "sync::trie::db", ?value, ?e, "Error while inserting value in Database");
+            panic!("failed to insert value in Database")
+        }
+        hash
+    }
+
+    fn emplace(&mut self, _key: H::Out, _prefix: Prefix<'_>, _value: V) {
+        todo!()
+    }
+
+    fn remove(&mut self, key: &H::Out, _prefix: Prefix<'_>) {
+        let _ = self.tx.cursor_dup_write::<tables::StoragesTrie>().and_then(|mut c| {
+            c.seek_by_key_subkey(self.key, (*key).into())?.map(|_| c.delete_current()).transpose()
+        });
+    }
+}
+
+impl<H: Hasher, DB: Database, T> AsHashDB<H, T> for DupHashDatabase<'_, '_, DB>
+where
+    H: Hasher,
+    DB: Database,
+    T: From<Vec<u8>>,
+    H::Out: Into<H256>,
+{
+    fn as_hash_db(&self) -> &dyn HashDB<H, T> {
+        self
+    }
+
+    fn as_hash_db_mut<'a>(&'a mut self) -> &'a mut (dyn HashDB<H, T> + 'a) {
+        self
+    }
+}
 
 // Encodes a partial path in the trie, adding necessary flags.
 fn encode_partial(
@@ -240,13 +387,8 @@ impl DBTrieLoader {
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(H256::zero())?;
 
-        // TODO: implement HashDB to use DB instead of MemoryDB
-        // let trie_cursor = tx.cursor_read::<tables::AccountsTrie>()?;
+        let mut db = HashDatabase::new(tx)?;
 
-        let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
-            RLPNodeCodec::<KeccakHasher>::empty_node(),
-            RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
-        );
         let mut root = H256::zero();
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
@@ -256,9 +398,9 @@ impl DBTrieLoader {
 
             value.storage_root = self.calculate_storage_root(tx, hashed_address)?;
 
-            let mut bytes = BytesMut::new();
-            Encodable::encode(&value, &mut bytes);
-            trie.insert(hashed_address.as_bytes(), bytes.as_ref())
+            let mut out = Vec::new();
+            Encodable::encode(&value, &mut out);
+            trie.insert(hashed_address.as_bytes(), out.as_ref())
                 .map_err(|_| TrieError::InternalError)?;
         }
 
@@ -270,10 +412,7 @@ impl DBTrieLoader {
         tx: &Transaction<'_, DB>,
         address: H256,
     ) -> Result<H256, TrieError> {
-        let mut db = MemoryDB::<KeccakHasher, HashKey<KeccakHasher>, Vec<u8>>::from_null_node(
-            RLPNodeCodec::<KeccakHasher>::empty_node(),
-            RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
-        );
+        let mut db = DupHashDatabase::new(tx, address)?;
         let mut root = H256::zero();
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::new(&mut db, &mut root).build();
@@ -282,9 +421,9 @@ impl DBTrieLoader {
         let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
 
         while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
-            let mut bytes = BytesMut::new();
-            Encodable::encode(&value, &mut bytes);
-            trie.insert(storage_key.as_bytes(), &bytes).map_err(|_| TrieError::InternalError)?;
+            let mut out = Vec::new();
+            Encodable::encode(&value, &mut out);
+            trie.insert(storage_key.as_bytes(), &out).map_err(|_| TrieError::InternalError)?;
         }
 
         Ok(*trie.root())
@@ -335,7 +474,7 @@ mod tests {
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let account = Account { nonce: 0, balance: U256::MAX, bytecode_hash: None };
         tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
-        let mut encoded_account = BytesMut::new();
+        let mut encoded_account = Vec::new();
         EthAccount::from(account).encode(&mut encoded_account);
         assert_eq!(
             trie.calculate_root(&tx),
@@ -363,9 +502,9 @@ mod tests {
             tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
         }
         let encoded_accounts = accounts.iter().map(|(k, v)| {
-            let mut bytes = BytesMut::new();
-            EthAccount::from(*v).encode(&mut bytes);
-            (k, bytes)
+            let mut out = Vec::new();
+            EthAccount::from(*v).encode(&mut out);
+            (k, out)
         });
         assert_eq!(
             trie.calculate_root(&tx),
@@ -391,9 +530,9 @@ mod tests {
             .unwrap();
         }
         let encoded_storage = storage.iter().map(|(k, v)| {
-            let mut bytes = BytesMut::new();
-            v.encode(&mut bytes);
-            (k, bytes)
+            let mut out = Vec::new();
+            v.encode(&mut out);
+            (k, out)
         });
         assert_eq!(
             trie.calculate_storage_root(&tx, hashed_address),
@@ -429,20 +568,20 @@ mod tests {
             )
             .unwrap();
         }
-        let mut bytes = Vec::new();
+        let mut out = Vec::new();
         let mut eth_account = EthAccount::from(account);
 
         let encoded_storage = storage.iter().map(|(k, v)| {
-            let mut bytes = BytesMut::new();
-            v.encode(&mut bytes);
-            (k, bytes)
+            let mut out = Vec::new();
+            v.encode(&mut out);
+            (k, out)
         });
 
         eth_account.storage_root = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
-        eth_account.encode(&mut bytes);
+        eth_account.encode(&mut out);
         assert_eq!(
             trie.calculate_root(&tx),
-            Ok(H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, bytes)]).0))
+            Ok(H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0))
         );
     }
 
