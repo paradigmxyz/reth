@@ -172,7 +172,7 @@ impl ChainSpec {
     pub fn fork_id(&self, discriminant: ForkDiscriminant) -> ForkId {
         let mut curr_forkhash = ForkHash::from(self.genesis_hash());
         let mut forks =
-            self.forks_iter().filter(|(f, _)| *f != Hardfork::Frontier).collect::<Vec<_>>();
+            self.forks_iter().filter(|(_, k)| !k.is_active_at_genesis()).collect::<Vec<_>>();
 
         forks.dedup_by(|a, b| a.1 == b.1);
 
@@ -300,6 +300,13 @@ impl ChainSpecBuilder {
     /// Sets the genesis hash
     pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
         self.genesis_hash = Some(genesis_hash);
+        self
+    }
+
+    /// Remove all [Hardfork]s from the spec. Useful when the builder has been created from a
+    /// existing chain spec.
+    pub fn clear_forks(mut self) -> Self {
+        self.hardforks.clear();
         self
     }
 
@@ -435,6 +442,7 @@ mod tests {
             .chain(Chain::mainnet())
             .genesis(empty_genesis)
             .genesis_hash(empty_sealed.hash())
+            .clear_forks()
             .with_fork(Hardfork::Frontier, ForkKind::Block(0))
             .with_fork(Hardfork::Homestead, ForkKind::Block(0))
             .with_fork(Hardfork::Tangerine, ForkKind::Block(0))

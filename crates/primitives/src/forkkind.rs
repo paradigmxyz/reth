@@ -16,6 +16,17 @@ pub enum ForkKind {
     Time(u64),
 }
 
+impl ForkKind {
+    /// Returns `true` is the fork is active at genesis
+    pub fn is_active_at_genesis(&self) -> bool {
+        match self {
+            ForkKind::Block(block_number) => *block_number == 0_u64,
+            ForkKind::TTD(_) => false,
+            ForkKind::Time(_) => false,
+        }
+    }
+}
+
 /// This struct is used when it's needed to determine is a hardfork is active
 #[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ForkDiscriminant {
