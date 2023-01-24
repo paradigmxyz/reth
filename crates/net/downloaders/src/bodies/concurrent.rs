@@ -11,7 +11,6 @@ use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
-    fmt::{Debug, Formatter},
     ops::{Range, RangeInclusive},
     pin::Pin,
     sync::Arc,
@@ -30,6 +29,7 @@ const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
+#[derive(Debug)]
 pub struct ConcurrentDownloader<B, DB> {
     /// The bodies client
     client: Arc<B>,
@@ -56,19 +56,6 @@ pub struct ConcurrentDownloader<B, DB> {
     buffered_responses: BinaryHeap<OrderedBodiesResponse>,
     /// Queued body responses
     queued_bodies: Vec<BlockResponse>,
-}
-
-impl<B, DB> Debug for ConcurrentDownloader<B, DB> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConcurrentDownloader")
-            .field("request_limit", &self.request_limit)
-            .field("stream_batch_size", &self.stream_batch_size)
-            .field("concurrent_requests_range", &self.concurrent_requests_range)
-            .field("max_buffered_responses", &self.max_buffered_responses)
-            .field("download_range", &self.download_range)
-            .field("latest_queued_block_number", &self.latest_queued_block_number)
-            .finish()
-    }
 }
 
 impl<B, DB> ConcurrentDownloader<B, DB>

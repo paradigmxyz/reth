@@ -18,10 +18,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, Header, SealedHeader, U256};
-use std::{
-    fmt::{Debug, Formatter},
-    sync::Arc,
-};
+use std::sync::Arc;
 use tracing::*;
 
 pub(crate) const HEADERS: StageId = StageId("Headers");
@@ -39,6 +36,7 @@ pub(crate) const HEADERS: StageId = StageId("Headers");
 ///
 /// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
 /// the stage progress is not updated unless this stage is done.
+#[derive(Debug)]
 pub struct HeaderStage<D: HeaderDownloader, S: StatusUpdater> {
     /// Strategy for downloading the headers
     pub downloader: D,
@@ -48,12 +46,6 @@ pub struct HeaderStage<D: HeaderDownloader, S: StatusUpdater> {
     pub sync_status_updates: S,
     /// Header metrics
     pub metrics: HeaderMetrics,
-}
-
-impl<D: HeaderDownloader, S: StatusUpdater> Debug for HeaderStage<D, S> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HeaderStage").finish()
-    }
 }
 
 // === impl HeaderStage ===

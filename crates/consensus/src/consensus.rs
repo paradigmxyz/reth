@@ -8,6 +8,7 @@ use tokio::sync::{watch, watch::error::SendError};
 ///
 /// This consensus engine does basic checks as outlined in the execution specs,
 /// but otherwise defers consensus on what the current chain is to a consensus client.
+#[derive(Debug)]
 pub struct BeaconConsensus {
     /// Watcher over the forkchoice state
     channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),

@@ -14,10 +14,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use std::{
-    fmt::{Debug, Formatter},
-    sync::Arc,
-};
+use std::sync::Arc;
 use tracing::*;
 
 pub(crate) const BODIES: StageId = StageId("Bodies");
@@ -53,17 +50,12 @@ pub(crate) const BODIES: StageId = StageId("Bodies");
 /// - The [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount] table
 /// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
 /// - The [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber] table
+#[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     pub downloader: D,
     /// The consensus engine.
     pub consensus: Arc<dyn Consensus>,
-}
-
-impl<D: BodyDownloader + Debug> Debug for BodyStage<D> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BodyStage").field("downloader", &self.downloader).finish()
-    }
 }
 
 #[async_trait::async_trait]
