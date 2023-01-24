@@ -38,19 +38,38 @@ where
 {
     println!("Generating test vectors for <{}>.", T::NAME);
 
-    let per_table = 100;
-    let strategy = proptest::collection::vec(
-        any_with::<(T::Key, T::Value)>((
-            <T::Key as Arbitrary>::Parameters::default(),
-            <T::Value as Arbitrary>::Parameters::default(),
-        )),
-        per_table,
-    )
-    .no_shrink()
-    .boxed();
+    let mut rows = vec![];
 
-    // Generate all `per_table` rows: (Key, Value)
-    let mut rows = strategy.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+    // We don't want repeated keys
+    let mut seen_keys = vec![];
+
+    while rows.len() < per_table {
+        let strategy = proptest::collection::vec(
+            any_with::<(T::Key, T::Value)>((
+                <T::Key as Arbitrary>::Parameters::default(),
+                <T::Value as Arbitrary>::Parameters::default(),
+            )),
+            per_table - rows.len(),
+        )
+        .no_shrink()
+        .boxed();
+
+        // Generate all `per_table` rows: (Key, Value)
+        rows.extend(
+            &mut strategy
+                .new_tree(runner)
+                .map_err(|e| eyre::eyre!("{e}"))?
+                .current()
+                .into_iter()
+                .filter(|e| {
+                    if seen_keys.contains(&e.0) {
+                        return false
+                    }
+                    seen_keys.push(e.0.clone());
+                    true
+                }),
+        );
+    }
 
     // Sort them by `Key`
     rows.sort_by(|a, b| a.0.cmp(&b.0));
