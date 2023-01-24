@@ -6,7 +6,7 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_net_common::network_io_meter::MeteredStream;
+use reth_net_common::metered_stream::MeteredStream;
 use reth_primitives::ForkFilter;
 use reth_rlp::{Decodable, Encodable};
 use std::{

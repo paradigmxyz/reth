@@ -4,7 +4,7 @@ use crate::{
 };
 use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
-use reth_net_common::{network_io_meter::MeteredStream, stream::HasRemoteAddr};
+use reth_net_common::{metered_stream::MeteredStream, stream::HasRemoteAddr};
 use reth_primitives::H512 as PeerId;
 use secp256k1::SecretKey;
 use std::{
