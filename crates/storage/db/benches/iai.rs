@@ -89,7 +89,6 @@ impl_iai!(
     TxHashNumber,
     BlockTransitionIndex,
     TxTransitionIndex,
-    SyncStage,
     Transactions,
     PlainStorageState,
     PlainAccountState
