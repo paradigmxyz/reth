@@ -6,7 +6,7 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_net_common::network_io_meter::{MeterableStream, NetworkIOMeterMetrics};
+use reth_net_common::network_io_meter::{MeteredStream, NetworkIOMeterMetrics};
 use reth_primitives::ForkFilter;
 use reth_rlp::{Decodable, Encodable};
 use std::{
@@ -254,12 +254,11 @@ where
     }
 }
 
-impl<S> MeterableStream for EthStream<S>
-where
-    S: MeterableStream,
+impl<S, M> AsMut<MeteredStream<M>> for EthStream<S>
+where S: AsMut<MeteredStream<M>>
 {
-    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
-        self.inner.expose_metrics(metrics);
+    fn as_mut(&mut self) -> &mut MeteredStream<M> {
+        self.inner.as_mut()
     }
 }
 

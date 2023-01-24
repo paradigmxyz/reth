@@ -5,7 +5,7 @@ use crate::{
 use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
 use reth_net_common::{
-    network_io_meter::{MeterableStream, NetworkIOMeterMetrics},
+    network_io_meter::{MeteredStream, NetworkIOMeterMetrics},
     stream::HasRemoteAddr,
 };
 use reth_primitives::H512 as PeerId;
@@ -145,12 +145,11 @@ where
     }
 }
 
-impl<S> MeterableStream for ECIESStream<S>
-where
-    S: MeterableStream,
+impl<S, M> AsMut<MeteredStream<M>> for ECIESStream<S>
+where S: AsMut<MeteredStream<M>>
 {
-    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
-        self.stream.get_mut().expose_metrics(metrics);
+    fn as_mut(&mut self) -> &mut MeteredStream<M> {
+        self.stream.get_mut().as_mut()
     }
 }
 

@@ -48,7 +48,9 @@ struct NetworkIOMeterInner {
     egress: AtomicU64,
 }
 
-/// Public shareable struct used for getting network IO info
+/// Public shareable struct used for getting network IO info.
+/// Can be shared between multiple [`MeteredStream`]s to aggregate
+/// ingress/egress measurements across all of them.
 #[derive(Clone, Debug)]
 pub struct NetworkIOMeter {
     inner: Arc<NetworkIOMeterInner>,
@@ -134,9 +136,21 @@ impl<S> MeteredStream<S> {
         self.meter = meter;
     }
 
+    /// Attaches the provided [`NetworkIOMeterMetrics`]
+    pub fn set_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
+        self.metrics = Some(metrics);
+    }
+
     /// Provides a reference to the [`NetworkIOMeter`] attached to this [`MeteredStream`]
     pub fn get_network_io_meter(&self) -> &NetworkIOMeter {
         &self.meter
+    }
+}
+
+impl<S> AsMut<MeteredStream<S>> for MeteredStream<S>
+{
+    fn as_mut(&mut self) -> &mut MeteredStream<S> {
+        self
     }
 }
 
@@ -196,18 +210,6 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
 impl HasRemoteAddr for MeteredStream<TcpStream> {
     fn remote_addr(&self) -> Option<SocketAddr> {
         self.inner.remote_addr()
-    }
-}
-
-/// Allows exporting metrics for a type that contains a nested [`MeteredStream`]
-pub trait MeterableStream {
-    /// Attaches the provided [`NetworkIOMeterMetrics`]
-    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics);
-}
-
-impl<S> MeterableStream for MeteredStream<S> {
-    fn expose_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
-        self.metrics = Some(metrics);
     }
 }
 
