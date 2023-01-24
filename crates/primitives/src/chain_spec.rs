@@ -538,26 +538,26 @@ mod tests {
 
     #[test]
     fn test_goerli_forkids() {
-        let frontier_forkid = GOERLI.fork_id(0);
+        let frontier_forkid = GOERLI.fork_id(ForkDiscriminant::block(0));
         assert_eq!([0xa3, 0xf5, 0xab, 0x08], frontier_forkid.hash.0);
         assert_eq!(1561651, frontier_forkid.next);
 
-        let istanbul_forkid = GOERLI.fork_id(1561651);
+        let istanbul_forkid = GOERLI.fork_id(ForkDiscriminant::block(1561651));
         assert_eq!([0xc2, 0x5e, 0xfa, 0x5c], istanbul_forkid.hash.0);
         assert_eq!(4460644, istanbul_forkid.next);
 
-        let berlin_forkid = GOERLI.fork_id(4460644);
+        let berlin_forkid = GOERLI.fork_id(ForkDiscriminant::block(4460644));
         assert_eq!([0x75, 0x7a, 0x1c, 0x47], berlin_forkid.hash.0);
         assert_eq!(5062605, berlin_forkid.next);
 
-        let london_forkid = GOERLI.fork_id(12965000);
+        let london_forkid = GOERLI.fork_id(ForkDiscriminant::block(12965000));
         assert_eq!([0xb8, 0xc6, 0x29, 0x9d], london_forkid.hash.0);
         assert_eq!(0, london_forkid.next);
     }
 
     #[test]
     fn test_sepolia_forkids() {
-        let mergenetsplit_forkid = SEPOLIA.fork_id(1735371);
+        let mergenetsplit_forkid = SEPOLIA.fork_id(ForkDiscriminant::block(1735371));
         assert_eq!([0xb9, 0x6c, 0xbd, 0x13], mergenetsplit_forkid.hash.0);
         assert_eq!(0, mergenetsplit_forkid.next);
     }
