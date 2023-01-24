@@ -1,20 +1,19 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::{Database, DatabaseGAT},
+    database::Database,
     models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
 use reth_interfaces::{
     consensus::Consensus,
-    p2p::bodies::downloader::{BlockResponse, BodyDownloader},
+    p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use reth_primitives::{BlockNumber, SealedHeader};
 use std::{fmt::Debug, sync::Arc};
 use tracing::*;
 
@@ -54,14 +53,9 @@ pub(crate) const BODIES: StageId = StageId("Bodies");
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, C: Consensus> {
     /// The body downloader.
-    pub downloader: Arc<D>,
+    pub downloader: D,
     /// The consensus engine.
     pub consensus: Arc<C>,
-    /// The maximum amount of block bodies to process in one stage execution.
-    ///
-    /// Smaller batch sizes result in less memory usage, but more disk I/O. Larger batch sizes
-    /// result in more memory usage, less disk I/O, and more infrequent checkpoints.
-    pub commit_threshold: u64,
 }
 
 #[async_trait::async_trait]
@@ -78,10 +72,10 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::bodies");
+        let (start_block, end_block) = exec_or_return!(input, "sync::stages::bodies");
 
-        let bodies_to_download = self.bodies_to_download::<DB>(tx, start_block, end_block)?;
+        // Update the header range on the downloader
+        self.downloader.set_download_range(start_block..end_block + 1)?;
 
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
@@ -95,28 +89,25 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // Get id for the first transaction and first transition in the block
         let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(start_block)?;
 
-        // NOTE(onbjerg): The stream needs to live here otherwise it will just create a new iterator
-        // on every iteration of the while loop -_-
-        let mut bodies_stream = self.downloader.bodies_stream(bodies_to_download.iter());
         let mut highest_block = input.stage_progress.unwrap_or_default();
         debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
-        while let Some(result) = bodies_stream.next().await {
-            let Ok(response) = result else {
-                error!(target: "sync::stages::bodies", block = highest_block + 1, error = ?result.unwrap_err(), "Error downloading block");
-                return Ok(ExecOutput {
-                    stage_progress: highest_block,
-                    done: false,
-                })
-            };
 
+        let downloaded_bodies = match self.downloader.next().await {
+            Some(downloaded_bodies) => downloaded_bodies,
+            None => {
+                info!(target: "sync::stages::bodies", stage_progress = highest_block, "Download stream exhausted");
+                return Ok(ExecOutput { stage_progress: highest_block, done: true })
+            }
+        };
+
+        trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
+        for response in downloaded_bodies {
             // Write block
             let block_header = response.header();
             let numhash: BlockNumHash = block_header.num_hash().into();
 
             match response {
                 BlockResponse::Full(block) => {
-                    trace!(target: "sync::stages::bodies", ommers = block.ommers.len(), txs = block.body.len(), ?numhash, "Writing full block");
-
                     body_cursor.append(
                         numhash,
                         StoredBlockBody {
@@ -147,7 +138,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                     }
                 }
                 BlockResponse::Empty(_) => {
-                    trace!(target: "sync::stages::bodies", ?numhash, "Writing empty block");
                     body_cursor.append(
                         numhash,
                         StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
@@ -160,7 +150,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // If the block does not have a reward, the transition will be the same as the
             // transition at the last transaction of this block.
             let has_reward = self.consensus.has_block_reward(numhash.number());
-            trace!(target: "sync::stages::bodies", has_reward, ?numhash, "Block reward");
             if has_reward {
                 transition_id += 1;
             }
@@ -172,7 +161,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         // The stage is "done" if:
         // - We got fewer blocks than our target
         // - We reached our target and the target was not limited by the batch size of the stage
-        let done = !capped && highest_block == end_block;
+        let done = highest_block == end_block;
         info!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: highest_block, done })
     }
@@ -232,35 +221,6 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
     }
 }
 
-impl<D: BodyDownloader, C: Consensus> BodyStage<D, C> {
-    /// Computes a list of `(block_number, header_hash)` for blocks that we need to download bodies
-    /// for.
-    ///
-    /// This skips empty blocks (i.e. no ommers, no transactions).
-    fn bodies_to_download<DB: Database>(
-        &self,
-        tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
-        starting_block: BlockNumber,
-        target: BlockNumber,
-    ) -> Result<Vec<SealedHeader>, StageError> {
-        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
-        let mut header_hashes_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-        let mut walker = header_hashes_cursor
-            .walk(starting_block)?
-            .take_while(|item| item.as_ref().map_or(false, |(num, _)| *num <= target));
-
-        let mut bodies_to_download = Vec::new();
-        while let Some(Ok((block_number, header_hash))) = walker.next() {
-            let (_, header) = header_cursor.seek_exact((block_number, header_hash).into())?.ok_or(
-                DatabaseIntegrityError::Header { number: block_number, hash: header_hash },
-            )?;
-            bodies_to_download.push(SealedHeader::new(header, header_hash));
-        }
-
-        Ok(bodies_to_download)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,11 +229,6 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::{
-        consensus,
-        p2p::error::{DownloadError, RequestError},
-    };
-    use std::collections::HashMap;
     use test_utils::*;
 
     stage_test_suite_ext!(BodyTestRunner, body);
@@ -376,47 +331,6 @@ mod tests {
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
-    /// Checks that the stage returns to the pipeline on validation failure.
-    #[tokio::test]
-    async fn pre_validation_failure() {
-        let (stage_progress, previous_stage) = (1, 20);
-
-        // Set up test runner
-        let mut runner = BodyTestRunner::default();
-
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
-        };
-        let blocks = runner.seed_execution(input).expect("failed to seed execution");
-
-        // Fail validation
-        let responses = blocks
-            .iter()
-            .map(|b| {
-                (
-                    b.hash(),
-                    Err(DownloadError::BlockValidation {
-                        hash: b.hash(),
-                        error: consensus::Error::BaseFeeMissing,
-                    }),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        runner.set_responses(responses);
-
-        // Run the stage
-        let rx = runner.execute(input);
-
-        // Check that the error bubbles up
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
-                if out_stage_progress == stage_progress
-        );
-        assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
-    }
-
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
     #[tokio::test]
     async fn unwind_missing_tx() {
@@ -472,40 +386,6 @@ mod tests {
         assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
     }
 
-    /// Checks that the stage exits if the downloader times out
-    /// TODO: We should probably just exit as "OK", commit the blocks we downloaded successfully and
-    /// try again?
-    #[tokio::test]
-    async fn downloader_timeout() {
-        let (stage_progress, previous_stage) = (1, 2);
-
-        // Set up test runner
-        let mut runner = BodyTestRunner::default();
-        let input = ExecInput {
-            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-            stage_progress: Some(stage_progress),
-        };
-        let blocks = runner.seed_execution(input).expect("failed to seed execution");
-
-        // overwrite responses
-        let header = blocks.last().unwrap();
-        runner.set_responses(HashMap::from([(
-            header.hash(),
-            Err(DownloadError::RequestError(RequestError::Timeout)),
-        )]));
-
-        // Run the stage
-        let rx = runner.execute(input);
-
-        // Check that the error bubbles up
-        assert_matches!(
-            rx.await.unwrap(),
-            Ok(ExecOutput { stage_progress: out_stage_progress, done: false })
-                if out_stage_progress == stage_progress
-        );
-        assert!(runner.validate_execution(input, None).is_ok(), "execution validation");
-    }
-
     mod test_utils {
         use crate::{
             stages::bodies::BodyStage,
@@ -516,8 +396,11 @@ mod tests {
             ExecInput, ExecOutput, UnwindInput,
         };
         use assert_matches::assert_matches;
+        use futures_util::Stream;
         use reth_db::{
             cursor::DbCursorRO,
+            database::Database,
+            mdbx::{Env, WriteMap},
             models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
@@ -525,13 +408,13 @@ mod tests {
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             consensus::Consensus,
+            db,
             p2p::{
                 bodies::{
-                    client::BodiesClient,
-                    downloader::{BlockResponse, BodyDownloader},
+                    client::BodiesClient, downloader::BodyDownloader, response::BlockResponse,
                 },
-                downloader::{DownloadClient, DownloadStream, Downloader},
-                error::{DownloadResult, PeerRequestResult},
+                downloader::{DownloadClient, Downloader},
+                error::PeerRequestResult,
                 priority::Priority,
             },
             test_utils::{
@@ -540,26 +423,32 @@ mod tests {
             },
         };
         use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
-        use std::{collections::HashMap, sync::Arc};
+        use std::{
+            collections::{HashMap, VecDeque},
+            ops::Range,
+            pin::Pin,
+            sync::Arc,
+            task::{Context, Poll},
+        };
 
         /// The block hash of the genesis block.
         pub(crate) const GENESIS_HASH: H256 = H256::zero();
 
-        /// A helper to create a collection of resulted-wrapped block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(block: &SealedBlock) -> (H256, DownloadResult<BlockBody>) {
+        /// A helper to create a collection of block bodies keyed by their hash.
+        pub(crate) fn body_by_hash(block: &SealedBlock) -> (H256, BlockBody) {
             (
                 block.hash(),
-                Ok(BlockBody {
+                BlockBody {
                     transactions: block.body.clone(),
                     ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                }),
+                },
             )
         }
 
         /// A helper struct for running the [BodyStage].
         pub(crate) struct BodyTestRunner {
             pub(crate) consensus: Arc<TestConsensus>,
-            responses: HashMap<H256, DownloadResult<BlockBody>>,
+            responses: HashMap<H256, BlockBody>,
             tx: TestTransaction,
             batch_size: u64,
         }
@@ -580,10 +469,7 @@ mod tests {
                 self.batch_size = batch_size;
             }
 
-            pub(crate) fn set_responses(
-                &mut self,
-                responses: HashMap<H256, DownloadResult<BlockBody>>,
-            ) {
+            pub(crate) fn set_responses(&mut self, responses: HashMap<H256, BlockBody>) {
                 self.responses = responses;
             }
         }
@@ -597,9 +483,12 @@ mod tests {
 
             fn stage(&self) -> Self::S {
                 BodyStage {
-                    downloader: Arc::new(TestBodyDownloader::new(self.responses.clone())),
+                    downloader: TestBodyDownloader::new(
+                        self.tx.inner_raw(),
+                        self.responses.clone(),
+                        self.batch_size,
+                    ),
                     consensus: self.consensus.clone(),
-                    commit_threshold: self.batch_size,
                 }
             }
         }
@@ -630,11 +519,15 @@ mod tests {
 
                         let last_transition_id = progress.body.len() as u64;
                         let block_transition_id = last_transition_id + 1; // for block reward
-                        println!("Bodies tx:{}", progress.body.len());
 
                         tx.put::<tables::BlockTransitionIndex>(key.number(), block_transition_id)?;
                         tx.put::<tables::BlockBodies>(key, body)?;
-                        tx.put::<tables::BlockOmmers>(key, StoredBlockOmmers { ommers: vec![] })?;
+                        if !progress.is_empty() {
+                            tx.put::<tables::BlockOmmers>(
+                                key,
+                                StoredBlockOmmers { ommers: vec![] },
+                            )?;
+                        }
                         Ok(())
                     })?;
                 }
@@ -706,6 +599,7 @@ mod tests {
             ) -> Result<(), TestRunnerError> {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
+                    let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
@@ -738,8 +632,15 @@ mod tests {
                             key.number(), highest_block
                         );
 
+                        let (_, header) = headers_cursor.seek_exact(key)?.expect("to be present");
                         // Validate that ommers exist
-                        assert_matches!(ommers_cursor.seek_exact(key), Ok(Some(_)), "Block ommers are missing");
+                        assert_matches!(
+                            ommers_cursor.seek_exact(key),
+                            Ok(ommers) => {
+                                assert!(if header.is_empty() { ommers.is_none() } else { ommers.is_some() })
+                            },
+                            "Block ommers are missing"
+                        );
 
                         for tx_id in body.tx_id_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
@@ -772,7 +673,6 @@ mod tests {
             }
         }
 
-        // TODO(onbjerg): Move
         /// A [BodiesClient] that should not be called.
         #[derive(Debug)]
         pub(crate) struct NoopClient;
@@ -798,16 +698,22 @@ mod tests {
             }
         }
 
-        // TODO(onbjerg): Move
         /// A [BodyDownloader] that is backed by an internal [HashMap] for testing.
-        #[derive(Debug, Default, Clone)]
+        #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            responses: HashMap<H256, DownloadResult<BlockBody>>,
+            db: Arc<Env<WriteMap>>,
+            responses: HashMap<H256, BlockBody>,
+            headers: VecDeque<SealedHeader>,
+            batch_size: u64,
         }
 
         impl TestBodyDownloader {
-            pub(crate) fn new(responses: HashMap<H256, DownloadResult<BlockBody>>) -> Self {
-                Self { responses }
+            pub(crate) fn new(
+                db: Arc<Env<WriteMap>>,
+                responses: HashMap<H256, BlockBody>,
+                batch_size: u64,
+            ) -> Self {
+                Self { db, responses, headers: VecDeque::default(), batch_size }
             }
         }
 
@@ -825,24 +731,61 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn bodies_stream<'a, 'b, I>(&'a self, hashes: I) -> DownloadStream<'a, BlockResponse>
-            where
-                I: IntoIterator<Item = &'b SealedHeader>,
-                <I as IntoIterator>::IntoIter: Send + 'b,
-                'b: 'a,
-            {
-                Box::pin(futures_util::stream::iter(hashes.into_iter().map(|header| {
-                    let result = self
-                        .responses
-                        .get(&header.hash())
-                        .expect("Stage tried downloading a block we do not have.")
-                        .clone()?;
-                    Ok(BlockResponse::Full(SealedBlock {
-                        header: header.clone(),
-                        body: result.transactions,
-                        ommers: result.ommers.into_iter().map(|header| header.seal()).collect(),
-                    }))
-                })))
+            fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
+                self.headers = VecDeque::from(self.db.view(|tx| {
+                    let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
+
+                    let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+                    let walker = canonical_cursor.walk(range.start)?.take_while(|entry| {
+                        entry.as_ref().map(|(num, _)| *num < range.end).unwrap_or_default()
+                    });
+
+                    let mut headers = Vec::default();
+                    for entry in walker {
+                        let (num, hash) = entry?;
+                        let (_, header) =
+                            header_cursor.seek_exact((num, hash).into())?.expect("missing header");
+                        headers.push(SealedHeader::new(header, hash));
+                    }
+                    Ok(headers)
+                })??);
+                Ok(())
+            }
+        }
+
+        impl Stream for TestBodyDownloader {
+            type Item = Vec<BlockResponse>;
+            fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+                let this = self.get_mut();
+
+                if this.headers.is_empty() {
+                    return Poll::Ready(None)
+                }
+
+                let mut response = Vec::default();
+                while let Some(header) = this.headers.pop_front() {
+                    if header.is_empty() {
+                        response.push(BlockResponse::Empty(header))
+                    } else {
+                        let body =
+                            this.responses.remove(&header.hash()).expect("requested unknown body");
+                        response.push(BlockResponse::Full(SealedBlock {
+                            header,
+                            body: body.transactions,
+                            ommers: body.ommers.into_iter().map(|h| h.seal()).collect(),
+                        }));
+                    }
+
+                    if response.len() as u64 >= this.batch_size {
+                        break
+                    }
+                }
+
+                if !response.is_empty() {
+                    return Poll::Ready(Some(response))
+                }
+
+                panic!("requested bodies without setting headers")
             }
         }
     }

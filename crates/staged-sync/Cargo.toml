@@ -7,7 +7,11 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 description = "Puts together all the Reth stages in a unified abstraction"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for config loading
+    "confy"
+]
 
 [dependencies]
 # reth
@@ -21,6 +25,7 @@ reth-net-nat = { path = "../../crates/net/nat" }
 # io
 serde = "1.0"
 serde_json = "1.0.91"
+confy = "0.5"
 
 # misc
 walkdir = "2.3.2"
