@@ -2,7 +2,11 @@ use crate::{
     db::Transaction, trie::DBTrieLoader, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_db::{database::Database, tables, transaction::DbTx};
+use reth_db::{
+    database::Database,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_interfaces::consensus;
 use std::fmt::Debug;
 use tracing::*;
@@ -52,8 +56,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(stage_progress)?;
         let to_transition = tx.get_block_transition(previous_stage_progress)?;
 
+        // TODO: transform into Transaction helper method
         let previous_numhash = tx.get_block_numhash(previous_stage_progress)?;
-
         let block_root = tx
             .get::<tables::Headers>(previous_numhash)?
             .ok_or_else(|| {
@@ -64,15 +68,32 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             })?
             .state_root;
 
+        let current_numhash = tx.get_block_numhash(stage_progress)?;
+        let mut current_root = tx
+            .get::<tables::Headers>(current_numhash)?
+            .ok_or_else(|| {
+                StageError::DatabaseIntegrity(DatabaseIntegrityError::Header {
+                    number: previous_stage_progress,
+                    hash: current_numhash.hash(),
+                })
+            })?
+            .state_root;
+
         let trie_root = if to_transition - from_transition > self.clean_threshold {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
-            let mut loader = DBTrieLoader {};
+            tx.clear::<tables::AccountsTrie>()?;
+            tx.clear::<tables::StoragesTrie>()?;
+
+            let loader = DBTrieLoader::default();
             loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
-            todo!()
+            let loader = DBTrieLoader::default();
+            loader
+                .update_root(tx, &mut current_root, from_transition, to_transition)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
         if block_root != trie_root {

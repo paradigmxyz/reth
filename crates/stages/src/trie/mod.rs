@@ -3,12 +3,14 @@ use hash_db::{AsHashDB, HashDB, Prefix};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
+    models::AccountBeforeTx,
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
+    keccak256,
     proofs::{KeccakHasher, EMPTY_ROOT},
-    Account, StorageEntry, StorageTrieEntry, H256, KECCAK_EMPTY, U256,
+    Account, Address, StorageEntry, StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{encode_iter, Encodable, RlpDecodable, RlpEncodable};
 use std::{borrow::Borrow, marker::PhantomData};
@@ -375,15 +377,17 @@ impl From<Account> for EthAccount {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct DBTrieLoader;
 
 impl DBTrieLoader {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
     pub(crate) fn calculate_root<DB: Database>(
-        &mut self,
+        &self,
         tx: &Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
+        tx.clear::<tables::AccountsTrie>()?;
+        tx.clear::<tables::StoragesTrie>()?;
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(H256::zero())?;
 
@@ -408,7 +412,7 @@ impl DBTrieLoader {
     }
 
     fn calculate_storage_root<DB: Database>(
-        &mut self,
+        &self,
         tx: &Transaction<'_, DB>,
         address: H256,
     ) -> Result<H256, TrieError> {
@@ -424,6 +428,80 @@ impl DBTrieLoader {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(storage_key.as_bytes(), &out).map_err(|_| TrieError::InternalError)?;
+        }
+
+        Ok(*trie.root())
+    }
+
+    /// Calculates the root of the state trie, saving intermediate hashes in the database.
+    pub(crate) fn update_root<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        root: &mut H256,
+        start_tid: TransitionId,
+        end_tid: TransitionId,
+    ) -> Result<H256, TrieError> {
+        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+        let mut changes_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
+
+        let mut walker = changes_cursor
+            .walk(start_tid)?
+            .take_while(|v| v.as_ref().map(|(k, _)| *k <= end_tid).unwrap_or(false));
+
+        let mut db = HashDatabase::new(tx)?;
+
+        let mut trie: TrieDBMut<'_, DBTrieLayout> =
+            TrieDBMutBuilder::from_existing(&mut db, root).build();
+
+        while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
+            let hashed_address = keccak256(address);
+            if let Some((_, account)) = accounts_cursor.seek_exact(hashed_address)? {
+                let mut value = EthAccount::from(account);
+                value.storage_root = self.update_storage_root(tx, address, start_tid, end_tid)?;
+
+                let mut out = Vec::new();
+                Encodable::encode(&value, &mut out);
+                trie.insert(hashed_address.as_bytes(), out.as_ref())
+                    .map_err(|_| TrieError::InternalError)?;
+            } else {
+                trie.remove(hashed_address.as_bytes()).map_err(|_| TrieError::InternalError)?;
+            }
+        }
+
+        Ok(*trie.root())
+    }
+
+    fn update_storage_root<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        address: Address,
+        start_tid: TransitionId,
+        end_tid: TransitionId,
+    ) -> Result<H256, TrieError> {
+        let hashed_address = keccak256(address);
+        let mut db = DupHashDatabase::new(tx, hashed_address)?;
+        let mut root = H256::zero();
+        let mut trie: TrieDBMut<'_, DBTrieLayout> =
+            TrieDBMutBuilder::new(&mut db, &mut root).build();
+
+        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let mut changes_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
+
+        let mut walker = changes_cursor.walk((start_tid, address).into())?.take_while(|v| {
+            v.as_ref().map(|(k, _)| *k <= (end_tid, address).into()).unwrap_or(false)
+        });
+
+        while let Some((_, StorageEntry { key: storage_key, .. })) = walker.next().transpose()? {
+            let key = keccak256(storage_key);
+            if let Some(StorageEntry { value, .. }) =
+                storage_cursor.seek_by_key_subkey(hashed_address, key)?
+            {
+                let mut out = Vec::new();
+                Encodable::encode(&value, &mut out);
+                trie.insert(storage_key.as_bytes(), &out).map_err(|_| TrieError::InternalError)?;
+            } else {
+                trie.remove(storage_key.as_bytes()).map_err(|_| TrieError::InternalError)?;
+            }
         }
 
         Ok(*trie.root())
@@ -460,7 +538,7 @@ mod tests {
 
     #[test]
     fn empty_trie() {
-        let mut trie = DBTrieLoader {};
+        let trie = DBTrieLoader::default();
         let db = create_test_rw_db::<WriteMap>();
         let tx = Transaction::new(db.as_ref()).unwrap();
         assert_eq!(trie.calculate_root(&tx), Ok(EMPTY_ROOT));
@@ -468,11 +546,11 @@ mod tests {
 
     #[test]
     fn single_account_trie() {
-        let mut trie = DBTrieLoader {};
+        let trie = DBTrieLoader::default();
         let db = create_test_rw_db::<WriteMap>();
         let tx = Transaction::new(db.as_ref()).unwrap();
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
-        let account = Account { nonce: 0, balance: U256::MAX, bytecode_hash: None };
+        let account = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
         tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
         let mut encoded_account = Vec::new();
         EthAccount::from(account).encode(&mut encoded_account);
@@ -484,7 +562,7 @@ mod tests {
 
     #[test]
     fn two_accounts_trie() {
-        let mut trie = DBTrieLoader {};
+        let trie = DBTrieLoader::default();
         let db = create_test_rw_db::<WriteMap>();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -514,7 +592,7 @@ mod tests {
 
     #[test]
     fn single_storage_trie() {
-        let mut trie = DBTrieLoader {};
+        let trie = DBTrieLoader::default();
         let db = create_test_rw_db::<WriteMap>();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -542,7 +620,7 @@ mod tests {
 
     #[test]
     fn single_account_with_storage_trie() {
-        let mut trie = DBTrieLoader {};
+        let trie = DBTrieLoader::default();
         let db = create_test_rw_db::<WriteMap>();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -587,7 +665,7 @@ mod tests {
 
     #[test]
     fn verify_genesis() {
-        let mut trie = DBTrieLoader {};
+        let trie = DBTrieLoader::default();
         let db = create_test_rw_db::<WriteMap>();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
         let ChainSpec { genesis, .. } = chain_spec_value_parser("mainnet").unwrap();
