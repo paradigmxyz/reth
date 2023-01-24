@@ -1,4 +1,4 @@
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
@@ -10,7 +10,7 @@
 /// The collection of algorithms for downloading block bodies.
 pub mod bodies;
 
-/// The collection of alhgorithms for downloading block headers.
+/// The collection of algorithms for downloading block headers.
 pub mod headers;
 
 #[cfg(test)]
