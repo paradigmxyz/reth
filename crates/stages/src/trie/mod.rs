@@ -75,6 +75,7 @@ impl TrieLayout for DBTrieLayout {
 //     }
 // }
 
+// Encodes a partial path in the trie, adding necessary flags.
 fn encode_partial(
     mut partial: impl Iterator<Item = u8>,
     nibbles: usize,
@@ -95,6 +96,7 @@ fn encode_partial(
     out
 }
 
+/// Responsible for encoding/decoding the trie nodes.
 #[derive(Debug, Default, Clone)]
 struct RLPNodeCodec<H: Hasher>(PhantomData<H>);
 
@@ -200,7 +202,7 @@ where
     }
 }
 
-/// An Ethereum account.
+/// An Ethereum account, for RLP encoding traits deriving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 struct EthAccount {
     /// Account nonce.
@@ -228,6 +230,7 @@ impl From<Account> for EthAccount {
 pub(crate) struct DBTrieLoader;
 
 impl DBTrieLoader {
+    /// Calculates the root of the state trie, saving intermediate hashes in the database.
     pub(crate) fn calculate_root<DB: Database>(
         &mut self,
         tx: &Transaction<'_, DB>,
