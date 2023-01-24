@@ -6,8 +6,8 @@ use reth_metrics_derive::Metrics;
 #[derive(Metrics)]
 #[metrics(scope = "downloaders_headers")]
 pub struct HeaderDownloaderMetrics {
-    /// The number of headers that were successfully returned by the downloader.
-    pub(crate) total_returned: Counter,
+    /// The number of headers that were successfully sent to the poller (stage)
+    pub(crate) total_flushed: Counter,
     /// Number of headers that were successfully downloaded
     pub(crate) total_downloaded: Counter,
     /// Number of timeout errors while requesting headers
