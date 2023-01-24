@@ -5,9 +5,7 @@ use std::{fmt::Display, str::FromStr};
 use crate::{forkkind::ForkDiscriminant, ChainSpec, ForkFilter, ForkId};
 
 #[allow(missing_docs)]
-#[derive(
-    Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Hardfork {
     Frontier,
     Homestead,
@@ -25,8 +23,6 @@ pub enum Hardfork {
     GrayGlacier,
     Paris,
     Shanghai,
-    #[default]
-    Latest,
 }
 
 impl Hardfork {
@@ -76,8 +72,7 @@ impl FromStr for Hardfork {
             "berlin" | "11" => Hardfork::Berlin,
             "london" | "12" => Hardfork::London,
             "arrowglacier" | "13" => Hardfork::ArrowGlacier,
-            "grayglacier" => Hardfork::GrayGlacier,
-            "latest" | "14" => Hardfork::Latest,
+            "latest" | "14" | "grayglacier" => Hardfork::GrayGlacier,
             _ => return Err(format!("Unknown hardfork {s}")),
         };
         Ok(hardfork)
