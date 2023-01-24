@@ -161,6 +161,7 @@ impl NetworkHandle {
         &self.inner.bandwidth_meter
     }
 
+    /// Send message to gracefully shutdown node.
     pub fn shutdown(&self) {
         self.send_message(NetworkHandleMessage::Shutdown);
     }
