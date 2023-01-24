@@ -13,6 +13,9 @@ use crate::{metric::Metric, with_attrs::WithAttrs};
 static METRIC_NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$").unwrap());
 
+/// Supported metrics separators
+const SUPPORTED_SEPARATORS: &[&str] = &[".", "_", ":"];
+
 pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let ty = &node.ident;
     let vis = &node.vis;
@@ -160,7 +163,7 @@ pub(crate) struct MetricsAttr {
 }
 
 impl MetricsAttr {
-    const DEFAULT_SEPARATOR: &str = "_";
+    const DEFAULT_SEPARATOR: &str = ".";
 
     fn separator(&self) -> String {
         match &self.separator {
@@ -193,10 +196,17 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
                 return Err(Error::new_spanned(kv, "Duplicate `separator` value provided."))
             }
             let separator_lit = parse_str_lit(&kv.lit)?;
-            if separator_lit.value() != ":" && separator_lit.value() != "_" {
+            if !SUPPORTED_SEPARATORS.contains(&&*separator_lit.value()) {
                 return Err(Error::new_spanned(
                     kv,
-                    "Unsupported `separator` value. Supported: `:` and `_`.",
+                    format!(
+                        "Unsupported `separator` value. Supported: {}.",
+                        SUPPORTED_SEPARATORS
+                            .iter()
+                            .map(|sep| format!("`{sep}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
                 ))
             }
             separator = Some(separator_lit);
