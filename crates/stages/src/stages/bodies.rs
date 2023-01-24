@@ -138,7 +138,9 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
                         // Append the transaction
                         tx_cursor.append(current_tx_id, transaction)?;
                         tx_transition_cursor.append(current_tx_id, transition_id)?;
+                        // Increment transaction id for each transaction.
                         current_tx_id += 1;
+                        // Increment transition id for each transaction.
                         transition_id += 1;
                     }
                 }
@@ -207,7 +209,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
             // Delete all transactions that belong to this block
             for tx_id in body.tx_id_range() {
                 // First delete the transaction
-                if let Some((_, _)) = transaction_cursor.seek_exact(tx_id)? {
+                if transaction_cursor.seek_exact(tx_id)?.is_some() {
                     transaction_cursor.delete_current()?;
                 }
                 // Delete the transaction transition if any
@@ -704,7 +706,7 @@ mod tests {
                     };
 
                     let mut prev_key: Option<BlockNumHash> = None;
-                    let mut current_transition_id = 0;
+                    let mut expected_transition_id = 0;
                     for entry in bodies_cursor.walk(first_body_key)? {
                         let (key, body) = entry?;
 
@@ -730,18 +732,19 @@ mod tests {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
                             assert!(tx_entry.is_some(), "Transaction is missing.");
                             assert_eq!(
-                                tx_transition_cursor.seek_exact(tx_id).expect("to be okay").expect("to be present").1, current_transition_id
+                                tx_transition_cursor.seek_exact(tx_id).expect("to be okay").expect("to be present").1, expected_transition_id
                             );
-                            current_transition_id += 1;
+                            // Increment expected id for each transaction transition.
+                            expected_transition_id += 1;
                         }
 
-                        // for block reward
+                        // Increment expected id for block reward.
                         if self.consensus.has_block_reward(key.number()) {
-                            current_transition_id += 1;
+                            expected_transition_id += 1;
                         }
 
                         // Validate that block transition exists
-                        assert_eq!(block_transition_cursor.seek_exact(key.number()).expect("To be okay").expect("Block transition to be present").1,current_transition_id);
+                        assert_eq!(block_transition_cursor.seek_exact(key.number()).expect("To be okay").expect("Block transition to be present").1,expected_transition_id);
 
 
                         prev_key = Some(key);
