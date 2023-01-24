@@ -70,8 +70,8 @@ impl SyncTarget {
 /// Validate whether the header is valid in relation to it's parent
 ///
 /// Returns Ok(false) if the
-pub fn validate_header_download<C: Consensus>(
-    consensus: &C,
+pub fn validate_header_download(
+    consensus: &dyn Consensus,
     header: &SealedHeader,
     parent: &SealedHeader,
 ) -> DownloadResult<()> {

@@ -14,7 +14,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use std::{fmt::Debug, sync::Arc};
+use std::sync::Arc;
 use tracing::*;
 
 pub(crate) const BODIES: StageId = StageId("Bodies");
@@ -51,15 +51,15 @@ pub(crate) const BODIES: StageId = StageId("Bodies");
 /// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
 /// - The [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber] table
 #[derive(Debug)]
-pub struct BodyStage<D: BodyDownloader, C: Consensus> {
+pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     pub downloader: D,
     /// The consensus engine.
-    pub consensus: Arc<C>,
+    pub consensus: Arc<dyn Consensus>,
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
+impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         BODIES
@@ -475,7 +475,7 @@ mod tests {
         }
 
         impl StageTestRunner for BodyTestRunner {
-            type S = BodyStage<TestBodyDownloader, TestConsensus>;
+            type S = BodyStage<TestBodyDownloader>;
 
             fn tx(&self) -> &TestTransaction {
                 &self.tx
