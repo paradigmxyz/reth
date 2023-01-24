@@ -9,7 +9,7 @@ use crate::{
     TransactionOrdering,
 };
 use rand::Rng;
-use reth_primitives::{Address, U256};
+use reth_primitives::{Address, U128, U256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -62,7 +62,7 @@ impl<T: TransactionOrdering> DerefMut for MockPool<T> {
 /// Simulates transaction execution.
 pub struct MockTransactionSimulator<R: Rng> {
     /// The pending base fee
-    base_fee: U256,
+    base_fee: u128,
     /// Generator for transactions
     tx_generator: MockTransactionDistribution,
     /// represents the on chain balance of a sender.
@@ -160,7 +160,7 @@ pub struct MockSimulatorConfig {
     /// Scenarios to test
     pub scenarios: Vec<ScenarioType>,
     /// The start base fee
-    pub base_fee: U256,
+    pub base_fee: u128,
     /// generator for transactions
     pub tx_generator: MockTransactionDistribution,
 }
@@ -220,7 +220,7 @@ fn test_on_chain_nonce_scenario() {
         num_senders: 10,
         balance: U256::from(200_000u64),
         scenarios: vec![ScenarioType::OnchainNonce],
-        base_fee: U256::from(10u64),
+        base_fee: 10,
         tx_generator: MockTransactionDistribution::new(30, 10..100),
     };
     let mut simulator = MockTransactionSimulator::new(rand::thread_rng(), config);

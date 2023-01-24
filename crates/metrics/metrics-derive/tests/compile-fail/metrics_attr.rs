@@ -40,7 +40,7 @@ struct CustomMetrics8;
 struct CustomMetrics9;
 
 #[derive(Metrics)]
-#[metrics(separator = ".")]
+#[metrics(separator = "x")]
 struct CustomMetrics10;
 
 #[derive(Metrics)]
