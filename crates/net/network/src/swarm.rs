@@ -251,6 +251,7 @@ where
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
             StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+                // Don't try to connect to peer if node is shutting down
                 if self.is_node_shutting_down() {
                     return None
                 }
