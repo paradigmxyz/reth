@@ -101,6 +101,10 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
     }
 }
 
+/// Derive trait implementation for [HistoricalStateProvider]
+/// from [HistoricalStateProviderRef] type.
+///
+/// Used to implement provider traits.
 macro_rules! derive_from_ref {
     ($trait:ident, $(fn $func:ident(&self$(, )?$($arg_name:ident: $arg:ty),*) -> $ret:ty),*) => {
         impl<'a, TX: DbTx<'a>> $trait for HistoricalStateProvider<'a, TX> {
