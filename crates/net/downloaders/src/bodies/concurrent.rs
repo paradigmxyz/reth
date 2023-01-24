@@ -29,6 +29,7 @@ const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
+#[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
 pub struct ConcurrentDownloader<B, DB> {
     /// The bodies client
