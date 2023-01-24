@@ -4126,7 +4126,6 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "async-trait",
- "backon",
  "futures",
  "futures-util",
  "once_cell",
@@ -4134,7 +4133,6 @@ dependencies = [
  "reth-eth-wire",
  "reth-interfaces",
  "reth-primitives",
- "reth-rpc-types",
  "reth-tracing",
  "thiserror",
  "tokio",

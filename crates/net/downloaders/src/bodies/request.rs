@@ -250,10 +250,7 @@ mod tests {
         let fut = BodiesRequestFuture::new(client.clone(), Arc::new(TestConsensus::default()))
             .with_headers(headers.clone());
 
-        assert_eq!(
-            fut.await,
-            headers.into_iter().map(|h| BlockResponse::Empty(h)).collect::<Vec<_>>()
-        );
+        assert_eq!(fut.await, headers.into_iter().map(BlockResponse::Empty).collect::<Vec<_>>());
         assert_eq!(client.times_requested(), 0);
     }
 
