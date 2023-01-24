@@ -7,22 +7,27 @@
 
 //! <reth crate template>
 
-mod block;
+/// Various provider traits.
+mod traits;
+pub use traits::{
+    AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider,
+    StateProviderFactory,
+};
 
-pub mod db_provider;
-mod state;
+/// Provider trait implementations.
+pub mod providers;
+pub use providers::{
+    DatabaseProvider, HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
+    LatestStateProviderRef,
+};
+
+/// Common database utilities.
+mod utils;
+pub use utils::{insert_block, insert_canonical_block};
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking the Provider.
 pub mod test_utils;
 
-pub use block::{
-    insert_block, insert_canonical_block, BlockHashProvider, BlockProvider, ChainInfo,
-    HeaderProvider,
-};
-pub use db_provider::{
-    self as db, HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
-    LatestStateProviderRef, ProviderImpl,
-};
+/// Re-export provider error.
 pub use reth_interfaces::provider::Error;
-pub use state::{AccountProvider, StateProvider, StateProviderFactory};
