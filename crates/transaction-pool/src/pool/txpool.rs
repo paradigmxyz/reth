@@ -18,7 +18,6 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use reth_primitives::{TxHash, H256};
-use ruint::uint;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
@@ -30,7 +29,7 @@ use std::{
 /// The minimal value the basefee can decrease to
 ///
 /// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` (https://eips.ethereum.org/EIPS/eip-1559) is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
-pub(crate) const MIN_PROTOCOL_BASE_FEE: U256 = uint!(0x7_U256);
+pub(crate) const MIN_PROTOCOL_BASE_FEE: u128 = 7;
 
 /// A pool that manages transactions.
 ///
@@ -485,11 +484,11 @@ impl<T: TransactionOrdering> fmt::Debug for TxPool<T> {
 /// derived from this set. Updates returned from this type must be applied to the sub-pools.
 pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Expected base fee for the pending block.
-    pending_basefee: U256,
+    pending_basefee: u128,
     /// Minimum base fee required by the protocol.
     ///
     /// Transactions with a lower base fee will never be included by the chain
-    minimal_protocol_basefee: U256,
+    minimal_protocol_basefee: u128,
     /// The max gas limit of the block
     block_gas_limit: u64,
     /// Max number of executable transaction slots guaranteed per account
@@ -559,7 +558,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        pending_block_base_fee: U256,
+        pending_block_base_fee: u128,
         _state_diffs: &StateDiff,
     ) -> Vec<PoolUpdate> {
         // update new basefee
@@ -661,7 +660,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Rechecks the transaction's dynamic fee condition.
-    fn update_base_fee(pending_block_base_fee: &U256, tx: &mut PoolInternalTransaction<T>) {
+    fn update_base_fee(pending_block_base_fee: &u128, tx: &mut PoolInternalTransaction<T>) {
         // Recheck dynamic fee condition.
         if let Some(fee_cap) = tx.transaction.max_fee_per_gas() {
             match fee_cap.cmp(pending_block_base_fee) {
@@ -1018,7 +1017,7 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     /// The transactions feeCap is lower than the chain's minimum fee requirement.
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
-    ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: U256 },
+    ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: u128 },
     /// Sender currently exceeds the configured limit for max account slots.
     ///
     /// The sender can be considered a spammer at this point.
@@ -1250,8 +1249,7 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        let tx =
-            MockTransaction::eip1559().inc_nonce().set_gas_price(U256::from(100u64)).inc_limit();
+        let tx = MockTransaction::eip1559().inc_nonce().set_gas_price(100).inc_limit();
         let first = f.validated(tx.clone());
         let _res = pool.insert_tx(first.clone(), on_chain_balance, on_chain_nonce).unwrap();
 
@@ -1282,7 +1280,7 @@ mod tests {
         let on_chain_nonce = 0;
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
-        pool.pending_basefee = pool.minimal_protocol_basefee.checked_add(U256::from(1)).unwrap();
+        pool.pending_basefee = pool.minimal_protocol_basefee.checked_add(1).unwrap();
         let tx = MockTransaction::eip1559().inc_nonce().inc_limit();
         let first = f.validated(tx.clone());
 
