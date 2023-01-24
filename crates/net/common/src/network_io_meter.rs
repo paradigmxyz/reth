@@ -1,4 +1,4 @@
-//! Support for metering network IO. Takes heavy inspiration from https://github.com/libp2p/rust-libp2p/blob/master/src/bandwidth.rs
+//! Support for metering ingress / egress over streams. Takes heavy inspiration from https://github.com/libp2p/rust-libp2p/blob/master/src/bandwidth.rs
 
 // Copyright 2019 Parity Technologies (UK) Ltd.
 //
@@ -39,24 +39,24 @@ use tokio::{
     net::TcpStream,
 };
 
-/// Meters network IO usage of streams
+/// Meters ingress & egress of streams
 #[derive(Debug)]
-struct NetworkIOMeterInner {
+struct MeteredStreamCountsInner {
     /// Measures the number of inbound bytes
     ingress: AtomicU64,
     /// Measures the number of outbound bytes
     egress: AtomicU64,
 }
 
-/// Public shareable struct used for getting network IO info.
+/// Public shareable struct used for getting stream ingress/egress info.
 /// Can be shared between multiple [`MeteredStream`]s to aggregate
 /// ingress/egress measurements across all of them.
 #[derive(Clone, Debug)]
-pub struct NetworkIOMeter {
-    inner: Arc<NetworkIOMeterInner>,
+pub struct MeteredStreamCounts {
+    inner: Arc<MeteredStreamCountsInner>,
 }
 
-impl NetworkIOMeter {
+impl MeteredStreamCounts {
     /// Returns the total number of bytes that have been downloaded on all the streams.
     ///
     /// > **Note**: This method is by design subject to race conditions. The returned value should
@@ -74,10 +74,10 @@ impl NetworkIOMeter {
     }
 }
 
-impl Default for NetworkIOMeter {
+impl Default for MeteredStreamCounts {
     fn default() -> Self {
         Self {
-            inner: Arc::new(NetworkIOMeterInner {
+            inner: Arc::new(MeteredStreamCountsInner {
                 ingress: AtomicU64::new(0),
                 egress: AtomicU64::new(0),
             }),
@@ -86,69 +86,68 @@ impl Default for NetworkIOMeter {
 }
 
 /// Exposes metrics for the ingress and egress on a given
-/// network IO meter
+/// metered stream
 #[derive(Metrics)]
 #[metrics(dynamic = true)]
-struct NetworkIOMeterMetricsInner {
+struct MeteredStreamMetricsInner {
     /// Counts inbound bytes
     ingress_bytes: Counter,
     /// Counts outbound bytes
     egress_bytes: Counter,
 }
 
-/// Public shareable struct used for exposing network IO metrics
+/// Public shareable struct used for metered stream metrics
 #[derive(Debug)]
-pub struct NetworkIOMeterMetrics {
-    inner: Arc<NetworkIOMeterMetricsInner>,
+pub struct MeteredStreamMetrics {
+    inner: Arc<MeteredStreamMetricsInner>,
 }
 
-impl NetworkIOMeterMetrics {
-    /// Creates an instance of [`NetworkIOMeterMetrics`] with the given scope
+impl MeteredStreamMetrics {
+    /// Creates an instance of  [`MeteredStreamMetrics`] with the given scope
     pub fn new(scope: &str, labels: impl metrics::IntoLabels + Clone) -> Self {
-        Self { inner: Arc::new(NetworkIOMeterMetricsInner::new_with_labels(scope, labels)) }
+        Self { inner: Arc::new(MeteredStreamMetricsInner::new_with_labels(scope, labels)) }
     }
 }
 
 /// Wraps around a single stream that implements [`AsyncRead`] + [`AsyncWrite`] and meters the
-/// network IO through it
+/// ingress/egress through it
 #[derive(Debug)]
 #[pin_project::pin_project]
 pub struct MeteredStream<S> {
     /// The stream this instruments
     #[pin]
     inner: S,
-    /// The [`NetworkIOMeter`] struct this uses to meter network IO
-    meter: NetworkIOMeter,
-    /// An optional [`NetworkIOMeterMetrics`] struct expose metrics over the
-    /// [`NetworkIOMeter`].
-    metrics: Option<NetworkIOMeterMetrics>,
+    /// The [`MeteredStreamCounts`] struct this uses to meter ingress / egress
+    meter: MeteredStreamCounts,
+    /// An optional  [`MeteredStreamMetrics`] struct expose metrics over the
+    /// [`MeteredStreamCounts`].
+    metrics: Option<MeteredStreamMetrics>,
 }
 
 impl<S> MeteredStream<S> {
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
-    /// along with a new [`NetworkIOMeter`]
+    /// along with a new [`MeteredStreamCounts`]
     pub fn new(inner: S) -> Self {
-        Self { inner, meter: NetworkIOMeter::default(), metrics: None }
+        Self { inner, meter: MeteredStreamCounts::default(), metrics: None }
     }
 
-    /// Attaches the provided [`NetworkIOMeter`]
-    pub fn set_meter(&mut self, meter: NetworkIOMeter) {
+    /// Attaches the provided [`MeteredStreamCounts`]
+    pub fn set_meter(&mut self, meter: MeteredStreamCounts) {
         self.meter = meter;
     }
 
-    /// Attaches the provided [`NetworkIOMeterMetrics`]
-    pub fn set_metrics(&mut self, metrics: NetworkIOMeterMetrics) {
+    /// Attaches the provided  [`MeteredStreamMetrics`]
+    pub fn set_metrics(&mut self, metrics: MeteredStreamMetrics) {
         self.metrics = Some(metrics);
     }
 
-    /// Provides a reference to the [`NetworkIOMeter`] attached to this [`MeteredStream`]
-    pub fn get_network_io_meter(&self) -> &NetworkIOMeter {
+    /// Provides a reference to the [`MeteredStreamCounts`] attached to this [`MeteredStream`]
+    pub fn get_metered_stream_counts(&self) -> &MeteredStreamCounts {
         &self.meter
     }
 }
 
-impl<S> AsMut<MeteredStream<S>> for MeteredStream<S>
-{
+impl<S> AsMut<MeteredStream<S>> for MeteredStream<S> {
     fn as_mut(&mut self) -> &mut MeteredStream<S> {
         self
     }
@@ -169,8 +168,8 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
         let current_ingress =
             this.meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
 
-        if let Some(network_io_meter_metrics) = &this.metrics {
-            network_io_meter_metrics.inner.ingress_bytes.absolute(current_ingress);
+        if let Some(metered_stream_metrics) = &this.metrics {
+            metered_stream_metrics.inner.ingress_bytes.absolute(current_ingress);
         }
 
         Poll::Ready(Ok(()))
@@ -189,8 +188,8 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
         let current_egress =
             this.meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
 
-        if let Some(network_io_meter_metrics) = &this.metrics {
-            network_io_meter_metrics.inner.egress_bytes.absolute(current_egress);
+        if let Some(metered_stream_metrics) = &this.metrics {
+            metered_stream_metrics.inner.egress_bytes.absolute(current_egress);
         }
 
         Poll::Ready(Ok(num_bytes))
@@ -222,8 +221,8 @@ mod tests {
     };
 
     fn create_metered_duplex<'a>(
-        client_meter: NetworkIOMeter,
-        server_meter: NetworkIOMeter,
+        client_meter: MeteredStreamCounts,
+        server_meter: MeteredStreamCounts,
     ) -> (MeteredStream<DuplexStream>, MeteredStream<DuplexStream>) {
         let (client, server) = duplex(64);
         let (mut metered_client, mut metered_server) =
@@ -249,17 +248,17 @@ mod tests {
     }
 
     fn assert_io_counts(
-        network_io_meter: &NetworkIOMeter,
+        metered_stream_counts: &MeteredStreamCounts,
         expected_ingress: u64,
         expected_egress: u64,
     ) {
-        let actual_ingress = network_io_meter.total_ingress();
+        let actual_ingress = metered_stream_counts.total_ingress();
         assert_eq!(
             actual_ingress, expected_ingress,
             "Expected {expected_ingress} inbound bytes, but got {actual_ingress}",
         );
 
-        let actual_egress = network_io_meter.total_egress();
+        let actual_egress = metered_stream_counts.total_egress();
         assert_eq!(
             actual_egress, expected_egress,
             "Expected {expected_egress} inbound bytes, but got {actual_egress}",
@@ -271,12 +270,12 @@ mod tests {
         // Taken in large part from https://docs.rs/tokio/latest/tokio/io/struct.DuplexStream.html#example
 
         let (mut metered_client, mut metered_server) =
-            create_metered_duplex(NetworkIOMeter::default(), NetworkIOMeter::default());
+            create_metered_duplex(MeteredStreamCounts::default(), MeteredStreamCounts::default());
 
         duplex_stream_ping_pong(&mut metered_client, &mut metered_server).await;
 
-        assert_io_counts(metered_client.get_network_io_meter(), 4, 4);
-        assert_io_counts(metered_server.get_network_io_meter(), 4, 4);
+        assert_io_counts(metered_client.get_metered_stream_counts(), 4, 4);
+        assert_io_counts(metered_server.get_metered_stream_counts(), 4, 4);
     }
 
     #[tokio::test]
@@ -307,22 +306,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_streams_one_meter() {
-        let shared_client_network_io_meter = NetworkIOMeter::default();
-        let shared_server_network_io_meter = NetworkIOMeter::default();
+        let shared_client_counts = MeteredStreamCounts::default();
+        let shared_server_counts = MeteredStreamCounts::default();
 
-        let (mut metered_client_1, mut metered_server_1) = create_metered_duplex(
-            shared_client_network_io_meter.clone(),
-            shared_server_network_io_meter.clone(),
-        );
-        let (mut metered_client_2, mut metered_server_2) = create_metered_duplex(
-            shared_client_network_io_meter.clone(),
-            shared_server_network_io_meter.clone(),
-        );
+        let (mut metered_client_1, mut metered_server_1) =
+            create_metered_duplex(shared_client_counts.clone(), shared_server_counts.clone());
+        let (mut metered_client_2, mut metered_server_2) =
+            create_metered_duplex(shared_client_counts.clone(), shared_server_counts.clone());
 
         duplex_stream_ping_pong(&mut metered_client_1, &mut metered_server_1).await;
         duplex_stream_ping_pong(&mut metered_client_2, &mut metered_server_2).await;
 
-        assert_io_counts(&shared_client_network_io_meter, 8, 8);
-        assert_io_counts(&shared_server_network_io_meter, 8, 8);
+        assert_io_counts(&shared_client_counts, 8, 8);
+        assert_io_counts(&shared_server_counts, 8, 8);
     }
 }

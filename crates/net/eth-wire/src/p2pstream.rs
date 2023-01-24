@@ -10,7 +10,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use metrics::counter;
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
-use reth_net_common::network_io_meter::{MeteredStream, NetworkIOMeterMetrics};
+use reth_net_common::network_io_meter::MeteredStream;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -495,7 +495,8 @@ where
 }
 
 impl<S, M> AsMut<MeteredStream<M>> for P2PStream<S>
-where S: AsMut<MeteredStream<M>>
+where
+    S: AsMut<MeteredStream<M>>,
 {
     fn as_mut(&mut self) -> &mut MeteredStream<M> {
         self.inner.as_mut()

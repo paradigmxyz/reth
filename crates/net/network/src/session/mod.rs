@@ -19,7 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_net_common::network_io_meter::{MeteredStream, NetworkIOMeterMetrics};
+use reth_net_common::network_io_meter::{MeteredStream, MeteredStreamMetrics};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
@@ -815,7 +815,7 @@ async fn authenticate_stream(
         }
     };
 
-    eth_stream.as_mut().set_metrics(NetworkIOMeterMetrics::new(
+    eth_stream.as_mut().set_metrics(MeteredStreamMetrics::new(
         "session_net_io",
         &[("peer_id", format!("{peer_id}"))],
     ));
