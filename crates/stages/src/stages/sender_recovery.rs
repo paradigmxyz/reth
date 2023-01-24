@@ -151,9 +151,10 @@ mod tests {
         };
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
+        let non_empty_block_number = stage_progress + 10;
         let blocks = (stage_progress..input.previous_stage_progress() + 1)
             .map(|number| {
-                random_block(number, None, Some((number == stage_progress + 10) as u8), None)
+                random_block(number, None, Some((number == non_empty_block_number) as u8), None)
             })
             .collect::<Vec<_>>();
         runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
