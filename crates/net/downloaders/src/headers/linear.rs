@@ -58,7 +58,7 @@ pub struct LinearDownloader<C, H> {
     /// Tip block number to start validating from (in reverse)
     next_chain_tip_block_number: u64,
     /// The batch size per one request
-    request_batch_size: u64,
+    request_limit: u64,
     /// Minimum amount of requests to handle concurrently.
     min_concurrent_requests: usize,
     /// Maximum amount of requests to handle concurrently.
@@ -124,11 +124,8 @@ where
     fn next_request(&mut self) -> Option<HeadersRequest> {
         let local_head = self.local_block_number();
         if self.next_request_block_number > local_head {
-            let request = calc_next_request(
-                local_head,
-                self.next_request_block_number,
-                self.request_batch_size,
-            );
+            let request =
+                calc_next_request(local_head, self.next_request_block_number, self.request_limit);
             // need to shift the tracked request block number based on the number of requested
             // headers so follow-up requests will use that as start.
             self.next_request_block_number -= request.limit;
@@ -742,7 +739,7 @@ struct SyncTargetBlock {
 #[derive(Debug)]
 pub struct LinearDownloadBuilder {
     /// The batch size per one request
-    request_batch_size: u64,
+    request_limit: u64,
     /// Batch size for headers
     stream_batch_size: usize,
     /// Batch size for headers
@@ -756,7 +753,7 @@ pub struct LinearDownloadBuilder {
 impl Default for LinearDownloadBuilder {
     fn default() -> Self {
         Self {
-            request_batch_size: 1_000,
+            request_limit: 1_000,
             stream_batch_size: 10_000,
             max_concurrent_requests: 150,
             min_concurrent_requests: 5,
@@ -771,7 +768,7 @@ impl LinearDownloadBuilder {
     /// This determines the `limit` for a [GetHeaders](reth_eth_wire::GetBlockHeaders) requests, the
     /// number of headers we ask for.
     pub fn request_limit(mut self, limit: u64) -> Self {
-        self.request_batch_size = limit;
+        self.request_limit = limit;
         self
     }
 
@@ -826,7 +823,7 @@ impl LinearDownloadBuilder {
         H: HeadersClient + 'static,
     {
         let Self {
-            request_batch_size,
+            request_limit,
             stream_batch_size,
             min_concurrent_requests,
             max_concurrent_requests,
@@ -842,7 +839,7 @@ impl LinearDownloadBuilder {
             next_request_block_number: 0,
             next_chain_tip_block_number: 0,
             lowest_validated_header: None,
-            request_batch_size,
+            request_limit,
             min_concurrent_requests,
             max_concurrent_requests,
             stream_batch_size,
@@ -863,18 +860,18 @@ impl LinearDownloadBuilder {
 /// Configures and returns the next [HeadersRequest] based on the given parameters
 ///
 /// The request wil start at the given `next_request_block_number` block.
-/// The `limit` of the request will either be the targeted `request_batch_size` or the difference of
+/// The `limit` of the request will either be the targeted `request_limit` or the difference of
 /// `next_request_block_number` and the `local_head` in case this is smaller than the targeted
-/// `request_batch_size`.
+/// `request_limit`.
 #[inline]
 fn calc_next_request(
     local_head: u64,
     next_request_block_number: u64,
-    request_batch_size: u64,
+    request_limit: u64,
 ) -> HeadersRequest {
     // downloading is in reverse
     let diff = next_request_block_number - local_head;
-    let limit = diff.min(request_batch_size);
+    let limit = diff.min(request_limit);
     let start = next_request_block_number;
     HeadersRequest { start: start.into(), limit, direction: HeadersDirection::Falling }
 }
