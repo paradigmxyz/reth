@@ -11,11 +11,11 @@ pub struct HeaderDownloaderMetrics {
     /// Number of headers that were successfully downloaded
     pub(crate) total_downloaded: Counter,
     /// Number of timeout errors while requesting headers
-    timeout_errors: Counter,
+    pub(crate) timeout_errors: Counter,
     /// Number of validation errors while requesting headers
-    validation_errors: Counter,
+    pub(crate) validation_errors: Counter,
     /// Number of unexpected errors while requesting headers
-    unexpected_errors: Counter,
+    pub(crate) unexpected_errors: Counter,
 }
 
 impl HeaderDownloaderMetrics {
