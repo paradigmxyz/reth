@@ -413,7 +413,7 @@ mod tests {
                 bodies::{
                     client::BodiesClient, downloader::BodyDownloader, response::BlockResponse,
                 },
-                downloader::{DownloadClient, Downloader},
+                download::DownloadClient,
                 error::PeerRequestResult,
                 priority::Priority,
             },
@@ -714,19 +714,6 @@ mod tests {
                 batch_size: u64,
             ) -> Self {
                 Self { db, responses, headers: VecDeque::default(), batch_size }
-            }
-        }
-
-        impl Downloader for TestBodyDownloader {
-            type Client = NoopClient;
-            type Consensus = TestConsensus;
-
-            fn client(&self) -> &Self::Client {
-                unreachable!()
-            }
-
-            fn consensus(&self) -> &Self::Consensus {
-                unreachable!()
             }
         }
 

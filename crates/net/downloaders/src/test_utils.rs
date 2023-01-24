@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     p2p::{
-        bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult,
+        bodies::client::BodiesClient, download::DownloadClient, error::PeerRequestResult,
         priority::Priority,
     },
     test_utils::generators::random_block_range,

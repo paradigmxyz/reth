@@ -5,18 +5,16 @@ use futures_util::{stream::FuturesUnordered, StreamExt};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
-        downloader::Downloader,
-        error::{DownloadError, PeerRequestResult},
+        error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
+            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
     },
 };
 use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, H256};
 use std::{
-    borrow::Borrow,
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     future::Future,
@@ -451,23 +449,6 @@ where
     }
 }
 
-impl<C, H> Downloader for LinearDownloader<C, H>
-where
-    C: Consensus,
-    H: HeadersClient,
-{
-    type Client = H;
-    type Consensus = C;
-
-    fn client(&self) -> &Self::Client {
-        self.client.borrow()
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        self.consensus.borrow()
-    }
-}
-
 impl<C, H> HeaderDownloader for LinearDownloader<C, H>
 where
     C: Consensus + 'static,
@@ -532,6 +513,11 @@ where
 
     fn set_batch_size(&mut self, batch_size: usize) {
         self.stream_batch_size = batch_size;
+    }
+
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)?;
+        Ok(())
     }
 }
 
