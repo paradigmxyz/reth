@@ -8,15 +8,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions, Status,
-};
+use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{EthProtocolInfo, NetworkError, NetworkInfo, NetworkStatus, PeersInfo};
+use reth_network_api::{NetworkError, NetworkInfo, NetworkStatus, PeersInfo};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -129,13 +127,6 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
     }
 
-    /// Get the current status of the node.
-    pub async fn get_status(&self) -> Result<Status, oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
-        rx.await
-    }
-
     /// Announce a block over devp2p
     ///
     /// Caution: in PoS this is a noop, since new block propagation will happen over devp2p
@@ -232,17 +223,9 @@ impl NetworkInfo for NetworkHandle {
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
-        let status = self.get_status().await?;
-
-        Ok(NetworkStatus {
-            client_version: "Reth".to_string(),
-            eth_protocol_info: EthProtocolInfo {
-                difficulty: status.total_difficulty,
-                head: status.blockhash,
-                network: status.chain.id(),
-                genesis: status.genesis,
-            },
-        })
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
+        rx.await.map_err(Into::into)
     }
 }
 
@@ -317,7 +300,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
     /// Get the currenet status
-    GetStatus(oneshot::Sender<Status>),
+    GetStatus(oneshot::Sender<NetworkStatus>),
     /// Get PeerInfo from all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
