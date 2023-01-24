@@ -88,8 +88,10 @@ fn encode_partial(
 
     if nibbles % 2 != 0 {
         flag_byte |= 0x10;
-        // should never be None
-        flag_byte |= partial.next().unwrap_or_default();
+        flag_byte |= match partial.next() {
+            Some(v) => v,
+            None => unreachable!("partial should be non-empty"),
+        };
     }
     out.push(flag_byte);
     out.extend(partial);
