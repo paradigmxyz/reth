@@ -163,13 +163,6 @@ impl NetworkHandle {
 
     pub fn shutdown(&self) {
         self.send_message(NetworkHandleMessage::Shutdown);
-        // stop connecting to peers
-
-        // drop pending connections
-
-        // tell incoming connections that we will shut down
-
-        // send disconnect reason to all connected peers
     }
 }
 
@@ -313,6 +306,6 @@ pub(crate) enum NetworkHandleMessage {
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
-    /// Gracefully shut down network
+    /// Gracefully shutdown network
     Shutdown,
 }
