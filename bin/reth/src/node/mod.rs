@@ -13,7 +13,7 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_interfaces::consensus::{Consensus, ForkchoiceState};
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
@@ -118,7 +118,23 @@ impl Command {
         let genesis = init_genesis(db.clone(), self.chain.clone())?;
         info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
-        let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        // TODO: This should be in a builder/factory in the consensus crate
+        let consensus: Arc<dyn Consensus> = {
+            let beacon_consensus = BeaconConsensus::new(self.chain.clone());
+
+            if let Some(tip) = self.tip {
+                debug!(target: "reth::cli", %tip, "Tip manually set");
+                beacon_consensus.notify_fork_choice_state(ForkchoiceState {
+                    head_block_hash: tip,
+                    safe_block_hash: tip,
+                    finalized_block_hash: tip,
+                })?;
+            } else {
+                warn!(target: "reth::cli", "No tip specified. reth cannot communicate with consensus clients, so a tip must manually be provided for the online stages with --debug.tip <HASH>.");
+            }
+
+            Arc::new(beacon_consensus)
+        };
 
         let network = config
             .network_config(
@@ -190,17 +206,6 @@ impl Command {
             .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
             // This merkle stage is used only for execute
             .push(MerkleStage { is_execute: true });
-
-        if let Some(tip) = self.tip {
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            consensus.notify_fork_choice_state(ForkchoiceState {
-                head_block_hash: tip,
-                safe_block_hash: tip,
-                finalized_block_hash: tip,
-            })?;
-        } else {
-            warn!(target: "reth::cli", "No tip specified. reth cannot communicate with consensus clients, so a tip must manually be provided for the online stages with --debug.tip <HASH>.");
-        }
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");

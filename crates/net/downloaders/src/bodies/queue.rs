@@ -2,7 +2,7 @@ use super::request::BodiesRequestFuture;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
-    consensus::Consensus as ConsensusTrait,
+    consensus::Consensus,
     p2p::bodies::{client::BodiesClient, response::BlockResponse},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -16,16 +16,16 @@ use std::{
 /// The wrapper around [FuturesUnordered] that keeps information
 /// about the blocks currently being requested.
 #[derive(Debug)]
-pub(crate) struct BodiesRequestQueue<B, C> {
+pub(crate) struct BodiesRequestQueue<B> {
     /// Inner body request queue.
-    inner: FuturesUnordered<BodiesRequestFuture<B, C>>,
+    inner: FuturesUnordered<BodiesRequestFuture<B>>,
     /// The block numbers being requested.
     block_numbers: HashSet<BlockNumber>,
     /// Last requested block number.
     pub(crate) last_requested_block_number: Option<BlockNumber>,
 }
 
-impl<B, C> Default for BodiesRequestQueue<B, C> {
+impl<B> Default for BodiesRequestQueue<B> {
     fn default() -> Self {
         Self {
             inner: Default::default(),
@@ -35,10 +35,9 @@ impl<B, C> Default for BodiesRequestQueue<B, C> {
     }
 }
 
-impl<B, C> BodiesRequestQueue<B, C>
+impl<B> BodiesRequestQueue<B>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
 {
     pub(crate) fn is_empty(&self) -> bool {
         self.inner.is_empty()
@@ -53,7 +52,7 @@ where
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         request: Vec<SealedHeader>,
     ) {
         // Set last max requested block number
@@ -78,10 +77,9 @@ where
     }
 }
 
-impl<B, C> Stream for BodiesRequestQueue<B, C>
+impl<B> Stream for BodiesRequestQueue<B>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
 {
     type Item = Vec<BlockResponse>;
 
