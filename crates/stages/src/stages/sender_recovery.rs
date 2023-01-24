@@ -226,6 +226,22 @@ mod tests {
         fn set_threshold(&mut self, threshold: u64) {
             self.threshold = threshold;
         }
+
+        fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
+            let body_result = self.tx.inner().get_block_body_by_num(block);
+            match body_result {
+                Ok(body) => self
+                    .tx
+                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
+                        key
+                    })?,
+                Err(_) => {
+                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
+                }
+            };
+
+            Ok(())
+        }
     }
 
     impl StageTestRunner for SenderRecoveryTestRunner {
@@ -257,8 +273,8 @@ mod tests {
             input: ExecInput,
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
-            if let Some(output) = output {
-                self.tx.query(|tx| {
+            match output {
+                Some(output) => self.tx.query(|tx| {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
 
@@ -282,10 +298,9 @@ mod tests {
                     }
 
                     Ok(())
-                })?;
-            } else {
-                self.check_no_senders_by_block(input.stage_progress.unwrap_or_default())?;
-            }
+                })?,
+                None => self.check_no_senders_by_block(input.stage_progress.unwrap_or_default())?,
+            };
 
             Ok(())
         }
@@ -294,24 +309,6 @@ mod tests {
     impl UnwindStageTestRunner for SenderRecoveryTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.check_no_senders_by_block(input.unwind_to)
-        }
-    }
-
-    impl SenderRecoveryTestRunner {
-        fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body_by_num(block);
-            match body_result {
-                Ok(body) => self
-                    .tx
-                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
-                        key
-                    })?,
-                Err(_) => {
-                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
-                }
-            };
-
-            Ok(())
         }
     }
 }

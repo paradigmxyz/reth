@@ -102,3 +102,191 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+    };
+    use assert_matches::assert_matches;
+    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
+    use reth_primitives::{BlockNumber, SealedBlock, H256};
+
+    // Implement stage test suite.
+    stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
+
+    #[tokio::test]
+    async fn execute_single_transaction_lookup() {
+        let (previous_stage, stage_progress) = (500, 100);
+
+        // Set up the runner
+        let runner = TransactionLookupTestRunner::default();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        // Insert blocks with a single transaction at block `stage_progress + 10`
+        let blocks = (stage_progress..input.previous_stage_progress() + 1)
+            .map(|number| {
+                random_block(number, None, Some((number == stage_progress + 10) as u8), None)
+            })
+            .collect::<Vec<_>>();
+        runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
+
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done, stage_progress })
+                if done && stage_progress == previous_stage
+        );
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    /// Execute the stage twice with input range that exceeds the commit threshold
+    #[tokio::test]
+    async fn execute_intermediate_commit_transaction_lookup() {
+        let threshold = 50;
+        let mut runner = TransactionLookupTestRunner::default();
+        runner.set_threshold(threshold);
+        let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
+        let first_input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        // Seed only once with full input range
+        runner.seed_execution(first_input).expect("failed to seed execution");
+
+        // Execute first time
+        let result = runner.execute(first_input).await.unwrap();
+        let expected_progress = stage_progress + threshold;
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done: false, stage_progress })
+                if stage_progress == expected_progress
+        );
+
+        // Execute second time
+        let second_input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(expected_progress),
+        };
+        let result = runner.execute(second_input).await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done: true, stage_progress })
+                if stage_progress == previous_stage
+        );
+
+        assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
+    }
+
+    struct TransactionLookupTestRunner {
+        tx: TestTransaction,
+        threshold: u64,
+    }
+
+    impl Default for TransactionLookupTestRunner {
+        fn default() -> Self {
+            Self { threshold: 1000, tx: TestTransaction::default() }
+        }
+    }
+
+    impl TransactionLookupTestRunner {
+        fn set_threshold(&mut self, threshold: u64) {
+            self.threshold = threshold;
+        }
+
+        fn check_no_hash_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
+            let body_result = self.tx.inner().get_block_body_by_num(block);
+            match body_result {
+                Ok(body) => self
+                    .tx
+                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
+                        key
+                    })?,
+                Err(_) => {
+                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
+                }
+            };
+
+            Ok(())
+        }
+    }
+
+    impl StageTestRunner for TransactionLookupTestRunner {
+        type S = TransactionLookupStage;
+
+        fn tx(&self) -> &TestTransaction {
+            &self.tx
+        }
+
+        fn stage(&self) -> Self::S {
+            TransactionLookupStage { commit_threshold: self.threshold }
+        }
+    }
+
+    impl ExecuteStageTestRunner for TransactionLookupTestRunner {
+        type Seed = Vec<SealedBlock>;
+
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let stage_progress = input.stage_progress.unwrap_or_default();
+            let end = input.previous_stage_progress() + 1;
+
+            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
+            self.tx.insert_blocks(blocks.iter(), None)?;
+            Ok(blocks)
+        }
+
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+            output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError> {
+            match output {
+                Some(output) => self.tx.query(|tx| {
+                    let start_block = input.stage_progress.unwrap_or_default() + 1;
+                    let end_block = output.stage_progress;
+
+                    if start_block > end_block {
+                        return Ok(())
+                    }
+
+                    let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
+                    let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+                    body_cursor.seek_exact((start_block, start_hash).into())?;
+
+                    while let Some((_, body)) = body_cursor.next()? {
+                        for tx_id in body.tx_id_range() {
+                            let transaction = tx
+                                .get::<tables::Transactions>(tx_id)?
+                                .expect("no transaction entry");
+                            assert_eq!(
+                                Some(tx_id),
+                                tx.get::<tables::TxHashNumber>(transaction.hash)?,
+                            );
+                        }
+                    }
+
+                    Ok(())
+                })?,
+                None => self.check_no_hash_by_block(input.stage_progress.unwrap_or_default())?,
+            };
+            Ok(())
+        }
+    }
+
+    impl UnwindStageTestRunner for TransactionLookupTestRunner {
+        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+            self.check_no_hash_by_block(input.unwind_to)
+        }
+    }
+}
