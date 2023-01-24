@@ -53,10 +53,10 @@ error: Value **must** be a string literal.
 39 | #[metrics(separator = 123)]
    |                       ^^^
 
-error: Unsupported `separator` value. Supported: `:` and `_`.
+error: Unsupported `separator` value. Supported: `.`, `_`, `:`.
   --> tests/compile-fail/metrics_attr.rs:43:11
    |
-43 | #[metrics(separator = ".")]
+43 | #[metrics(separator = "x")]
    |           ^^^^^^^^^^^^^^^
 
 error: Duplicate `separator` value provided.
