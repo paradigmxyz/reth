@@ -52,13 +52,13 @@ where
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
-    let pair = &load_vectors::<T>();
+    let input = &load_vectors::<T>();
     group.bench_function(format!("{}.KeyEncode", T::NAME), move |b| {
         b.iter_with_setup(
-            || pair.clone(),
-            |pair| {
+            || input.clone(),
+            |input| {
                 black_box({
-                    for (k, _, _, _) in pair {
+                    for (k, _, _, _) in input {
                         k.encode();
                     }
                 });
@@ -68,10 +68,10 @@ where
 
     group.bench_function(format!("{}.KeyDecode", T::NAME), |b| {
         b.iter_with_setup(
-            || pair.clone(),
-            |pair| {
+            || input.clone(),
+            |input| {
                 black_box({
-                    for (_, k, _, _) in pair {
+                    for (_, k, _, _) in input {
                         let _ = <T as Table>::Key::decode(k);
                     }
                 });
@@ -81,10 +81,10 @@ where
 
     group.bench_function(format!("{}.ValueCompress", T::NAME), move |b| {
         b.iter_with_setup(
-            || pair.clone(),
-            |pair| {
+            || input.clone(),
+            |input| {
                 black_box({
-                    for (_, _, v, _) in pair {
+                    for (_, _, v, _) in input {
                         v.compress();
                     }
                 });
@@ -94,10 +94,10 @@ where
 
     group.bench_function(format!("{}.ValueDecompress", T::NAME), |b| {
         b.iter_with_setup(
-            || pair.clone(),
-            |pair| {
+            || input.clone(),
+            |input| {
                 black_box({
-                    for (_, _, _, v) in pair {
+                    for (_, _, _, v) in input {
                         let _ = <T as Table>::Value::decompress(v);
                     }
                 });
@@ -112,7 +112,7 @@ where
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
-    let pair = &load_vectors::<T>();
+    let input = &load_vectors::<T>();
     let bench_db_path = Path::new(BENCH_DB_PATH);
 
     group.bench_function(format!("{}.SeqWrite", T::NAME), |b| {
@@ -122,15 +122,15 @@ where
                 let _ = std::fs::remove_dir_all(bench_db_path);
                 let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
-                (pair.clone(), db)
+                (input.clone(), db)
             },
-            |(pair, db)| {
+            |(input, db)| {
                 // Create TX
                 let tx = db.tx_mut().expect("tx");
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
                 black_box({
-                    for (k, _, v, _) in pair {
+                    for (k, _, v, _) in input {
                         crsr.append(k, v).expect("submit");
                     }
 
@@ -148,7 +148,8 @@ where
                 let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
                 (
-                    pair.iter()
+                    input
+                        .iter()
                         .enumerate()
                         .filter(|(i, _)| RANDOM_INDEXES.contains(i))
                         .map(|(i, e)| (i, e.clone()))
@@ -156,13 +157,13 @@ where
                     db,
                 )
             },
-            |(pair, db)| {
+            |(input, db)| {
                 // Create TX
                 let tx = db.tx_mut().expect("tx");
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
                 black_box({
-                    for (_, (k, _, v, _)) in pair {
+                    for (_, (k, _, v, _)) in input {
                         crsr.insert(k, v).expect("submit");
                     }
 
@@ -173,7 +174,7 @@ where
     });
 
     group.bench_function(format!("{}.SeqRead", T::NAME), |b| {
-        let db = set_up_db::<T>(bench_db_path, pair);
+        let db = set_up_db::<T>(bench_db_path, input);
 
         b.iter(|| {
             // Create TX
@@ -181,7 +182,7 @@ where
 
             black_box({
                 let mut cursor = tx.cursor_read::<T>().expect("cursor");
-                let walker = cursor.walk(pair.first().unwrap().0.clone()).unwrap();
+                let walker = cursor.walk(input.first().unwrap().0.clone()).unwrap();
                 for element in walker {
                     element.unwrap();
                 }
@@ -190,7 +191,7 @@ where
     });
 
     group.bench_function(format!("{}.RandomRead", T::NAME), |b| {
-        let db = set_up_db::<T>(bench_db_path, pair);
+        let db = set_up_db::<T>(bench_db_path, input);
 
         b.iter(|| {
             // Create TX
@@ -199,7 +200,7 @@ where
             black_box({
                 for index in RANDOM_INDEXES {
                     let mut cursor = tx.cursor_read::<T>().expect("cursor");
-                    cursor.seek_exact(pair.get(index).unwrap().0.clone()).unwrap();
+                    cursor.seek_exact(input.get(index).unwrap().0.clone()).unwrap();
                 }
             });
         })
