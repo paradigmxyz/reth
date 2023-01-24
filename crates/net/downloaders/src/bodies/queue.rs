@@ -39,12 +39,21 @@ impl<B> BodiesRequestQueue<B>
 where
     B: BodiesClient + 'static,
 {
+    /// Returns `true` if the queue is empty.
     pub(crate) fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
+    /// Returns the number of queued requests.
     pub(crate) fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Clears the inner queue and related data.
+    pub(crate) fn clear(&mut self) {
+        self.inner.clear();
+        self.block_numbers.clear();
+        self.last_requested_block_number.take();
     }
 
     /// Add new request to the queue.
