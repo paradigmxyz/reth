@@ -304,11 +304,7 @@ pub fn execute<DB: StateProvider>(
 
     let spec_id = revm_spec(
         chain_spec,
-        ForkDiscriminant::new(
-            header.number,
-            chain_spec.terminal_total_difficulty().unwrap_or_default(),
-            header.timestamp,
-        ),
+        ForkDiscriminant::new(header.number, header.difficulty, header.timestamp),
     );
     evm.env.cfg.chain_id = U256::from(chain_spec.chain().id());
     evm.env.cfg.spec_id = spec_id;
@@ -458,11 +454,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // amount. We raise the block’s beneficiary account by Rblock; for each ommer, we raise the
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
-    let discriminant = ForkDiscriminant::new(
-        header.number,
-        chain_spec.terminal_total_difficulty().unwrap_or_default(),
-        header.timestamp,
-    );
+    let discriminant = ForkDiscriminant::new(header.number, header.difficulty, header.timestamp);
 
     match discriminant {
         d if chain_spec.fork_active(Hardfork::Paris, d) => None,

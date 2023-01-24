@@ -227,7 +227,7 @@ impl From<EthersGenesis> for ChainSpec {
 
         let genesis_hash = Header::from(genesis_block.clone()).seal().hash();
         let paris_ttd = genesis.config.terminal_total_difficulty.map(|ttd| ttd.into());
-        let hardfork_opts = vec![
+        let mut hardfork_opts = vec![
             (Hardfork::Homestead, genesis.config.homestead_block),
             (Hardfork::Dao, genesis.config.dao_fork_block),
             (Hardfork::Tangerine, genesis.config.eip150_block),
@@ -241,8 +241,13 @@ impl From<EthersGenesis> for ChainSpec {
             (Hardfork::London, genesis.config.london_block),
             (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
             (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
-            (Hardfork::Paris, genesis.config.merge_netsplit_block),
         ];
+
+        // Paris block is not used to fork, and is not used in genesis.json
+        // except in Sepolia
+        if genesis.config.chain_id == Chain::sepolia().id() {
+            hardfork_opts.push((Hardfork::Paris, genesis.config.merge_netsplit_block))
+        }
 
         let configured_hardforks = hardfork_opts
             .iter()
@@ -317,7 +322,6 @@ impl ChainSpecBuilder {
 
     /// Enables Frontier
     pub fn frontier_activated(mut self) -> Self {
-        self.hardforks.clear();
         self.hardforks.insert(Hardfork::Frontier, ForkKind::Block(0));
         self
     }

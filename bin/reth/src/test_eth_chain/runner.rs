@@ -20,7 +20,7 @@ use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 /// The outcome of a test.
 #[derive(Debug)]
@@ -198,8 +198,9 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         {
             let mut transaction = Transaction::new(db.as_ref())?;
 
-            // ignore error
-            let _ = stage.execute(&mut transaction, input).await;
+            if let Err(err) = stage.execute(&mut transaction, input).await {
+                warn!("{:#}", err);
+            }
             transaction.commit()?;
         }
 
