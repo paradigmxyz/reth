@@ -97,60 +97,62 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
             // Aggregate all transition changesets and and make list of storages that have been
             // changed.
-            tx.get_range::<tables::StorageChangeSet>(
+            let storage_changeset_batch = tx.get_range::<tables::StorageChangeSet>(
                 (from_transition, Address::zero()).into(),
                 (to_transition, Address::zero()).into(),
-            )?
-            .into_iter()
-            // fold all storages and save its old state so we can remove it from HashedStorage
-            // it is needed as it is dup table.
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, BTreeMap<H256, U256>>,
-                 (TransitionIdAddress((_, address)), storage_entry)| {
-                    accounts
-                        .entry(address)
-                        .or_default()
-                        .insert(storage_entry.key, storage_entry.value);
-                    accounts
-                },
-            )
-            .into_iter()
-            // iterate over plain state and get newest storage value.
-            // Assumption we are okay with is that plain state represent
-            // `previous_stage_progress` state.
-            .map(|(address, storage)| {
-                storage
-                    .into_iter()
-                    .map(|(key, val)| {
-                        plain_storage
-                            .seek_by_key_subkey(address, key)
-                            .map(|ret| (key, (val, ret.map(|e| e.value))))
-                    })
-                    .collect::<Result<BTreeMap<_, _>, _>>()
-                    .map(|storage| (address, storage))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            // Hash the address and key and apply them to HashedStorage (if Storage is None
-            // just remove it);
-            .try_for_each(|(address, storage)| {
-                let hashed_address = keccak256(address);
-                storage.into_iter().try_for_each(
-                    |(key, (old_val, new_val))| -> Result<(), StageError> {
-                        let key = keccak256(key);
-                        tx.delete::<tables::HashedStorage>(
-                            hashed_address,
-                            Some(StorageEntry { key, value: old_val }),
-                        )?;
-                        if let Some(value) = new_val {
-                            let val = StorageEntry { key, value };
-                            tx.put::<tables::HashedStorage>(hashed_address, val)?
-                        }
-                        Ok(())
+            )?;
+
+            storage_changeset_batch
+                .into_iter()
+                // fold all storages and save its old state so we can remove it from HashedStorage
+                // it is needed as it is dup table.
+                .fold(
+                    BTreeMap::new(),
+                    |mut accounts: BTreeMap<Address, BTreeMap<H256, U256>>,
+                     (TransitionIdAddress((_, address)), storage_entry)| {
+                        accounts
+                            .entry(address)
+                            .or_default()
+                            .insert(storage_entry.key, storage_entry.value);
+                        accounts
                     },
                 )
-            })?;
+                .into_iter()
+                // iterate over plain state and get newest storage value.
+                // Assumption we are okay with is that plain state represent
+                // `previous_stage_progress` state.
+                .map(|(address, storage)| {
+                    storage
+                        .into_iter()
+                        .map(|(key, val)| {
+                            plain_storage
+                                .seek_by_key_subkey(address, key)
+                                .map(|ret| (key, (val, ret.map(|e| e.value))))
+                        })
+                        .collect::<Result<BTreeMap<_, _>, _>>()
+                        .map(|storage| (address, storage))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                // Hash the address and key and apply them to HashedStorage (if Storage is None
+                // just remove it);
+                .try_for_each(|(address, storage)| {
+                    let hashed_address = keccak256(address);
+                    storage.into_iter().try_for_each(
+                        |(key, (old_val, new_val))| -> Result<(), StageError> {
+                            let key = keccak256(key);
+                            tx.delete::<tables::HashedStorage>(
+                                hashed_address,
+                                Some(StorageEntry { key, value: old_val }),
+                            )?;
+                            if let Some(value) = new_val {
+                                let val = StorageEntry { key, value };
+                                tx.put::<tables::HashedStorage>(hashed_address, val)?
+                            }
+                            Ok(())
+                        },
+                    )
+                })?;
         }
 
         info!(target: "sync::stages::hashing_storage", "Stage finished");
@@ -169,37 +171,39 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         let mut hashed_storage = tx.cursor_dup_write::<tables::HashedStorage>()?;
 
         // Aggregate all transition changesets and make list of accounts that have been changed.
-        tx.get_range::<tables::StorageChangeSet>(
+        let storage_changeset_batch = tx.get_range::<tables::StorageChangeSet>(
             (from_transition_rev, Address::zero()).into(),
             (to_transition_rev, Address::zero()).into(),
-        )?
-        .into_iter()
-        .rev()
-        // fold all account to get the old balance/nonces and account that needs to be removed
-        .fold(
-            BTreeMap::new(),
-            |mut accounts: BTreeMap<(Address, H256), U256>,
-             (TransitionIdAddress((_, address)), storage_entry)| {
-                accounts.insert((address, storage_entry.key), storage_entry.value);
-                accounts
-            },
-        )
-        .into_iter()
-        // hash addresses and collect it inside sorted BTreeMap.
-        // We are doing keccak only once per address.
-        .map(|((address, key), value)| ((keccak256(address), keccak256(key)), value))
-        .collect::<BTreeMap<_, _>>()
-        .into_iter()
-        // Apply values to HashedStorage (if Value is zero remove it);
-        .try_for_each(|((address, key), value)| -> Result<(), StageError> {
-            hashed_storage.seek_by_key_subkey(address, key)?;
-            hashed_storage.delete_current()?;
+        )?;
 
-            if value != U256::ZERO {
-                hashed_storage.append_dup(address, StorageEntry { key, value })?;
-            }
-            Ok(())
-        })?;
+        storage_changeset_batch
+            .into_iter()
+            .rev()
+            // fold all account to get the old balance/nonces and account that needs to be removed
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<(Address, H256), U256>,
+                 (TransitionIdAddress((_, address)), storage_entry)| {
+                    accounts.insert((address, storage_entry.key), storage_entry.value);
+                    accounts
+                },
+            )
+            .into_iter()
+            // hash addresses and collect it inside sorted BTreeMap.
+            // We are doing keccak only once per address.
+            .map(|((address, key), value)| ((keccak256(address), keccak256(key)), value))
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            // Apply values to HashedStorage (if Value is zero remove it);
+            .try_for_each(|((address, key), value)| -> Result<(), StageError> {
+                hashed_storage.seek_by_key_subkey(address, key)?;
+                hashed_storage.delete_current()?;
+
+                if value != U256::ZERO {
+                    hashed_storage.append_dup(address, StorageEntry { key, value })?;
+                }
+                Ok(())
+            })?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
