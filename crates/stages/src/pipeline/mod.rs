@@ -408,6 +408,7 @@ mod tests {
                 TestStage::new(StageId("B"))
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
             )
+            .with_max_block(10)
             .build();
         let events = pipeline.events();
 
@@ -470,6 +471,23 @@ mod tests {
         assert_eq!(
             UnboundedReceiverStream::new(events).collect::<Vec<PipelineEvent>>().await,
             vec![
+                // Executing
+                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("A"),
+                    result: ExecOutput { stage_progress: 100, done: true },
+                },
+                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("B"),
+                    result: ExecOutput { stage_progress: 10, done: true },
+                },
+                PipelineEvent::Running { stage_id: StageId("C"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("C"),
+                    result: ExecOutput { stage_progress: 20, done: true },
+                },
+                // Unwinding
                 PipelineEvent::Unwinding {
                     stage_id: StageId("C"),
                     input: UnwindInput { stage_progress: 20, unwind_to: 1, bad_block: None }
