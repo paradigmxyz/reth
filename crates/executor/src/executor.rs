@@ -6,8 +6,8 @@ use hashbrown::hash_map::Entry;
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Bloom, ChainSpec, ForkDiscriminant, Hardfork, Header, Log,
-    Receipt, TransactionSignedEcRecovered, H160, H256, U256,
+    bloom::logs_bloom, Account, Address, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
+    TransactionSignedEcRecovered, H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -302,10 +302,7 @@ pub fn execute<DB: StateProvider>(
     let mut evm = EVM::new();
     evm.database(db);
 
-    let spec_id = revm_spec(
-        chain_spec,
-        ForkDiscriminant::new(header.number, header.difficulty, header.timestamp),
-    );
+    let spec_id = revm_spec(chain_spec, header.into());
     evm.env.cfg.chain_id = U256::from(chain_spec.chain().id());
     evm.env.cfg.spec_id = spec_id;
     evm.env.cfg.perf_all_precompiles_have_balance = false;
@@ -454,9 +451,7 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // amount. We raise the block’s beneficiary account by Rblock; for each ommer, we raise the
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
-    let discriminant = ForkDiscriminant::new(header.number, header.difficulty, header.timestamp);
-
-    match discriminant {
+    match header.into() {
         d if chain_spec.fork_active(Hardfork::Paris, d) => None,
         d if chain_spec.fork_active(Hardfork::Petersburg, d) => Some(WEI_2ETH),
         d if chain_spec.fork_active(Hardfork::Byzantium, d) => Some(WEI_3ETH),

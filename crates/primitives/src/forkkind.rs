@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BlockNumber, ChainSpec, U256};
+use crate::{BlockNumber, ChainSpec, Header, U256};
 
 /// Hardforks can be based on block numbers (pre-merge), TTD (Paris)
 /// or timestamp (post-merge)
@@ -78,5 +78,15 @@ impl ForkDiscriminant {
 impl From<BlockNumber> for ForkDiscriminant {
     fn from(value: BlockNumber) -> Self {
         Self { block_number: value, ..Default::default() }
+    }
+}
+
+impl From<&Header> for ForkDiscriminant {
+    fn from(value: &Header) -> Self {
+        Self {
+            block_number: value.number,
+            total_difficulty: value.difficulty,
+            timestamp: value.timestamp,
+        }
     }
 }
