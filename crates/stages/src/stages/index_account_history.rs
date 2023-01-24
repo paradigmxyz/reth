@@ -68,26 +68,10 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             .into_iter()
             // insert indexes to AccontHistory.
             .try_for_each(|(address, mut indices)| -> Result<(), StageError> {
-                // load last shard and check if it is full, remove last shard and append indices.
-                let indices = if let Some((shard_key, list)) =
-                    tx.get_account_history_biggest_sharded_index(address)?
-                {
-                    if list.len() >= NUM_OF_INDICES_IN_SHARD {
-                        // if latest shard is full, just append new indices
-                        indices
-                    } else {
-                        // delete old shard so new one can be inserted.
-                        tx.delete::<tables::AccountHistory>(shard_key, None)?;
-                        let mut list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-                        list.append(&mut indices);
-                        list
-                    }
-                } else {
-                    // if presently there isn't any shard insert all indices
-                    indices
-                };
+                let mut last_shard = take_last_notfull_account_shard(tx, address)?;
+                last_shard.append(&mut indices);
                 // chunk indices and insert them in shards of N size.
-                indices.into_iter().chunks(NUM_OF_INDICES_IN_SHARD).into_iter().try_for_each(
+                last_shard.into_iter().chunks(NUM_OF_INDICES_IN_SHARD).into_iter().try_for_each(
                     |chuck| {
                         let list = chuck.map(|i| i as usize).collect::<Vec<_>>();
                         let biggest_id =
@@ -151,6 +135,26 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
+}
+
+/// Load last shard and check if it is full and remove if it is not. If list is empty, last shard
+/// was full or there is no shards at all.
+pub fn take_last_notfull_account_shard<DB: Database>(
+    tx: &Transaction<'_, DB>,
+    address: Address,
+) -> Result<Vec<u64>, StageError> {
+    if let Some((shard_key, list)) = tx.get_account_history_biggest_sharded_index(address)? {
+        if list.len() >= NUM_OF_INDICES_IN_SHARD {
+            // if latest shard is full, just return empty vec
+            return Ok(Vec::new())
+        } else {
+            // delete old shard so new one can be inserted.
+            tx.delete::<tables::AccountHistory>(shard_key, None)?;
+            let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
+            return Ok(list)
+        }
+    }
+    Ok(Vec::new())
 }
 
 /// Unwind all history shards. For boundary shard, remove it from database and
