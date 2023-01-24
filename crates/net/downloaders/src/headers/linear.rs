@@ -248,7 +248,7 @@ where
                 let mut headers = headers.0;
 
                 // update total downloaded metric
-                self.metrics.update_total_downloaded(headers.len());
+                self.metrics.total_downloaded.increment(headers.len() as u64);
 
                 // sort headers from highest to lowest block number
                 headers.sort_unstable_by_key(|h| Reverse(h.number));
@@ -306,7 +306,7 @@ where
                 let mut headers = headers.0;
 
                 // update total downloaded metric
-                self.metrics.update_total_downloaded(headers.len());
+                self.metrics.total_downloaded.increment(headers.len() as u64);
 
                 trace!(target: "downloaders::headers", len=%headers.len(), "Received headers response");
 
@@ -391,7 +391,7 @@ where
         self.penalize_peer(peer_id, &error);
 
         // Update error metric
-        self.metrics.update_error_metrics(&error);
+        self.metrics.increment_errors(&error);
 
         // Re-submit the request
         self.submit_request(request, Priority::High);
@@ -548,7 +548,7 @@ where
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
                         this.penalize_peer(err.peer_id, &err.error);
-                        this.metrics.update_error_metrics(&err.error);
+                        this.metrics.increment_errors(&err.error);
                         this.sync_target_request =
                             Some(this.request_fut(err.request, Priority::High));
                     } else {
@@ -612,7 +612,7 @@ where
 
                 trace!(target: "downloaders::headers", batch=%next_batch.len(), "Returning validated batch");
 
-                this.metrics.update_total_returned(next_batch.len());
+                this.metrics.total_returned.increment(next_batch.len() as u64);
                 return Poll::Ready(Some(next_batch))
             }
 
@@ -628,7 +628,7 @@ where
                 this.clear();
                 return Poll::Ready(None)
             }
-            this.metrics.update_total_returned(next_batch.len());
+            this.metrics.total_returned.increment(next_batch.len() as u64);
             return Poll::Ready(Some(next_batch))
         }
 
