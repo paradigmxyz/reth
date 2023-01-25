@@ -1,6 +1,6 @@
 use crate::{
-    proofs::genesis_state_root, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
-    GenesisAccount, Hardfork, Header, H160, H256, U256,
+    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
+    H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
@@ -195,8 +195,6 @@ impl From<EthersGenesis> for ChainSpec {
             .map(|(addr, account)| (addr.0.into(), account.clone().into()))
             .collect::<HashMap<H160, GenesisAccount>>();
 
-        let state_root = genesis_state_root(alloc.clone());
-
         let genesis_block = Genesis {
             nonce: genesis.nonce.as_u64(),
             timestamp: genesis.timestamp.as_u64(),
@@ -206,7 +204,6 @@ impl From<EthersGenesis> for ChainSpec {
             coinbase: genesis.coinbase.0.into(),
             extra_data: genesis.extra_data.0.into(),
             alloc,
-            state_root,
         };
 
         let genesis_hash = Header::from(genesis_block.clone()).seal().hash();
