@@ -5,7 +5,8 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! <reth crate template>
+//! This crate contains a collection of traits and trait implementations for common database
+//! operations.
 
 /// Various provider traits.
 mod traits;
