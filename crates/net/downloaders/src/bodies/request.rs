@@ -1,10 +1,10 @@
 use futures::{Future, FutureExt};
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
-    consensus::{Consensus as ConsensusTrait, Consensus, Error as ConsensusError},
+    consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
-        error::{PeerRequestResult, RequestError},
+        error::{DownloadError, PeerRequestResult},
     },
 };
 use reth_primitives::{PeerId, SealedBlock, SealedHeader, H256};
@@ -13,21 +13,8 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use thiserror::Error;
 
 type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send>>;
-
-#[derive(Error, Debug)]
-enum BodyRequestError {
-    #[error("Received empty response")]
-    EmptyResponse,
-    #[error("Received more bodies than requested. Expected: {expected}. Received: {received}")]
-    TooManyBodies { expected: usize, received: usize },
-    #[error("Error validating body for header {hash:?}: {error}")]
-    Validation { hash: H256, error: ConsensusError },
-    #[error(transparent)]
-    Request(#[from] RequestError),
-}
 
 /// Body request implemented as a [Future].
 ///
@@ -86,7 +73,7 @@ where
         self
     }
 
-    fn on_error(&mut self, error: BodyRequestError, peer_id: Option<PeerId>) {
+    fn on_error(&mut self, error: DownloadError, peer_id: Option<PeerId>) {
         tracing::error!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
         if let Some(peer_id) = peer_id {
             self.client.report_bad_message(peer_id);
@@ -114,7 +101,7 @@ where
     ///
     /// If the number of buffered bodies does not equal the number of non empty headers.
     #[allow(clippy::result_large_err)]
-    fn try_construct_blocks(&mut self) -> Result<Vec<BlockResponse>, (PeerId, BodyRequestError)> {
+    fn try_construct_blocks(&mut self) -> Result<Vec<BlockResponse>, (PeerId, DownloadError)> {
         // Drop the allocated memory for the buffer. Optimistically, it will not be reused.
         let mut bodies = std::mem::take(&mut self.buffer).into_iter();
         let mut results = Vec::default();
@@ -135,7 +122,7 @@ where
                 // This ensures that the TxRoot and OmmersRoot from the header match the
                 // ones calculated manually from the block body.
                 self.consensus.pre_validate_block(&block).map_err(|error| {
-                    (peer_id, BodyRequestError::Validation { hash: header.hash(), error })
+                    (peer_id, DownloadError::BodyValidation { hash: header.hash(), error })
                 })?;
 
                 results.push(BlockResponse::Full(block));
@@ -161,27 +148,25 @@ where
                 match ready!(fut.poll_unpin(cx)) {
                     Ok(response) => {
                         let (peer_id, bodies) = response.split();
-                        if bodies.is_empty() {
-                            this.on_error(BodyRequestError::EmptyResponse, Some(peer_id));
+                        let request_len = this.hashes_to_download.len();
+                        let response_len = bodies.len();
+                        // Malicious peers often return a single block. Mark responses with single
+                        // block when more than 1 were requested invalid.
+                        // TODO: Instead of marking single block responses invalid, calculate
+                        // soft response size lower limit and use that for filtering.
+                        if bodies.is_empty() || (request_len != 1 && response_len == 1) {
+                            this.on_error(DownloadError::EmptyResponse, Some(peer_id));
                             continue
                         }
 
-                        let request_len = this.hashes_to_download.len();
-                        let response_len = bodies.len();
                         if response_len > request_len {
                             this.on_error(
-                                BodyRequestError::TooManyBodies {
+                                DownloadError::TooManyBodies {
                                     expected: request_len,
                                     received: response_len,
                                 },
                                 Some(peer_id),
                             );
-                            continue
-                        }
-
-                        // TODO: Consider limiting
-                        if request_len != 1 && response_len == 1 {
-                            this.on_error(BodyRequestError::EmptyResponse, Some(peer_id));
                             continue
                         }
 
