@@ -8,7 +8,7 @@ use reth_network::{
     NetworkConfig, NetworkConfigBuilder, PeersConfig,
 };
 use reth_primitives::{ChainSpec, NodeRecord};
-use reth_provider::ProviderImpl;
+use reth_provider::ShareableDatabase;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the reth node.
@@ -31,7 +31,7 @@ impl Config {
         disable_discovery: bool,
         bootnodes: Option<Vec<NodeRecord>>,
         nat_resolution_method: reth_net_nat::NatResolver,
-    ) -> NetworkConfig<ProviderImpl<DB>> {
+    ) -> NetworkConfig<ShareableDatabase<DB>> {
         let peer_config = reth_network::PeersConfig::default()
             .with_trusted_nodes(self.peers.trusted_nodes.clone())
             .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
@@ -43,7 +43,7 @@ impl Config {
             .discovery(discv4)
             .chain_spec(chain_spec)
             .set_discovery(disable_discovery)
-            .build(Arc::new(ProviderImpl::new(db)))
+            .build(Arc::new(ShareableDatabase::new(db)))
     }
 }
 
