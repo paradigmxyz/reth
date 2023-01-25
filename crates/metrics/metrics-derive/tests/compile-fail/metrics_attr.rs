@@ -24,7 +24,7 @@ struct CustomMetrics4;
 struct CustomMetrics5;
 
 #[derive(Metrics)]
-#[metrics(scope = "some.scope")]
+#[metrics(scope = "some-scope")]
 struct CustomMetrics6;
 
 #[derive(Metrics)]
