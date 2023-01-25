@@ -123,3 +123,322 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::{
+        test_utils::{
+            stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+            TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        },
+        trie::EthAccount,
+    };
+    use assert_matches::assert_matches;
+    use reth_db::{
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+        models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
+    };
+    use reth_interfaces::test_utils::generators::{
+        random_block_range, random_contract_account_range,
+    };
+    use reth_primitives::{
+        keccak256, proofs::KeccakHasher, Account, Address, SealedBlock, StorageEntry, H256, U256,
+    };
+    use reth_rlp::Encodable;
+    use triehash::sec_trie_root;
+
+    stage_test_suite_ext!(MerkleTestRunner, merkle);
+
+    /// Execute with low clean threshold so as to hash whole storage
+    #[tokio::test]
+    async fn execute_clean() {
+        let (previous_stage, stage_progress) = (500, 100);
+
+        // Set up the runner
+        let mut runner = MerkleTestRunner::default();
+        // set low threshold so we hash the whole storage
+        runner.set_clean_threshold(1);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done, stage_progress })
+                if done && stage_progress == previous_stage
+        );
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    struct MerkleTestRunner {
+        tx: TestTransaction,
+        clean_threshold: u64,
+        is_execute: bool,
+    }
+
+    impl Default for MerkleTestRunner {
+        fn default() -> Self {
+            Self { tx: TestTransaction::default(), clean_threshold: 0, is_execute: true }
+        }
+    }
+
+    impl StageTestRunner for MerkleTestRunner {
+        type S = MerkleStage;
+
+        fn tx(&self) -> &TestTransaction {
+            &self.tx
+        }
+
+        fn stage(&self) -> Self::S {
+            Self::S { clean_threshold: self.clean_threshold, is_execute: self.is_execute }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ExecuteStageTestRunner for MerkleTestRunner {
+        type Seed = Vec<SealedBlock>;
+
+        fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
+            let stage_progress = input.stage_progress.unwrap_or_default();
+            let end = input.previous_stage_progress() + 1;
+
+            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..3);
+
+            self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+
+            let iter = blocks.iter();
+            let (mut transition_id, mut tx_id) = (0, 0);
+
+            let n_accounts = 31;
+            let mut accounts = random_contract_account_range(&mut (0..n_accounts));
+
+            let mut storages: BTreeMap<Address, BTreeMap<H256, U256>> = BTreeMap::new();
+
+            for progress in iter {
+                // Insert last progress data
+                self.tx.commit(|tx| {
+                    let key: BlockNumHash = (progress.number, progress.hash()).into();
+
+                    let body = StoredBlockBody {
+                        start_tx_id: tx_id,
+                        tx_count: progress.body.len() as u64,
+                    };
+
+                    progress.body.iter().try_for_each(|transaction| {
+                        tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
+                        tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
+                        tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
+                        tx_id += 1;
+                        Ok(())
+                    })?;
+
+                    // seed account changeset
+                    for (addr, prev_acc) in &mut accounts {
+                        let acc_before_tx =
+                            AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
+                        transition_id += 1;
+                        tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
+
+                        prev_acc.nonce += 1;
+                        prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
+
+                        let new_entry = StorageEntry {
+                            key: H256::from(keccak256(&[rand::random::<u8>()])),
+                            value: U256::from(rand::random::<u8>()),
+                        };
+                        let storage = storages.entry(*addr).or_default();
+                        let old_value = storage.entry(new_entry.key).or_default();
+
+                        transition_id += 1;
+                        tx.put::<tables::StorageChangeSet>(
+                            (transition_id, *addr).into(),
+                            StorageEntry { key: new_entry.key, value: *old_value },
+                        )?;
+
+                        *old_value = new_entry.value;
+                    }
+
+                    tx.put::<tables::BlockTransitionIndex>(key.number(), transition_id)?;
+                    tx.put::<tables::BlockBodies>(key, body)
+                })?;
+            }
+
+            self.insert_accounts(&accounts)?;
+            self.insert_storages(&storages)?;
+
+            let last_numhash = self.tx.inner().get_block_numhash(end - 1).unwrap();
+            let root = self.state_root()?;
+            self.tx.commit(|tx| {
+                let mut last_header = tx.get::<tables::Headers>(last_numhash)?.unwrap();
+                last_header.state_root = root;
+                tx.put::<tables::Headers>(last_numhash, last_header)
+            })?;
+
+            Ok(blocks)
+        }
+
+        fn validate_execution(
+            &self,
+            input: ExecInput,
+            output: Option<ExecOutput>,
+        ) -> Result<(), TestRunnerError> {
+            if let Some(output) = output {
+                let start_block = input.stage_progress.unwrap_or_default() + 1;
+                let end_block = output.stage_progress;
+                if start_block > end_block {
+                    return Ok(())
+                }
+            }
+            self.check_table_is_populated()
+        }
+    }
+
+    impl UnwindStageTestRunner for MerkleTestRunner {
+        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+            self.unwind_storage(input)?;
+            self.check_table_is_populated()
+        }
+    }
+
+    impl MerkleTestRunner {
+        fn set_clean_threshold(&mut self, threshold: u64) {
+            self.clean_threshold = threshold;
+        }
+
+        #[allow(dead_code)]
+        fn set_is_execute(&mut self, is_execute: bool) {
+            self.is_execute = is_execute;
+        }
+
+        fn state_root(&self) -> Result<H256, TestRunnerError> {
+            self.tx
+                .query(|tx| {
+                    let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
+                    let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+                    // TODO: maybe extract root calculation as a test util?
+                    let accounts = accounts_cursor.walk(Address::zero())?.map_while(|res| {
+                        let Ok((address, account)) = res else {
+                                return None
+                            };
+                        let mut bytes = Vec::new();
+                        let storage = storage_cursor
+                            .walk_dup(address, H256::zero())
+                            .unwrap()
+                            .into_iter()
+                            .map_while(|res| {
+                                let Ok((_, StorageEntry { key, value })) = res else { return None };
+                                let mut bytes = Vec::new();
+                                value.encode(&mut bytes);
+                                Some((key, bytes))
+                            });
+                        let root = sec_trie_root::<KeccakHasher, _, _, _>(storage);
+                        let eth_account = EthAccount::from_with_root(account, root);
+                        eth_account.encode(&mut bytes);
+                        Some((address, bytes))
+                    });
+                    Ok(sec_trie_root::<KeccakHasher, _, _, _>(accounts))
+                })
+                .map_err(|e| e.into())
+        }
+
+        pub(crate) fn insert_accounts(
+            &self,
+            accounts: &[(Address, Account)],
+        ) -> Result<(), TestRunnerError> {
+            for (addr, acc) in accounts.iter() {
+                self.tx.commit(|tx| {
+                    tx.put::<tables::PlainAccountState>(*addr, *acc)?;
+                    Ok(())
+                })?;
+            }
+
+            Ok(())
+        }
+
+        fn insert_storages(
+            &self,
+            storages: &BTreeMap<Address, BTreeMap<H256, U256>>,
+        ) -> Result<(), TestRunnerError> {
+            self.tx
+                .commit(|tx| {
+                    storages.iter().try_for_each(|(&addr, storage)| {
+                        storage.iter().try_for_each(|(&key, &value)| {
+                            let entry = StorageEntry { key, value };
+                            tx.put::<tables::PlainStorageState>(addr, entry)
+                        })
+                    })?;
+                    storages
+                        .into_iter()
+                        .map(|(addr, storage)| {
+                            (
+                                keccak256(addr),
+                                storage.into_iter().map(|(key, value)| (keccak256(key), value)),
+                            )
+                        })
+                        .collect::<BTreeMap<_, _>>()
+                        .into_iter()
+                        .try_for_each(|(addr, storage)| {
+                            storage.into_iter().try_for_each(|(key, &value)| {
+                                let entry = StorageEntry { key, value };
+                                tx.put::<tables::HashedStorage>(addr, entry)
+                            })
+                        })?;
+                    Ok(())
+                })
+                .map_err(|e| e.into())
+        }
+
+        fn unwind_storage(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+            let target_transition = self
+                .tx
+                .inner()
+                .get_block_transition(input.unwind_to)
+                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
+            self.tx.commit(|tx| {
+                let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+                let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
+
+                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
+
+                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
+                    if tid_address.transition_id() <= target_transition {
+                        break
+                    }
+
+                    storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?;
+                    storage_cursor.delete_current()?;
+
+                    if entry.value != U256::ZERO {
+                        storage_cursor.append_dup(tid_address.address(), entry)?;
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(())
+        }
+
+        fn check_table_is_populated(&self) -> Result<(), TestRunnerError> {
+            assert_eq!(
+                self.tx.table_is_empty::<tables::AccountsTrie>()?,
+                self.tx.table_is_empty::<tables::PlainAccountState>()?
+            );
+            assert_eq!(
+                self.tx.table_is_empty::<tables::StoragesTrie>()?,
+                self.tx.table_is_empty::<tables::PlainStorageState>()?
+            );
+            Ok(())
+        }
+    }
+}

@@ -435,7 +435,7 @@ where
 
 /// An Ethereum account, for RLP encoding traits deriving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
-struct EthAccount {
+pub(crate) struct EthAccount {
     /// Account nonce.
     nonce: u64,
     /// Account balance.
@@ -454,6 +454,12 @@ impl From<Account> for EthAccount {
             storage_root: EMPTY_ROOT,
             code_hash: acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
         }
+    }
+}
+
+impl EthAccount {
+    pub(crate) fn from_with_root(acc: Account, storage_root: H256) -> EthAccount {
+        Self { storage_root, ..Self::from(acc) }
     }
 }
 
@@ -478,9 +484,10 @@ impl DBTrieLoader {
             TrieDBMutBuilder::new(&mut db, &mut root).build();
 
         while let Some((hashed_address, account)) = walker.next().transpose()? {
-            let mut value = EthAccount::from(account);
-
-            value.storage_root = self.calculate_storage_root(tx, hashed_address)?;
+            let value = EthAccount::from_with_root(
+                account,
+                self.calculate_storage_root(tx, hashed_address)?,
+            );
 
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
@@ -533,11 +540,14 @@ impl DBTrieLoader {
         let mut trie: TrieDBMut<'_, DBTrieLayout> =
             TrieDBMutBuilder::from_existing(&mut db, root).build();
 
+        // TODO: consider accounts which had only their storage changed
         while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
             let hashed_address = keccak256(address);
             if let Some((_, account)) = accounts_cursor.seek_exact(hashed_address)? {
-                let mut value = EthAccount::from(account);
-                value.storage_root = self.update_storage_root(tx, address, start_tid, end_tid)?;
+                let value = EthAccount::from_with_root(
+                    account,
+                    self.update_storage_root(tx, address, start_tid, end_tid)?,
+                );
 
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
@@ -727,7 +737,6 @@ mod tests {
             .unwrap();
         }
         let mut out = Vec::new();
-        let mut eth_account = EthAccount::from(account);
 
         let encoded_storage = storage.iter().map(|(k, v)| {
             let mut out = Vec::new();
@@ -735,7 +744,10 @@ mod tests {
             (k, out)
         });
 
-        eth_account.storage_root = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
+        let eth_account = EthAccount::from_with_root(
+            account,
+            H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0),
+        );
         eth_account.encode(&mut out);
         assert_eq!(
             trie.calculate_root(&tx),
