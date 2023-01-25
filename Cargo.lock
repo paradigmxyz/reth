@@ -4136,7 +4136,6 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-tracing",
- "thiserror",
  "tokio",
  "tracing",
 ]
