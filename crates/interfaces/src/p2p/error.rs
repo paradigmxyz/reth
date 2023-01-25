@@ -90,6 +90,7 @@ pub type DownloadResult<T> = Result<T, DownloadError>;
 /// The downloader error type
 #[derive(Error, Debug, Clone)]
 pub enum DownloadError {
+    /* ==================== HEADER ERRORS ==================== */
     /// Header validation failed
     #[error("Failed to validate header {hash}. Details: {error}.")]
     HeaderValidation {
@@ -99,18 +100,6 @@ pub enum DownloadError {
         #[source]
         error: consensus::Error,
     },
-    /// Block validation failed
-    #[error("Failed to validate body for header {hash}. Details: {error}.")]
-    BlockValidation {
-        /// Hash of header failing validation
-        hash: H256,
-        /// The details of validation failure
-        #[source]
-        error: consensus::Error,
-    },
-    /// Timed out while waiting for request id response.
-    #[error("Timed out while getting headers for request.")]
-    Timeout,
     /// Error when checking that the current [`Header`] has the parent's hash as the parent_hash
     /// field, and that they have sequential block numbers.
     #[error("Headers did not match, current number: {header_number} / current hash: {header_hash}, parent number: {parent_number} / parent_hash: {parent_hash}")]
@@ -124,9 +113,6 @@ pub enum DownloadError {
         /// The parent hash being evaluated
         parent_hash: H256,
     },
-    /// Received empty response while expecting headers
-    #[error("Received empty header response.")]
-    EmptyResponse,
     /// Received an invalid tip
     #[error("Received invalid tip: {received:?}. Expected {expected:?}.")]
     InvalidTip {
@@ -151,6 +137,31 @@ pub enum DownloadError {
         /// How many headers we expected.
         expected: u64,
     },
+    /* ==================== BODIES ERRORS ==================== */
+    /// Block validation failed
+    #[error("Failed to validate body for header {hash}. Details: {error}.")]
+    BodyValidation {
+        /// Hash of header failing validation
+        hash: H256,
+        /// The details of validation failure
+        #[source]
+        error: consensus::Error,
+    },
+    /// Received more bodies than requested.
+    #[error("Received more bodies than requested. Expected: {expected}. Received: {received}")]
+    TooManyBodies {
+        /// How many bodies we received.
+        received: usize,
+        /// How many bodies we expected.
+        expected: usize,
+    },
+    /* ==================== COMMON ERRORS ==================== */
+    /// Timed out while waiting for request id response.
+    #[error("Timed out while waiting for response.")]
+    Timeout,
+    /// Received empty response while expecting non empty
+    #[error("Received empty response.")]
+    EmptyResponse,
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
