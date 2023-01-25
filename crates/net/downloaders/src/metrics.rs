@@ -10,7 +10,7 @@ use reth_metrics_derive::Metrics;
 /// use reth_downloaders::metrics::DownloaderMetrics;
 /// use reth_interfaces::p2p::error::DownloadError;
 ///
-/// // Initialized metrics.
+/// // Initialize metrics.
 /// let metrics = DownloaderMetrics::new("downloaders.headers");
 /// // Increment `downloaders.headers.timeout_errors` counter by 1.
 /// metrics.increment_errors(&DownloadError::Timeout);
