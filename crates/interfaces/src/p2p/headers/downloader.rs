@@ -28,9 +28,6 @@ pub trait HeaderDownloader: Send + Sync + Stream<Item = Vec<SealedHeader>> + Unp
 
     /// Sets the headers batch size that the Stream should return.
     fn set_batch_size(&mut self, limit: usize);
-
-    /// Validate whether the header is valid in relation to it's parent
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()>;
 }
 
 /// Specifies the target to sync for [HeaderDownloader::update_sync_target]

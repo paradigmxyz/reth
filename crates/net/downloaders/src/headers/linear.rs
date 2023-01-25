@@ -92,6 +92,11 @@ impl<H> LinearDownloader<H>
 where
     H: HeadersClient + 'static,
 {
+    /// Convenience method to create a [LinearDownloadBuilder] without importing it
+    pub fn builder() -> LinearDownloadBuilder {
+        LinearDownloadBuilder::default()
+    }
+
     /// Returns the block number the local node is at.
     #[inline]
     fn local_block_number(&self) -> u64 {
@@ -446,6 +451,11 @@ where
         }
     }
 
+    /// Validate whether the header is valid in relation to it's parent
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)
+    }
+
     /// Clears all requests/responses.
     fn clear(&mut self) {
         self.lowest_validated_header.take();
@@ -526,11 +536,6 @@ where
 
     fn set_batch_size(&mut self, batch_size: usize) {
         self.stream_batch_size = batch_size;
-    }
-
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
-        validate_header_download(&self.consensus, header, parent)?;
-        Ok(())
     }
 }
 
@@ -875,19 +880,10 @@ fn calc_next_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
+
+    use crate::headers::test_utils::child_header;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
-
-    static CONSENSUS: Lazy<Arc<dyn Consensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
-
-    fn child_header(parent: &SealedHeader) -> SealedHeader {
-        let mut child = parent.as_ref().clone();
-        child.number += 1;
-        child.parent_hash = parent.hash_slow();
-        let hash = child.hash_slow();
-        SealedHeader::new(child, hash)
-    }
 
     /// Tests that request calc works
     #[test]
@@ -897,7 +893,7 @@ mod tests {
         let genesis = SealedHeader::default();
 
         let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             genesis,
             H256::random(),
@@ -924,7 +920,7 @@ mod tests {
         let header = SealedHeader::default();
 
         let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             header.clone(),
             H256::random(),
@@ -966,7 +962,7 @@ mod tests {
         let batch_size = 99;
         let start = 1000;
         let mut downloader = LinearDownloadBuilder::default().request_limit(batch_size).build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             genesis,
             H256::random(),
@@ -1017,7 +1013,7 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
             .extend(vec![
@@ -1047,7 +1043,7 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
             .extend(vec![
