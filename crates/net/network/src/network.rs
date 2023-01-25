@@ -19,7 +19,7 @@ use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256}
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -39,6 +39,7 @@ pub struct NetworkHandle {
 
 impl NetworkHandle {
     /// Creates a single new instance.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
@@ -47,6 +48,7 @@ impl NetworkHandle {
         peers: PeersHandle,
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
+        chain_id: Arc<AtomicU64>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -57,6 +59,7 @@ impl NetworkHandle {
             network_mode,
             bandwidth_meter,
             is_syncing: Arc::new(Default::default()),
+            chain_id,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -227,6 +230,10 @@ impl NetworkInfo for NetworkHandle {
         let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
         rx.await.map_err(Into::into)
     }
+
+    fn chain_id(&self) -> u64 {
+        self.inner.chain_id.load(Ordering::Relaxed)
+    }
 }
 
 impl StatusUpdater for NetworkHandle {
@@ -267,6 +274,8 @@ struct NetworkInner {
     bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
+    /// The chain id
+    chain_id: Arc<AtomicU64>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
