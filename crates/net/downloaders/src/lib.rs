@@ -14,7 +14,7 @@ pub mod bodies;
 pub mod headers;
 
 /// Common downloader metrics.
-mod metrics;
+pub mod metrics;
 
 #[cfg(test)]
 mod test_utils;

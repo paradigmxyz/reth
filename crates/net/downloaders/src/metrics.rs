@@ -3,7 +3,7 @@ use reth_interfaces::p2p::error::DownloadError;
 use reth_metrics_derive::Metrics;
 
 /// The header downloader metrics.
-#[derive(Metrics)]
+#[derive(Clone, Metrics)]
 #[metrics(dynamic = true)]
 pub struct DownloaderMetrics {
     /// The number of items that were successfully sent to the poller (stage)

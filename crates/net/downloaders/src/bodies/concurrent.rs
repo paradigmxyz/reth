@@ -497,6 +497,8 @@ impl ConcurrentDownloaderBuilder {
             concurrent_requests_range,
             max_buffered_responses,
         } = self;
+        let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
+        let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
         ConcurrentDownloader {
             client,
             consensus,
@@ -505,12 +507,12 @@ impl ConcurrentDownloaderBuilder {
             stream_batch_size,
             max_buffered_responses,
             concurrent_requests_range,
+            in_progress_queue,
+            metrics,
             download_range: Default::default(),
             latest_queued_block_number: None,
-            in_progress_queue: Default::default(),
             buffered_responses: Default::default(),
             queued_bodies: Default::default(),
-            metrics: DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE),
         }
     }
 }

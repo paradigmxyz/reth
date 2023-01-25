@@ -15,6 +15,8 @@ use std::{
 };
 use thiserror::Error;
 
+use crate::metrics::DownloaderMetrics;
+
 type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send>>;
 
 #[derive(Error, Debug)]
@@ -51,6 +53,7 @@ enum BodyRequestError {
 pub(crate) struct BodiesRequestFuture<B> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
+    metrics: DownloaderMetrics,
     // All requested headers
     headers: Vec<SealedHeader>,
     // Remaining hashes to download
@@ -64,10 +67,15 @@ where
     B: BodiesClient + 'static,
 {
     /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
-    pub(crate) fn new(client: Arc<B>, consensus: Arc<dyn Consensus>) -> Self {
+    pub(crate) fn new(
+        client: Arc<B>,
+        consensus: Arc<dyn Consensus>,
+        metrics: DownloaderMetrics,
+    ) -> Self {
         Self {
             client,
             consensus,
+            metrics,
             headers: Default::default(),
             hashes_to_download: Default::default(),
             buffer: Default::default(),
@@ -87,6 +95,8 @@ where
     }
 
     fn on_error(&mut self, error: BodyRequestError, peer_id: Option<PeerId>) {
+        // TODO: reenable when BodyRequestError is removed in favor of DownloadError
+        // self.metrics.increment_errors(error);
         tracing::error!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
         if let Some(peer_id) = peer_id {
             self.client.report_bad_message(peer_id);
@@ -161,6 +171,7 @@ where
                 match ready!(fut.poll_unpin(cx)) {
                     Ok(response) => {
                         let (peer_id, bodies) = response.split();
+                        this.metrics.total_downloaded.increment(bodies.len() as u64);
                         if bodies.is_empty() {
                             this.on_error(BodyRequestError::EmptyResponse, Some(peer_id));
                             continue
@@ -230,7 +241,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::test_utils::zip_blocks,
-        test_utils::{generate_bodies, TestBodiesClient},
+        test_utils::{generate_bodies, TestBodiesClient, TEST_SCOPE},
     };
     use reth_interfaces::{
         p2p::bodies::response::BlockResponse,
@@ -245,8 +256,12 @@ mod tests {
         let headers = random_header_range(0..20, H256::zero());
 
         let client = Arc::new(TestBodiesClient::default());
-        let fut = BodiesRequestFuture::new(client.clone(), Arc::new(TestConsensus::default()))
-            .with_headers(headers.clone());
+        let fut = BodiesRequestFuture::new(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            DownloaderMetrics::new(TEST_SCOPE),
+        )
+        .with_headers(headers.clone());
 
         assert_eq!(fut.await, headers.into_iter().map(BlockResponse::Empty).collect::<Vec<_>>());
         assert_eq!(client.times_requested(), 0);
@@ -262,8 +277,12 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_max_batch_size(batch_size),
         );
-        let fut = BodiesRequestFuture::new(client.clone(), Arc::new(TestConsensus::default()))
-            .with_headers(headers.clone());
+        let fut = BodiesRequestFuture::new(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            DownloaderMetrics::new(TEST_SCOPE),
+        )
+        .with_headers(headers.clone());
 
         assert_eq!(fut.await, zip_blocks(headers.iter(), &mut bodies));
         assert_eq!(

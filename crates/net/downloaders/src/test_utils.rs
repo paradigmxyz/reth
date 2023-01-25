@@ -18,6 +18,9 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+/// Metrics scope used for testing.
+pub(crate) const TEST_SCOPE: &str = "downloaders.test";
+
 /// Generate a set of bodies and their corresponding block hashes
 pub(crate) fn generate_bodies(
     rng: std::ops::Range<u64>,
