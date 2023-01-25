@@ -46,7 +46,7 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -218,6 +218,7 @@ where
             peers_handle,
             network_mode,
             bandwidth_meter,
+            Arc::new(AtomicU64::new(chain_spec.chain.id())),
         );
 
         Ok(Self {
@@ -312,9 +313,11 @@ where
     pub fn status(&self) -> NetworkStatus {
         let sessions = self.swarm.sessions();
         let status = sessions.status();
+        let hello_message = sessions.hello_message();
 
         NetworkStatus {
-            client_version: sessions.hello_message().client_version,
+            client_version: hello_message.client_version,
+            protocol_version: hello_message.protocol_version as u64,
             eth_protocol_info: EthProtocolInfo {
                 difficulty: status.total_difficulty,
                 head: status.blockhash,

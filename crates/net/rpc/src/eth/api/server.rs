@@ -25,8 +25,8 @@ where
     Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
 {
-    fn protocol_version(&self) -> Result<U64> {
-        Ok(EthApiSpec::protocol_version(self))
+    async fn protocol_version(&self) -> Result<U64> {
+        EthApiSpec::protocol_version(self).await.to_rpc_result()
     }
 
     fn syncing(&self) -> Result<SyncStatus> {

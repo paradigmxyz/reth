@@ -44,6 +44,8 @@ pub trait PeersInfo: Send + Sync {
 pub struct NetworkStatus {
     /// The local node client version.
     pub client_version: String,
+    /// The current ethereum protocol version
+    pub protocol_version: u64,
     /// Information about the Ethereum Wire Protocol.
     pub eth_protocol_info: EthProtocolInfo,
 }
