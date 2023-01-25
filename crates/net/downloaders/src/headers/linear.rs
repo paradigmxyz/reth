@@ -24,6 +24,8 @@ use std::{
 };
 use tracing::trace;
 
+use super::metrics::HeaderDownloaderMetrics;
+
 /// A heuristic that is used to determine the number of requests that should be prepared for a peer.
 /// This should ensure that there are always requests lined up for peers to handle while the
 /// downloader is yielding a next batch of headers that is being committed to the database.
@@ -78,6 +80,8 @@ pub struct LinearDownloader<H> {
     ///
     /// Note: headers are sorted from high to low
     queued_validated_headers: Vec<SealedHeader>,
+    /// Header downloader metrics.
+    metrics: HeaderDownloaderMetrics,
 }
 
 // === impl LinearDownloader ===
@@ -243,6 +247,9 @@ where
                 let (peer_id, headers) = res.split();
                 let mut headers = headers.0;
 
+                // update total downloaded metric
+                self.metrics.total_downloaded.increment(headers.len() as u64);
+
                 // sort headers from highest to lowest block number
                 headers.sort_unstable_by_key(|h| Reverse(h.number));
 
@@ -297,6 +304,9 @@ where
             Ok(res) => {
                 let (peer_id, headers) = res.split();
                 let mut headers = headers.0;
+
+                // update total downloaded metric
+                self.metrics.total_downloaded.increment(headers.len() as u64);
 
                 trace!(target: "downloaders::headers", len=%headers.len(), "Received headers response");
 
@@ -380,7 +390,10 @@ where
 
         self.penalize_peer(peer_id, &error);
 
-        // re-submit the request
+        // Update error metric
+        self.metrics.increment_errors(&error);
+
+        // Re-submit the request
         self.submit_request(request, Priority::High);
     }
 
@@ -535,6 +548,7 @@ where
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
                         this.penalize_peer(err.peer_id, &err.error);
+                        this.metrics.increment_errors(&err.error);
                         this.sync_target_request =
                             Some(this.request_fut(err.request, Priority::High));
                     } else {
@@ -598,6 +612,7 @@ where
 
                 trace!(target: "downloaders::headers", batch=%next_batch.len(), "Returning validated batch");
 
+                this.metrics.total_flushed.increment(next_batch.len() as u64);
                 return Poll::Ready(Some(next_batch))
             }
 
@@ -613,6 +628,7 @@ where
                 this.clear();
                 return Poll::Ready(None)
             }
+            this.metrics.total_flushed.increment(next_batch.len() as u64);
             return Poll::Ready(Some(next_batch))
         }
 
@@ -825,6 +841,7 @@ impl LinearDownloadBuilder {
             in_progress_queue: Default::default(),
             buffered_responses: Default::default(),
             queued_validated_headers: Default::default(),
+            metrics: Default::default(),
         };
 
         downloader.sync_target_request =
