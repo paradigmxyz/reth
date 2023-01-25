@@ -1,4 +1,5 @@
 use super::request::BodiesRequestFuture;
+use crate::metrics::DownloaderMetrics;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
@@ -21,24 +22,26 @@ pub(crate) struct BodiesRequestQueue<B> {
     inner: FuturesUnordered<BodiesRequestFuture<B>>,
     /// The block numbers being requested.
     block_numbers: HashSet<BlockNumber>,
+    /// The downloader metrics.
+    metrics: DownloaderMetrics,
     /// Last requested block number.
     pub(crate) last_requested_block_number: Option<BlockNumber>,
-}
-
-impl<B> Default for BodiesRequestQueue<B> {
-    fn default() -> Self {
-        Self {
-            inner: Default::default(),
-            block_numbers: Default::default(),
-            last_requested_block_number: None,
-        }
-    }
 }
 
 impl<B> BodiesRequestQueue<B>
 where
     B: BodiesClient + 'static,
 {
+    /// Create new instance of request queue.
+    pub(crate) fn new(metrics: DownloaderMetrics) -> Self {
+        Self {
+            metrics,
+            inner: Default::default(),
+            block_numbers: Default::default(),
+            last_requested_block_number: None,
+        }
+    }
+
     /// Returns `true` if the queue is empty.
     pub(crate) fn is_empty(&self) -> bool {
         self.inner.is_empty()
@@ -77,7 +80,9 @@ where
         self.block_numbers.extend(request.iter().map(|h| h.number));
 
         // Create request and push into the queue.
-        self.inner.push(BodiesRequestFuture::new(client, consensus).with_headers(request))
+        self.inner.push(
+            BodiesRequestFuture::new(client, consensus, self.metrics.clone()).with_headers(request),
+        )
     }
 
     /// Check if the block number is currently in progress

@@ -1,5 +1,6 @@
 //! A headers downloader that can handle multiple requests concurrently.
 
+use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use reth_interfaces::{
@@ -24,12 +25,13 @@ use std::{
 };
 use tracing::trace;
 
-use super::metrics::HeaderDownloaderMetrics;
-
 /// A heuristic that is used to determine the number of requests that should be prepared for a peer.
 /// This should ensure that there are always requests lined up for peers to handle while the
 /// downloader is yielding a next batch of headers that is being committed to the database.
 const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
+
+/// The scope for headers downloader metrics.
+pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
 
 /// Downloads headers concurrently.
 ///
@@ -81,7 +83,7 @@ pub struct LinearDownloader<H> {
     /// Note: headers are sorted from high to low
     queued_validated_headers: Vec<SealedHeader>,
     /// Header downloader metrics.
-    metrics: HeaderDownloaderMetrics,
+    metrics: DownloaderMetrics,
 }
 
 // === impl LinearDownloader ===
@@ -841,7 +843,7 @@ impl LinearDownloadBuilder {
             in_progress_queue: Default::default(),
             buffered_responses: Default::default(),
             queued_validated_headers: Default::default(),
-            metrics: Default::default(),
+            metrics: DownloaderMetrics::new(HEADERS_DOWNLOADER_SCOPE),
         };
 
         downloader.sync_target_request =
