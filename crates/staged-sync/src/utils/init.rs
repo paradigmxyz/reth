@@ -76,17 +76,14 @@ mod tests {
     use crate::utils::init::WriteMap;
     use reth_db::mdbx::test_utils::create_test_rw_db;
     use reth_primitives::{
-        Header, GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
+        GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
     };
 
     #[test]
     fn success_init_genesis_mainnet() {
         let db = create_test_rw_db::<WriteMap>();
-
-        let mut chain_spec = MAINNET.clone();
-        chain_spec.genesis_hash = Header::default().hash_slow();
-
-        let genesis_hash = init_genesis(db.clone(), chain_spec).unwrap();
+        let genesis_hash = init_genesis(db.clone(), MAINNET.clone()).unwrap();
+        
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS);
     }
@@ -94,11 +91,8 @@ mod tests {
     #[test]
     fn success_init_genesis_goerli() {
         let db = create_test_rw_db::<WriteMap>();
-
-        let mut chain_spec = GOERLI.clone();
-        chain_spec.genesis_hash = Header::default().hash_slow();
-
-        let genesis_hash = init_genesis(db.clone(), chain_spec).unwrap();
+        let genesis_hash = init_genesis(db.clone(), GOERLI.clone()).unwrap();
+        
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS);
     }
@@ -106,11 +100,8 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let db = create_test_rw_db::<WriteMap>();
-
-        let mut chain_spec = SEPOLIA.clone();
-        chain_spec.genesis_hash = Header::default().hash_slow();
-
-        let genesis_hash = init_genesis(db.clone(), chain_spec).unwrap();
+        let genesis_hash = init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
+        
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS);
     }
