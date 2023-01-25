@@ -70,7 +70,7 @@ pub(crate) struct Swarm<C> {
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
     /// Tracks the connection state of the node
-    node_connection_state: NodeConnectionState,
+    net_connection_state: NetworkConnectionState,
 }
 
 // === impl Swarm ===
@@ -84,9 +84,9 @@ where
         incoming: ConnectionListener,
         sessions: SessionManager,
         state: NetworkState<C>,
-        node_connection_state: NodeConnectionState,
+        net_connection_state: NetworkConnectionState,
     ) -> Self {
-        Self { incoming, sessions, state, node_connection_state }
+        Self { incoming, sessions, state, net_connection_state }
     }
 
     /// Access to the state.
@@ -193,7 +193,7 @@ where
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
                 // Reject incoming connection if node is shutting down.
-                if self.is_node_shutting_down() {
+                if self.is_shutting_down() {
                     return None
                 }
                 // ensure we can handle an incoming connection from this address
@@ -252,7 +252,7 @@ where
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
             StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
                 // Don't try to connect to peer if node is shutting down
-                if self.is_node_shutting_down() {
+                if self.is_shutting_down() {
                     return None
                 }
                 // Insert peer only if no fork id or a valid fork id
@@ -271,13 +271,14 @@ where
         None
     }
 
-    /// Set node connection state to `ShuttingDown`
+    /// Set network connection state to `ShuttingDown`
     pub(crate) fn on_shutdown_requested(&mut self) {
-        self.node_connection_state = NetworkConnectionState::ShuttingDown;
+        self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
 
+    /// Checks if the node's network connection state is 'ShuttingDown'
     fn is_shutting_down(&self) -> bool {
-        matches!(self.node_connection_state, NetworkConnectionState::Active)
+        matches!(self.net_connection_state, NetworkConnectionState::Active)
     }
 }
 

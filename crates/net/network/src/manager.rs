@@ -28,7 +28,7 @@ use crate::{
     peers::{PeersHandle, PeersManager},
     session::SessionManager,
     state::NetworkState,
-    swarm::{NodeConnectionState, Swarm, SwarmEvent},
+    swarm::{NetworkConnectionState, Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
@@ -206,7 +206,7 @@ where
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state, NodeConnectionState::default());
+        let swarm = Swarm::new(incoming, sessions, state, NetworkConnectionState::default());
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
@@ -517,7 +517,7 @@ where
                 // Set connection status to `Shutdown`. This will prevent the node to accept
                 // new incoming connections as well as sending connection requests to newly
                 // discovered nodes.
-                self.swarm.set_shutdown_connection_state();
+                self.swarm.on_shutdown_requested();
 
                 // drop pending connections
 
