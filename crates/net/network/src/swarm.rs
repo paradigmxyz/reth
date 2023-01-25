@@ -272,12 +272,12 @@ where
     }
 
     /// Set node connection state to `ShuttingDown`
-    pub(crate) fn set_shutdown_connection_state(&mut self) {
-        self.node_connection_state = NodeConnectionState::ShuttingDown;
+    pub(crate) fn on_shutdown_requested(&mut self) {
+        self.node_connection_state = NetworkConnectionState::ShuttingDown;
     }
 
-    fn is_node_shutting_down(&self) -> bool {
-        matches!(self.node_connection_state, NodeConnectionState::Active)
+    fn is_shutting_down(&self) -> bool {
+        matches!(self.node_connection_state, NetworkConnectionState::Active)
     }
 }
 
@@ -416,7 +416,7 @@ pub(crate) enum SwarmEvent {
 }
 
 #[derive(Default)]
-pub(crate) enum NodeConnectionState {
+pub(crate) enum NetworkConnectionState {
     #[default]
     Active,
     ShuttingDown,
