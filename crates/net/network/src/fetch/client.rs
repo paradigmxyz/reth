@@ -7,7 +7,7 @@ use crate::{
 use reth_eth_wire::{BlockBody, BlockHeaders};
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
-    downloader::DownloadClient,
+    download::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
@@ -57,7 +57,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 //         end
 //     end
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FetchClient {
     /// Sender half of the request channel.
     pub(crate) request_tx: UnboundedSender<DownloadRequest>,

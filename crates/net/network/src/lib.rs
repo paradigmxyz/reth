@@ -66,9 +66,9 @@
 //! // The key that's used for encrypting sessions and to identify our node.
 //! let local_key = rng_secret_key();
 //!
-//! let config = NetworkConfig::builder(client, local_key).boot_nodes(
+//! let config = NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(
 //!     mainnet_nodes()
-//! ).build();
+//! ).build(client);
 //!
 //! // create the network instance
 //! let network = NetworkManager::new(config).await.unwrap();
@@ -97,7 +97,7 @@
 //!     let local_key = rng_secret_key();
 //!
 //!     let config =
-//!         NetworkConfig::builder(Arc::clone(&client), local_key).boot_nodes(mainnet_nodes()).build();
+//!         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(Arc::clone(&client));
 //!
 //!     // create the network instance
 //!     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
@@ -143,5 +143,6 @@ pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::NetworkHandle;
 pub use peers::PeersConfig;
+pub use session::PeerInfo;
 
 pub use reth_eth_wire::DisconnectReason;

@@ -21,7 +21,6 @@ reth-executor = { path = "../executor" }
 reth-rlp = { path = "../common/rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
-reth-metrics-derive = { path = "../metrics/metrics-derive" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }

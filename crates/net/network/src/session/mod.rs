@@ -148,6 +148,11 @@ impl SessionManager {
         self.status
     }
 
+    /// Returns the session hello message.
+    pub(crate) fn hello_message(&self) -> HelloMessage {
+        self.hello_message.clone()
+    }
+
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].
     fn spawn<F>(&self, f: F)
     where
@@ -595,8 +600,8 @@ pub(crate) enum PendingSessionHandshakeError {
 }
 
 /// The direction of the connection.
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum Direction {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Direction {
     /// Incoming connection.
     Incoming,
     /// Outgoing connection to a specific node.

@@ -101,7 +101,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
-    pub fn max_fee_per_gas(&self) -> Option<U256> {
+    pub fn max_fee_per_gas(&self) -> Option<u128> {
         self.transaction.max_fee_per_gas()
     }
 

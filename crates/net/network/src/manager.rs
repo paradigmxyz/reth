@@ -39,6 +39,7 @@ use reth_eth_wire::{
     DisconnectReason, Status,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
+use reth_network_api::{EthProtocolInfo, NetworkStatus};
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
@@ -250,7 +251,7 @@ where
     ///     let local_key = rng_secret_key();
     ///
     ///     let config =
-    ///         NetworkConfig::builder(Arc::clone(&client), local_key).boot_nodes(mainnet_nodes()).build();
+    ///         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(Arc::clone(&client));
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
@@ -307,9 +308,20 @@ where
         self.swarm.state().fetch_client()
     }
 
-    /// Returns the current [`Status`] for the local node.
-    pub fn status(&self) -> Status {
-        self.swarm.sessions().status()
+    /// Returns the current [`NetworkStatus`] for the local node.
+    pub fn status(&self) -> NetworkStatus {
+        let sessions = self.swarm.sessions();
+        let status = sessions.status();
+
+        NetworkStatus {
+            client_version: sessions.hello_message().client_version,
+            eth_protocol_info: EthProtocolInfo {
+                difficulty: status.total_difficulty,
+                head: status.blockhash,
+                network: status.chain.id(),
+                genesis: status.genesis,
+            },
+        }
     }
 
     /// Event hook for an unexpected message from the peer.

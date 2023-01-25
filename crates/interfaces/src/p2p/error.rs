@@ -1,13 +1,44 @@
 use crate::consensus;
-use reth_primitives::{rpc::BlockNumber, WithPeerId, H256};
+use reth_primitives::{rpc::BlockNumber, BlockHashOrNumber, Header, WithPeerId, H256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
+
+use super::headers::client::HeadersRequest;
 
 /// Result alias for result of a request.
 pub type RequestResult<T> = Result<T, RequestError>;
 
 /// Result with [PeerId]
 pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
+
+/// Helper trait used to validate responses.
+pub trait EthResponseValidator {
+    /// Determine whether the response matches what we requested in [HeadersRequest]
+    fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool;
+}
+
+impl EthResponseValidator for RequestResult<Vec<Header>> {
+    fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool {
+        match self {
+            Ok(headers) => {
+                let request_length = headers.len() as u64;
+
+                if request_length <= 1 && request.limit != request_length {
+                    return true
+                }
+
+                match request.start {
+                    BlockHashOrNumber::Number(block_number) => block_number != headers[0].number,
+                    BlockHashOrNumber::Hash(_) => {
+                        // we don't want to hash the header
+                        false
+                    }
+                }
+            }
+            Err(_) => true,
+        }
+    }
+}
 
 /// Error variants that can happen when sending requests to a session.
 #[derive(Debug, Error, Clone, Eq, PartialEq)]

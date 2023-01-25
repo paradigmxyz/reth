@@ -15,5 +15,6 @@ reth-rpc = { path = "../rpc" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 jsonrpsee = { version = "0.16", features = ["server"] }
+
 strum = { version = "0.24", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }

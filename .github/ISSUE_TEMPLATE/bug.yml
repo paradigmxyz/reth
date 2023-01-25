@@ -55,6 +55,9 @@ body:
         - Windows (ARM)
     validations:
       required: false
+  - type: input
+    attributes:
+      label: What version/commit are you on?
   - type: checkboxes
     id: terms
     attributes:

@@ -59,7 +59,21 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
     genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
-    hardforks: BTreeMap::from([(Hardfork::MergeNetsplit, 1735371)]),
+    hardforks: BTreeMap::from([
+        (Hardfork::Frontier, 0),
+        (Hardfork::Homestead, 0),
+        (Hardfork::Dao, 0),
+        (Hardfork::Tangerine, 0),
+        (Hardfork::SpuriousDragon, 0),
+        (Hardfork::Byzantium, 0),
+        (Hardfork::Constantinople, 0),
+        (Hardfork::Petersburg, 0),
+        (Hardfork::Istanbul, 0),
+        (Hardfork::Muirglacier, 0),
+        (Hardfork::Berlin, 0),
+        (Hardfork::London, 0),
+        (Hardfork::MergeNetsplit, 1735371),
+    ]),
     dao_fork_support: true,
     paris_block: Some(1450408),
     paris_ttd: Some(U256::from(17000000000000000_u64)),
@@ -423,7 +437,7 @@ impl ParisStatus {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Chain, ChainSpec, ForkHash, Genesis, Hardfork, Header, MAINNET};
+    use crate::{Chain, ChainSpec, ForkHash, Genesis, Hardfork, Header, GOERLI, MAINNET, SEPOLIA};
 
     #[test]
     fn test_empty_forkid() {
@@ -483,8 +497,8 @@ mod tests {
         assert_eq!(unique_spec.fork_id(2), duplicate_spec.fork_id(2));
     }
 
+    // these tests check that the forkid computation is accurate
     #[test]
-    // this test checks that the forkid computation is accurate
     fn test_mainnet_forkids() {
         let frontier_forkid = MAINNET.fork_id(0);
         assert_eq!([0xfc, 0x64, 0xec, 0x04], frontier_forkid.hash.0);
@@ -540,5 +554,32 @@ mod tests {
 
         let latest_forkid = MAINNET.fork_id(15050000);
         assert_eq!(0, latest_forkid.next);
+    }
+
+    #[test]
+    fn test_goerli_forkids() {
+        let frontier_forkid = GOERLI.fork_id(0);
+        assert_eq!([0xa3, 0xf5, 0xab, 0x08], frontier_forkid.hash.0);
+        assert_eq!(1561651, frontier_forkid.next);
+
+        let istanbul_forkid = GOERLI.fork_id(1561651);
+        assert_eq!([0xc2, 0x5e, 0xfa, 0x5c], istanbul_forkid.hash.0);
+        assert_eq!(4460644, istanbul_forkid.next);
+
+        let berlin_forkid = GOERLI.fork_id(4460644);
+        assert_eq!([0x75, 0x7a, 0x1c, 0x47], berlin_forkid.hash.0);
+        assert_eq!(5062605, berlin_forkid.next);
+
+        let london_forkid = GOERLI.fork_id(12965000);
+        assert_eq!([0xb8, 0xc6, 0x29, 0x9d], london_forkid.hash.0);
+        assert_eq!(0, london_forkid.next);
+    }
+
+    #[test]
+    fn test_sepolia_forkids() {
+        // Test vector is from <https://github.com/ethereum/go-ethereum/blob/59a48e0289b1a7470a8285e665cab12b29117a70/core/forkid/forkid_test.go#L146-L151>
+        let mergenetsplit_forkid = SEPOLIA.fork_id(1735371);
+        assert_eq!([0xb9, 0x6c, 0xbd, 0x13], mergenetsplit_forkid.hash.0);
+        assert_eq!(0, mergenetsplit_forkid.next);
     }
 }

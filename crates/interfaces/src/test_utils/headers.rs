@@ -2,11 +2,11 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadClient, Downloader},
+        download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
-            downloader::{HeaderDownloader, SyncTarget},
+            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
     },
@@ -26,7 +26,7 @@ use std::{
     },
     task::{ready, Context, Poll},
 };
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, watch::error::SendError, Mutex};
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]
@@ -62,19 +62,6 @@ impl TestHeaderDownloader {
     }
 }
 
-impl Downloader for TestHeaderDownloader {
-    type Client = TestHeadersClient;
-    type Consensus = TestConsensus;
-
-    fn client(&self) -> &Self::Client {
-        &self.client
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        &self.consensus
-    }
-}
-
 impl HeaderDownloader for TestHeaderDownloader {
     fn update_local_head(&mut self, _head: SealedHeader) {}
 
@@ -82,6 +69,11 @@ impl HeaderDownloader for TestHeaderDownloader {
 
     fn set_batch_size(&mut self, limit: usize) {
         self.batch_size = limit;
+    }
+
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)?;
+        Ok(())
     }
 }
 
@@ -276,16 +268,6 @@ impl Default for TestConsensus {
 }
 
 impl TestConsensus {
-    /// Update the fork choice state
-    pub fn update_tip(&self, tip: H256) {
-        let state = ForkchoiceState {
-            head_block_hash: tip,
-            finalized_block_hash: H256::zero(),
-            safe_block_hash: H256::zero(),
-        };
-        self.channel.0.send(state).expect("updating fork choice state failed");
-    }
-
     /// Get the failed validation flag
     pub fn fail_validation(&self) -> bool {
         self.fail_validation.load(Ordering::SeqCst)
@@ -309,6 +291,13 @@ impl StatusUpdater for TestStatusUpdater {
 impl Consensus for TestConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
+    }
+
+    fn notify_fork_choice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), SendError<ForkchoiceState>> {
+        self.channel.0.send(state)
     }
 
     fn validate_header(
