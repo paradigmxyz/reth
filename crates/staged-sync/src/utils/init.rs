@@ -83,7 +83,7 @@ mod tests {
     fn success_init_genesis_mainnet() {
         let db = create_test_rw_db::<WriteMap>();
         let genesis_hash = init_genesis(db.clone(), MAINNET.clone()).unwrap();
-        
+
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS);
     }
@@ -92,7 +92,7 @@ mod tests {
     fn success_init_genesis_goerli() {
         let db = create_test_rw_db::<WriteMap>();
         let genesis_hash = init_genesis(db.clone(), GOERLI.clone()).unwrap();
-        
+
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS);
     }
@@ -101,7 +101,7 @@ mod tests {
     fn success_init_genesis_sepolia() {
         let db = create_test_rw_db::<WriteMap>();
         let genesis_hash = init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
-        
+
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS);
     }
