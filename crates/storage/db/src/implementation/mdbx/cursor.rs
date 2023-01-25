@@ -4,7 +4,8 @@ use std::{borrow::Cow, marker::PhantomData};
 
 use crate::{
     cursor::{
-        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, ReverseWalker, Walker,
+        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
+        ReverseWalker, Walker,
     },
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,
@@ -86,6 +87,23 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             .map(decoder::<T>);
 
         Ok(Walker::new(self, start))
+    }
+
+    fn walk_range<'cursor>(
+        &'cursor mut self,
+        start_key: T::Key,
+        end_key: T::Key,
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
+        let start = self
+            .inner
+            .set_range(start_key.encode().as_ref())
+            .map_err(|e| Error::Read(e.into()))?
+            .map(decoder::<T>);
+
+        Ok(RangeWalker::new(self, start, end_key))
     }
 
     fn walk_back<'cursor>(
