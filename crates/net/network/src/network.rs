@@ -2,7 +2,7 @@ use crate::{
     config::NetworkMode,
     manager::NetworkEvent,
     message::PeerRequest,
-    peers::{PeerKind, PeersHandle, ReputationChangeKind},
+    peers::{PeerKind, PeersHandle},
     session::PeerInfo,
     FetchClient,
 };
@@ -14,7 +14,7 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{NetworkError, NetworkInfo, NetworkStatus, PeersInfo};
+use reth_network_api::{NetworkError, NetworkInfo, NetworkStatus, PeersInfo, ReputationChangeKind};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,

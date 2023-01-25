@@ -8,6 +8,7 @@ use reth_interfaces::p2p::{
     headers::client::HeadersRequest,
     priority::Priority,
 };
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
@@ -21,7 +22,6 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 mod client;
-use crate::peers::ReputationChangeKind;
 pub use client::FetchClient;
 
 /// Manages data fetching operations.

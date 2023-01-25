@@ -2,13 +2,14 @@ use crate::{
     error::{BackoffKind, SessionError},
     peers::{
         reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
-        ReputationChangeKind, ReputationChangeWeights,
+        ReputationChangeWeights,
     },
     session::{Direction, PendingSessionHandshakeError},
 };
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -1067,7 +1068,7 @@ mod test {
         error::BackoffKind,
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
-            PeerAction, ReputationChangeKind,
+            PeerAction,
         },
         session::PendingSessionHandshakeError,
         PeersConfig,
@@ -1078,6 +1079,7 @@ mod test {
         DisconnectReason,
     };
     use reth_net_common::ban_list::BanList;
+    use reth_network_api::ReputationChangeKind;
     use reth_primitives::{PeerId, H512};
     use std::{
         collections::HashSet,

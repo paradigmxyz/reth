@@ -16,7 +16,11 @@ use std::net::SocketAddr;
 
 /// Network Error
 pub mod error;
+/// Reputation score
+pub mod reputation;
+
 pub use error::NetworkError;
+pub use reputation::{Reputation, ReputationChangeKind};
 
 /// Provides general purpose information about the network.
 #[async_trait]

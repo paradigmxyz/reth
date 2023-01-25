@@ -25,7 +25,7 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::NetworkMetrics,
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeersHandle, PeersManager, ReputationChangeKind},
+    peers::{PeersHandle, PeersManager},
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
@@ -39,7 +39,7 @@ use reth_eth_wire::{
     DisconnectReason, Status,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{EthProtocolInfo, NetworkStatus};
+use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
