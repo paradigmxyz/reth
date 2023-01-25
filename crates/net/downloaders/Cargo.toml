@@ -21,7 +21,6 @@ futures-util = "0.3.25"
 
 # misc
 tracing = "0.1.37"
-thiserror = "1.0"
 metrics = "0.20.1"
 
 [dev-dependencies]
