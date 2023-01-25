@@ -208,7 +208,7 @@ mod tests {
             self.threshold = threshold;
         }
 
-        fn check_no_hash_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
+        fn ensure_no_hash_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self.tx.inner().get_block_body_by_num(block);
             match body_result {
                 Ok(body) => self
@@ -281,7 +281,7 @@ mod tests {
 
                     Ok(())
                 })?,
-                None => self.check_no_hash_by_block(input.stage_progress.unwrap_or_default())?,
+                None => self.ensure_no_hash_by_block(input.stage_progress.unwrap_or_default())?,
             };
             Ok(())
         }
@@ -289,7 +289,7 @@ mod tests {
 
     impl UnwindStageTestRunner for TransactionLookupTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            self.check_no_hash_by_block(input.unwind_to)
+            self.ensure_no_hash_by_block(input.unwind_to)
         }
     }
 }
