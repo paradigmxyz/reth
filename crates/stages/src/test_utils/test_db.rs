@@ -124,7 +124,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Key]
-    pub(crate) fn check_no_entry_above<T, F>(
+    pub(crate) fn ensure_no_entry_above<T, F>(
         &self,
         num: u64,
         mut selector: F,
@@ -144,7 +144,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Value]
-    pub(crate) fn check_no_entry_above_by_value<T, F>(
+    pub(crate) fn ensure_no_entry_above_by_value<T, F>(
         &self,
         num: u64,
         mut selector: F,

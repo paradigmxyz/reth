@@ -649,20 +649,22 @@ mod tests {
 
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.tx.check_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
-                    key.number()
-                })?;
-                self.tx.check_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| {
-                    key.number()
-                })?;
-                self.tx.check_no_entry_above::<tables::BlockTransitionIndex, _>(
+                self.tx
+                    .ensure_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
+                        key.number()
+                    })?;
+                self.tx
+                    .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| {
+                        key.number()
+                    })?;
+                self.tx.ensure_no_entry_above::<tables::BlockTransitionIndex, _>(
                     input.unwind_to,
                     |key| key,
                 )?;
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
                     self.tx
-                        .check_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
-                    self.tx.check_no_entry_above::<tables::TxTransitionIndex, _>(
+                        .ensure_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
+                    self.tx.ensure_no_entry_above::<tables::TxTransitionIndex, _>(
                         last_tx_id,
                         |key| key,
                     )?;

@@ -211,16 +211,22 @@ mod tests {
             self.threshold = threshold;
         }
 
+        /// # Panics
+        ///
+        /// 1. If there are any entries in the [tables::TxHashNumber] table above
+        ///    a given block number.
+        ///
+        /// 2. If the is no requested block entry in the bodies table,
+        ///    but [tables::TxHashNumber] is not empty.
         fn ensure_no_hash_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self.tx.inner().get_block_body_by_num(block);
             match body_result {
-                Ok(body) => self
-                    .tx
-                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
-                        key
-                    })?,
+                Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
+                    body.last_tx_index(),
+                    |key| key,
+                )?,
                 Err(_) => {
-                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
+                    assert!(self.tx.table_is_empty::<tables::TxHashNumber>()?);
                 }
             };
 

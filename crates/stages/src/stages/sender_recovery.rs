@@ -229,16 +229,18 @@ mod tests {
         }
 
         /// # Panics
+        ///
         /// 1. If there are any entries in the [tables::TxSenders] table above
-        /// a given block number.
+        ///    a given block number.
+        ///
         /// 2. If the is no requested block entry in the bodies table,
-        /// but [tables::TxSenders] is not empty.
+        ///    but [tables::TxSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self.tx.inner().get_block_body_by_num(block);
             match body_result {
                 Ok(body) => self
                     .tx
-                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
+                    .ensure_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
                         key
                     })?,
                 Err(_) => {
