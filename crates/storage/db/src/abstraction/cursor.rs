@@ -201,8 +201,10 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     start: IterPairResult<T>,
-    // exclusive `key` where to stop the walk.
+    /// exclusive `key` where to stop the walk.
     end_key: T::Key,
+    /// flag whether is ended
+    is_ended: bool,
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
     _tx_phantom: PhantomData<&'tx T>,
 }
@@ -212,6 +214,10 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
 {
     type Item = Result<(T::Key, T::Value), Error>;
     fn next(&mut self) -> Option<Self::Item> {
+        if self.is_ended {
+            return None
+        }
+
         let start = self.start.take();
         if start.is_some() {
             return start
@@ -222,6 +228,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
             if key < self.end_key {
                 Some(Ok((key, value)))
             } else {
+                self.is_ended = true;
                 None
             }
         } else {
@@ -233,7 +240,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 'tx, T, CURSOR> {
     /// construct RangeWalker
     pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>, end_key: T::Key) -> Self {
-        Self { cursor, start, end_key, _tx_phantom: std::marker::PhantomData }
+        Self { cursor, start, end_key, is_ended: false, _tx_phantom: std::marker::PhantomData }
     }
 }
 
