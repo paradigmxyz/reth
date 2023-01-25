@@ -20,7 +20,14 @@ const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 #[derive(Debug)]
 pub struct TransactionLookupStage {
     /// The number of table entries to commit at once
-    pub commit_threshold: u64,
+    commit_threshold: u64,
+}
+
+impl TransactionLookupStage {
+    /// Create new instance of [TransactionLookupStage].
+    pub fn new(commit_threshold: u64) -> Self {
+        Self { commit_threshold }
+    }
 }
 
 #[async_trait::async_trait]
