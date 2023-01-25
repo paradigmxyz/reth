@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::U64;
-use reth_provider::{BlockProvider, ChainInfo, StateProviderFactory};
+use reth_primitives::{ChainInfo, U64};
+use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
