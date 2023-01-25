@@ -23,7 +23,9 @@ impl DownloaderMetrics {
     pub(crate) fn increment_errors(&self, error: &DownloadError) {
         match error {
             DownloadError::Timeout => self.timeout_errors.increment(1),
-            DownloadError::HeaderValidation { .. } => self.validation_errors.increment(1),
+            DownloadError::HeaderValidation { .. } | DownloadError::BodyValidation { .. } => {
+                self.validation_errors.increment(1)
+            }
             _error => self.unexpected_errors.increment(1),
         }
     }
