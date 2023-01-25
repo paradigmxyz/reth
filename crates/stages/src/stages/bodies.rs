@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
-use futures_util::StreamExt;
+use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -92,7 +92,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut highest_block = input.stage_progress.unwrap_or_default();
         debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
 
-        let downloaded_bodies = match self.downloader.next().await {
+        let downloaded_bodies = match self.downloader.try_next().await? {
             Some(downloaded_bodies) => downloaded_bodies,
             None => {
                 info!(target: "sync::stages::bodies", stage_progress = highest_block, "Download stream exhausted");
@@ -741,7 +741,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = Vec<BlockResponse>;
+            type Item = Result<Vec<BlockResponse>, db::Error>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 
@@ -769,7 +769,7 @@ mod tests {
                 }
 
                 if !response.is_empty() {
-                    return Poll::Ready(Some(response))
+                    return Poll::Ready(Some(Ok(response)))
                 }
 
                 panic!("requested bodies without setting headers")

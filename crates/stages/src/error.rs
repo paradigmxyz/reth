@@ -1,5 +1,5 @@
 use crate::pipeline::PipelineEvent;
-use reth_interfaces::{consensus, db::Error as DbError, executor};
+use reth_interfaces::{consensus, db::Error as DbError, executor, p2p::error::DownloadError};
 use reth_primitives::{BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
@@ -35,7 +35,7 @@ pub enum StageError {
     /// Invalid download response. Applicable for stages which
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
-    Download(String),
+    Download(#[from] DownloadError),
     /// Invalid checkpoint passed to the stage
     #[error("Invalid stage progress: {0}")]
     StageProgress(u64),

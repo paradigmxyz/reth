@@ -58,7 +58,21 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
     genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
-    hardforks: BTreeMap::from([(Hardfork::Paris, ForkKind::Block(1735371))]),
+    hardforks: BTreeMap::from([
+        (Hardfork::Frontier, ForkKind::Block(0)),
+        (Hardfork::Homestead, ForkKind::Block(0)),
+        (Hardfork::Dao, ForkKind::Block(0)),
+        (Hardfork::Tangerine, ForkKind::Block(0)),
+        (Hardfork::SpuriousDragon, ForkKind::Block(0)),
+        (Hardfork::Byzantium, ForkKind::Block(0)),
+        (Hardfork::Constantinople, ForkKind::Block(0)),
+        (Hardfork::Petersburg, ForkKind::Block(0)),
+        (Hardfork::Istanbul, ForkKind::Block(0)),
+        (Hardfork::Muirglacier, ForkKind::Block(0)),
+        (Hardfork::Berlin, ForkKind::Block(0)),
+        (Hardfork::London, ForkKind::Block(0)),
+        (Hardfork::Paris, ForkKind::Block(1735371)),
+    ]),
     dao_fork_support: true,
     paris_ttd: Some(U256::from(17_000_000_000_000_000_u64)),
 });
@@ -574,6 +588,7 @@ mod tests {
 
     #[test]
     fn test_sepolia_forkids() {
+        // Test vector is from <https://github.com/ethereum/go-ethereum/blob/59a48e0289b1a7470a8285e665cab12b29117a70/core/forkid/forkid_test.go#L146-L151>
         let mergenetsplit_forkid = SEPOLIA.fork_id(ForkDiscriminant::block(1735371));
         assert_eq!([0xb9, 0x6c, 0xbd, 0x13], mergenetsplit_forkid.hash.0);
         assert_eq!(0, mergenetsplit_forkid.next);
