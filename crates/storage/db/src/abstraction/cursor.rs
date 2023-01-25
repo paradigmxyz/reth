@@ -194,11 +194,14 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
     }
 }
 
+/// Provides a range iterator to `Cursor` when handling `Table`.
+/// Also check [`Walker`]
 pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     /// Cursor to be used to walk through the table.
     cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     start: IterPairResult<T>,
+    // exclusive `key` where to stop the walk.
     end_key: T::Key,
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
     _tx_phantom: PhantomData<&'tx T>,
@@ -228,7 +231,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
 }
 
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 'tx, T, CURSOR> {
-    /// construct Walker
+    /// construct RangeWalker
     pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>, end_key: T::Key) -> Self {
         Self { cursor, start, end_key, _tx_phantom: std::marker::PhantomData }
     }

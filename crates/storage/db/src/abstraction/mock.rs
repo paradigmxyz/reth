@@ -142,8 +142,8 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
 
     fn walk_range<'cursor>(
         &'cursor mut self,
-        start_key: <T as Table>::Key,
-        end_key: <T as Table>::Key,
+        _start_key: <T as Table>::Key,
+        _end_key: <T as Table>::Key,
     ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,
