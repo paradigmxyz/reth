@@ -4,21 +4,21 @@ use reth_metrics_derive::Metrics;
 
 /// The header downloader metrics.
 #[derive(Metrics)]
-#[metrics(scope = "downloaders.headers")]
-pub struct HeaderDownloaderMetrics {
-    /// The number of headers that were successfully sent to the poller (stage)
+#[metrics(dynamic = true)]
+pub struct DownloaderMetrics {
+    /// The number of items that were successfully sent to the poller (stage)
     pub(crate) total_flushed: Counter,
-    /// Number of headers that were successfully downloaded
+    /// Number of items that were successfully downloaded
     pub(crate) total_downloaded: Counter,
-    /// Number of timeout errors while requesting headers
+    /// Number of timeout errors while requesting items
     pub(crate) timeout_errors: Counter,
-    /// Number of validation errors while requesting headers
+    /// Number of validation errors while requesting items
     pub(crate) validation_errors: Counter,
-    /// Number of unexpected errors while requesting headers
+    /// Number of unexpected errors while requesting items
     pub(crate) unexpected_errors: Counter,
 }
 
-impl HeaderDownloaderMetrics {
+impl DownloaderMetrics {
     /// Increment errors counter.
     pub(crate) fn increment_errors(&self, error: &DownloadError) {
         match error {
