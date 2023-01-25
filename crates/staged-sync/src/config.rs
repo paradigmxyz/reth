@@ -153,6 +153,12 @@ mod tests {
     use super::Config;
     #[test]
     fn can_serde_config() {
+        // Delete config file if it exists, as it can be outdated and
+        // make the test fail. It will be then created.
+        let config_path = confy::get_configuration_file_path("test", None).unwrap();
+        if std::path::Path::exists(&config_path) {
+            std::fs::remove_file(config_path).unwrap();
+        }
         let _: Config = confy::load("test", None).unwrap();
     }
 }
