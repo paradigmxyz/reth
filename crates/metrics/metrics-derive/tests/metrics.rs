@@ -43,7 +43,7 @@ static RECORDER: Lazy<TestRecorder> = Lazy::new(TestRecorder::new);
 fn test_describe(scope: &str) {
     assert_eq!(RECORDER.metrics_len(), 4);
 
-    let gauge = RECORDER.get_metric(&format!("{scope}_gauge"));
+    let gauge = RECORDER.get_metric(&format!("{scope}.gauge"));
     assert!(gauge.is_some());
     assert_eq!(
         gauge.unwrap(),
@@ -54,7 +54,7 @@ fn test_describe(scope: &str) {
         }
     );
 
-    let second_gauge = RECORDER.get_metric(&format!("{scope}_second_gauge"));
+    let second_gauge = RECORDER.get_metric(&format!("{scope}.second_gauge"));
     assert!(second_gauge.is_some());
     assert_eq!(
         second_gauge.unwrap(),
@@ -65,7 +65,7 @@ fn test_describe(scope: &str) {
         }
     );
 
-    let counter = RECORDER.get_metric(&format!("{scope}_counter"));
+    let counter = RECORDER.get_metric(&format!("{scope}.counter"));
     assert!(counter.is_some());
     assert_eq!(
         counter.unwrap(),
@@ -78,7 +78,7 @@ fn test_describe(scope: &str) {
         }
     );
 
-    let histogram = RECORDER.get_metric(&format!("{scope}_histogram"));
+    let histogram = RECORDER.get_metric(&format!("{scope}.histogram"));
     assert!(histogram.is_some());
     assert_eq!(
         histogram.unwrap(),
@@ -119,28 +119,28 @@ fn describe_dynamic_metrics() {
 fn test_register(scope: &str) {
     assert_eq!(RECORDER.metrics_len(), 4);
 
-    let gauge = RECORDER.get_metric(&format!("{scope}_gauge"));
+    let gauge = RECORDER.get_metric(&format!("{scope}.gauge"));
     assert!(gauge.is_some());
     assert_eq!(
         gauge.unwrap(),
         TestMetric { ty: TestMetricTy::Gauge, description: None, labels: None }
     );
 
-    let second_gauge = RECORDER.get_metric(&format!("{scope}_second_gauge"));
+    let second_gauge = RECORDER.get_metric(&format!("{scope}.second_gauge"));
     assert!(second_gauge.is_some());
     assert_eq!(
         second_gauge.unwrap(),
         TestMetric { ty: TestMetricTy::Gauge, description: None, labels: None }
     );
 
-    let counter = RECORDER.get_metric(&format!("{scope}_counter"));
+    let counter = RECORDER.get_metric(&format!("{scope}.counter"));
     assert!(counter.is_some());
     assert_eq!(
         counter.unwrap(),
         TestMetric { ty: TestMetricTy::Counter, description: None, labels: None }
     );
 
-    let histogram = RECORDER.get_metric(&format!("{scope}_histogram"));
+    let histogram = RECORDER.get_metric(&format!("{scope}.histogram"));
     assert!(histogram.is_some());
     assert_eq!(
         histogram.unwrap(),
@@ -177,25 +177,25 @@ fn register_dynamic_metrics() {
 fn test_labels(scope: &str) {
     let test_labels = vec![Label::new("key", "value")];
 
-    let gauge = RECORDER.get_metric(&format!("{scope}_gauge"));
+    let gauge = RECORDER.get_metric(&format!("{scope}.gauge"));
     assert!(gauge.is_some());
     let labels = gauge.unwrap().labels;
     assert!(labels.is_some());
     assert_eq!(labels.unwrap(), test_labels.clone(),);
 
-    let second_gauge = RECORDER.get_metric(&format!("{scope}_second_gauge"));
+    let second_gauge = RECORDER.get_metric(&format!("{scope}.second_gauge"));
     assert!(second_gauge.is_some());
     let labels = second_gauge.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(labels.unwrap(), test_labels.clone(),);
+    assert_eq!(labels.unwrap(), test_labels.clone());
 
-    let counter = RECORDER.get_metric(&format!("{scope}_counter"));
+    let counter = RECORDER.get_metric(&format!("{scope}.counter"));
     assert!(counter.is_some());
     let labels = counter.unwrap().labels;
     assert!(labels.is_some());
     assert_eq!(labels.unwrap(), test_labels.clone(),);
 
-    let histogram = RECORDER.get_metric(&format!("{scope}_histogram"));
+    let histogram = RECORDER.get_metric(&format!("{scope}.histogram"));
     assert!(histogram.is_some());
     let labels = histogram.unwrap().labels;
     assert!(labels.is_some());

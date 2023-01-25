@@ -11,7 +11,7 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 /// # Example
 /// ```
 /// use reth_eth_wire::EthVersion;
-/// use reth_primitives::{Chain, U256, H256, MAINNET_GENESIS, Hardfork};
+/// use reth_primitives::{Chain, U256, H256, MAINNET_GENESIS, MAINNET, Hardfork};
 /// use reth_eth_wire::types::Status;
 ///
 /// // this is just an example status message!
@@ -21,7 +21,7 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(H256::from(MAINNET_GENESIS))
 ///     .genesis(H256::from(MAINNET_GENESIS))
-///     .forkid(Hardfork::Latest.fork_id())
+///     .forkid(Hardfork::Latest.fork_id(&MAINNET).unwrap())
 ///     .build();
 ///
 /// assert_eq!(
@@ -32,7 +32,7 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 ///         total_difficulty: U256::from(100),
 ///         blockhash: H256::from(MAINNET_GENESIS),
 ///         genesis: H256::from(MAINNET_GENESIS),
-///         forkid: Hardfork::Latest.fork_id(),
+///         forkid: Hardfork::Latest.fork_id(&MAINNET).unwrap(),
 ///     }
 /// );
 /// ```

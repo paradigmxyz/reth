@@ -1,8 +1,9 @@
 use super::request::BodiesRequestFuture;
+use crate::metrics::DownloaderMetrics;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
-    consensus::Consensus as ConsensusTrait,
+    consensus::Consensus,
     p2p::bodies::{client::BodiesClient, response::BlockResponse},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -16,36 +17,46 @@ use std::{
 /// The wrapper around [FuturesUnordered] that keeps information
 /// about the blocks currently being requested.
 #[derive(Debug)]
-pub(crate) struct BodiesRequestQueue<B, C> {
+pub(crate) struct BodiesRequestQueue<B> {
     /// Inner body request queue.
-    inner: FuturesUnordered<BodiesRequestFuture<B, C>>,
+    inner: FuturesUnordered<BodiesRequestFuture<B>>,
     /// The block numbers being requested.
     block_numbers: HashSet<BlockNumber>,
+    /// The downloader metrics.
+    metrics: DownloaderMetrics,
     /// Last requested block number.
     pub(crate) last_requested_block_number: Option<BlockNumber>,
 }
 
-impl<B, C> Default for BodiesRequestQueue<B, C> {
-    fn default() -> Self {
+impl<B> BodiesRequestQueue<B>
+where
+    B: BodiesClient + 'static,
+{
+    /// Create new instance of request queue.
+    pub(crate) fn new(metrics: DownloaderMetrics) -> Self {
         Self {
+            metrics,
             inner: Default::default(),
             block_numbers: Default::default(),
             last_requested_block_number: None,
         }
     }
-}
 
-impl<B, C> BodiesRequestQueue<B, C>
-where
-    B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
-{
+    /// Returns `true` if the queue is empty.
     pub(crate) fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
+    /// Returns the number of queued requests.
     pub(crate) fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Clears the inner queue and related data.
+    pub(crate) fn clear(&mut self) {
+        self.inner.clear();
+        self.block_numbers.clear();
+        self.last_requested_block_number.take();
     }
 
     /// Add new request to the queue.
@@ -53,7 +64,7 @@ where
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         request: Vec<SealedHeader>,
     ) {
         // Set last max requested block number
@@ -69,7 +80,9 @@ where
         self.block_numbers.extend(request.iter().map(|h| h.number));
 
         // Create request and push into the queue.
-        self.inner.push(BodiesRequestFuture::new(client, consensus).with_headers(request))
+        self.inner.push(
+            BodiesRequestFuture::new(client, consensus, self.metrics.clone()).with_headers(request),
+        )
     }
 
     /// Check if the block number is currently in progress
@@ -78,10 +91,9 @@ where
     }
 }
 
-impl<B, C> Stream for BodiesRequestQueue<B, C>
+impl<B> Stream for BodiesRequestQueue<B>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
 {
     type Item = Vec<BlockResponse>;
 

@@ -148,6 +148,11 @@ impl SessionManager {
         self.status
     }
 
+    /// Returns the session hello message.
+    pub(crate) fn hello_message(&self) -> HelloMessage {
+        self.hello_message.clone()
+    }
+
     /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].
     fn spawn<F>(&self, f: F)
     where

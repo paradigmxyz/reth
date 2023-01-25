@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
-use futures_util::StreamExt;
+use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -14,7 +14,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
 };
-use std::{fmt::Debug, sync::Arc};
+use std::sync::Arc;
 use tracing::*;
 
 pub(crate) const BODIES: StageId = StageId("Bodies");
@@ -51,15 +51,15 @@ pub(crate) const BODIES: StageId = StageId("Bodies");
 /// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
 /// - The [`TransactionHashNumber`][reth_interfaces::db::tables::TransactionHashNumber] table
 #[derive(Debug)]
-pub struct BodyStage<D: BodyDownloader, C: Consensus> {
+pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     pub downloader: D,
     /// The consensus engine.
-    pub consensus: Arc<C>,
+    pub consensus: Arc<dyn Consensus>,
 }
 
 #[async_trait::async_trait]
-impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C> {
+impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         BODIES
@@ -92,7 +92,7 @@ impl<DB: Database, D: BodyDownloader, C: Consensus> Stage<DB> for BodyStage<D, C
         let mut highest_block = input.stage_progress.unwrap_or_default();
         debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
 
-        let downloaded_bodies = match self.downloader.next().await {
+        let downloaded_bodies = match self.downloader.try_next().await? {
             Some(downloaded_bodies) => downloaded_bodies,
             None => {
                 info!(target: "sync::stages::bodies", stage_progress = highest_block, "Download stream exhausted");
@@ -413,7 +413,7 @@ mod tests {
                 bodies::{
                     client::BodiesClient, downloader::BodyDownloader, response::BlockResponse,
                 },
-                downloader::{DownloadClient, Downloader},
+                download::DownloadClient,
                 error::PeerRequestResult,
                 priority::Priority,
             },
@@ -475,7 +475,7 @@ mod tests {
         }
 
         impl StageTestRunner for BodyTestRunner {
-            type S = BodyStage<TestBodyDownloader, TestConsensus>;
+            type S = BodyStage<TestBodyDownloader>;
 
             fn tx(&self) -> &TestTransaction {
                 &self.tx
@@ -717,19 +717,6 @@ mod tests {
             }
         }
 
-        impl Downloader for TestBodyDownloader {
-            type Client = NoopClient;
-            type Consensus = TestConsensus;
-
-            fn client(&self) -> &Self::Client {
-                unreachable!()
-            }
-
-            fn consensus(&self) -> &Self::Consensus {
-                unreachable!()
-            }
-        }
-
         impl BodyDownloader for TestBodyDownloader {
             fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
                 self.headers = VecDeque::from(self.db.view(|tx| {
@@ -754,7 +741,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = Vec<BlockResponse>;
+            type Item = Result<Vec<BlockResponse>, db::Error>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 
@@ -782,7 +769,7 @@ mod tests {
                 }
 
                 if !response.is_empty() {
-                    return Poll::Ready(Some(response))
+                    return Poll::Ready(Some(Ok(response)))
                 }
 
                 panic!("requested bodies without setting headers")

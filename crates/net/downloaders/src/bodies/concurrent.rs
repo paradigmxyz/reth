@@ -1,18 +1,16 @@
+use crate::metrics::DownloaderMetrics;
+
 use super::queue::BodiesRequestQueue;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    consensus::Consensus as ConsensusTrait,
+    consensus::Consensus,
     db,
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
-        downloader::Downloader,
-    },
+    p2p::bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
-    borrow::Borrow,
     cmp::Ordering,
     collections::BinaryHeap,
     ops::{Range, RangeInclusive},
@@ -30,15 +28,19 @@ use std::{
 /// in the near future.
 const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
 
+/// The scope for headers downloader metrics.
+pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
+
 /// Downloads bodies in batches.
 ///
 /// All blocks in a batch are fetched at the same time.
+#[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct ConcurrentDownloader<B, C, DB> {
+pub struct ConcurrentDownloader<B, DB> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
-    consensus: Arc<C>,
+    consensus: Arc<dyn Consensus>,
     // TODO: make this a [HeaderProvider]
     /// The database handle
     db: Arc<DB>,
@@ -55,44 +57,20 @@ pub struct ConcurrentDownloader<B, C, DB> {
     /// The latest block number returned.
     latest_queued_block_number: Option<BlockNumber>,
     /// Requests in progress
-    in_progress_queue: BodiesRequestQueue<B, C>,
+    in_progress_queue: BodiesRequestQueue<B>,
     /// Buffered responses
     buffered_responses: BinaryHeap<OrderedBodiesResponse>,
     /// Queued body responses
     queued_bodies: Vec<BlockResponse>,
+    /// The bodies downloader metrics.
+    metrics: DownloaderMetrics,
 }
 
-impl<B, C, DB> ConcurrentDownloader<B, C, DB>
+impl<B, DB> ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
-    fn new(
-        client: Arc<B>,
-        consensus: Arc<C>,
-        db: Arc<DB>,
-        request_limit: u64,
-        stream_batch_size: usize,
-        max_buffered_responses: usize,
-        concurrent_requests_range: RangeInclusive<usize>,
-    ) -> Self {
-        Self {
-            client,
-            consensus,
-            db,
-            request_limit,
-            stream_batch_size,
-            max_buffered_responses,
-            concurrent_requests_range,
-            download_range: Default::default(),
-            latest_queued_block_number: None,
-            in_progress_queue: Default::default(),
-            buffered_responses: Default::default(),
-            queued_bodies: Default::default(),
-        }
-    }
-
     /// Returns the next contiguous request.
     fn next_headers_request(&mut self) -> Result<Option<Vec<SealedHeader>>, db::Error> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
@@ -182,14 +160,31 @@ where
         max_dynamic.min(*self.concurrent_requests_range.end())
     }
 
+    // Check if the stream is terminated
     fn is_terminated(&self) -> bool {
-        self.in_progress_queue
-            .last_requested_block_number
-            .map(|last| last + 1 == self.download_range.end)
-            .unwrap_or_default() &&
+        // There is nothing to request if the range is empty
+        let nothing_to_request = self.download_range.is_empty() ||
+            // or all blocks have already been requested. 
+            self.in_progress_queue
+                .last_requested_block_number
+                .map(|last| last + 1 == self.download_range.end)
+                .unwrap_or_default();
+
+        nothing_to_request &&
             self.in_progress_queue.is_empty() &&
             self.buffered_responses.is_empty() &&
             self.queued_bodies.is_empty()
+    }
+
+    /// Clear all download related data.
+    ///
+    /// Should be invoked upon encountering fatal error.
+    fn clear(&mut self) {
+        self.download_range = Range::default();
+        self.latest_queued_block_number.take();
+        self.in_progress_queue.clear();
+        self.buffered_responses.clear();
+        self.queued_bodies.clear();
     }
 
     /// Queues bodies and sets the latest queued block number
@@ -224,28 +219,9 @@ where
     }
 }
 
-impl<B, C, DB> Downloader for ConcurrentDownloader<B, C, DB>
-where
-    B: BodiesClient,
-    C: ConsensusTrait,
-    DB: Database,
-{
-    type Client = B;
-    type Consensus = C;
-
-    fn client(&self) -> &Self::Client {
-        self.client.borrow()
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        self.consensus.borrow()
-    }
-}
-
-impl<B, C, DB> BodyDownloader for ConcurrentDownloader<B, C, DB>
+impl<B, DB> BodyDownloader for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
     /// Set a new download range (exclusive).
@@ -320,13 +296,12 @@ where
     }
 }
 
-impl<B, C, DB> Stream for ConcurrentDownloader<B, C, DB>
+impl<B, DB> Stream for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient + 'static,
-    C: ConsensusTrait + 'static,
     DB: Database,
 {
-    type Item = Vec<BlockResponse>;
+    type Item = Result<Vec<BlockResponse>, db::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -362,6 +337,8 @@ where
                     Ok(None) => break 'inner,
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", ?error, "Failed to form next request");
+                        this.clear();
+                        return Poll::Ready(Some(Err(error)))
                     }
                 };
             }
@@ -373,7 +350,8 @@ where
             // Yield next batch
             if this.queued_bodies.len() >= this.stream_batch_size {
                 let next_batch = this.queued_bodies.drain(..this.stream_batch_size);
-                return Poll::Ready(Some(next_batch.collect()))
+                this.metrics.total_flushed.increment(next_batch.len() as u64);
+                return Poll::Ready(Some(Ok(next_batch.collect())))
             }
 
             if !new_request_submitted {
@@ -389,7 +367,8 @@ where
 
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size);
-            return Poll::Ready(Some(next_batch.collect()))
+            this.metrics.total_flushed.increment(next_batch.len() as u64);
+            return Poll::Ready(Some(Ok(next_batch.collect())))
         }
 
         Poll::Pending
@@ -402,10 +381,9 @@ where
 /// whatsoever: All the mutations are performed through an exclusive reference on
 /// `ConcurrentDownloader` when the Stream is polled. This means it suffices that
 /// `ConcurrentDownloader` is Sync:
-unsafe impl<B, C, DB> Sync for ConcurrentDownloader<B, C, DB>
+unsafe impl<B, DB> Sync for ConcurrentDownloader<B, DB>
 where
     B: BodiesClient,
-    C: ConsensusTrait,
     DB: Database,
 {
 }
@@ -503,26 +481,39 @@ impl ConcurrentDownloaderBuilder {
     }
 
     /// Consume self and return the concurrent donwloader.
-    pub fn build<B, C, DB>(
+    pub fn build<B, DB>(
         self,
         client: Arc<B>,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
-    ) -> ConcurrentDownloader<B, C, DB>
+    ) -> ConcurrentDownloader<B, DB>
     where
-        C: ConsensusTrait + 'static,
         B: BodiesClient + 'static,
         DB: Database,
     {
-        ConcurrentDownloader::new(
+        let Self {
+            request_limit,
+            stream_batch_size,
+            concurrent_requests_range,
+            max_buffered_responses,
+        } = self;
+        let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
+        let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
+        ConcurrentDownloader {
             client,
             consensus,
             db,
-            self.request_limit,
-            self.stream_batch_size,
-            self.max_buffered_responses,
-            self.concurrent_requests_range,
-        )
+            request_limit,
+            stream_batch_size,
+            max_buffered_responses,
+            concurrent_requests_range,
+            in_progress_queue,
+            metrics,
+            download_range: Default::default(),
+            latest_queued_block_number: None,
+            buffered_responses: Default::default(),
+            queued_bodies: Default::default(),
+        }
     }
 }
 
@@ -563,7 +554,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..20);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
@@ -577,7 +568,7 @@ mod tests {
 
         assert_matches!(
             downloader.next().await,
-            Some(res) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
         );
         assert_eq!(client.times_requested(), 1);
     }
@@ -590,7 +581,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..100);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let stream_batch_size = 20;
         let request_limit = 10;
@@ -609,7 +600,7 @@ mod tests {
 
             assert_matches!(
                 downloader.next().await,
-                Some(res) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &mut bodies))
+                Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &mut bodies))
             );
             assert!(downloader.latest_queued_block_number >= Some(range_start));
             range_start += stream_batch_size as u64;
@@ -630,7 +621,7 @@ mod tests {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let (headers, mut bodies) = generate_bodies(0..200);
 
-        insert_headers(db.borrow(), &headers);
+        insert_headers(&db, &headers);
 
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let mut downloader = ConcurrentDownloaderBuilder::default()
@@ -641,17 +632,17 @@ mod tests {
         downloader.set_download_range(0..100).expect("failed to set header range");
         assert_matches!(
             downloader.next().await,
-            Some(res) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
         );
 
         // Check that the stream is terminated
-        assert_eq!(downloader.next().await, None);
+        assert!(downloader.next().await.is_none());
 
         // Set and download the second range
         downloader.set_download_range(100..200).expect("failed to set header range");
         assert_matches!(
             downloader.next().await,
-            Some(res) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
         );
     }
 }

@@ -1,4 +1,4 @@
-use crate::p2p::{downloader::DownloadClient, error::PeerRequestResult, priority::Priority};
+use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use async_trait::async_trait;
 pub use reth_eth_wire::BlockHeaders;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
