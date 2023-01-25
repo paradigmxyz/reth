@@ -203,11 +203,6 @@ impl NetworkHandle {
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
     }
-
-    /// Returns the chain id
-    pub fn chain_id(&self) -> u64 {
-        self.inner.chain_id.load(Ordering::Relaxed)
-    }
 }
 
 // === API Implementations ===
@@ -234,6 +229,10 @@ impl NetworkInfo for NetworkHandle {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
         rx.await.map_err(Into::into)
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.inner.chain_id.load(Ordering::Relaxed)
     }
 }
 

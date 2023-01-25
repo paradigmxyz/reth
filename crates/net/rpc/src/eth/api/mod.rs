@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use reth_interfaces::Result;
-use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::U64;
 use reth_provider::{BlockProvider, ChainInfo, StateProviderFactory};
@@ -36,18 +35,19 @@ pub trait EthApiSpec: Send + Sync {
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
 #[derive(Debug, Clone)]
-pub struct EthApi<Pool, Client> {
+pub struct EthApi<Pool, Client, Network> {
     /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Pool, Client>>,
+    inner: Arc<EthApiInner<Pool, Client, Network>>,
 }
 
-impl<Pool, Client> EthApi<Pool, Client>
+impl<Pool, Client, Network> EthApi<Pool, Client, Network>
 where
     Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
+    Network: NetworkInfo,
 {
     /// Creates a new, shareable instance.
-    pub fn new(client: Arc<Client>, pool: Pool, network: NetworkHandle) -> Self {
+    pub fn new(client: Arc<Client>, pool: Pool, network: Network) -> Self {
         let inner = EthApiInner { client, pool, network };
         Self { inner: Arc::new(inner) }
     }
@@ -57,17 +57,18 @@ where
         &self.inner.client
     }
 
-    /// Returns the inner `Client`
-    fn network(&self) -> &NetworkHandle {
+    /// Returns the inner `Network`
+    fn network(&self) -> &Network {
         &self.inner.network
     }
 }
 
 #[async_trait]
-impl<Pool, Client> EthApiSpec for EthApi<Pool, Client>
+impl<Pool, Client, Network> EthApiSpec for EthApi<Pool, Client, Network>
 where
     Pool: TransactionPool<Transaction = Transaction> + Clone + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
+    Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.
     ///
@@ -90,11 +91,11 @@ where
 
 /// Container type `EthApi`
 #[derive(Debug)]
-struct EthApiInner<Pool, Client> {
+struct EthApiInner<Pool, Client, Network> {
     /// The transaction pool.
     pool: Pool,
     /// The client that can interact with the chain.
     client: Arc<Client>,
     /// An interface to interact with the network
-    network: NetworkHandle,
+    network: Network,
 }
