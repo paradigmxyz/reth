@@ -1,9 +1,8 @@
+use super::headers::client::HeadersRequest;
 use crate::consensus;
 use reth_primitives::{rpc::BlockNumber, BlockHashOrNumber, Header, WithPeerId, H256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-
-use super::headers::client::HeadersRequest;
 
 /// Result alias for result of a request.
 pub type RequestResult<T> = Result<T, RequestError>;

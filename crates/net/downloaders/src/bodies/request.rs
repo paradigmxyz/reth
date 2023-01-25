@@ -1,3 +1,4 @@
+use crate::metrics::DownloaderMetrics;
 use futures::{Future, FutureExt};
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
@@ -13,8 +14,6 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-
-use crate::metrics::DownloaderMetrics;
 
 type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send>>;
 
