@@ -879,8 +879,8 @@ fn calc_next_request(
 mod tests {
     use super::*;
 
-    use crate::headers::test_utils::{child_header, CONSENSUS};
-    use reth_interfaces::test_utils::TestHeadersClient;
+    use crate::headers::test_utils::child_header;
+    use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
 
     /// Tests that request calc works
@@ -891,7 +891,7 @@ mod tests {
         let genesis = SealedHeader::default();
 
         let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             genesis,
             H256::random(),
@@ -918,7 +918,7 @@ mod tests {
         let header = SealedHeader::default();
 
         let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             header.clone(),
             H256::random(),
@@ -960,7 +960,7 @@ mod tests {
         let batch_size = 99;
         let start = 1000;
         let mut downloader = LinearDownloadBuilder::default().request_limit(batch_size).build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             genesis,
             H256::random(),
@@ -1011,7 +1011,7 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
             .extend(vec![
@@ -1041,7 +1041,7 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
             .extend(vec![

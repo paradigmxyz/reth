@@ -1,4 +1,3 @@
-//!
 use futures::Stream;
 use futures_util::StreamExt;
 use pin_project::pin_project;
@@ -156,11 +155,8 @@ enum DownloaderUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::headers::{
-        linear::LinearDownloadBuilder,
-        test_utils::{child_header, CONSENSUS},
-    };
-    use reth_interfaces::test_utils::TestHeadersClient;
+    use crate::headers::{linear::LinearDownloadBuilder, test_utils::child_header};
+    use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use std::sync::Arc;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -176,7 +172,7 @@ mod tests {
         let downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
 
         let mut downloader = TaskDownloader::spawn(downloader);
 

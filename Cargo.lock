@@ -4128,7 +4128,6 @@ dependencies = [
  "futures",
  "futures-util",
  "metrics",
- "once_cell",
  "pin-project",
  "reth-db",
  "reth-eth-wire",
