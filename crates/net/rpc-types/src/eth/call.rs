@@ -1,4 +1,4 @@
-use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U256};
+use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U128, U256};
 use serde::{Deserialize, Serialize};
 
 /// Call request
@@ -10,11 +10,11 @@ pub struct CallRequest {
     /// To
     pub to: Option<Address>,
     /// Gas Price
-    pub gas_price: Option<U256>,
+    pub gas_price: Option<U128>,
     /// EIP-1559 Max base fee the caller is willing to pay
-    pub max_fee_per_gas: Option<U256>,
+    pub max_fee_per_gas: Option<U128>,
     /// EIP-1559 Priority fee the caller is paying to the block author
-    pub max_priority_fee_per_gas: Option<U256>,
+    pub max_priority_fee_per_gas: Option<U128>,
     /// Gas
     pub gas: Option<U256>,
     /// Value
