@@ -15,7 +15,7 @@ use reth_rpc_types::{
 pub trait EthApi {
     /// Returns the protocol version encoded as a string.
     #[method(name = "eth_protocolVersion")]
-    fn protocol_version(&self) -> Result<U64>;
+    async fn protocol_version(&self) -> Result<U64>;
 
     /// Returns an object with data about the sync status or false.
     #[method(name = "eth_syncing")]
