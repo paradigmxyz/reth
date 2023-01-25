@@ -1,6 +1,5 @@
-use crate::metrics::DownloaderMetrics;
-
 use super::request::BodiesRequestFuture;
+use crate::metrics::DownloaderMetrics;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
