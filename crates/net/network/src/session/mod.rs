@@ -19,7 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_net_common::metered_stream::{MeteredStream, MeteredStreamMetrics};
+use reth_net_common::metered_stream::{MeteredStream, MeteredStreamMetrics, MeteredStreamCounts};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
@@ -97,7 +97,11 @@ pub(crate) struct SessionManager {
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
+    /// Used to measure ingress & egress across all sessions
+    metered_stream_counts: MeteredStreamCounts,
 }
+
+const SESSIONS_METER_NAME: &str = "peer_sessions_total";
 
 // === impl SessionManager ===
 
@@ -130,6 +134,7 @@ impl SessionManager {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx,
             active_session_rx: ReceiverStream::new(active_session_rx),
+            metered_stream_counts: MeteredStreamCounts::default(),
         }
     }
 
@@ -206,6 +211,10 @@ impl SessionManager {
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new(stream);
+        // Attach meter for total across all sessions
+        metered_stream.add_meter(SESSIONS_METER_NAME, self.metered_stream_counts.clone());
+        // Attach meter for this session
+        metered_stream.add_meter("session", MeteredStreamCounts::default());
         self.spawn(start_pending_incoming_session(
             disconnect_rx,
             session_id,
@@ -240,6 +249,7 @@ impl SessionManager {
             self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
+            self.metered_stream_counts.clone(),
         ));
 
         let handle = PendingSessionHandle {
@@ -666,9 +676,17 @@ async fn start_pending_outbound_session(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
+    metered_stream_counts: MeteredStreamCounts,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
-        Ok(stream) => MeteredStream::new(stream),
+        Ok(stream) => {
+            let metered_stream = MeteredStream::new(stream);
+            // Attach meter for total across all sessions
+            metered_stream.add_meter(SESSIONS_METER_NAME, metered_stream_counts);
+            // Attach meter for this session
+            metered_stream.add_meter("session", MeteredStreamCounts::default());
+            metered_stream
+        },
         Err(error) => {
             let _ = events
                 .send(PendingSessionEvent::OutgoingConnectionError {
@@ -814,11 +832,6 @@ async fn authenticate_stream(
             }
         }
     };
-
-    eth_stream.as_mut().set_metrics(MeteredStreamMetrics::new(
-        "session_net_io",
-        &[("peer_id", format!("{peer_id}"))],
-    ));
 
     PendingSessionEvent::Established {
         session_id,

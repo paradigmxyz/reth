@@ -33,6 +33,7 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll},
+    collections::HashMap,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
@@ -113,47 +114,59 @@ impl MeteredStreamMetrics {
 /// ingress/egress through it
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct MeteredStream<S> {
+pub struct MeteredStream<'a, S> {
     /// The stream this instruments
     #[pin]
     inner: S,
-    /// The [`MeteredStreamCounts`] struct this uses to meter ingress / egress
-    meter: MeteredStreamCounts,
-    /// An optional  [`MeteredStreamMetrics`] struct expose metrics over the
-    /// [`MeteredStreamCounts`].
-    metrics: Option<MeteredStreamMetrics>,
+    /// The [`MeteredStreamCounts`] structs this can increment ingress / egress counts for,
+    /// with optional metrics associated with each.
+    meters: HashMap<&'a str, (MeteredStreamCounts, Option<MeteredStreamMetrics>)>,
 }
 
-impl<S> MeteredStream<S> {
+/// Error representing that a meter was not found in the `meters` map of a [`MeteredStream`]
+#[derive(Debug)]
+pub struct MeterNotFoundError;
+
+impl core::fmt::Display for MeterNotFoundError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "meter not found")
+    }
+}
+
+impl std::error::Error for MeterNotFoundError {}
+
+impl<'a, S> MeteredStream<'a, S> {
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
     /// along with a new [`MeteredStreamCounts`]
     pub fn new(inner: S) -> Self {
-        Self { inner, meter: MeteredStreamCounts::default(), metrics: None }
+        Self { inner, meters: HashMap::new() }
     }
 
-    /// Attaches the provided [`MeteredStreamCounts`]
-    pub fn set_meter(&mut self, meter: MeteredStreamCounts) {
-        self.meter = meter;
+    /// Adds the provided [`MeteredStreamCounts`]
+    pub fn add_meter(&mut self, meter_name: &'a str, meter: MeteredStreamCounts) {
+        self.meters.insert(meter_name, (meter, None));
     }
 
     /// Attaches the provided  [`MeteredStreamMetrics`]
-    pub fn set_metrics(&mut self, metrics: MeteredStreamMetrics) {
-        self.metrics = Some(metrics);
+    pub fn set_metrics(&mut self, meter_name: &'a str, metrics: MeteredStreamMetrics) -> Result<(), MeterNotFoundError> {
+        let meter_metrics = self.meters.get_mut(meter_name).ok_or(MeterNotFoundError)?;
+        meter_metrics.1 = Some(metrics);
+        Ok(())
     }
 
     /// Provides a reference to the [`MeteredStreamCounts`] attached to this [`MeteredStream`]
-    pub fn get_metered_stream_counts(&self) -> &MeteredStreamCounts {
-        &self.meter
+    pub fn get_metered_stream_counts(&self, meter_name: &'a str) -> Option<&MeteredStreamCounts> {
+        self.meters.get(meter_name).map(|m| &m.0)
     }
 }
 
-impl<S> AsMut<MeteredStream<S>> for MeteredStream<S> {
-    fn as_mut(&mut self) -> &mut MeteredStream<S> {
+impl<'a, S> AsMut<MeteredStream<'a, S>> for MeteredStream<'a, S> {
+    fn as_mut(&mut self) -> &mut MeteredStream<'a, S> {
         self
     }
 }
 
-impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
+impl<Stream: AsyncRead> AsyncRead for MeteredStream<'_, Stream> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -165,18 +178,21 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
             ready!(this.inner.poll_read(cx, buf))?;
             u64::try_from(buf.filled().len() - init_num_bytes).unwrap_or(u64::max_value())
         };
-        let current_ingress =
-            this.meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
 
-        if let Some(metered_stream_metrics) = &this.metrics {
-            metered_stream_metrics.inner.ingress_bytes.absolute(current_ingress);
-        }
+        this.meters.iter().for_each(|(_, (meter, metrics))| {
+            let current_ingress =
+                meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
+    
+            if let Some(metered_stream_metrics) = metrics {
+                metered_stream_metrics.inner.ingress_bytes.absolute(current_ingress);
+            }
+        });
 
         Poll::Ready(Ok(()))
     }
 }
 
-impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
+impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<'_, Stream> {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -185,12 +201,15 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
         let this = self.project();
         let num_bytes = ready!(this.inner.poll_write(cx, buf))?;
         let num_bytes_u64 = { u64::try_from(num_bytes).unwrap_or(u64::max_value()) };
-        let current_egress =
-            this.meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
 
-        if let Some(metered_stream_metrics) = &this.metrics {
-            metered_stream_metrics.inner.egress_bytes.absolute(current_egress);
-        }
+        this.meters.iter().for_each(|(_, (meter, metrics))| {
+            let current_egress =
+                meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
+    
+            if let Some(metered_stream_metrics) = metrics {
+                metered_stream_metrics.inner.egress_bytes.absolute(current_egress);
+            }
+        });
 
         Poll::Ready(Ok(num_bytes))
     }
@@ -206,7 +225,7 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
     }
 }
 
-impl HasRemoteAddr for MeteredStream<TcpStream> {
+impl HasRemoteAddr for MeteredStream<'_, TcpStream> {
     fn remote_addr(&self) -> Option<SocketAddr> {
         self.inner.remote_addr()
     }
@@ -223,20 +242,20 @@ mod tests {
     fn create_metered_duplex<'a>(
         client_meter: MeteredStreamCounts,
         server_meter: MeteredStreamCounts,
-    ) -> (MeteredStream<DuplexStream>, MeteredStream<DuplexStream>) {
+    ) -> (MeteredStream<'a, DuplexStream>, MeteredStream<'a, DuplexStream>) {
         let (client, server) = duplex(64);
         let (mut metered_client, mut metered_server) =
             (MeteredStream::new(client), MeteredStream::new(server));
 
-        metered_client.set_meter(client_meter);
-        metered_server.set_meter(server_meter);
+        metered_client.add_meter("session", client_meter);
+        metered_server.add_meter("session", server_meter);
 
         (metered_client, metered_server)
     }
 
-    async fn duplex_stream_ping_pong(
-        client: &mut MeteredStream<DuplexStream>,
-        server: &mut MeteredStream<DuplexStream>,
+    async fn duplex_stream_ping_pong<'a>(
+        client: &mut MeteredStream<'a, DuplexStream>,
+        server: &mut MeteredStream<'a, DuplexStream>,
     ) {
         let mut buf = [0u8; 4];
 
@@ -274,8 +293,8 @@ mod tests {
 
         duplex_stream_ping_pong(&mut metered_client, &mut metered_server).await;
 
-        assert_io_counts(metered_client.get_metered_stream_counts(), 4, 4);
-        assert_io_counts(metered_server.get_metered_stream_counts(), 4, 4);
+        assert_io_counts(metered_client.get_metered_stream_counts("session").unwrap(), 4, 4);
+        assert_io_counts(metered_server.get_metered_stream_counts("session").unwrap(), 4, 4);
     }
 
     #[tokio::test]
@@ -285,18 +304,23 @@ mod tests {
 
         let client_stream = TcpStream::connect(server_addr).await.unwrap();
         let mut metered_client_stream = MeteredStream::new(client_stream);
+        
+        let client_meter = MeteredStreamCounts::default();
+        metered_client_stream.add_meter("session", client_meter.clone());
 
-        let client_meter = metered_client_stream.meter.clone();
 
         let handle = tokio::spawn(async move {
             let (server_stream, _) = listener.accept().await.unwrap();
             let mut metered_server_stream = MeteredStream::new(server_stream);
 
+            let server_meter = MeteredStreamCounts::default();
+            metered_server_stream.add_meter("session", server_meter.clone());
+
             let mut buf = [0u8; 4];
 
             metered_server_stream.read(&mut buf).await.unwrap();
 
-            assert_eq!(metered_server_stream.meter.total_ingress(), client_meter.total_egress());
+            assert_eq!(server_meter.total_ingress(), client_meter.total_egress());
         });
 
         metered_client_stream.write_all(b"ping").await.unwrap();
