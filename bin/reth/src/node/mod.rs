@@ -20,7 +20,6 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
-    metrics::HeaderMetrics,
     stages::{
         bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
         hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
@@ -173,7 +172,6 @@ impl Command {
                     ),
                 consensus: consensus.clone(),
                 sync_status_updates: network.clone(),
-                metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {
                 commit_threshold: config.stages.total_difficulty.commit_threshold,
