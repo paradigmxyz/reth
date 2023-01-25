@@ -4,7 +4,7 @@ use reth_metrics_derive::Metrics;
 
 /// The header downloader metrics.
 #[derive(Metrics)]
-#[metrics(scope = "downloaders_headers")]
+#[metrics(scope = "downloaders.headers")]
 pub struct HeaderDownloaderMetrics {
     /// The number of headers that were successfully sent to the poller (stage)
     pub(crate) total_flushed: Counter,
