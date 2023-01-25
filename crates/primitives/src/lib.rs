@@ -40,7 +40,9 @@ pub use bloom::Bloom;
 pub use chain::{
     Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ParisStatus, GOERLI, MAINNET, SEPOLIA,
 };
-pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
+pub use constants::{
+    EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
+};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
