@@ -181,19 +181,19 @@ fn test_labels(scope: &str) {
     assert!(gauge.is_some());
     let labels = gauge.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(labels.unwrap(), test_labels.clone(),);
+    assert_eq!(labels.unwrap(), test_labels,);
 
     let second_gauge = RECORDER.get_metric(&format!("{scope}.second_gauge"));
     assert!(second_gauge.is_some());
     let labels = second_gauge.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(labels.unwrap(), test_labels.clone());
+    assert_eq!(labels.unwrap(), test_labels,);
 
     let counter = RECORDER.get_metric(&format!("{scope}.counter"));
     assert!(counter.is_some());
     let labels = counter.unwrap().labels;
     assert!(labels.is_some());
-    assert_eq!(labels.unwrap(), test_labels.clone(),);
+    assert_eq!(labels.unwrap(), test_labels,);
 
     let histogram = RECORDER.get_metric(&format!("{scope}.histogram"));
     assert!(histogram.is_some());
