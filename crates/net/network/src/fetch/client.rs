@@ -1,9 +1,6 @@
 //! A client implementation that can interact with the network and download data.
 
-use crate::{
-    fetch::DownloadRequest,
-    peers::{PeersHandle, ReputationChangeKind},
-};
+use crate::{fetch::DownloadRequest, peers::PeersHandle};
 use reth_eth_wire::{BlockBody, BlockHeaders};
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
@@ -12,6 +9,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{PeerId, WithPeerId, H256};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
