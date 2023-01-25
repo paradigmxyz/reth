@@ -60,6 +60,11 @@ impl TestHeaderDownloader {
             done: false,
         }
     }
+
+    /// Validate whether the header is valid in relation to it's parent
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)
+    }
 }
 
 impl HeaderDownloader for TestHeaderDownloader {
@@ -69,11 +74,6 @@ impl HeaderDownloader for TestHeaderDownloader {
 
     fn set_batch_size(&mut self, limit: usize) {
         self.batch_size = limit;
-    }
-
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
-        validate_header_download(&self.consensus, header, parent)?;
-        Ok(())
     }
 }
 
