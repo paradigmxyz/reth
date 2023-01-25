@@ -2,112 +2,78 @@ use crate::{
     db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
-use itertools::Itertools;
-use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
 };
-use reth_primitives::TxNumber;
-use std::fmt::Debug;
-use thiserror::Error;
 use tracing::*;
 
-const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
+const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 
-/// The sender recovery stage iterates over existing transactions,
-/// recovers the transaction signer and stores them
-/// in [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
+/// The transaction lookup stage.
+///
+/// This stage walks over the bodies table, and sets the transaction hash of each transaction in a
+/// block to the corresponding `TransitionId` at each block. This is written to the
+/// [`tables::TxHashNumber`] This is used for looking up changesets via the transaction hash.
 #[derive(Debug)]
-pub struct SenderRecoveryStage {
-    /// The size of the chunk for parallel sender recovery
-    pub batch_size: usize,
-    /// The size of inserted items after which the control
-    /// flow will be returned to the pipeline for commit
-    pub commit_threshold: u64,
+pub struct TransactionLookupStage {
+    /// The number of table entries to commit at once
+    commit_threshold: u64,
 }
 
-// TODO(onbjerg): Should unwind
-#[derive(Error, Debug)]
-enum SenderRecoveryStageError {
-    #[error("Sender recovery failed for transaction {tx}.")]
-    SenderRecovery { tx: TxNumber },
-}
-
-impl From<SenderRecoveryStageError> for StageError {
-    fn from(error: SenderRecoveryStageError) -> Self {
-        StageError::Fatal(Box::new(error))
+impl TransactionLookupStage {
+    /// Create new instance of [TransactionLookupStage].
+    pub fn new(commit_threshold: u64) -> Self {
+        Self { commit_threshold }
     }
 }
 
 #[async_trait::async_trait]
-impl<DB: Database> Stage<DB> for SenderRecoveryStage {
+impl<DB: Database> Stage<DB> for TransactionLookupStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        SENDER_RECOVERY
+        TRANSACTION_LOOKUP
     }
 
-    /// Retrieve the range of transactions to iterate over by querying
-    /// [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount],
-    /// collect transactions within that range,
-    /// recover signer for each transaction and store entries in
-    /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
+    /// Write total difficulty entries
     async fn execute(
         &mut self,
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::sender_recovery");
+            exec_or_return!(input, self.commit_threshold, "sync::stages::transaction_lookup");
 
-        // Look up the start index for the transaction range
-        let start_tx_index = tx.get_block_body_by_num(start_block)?.start_tx_id;
+        debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
-        // Look up the end index for transaction range (inclusive)
-        let end_tx_index = tx.get_block_body_by_num(end_block)?.last_tx_index();
+        let mut cursor_bodies = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let start_key = tx.get_block_numhash(start_block)?;
 
-        // No transactions to walk over
-        if start_tx_index > end_tx_index {
-            info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Target transaction already reached");
-            return Ok(ExecOutput { stage_progress: end_block, done: true })
-        }
+        // Walk over block bodies within a specified range.
+        let bodies = cursor_bodies.walk(start_key)?.take_while(|entry| {
+            entry
+                .as_ref()
+                .map(|(block_num_hash, _)| block_num_hash.number() <= end_block)
+                .unwrap_or_default()
+        });
 
-        // Acquire the cursor for inserting elements
-        let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
+        // Collect tranasctions for each body and insert the reverse lookup for hash -> tx_id.
+        for body_entry in bodies {
+            let (_, body) = body_entry?;
+            let transactions = tx_cursor.walk(body.start_tx_id)?.take(body.tx_count as usize);
 
-        // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-        // Walk the transactions from start to end index (inclusive)
-        let entries = tx_cursor
-            .walk(start_tx_index)?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k <= end_tx_index).unwrap_or_default());
-
-        // Iterate over transactions in chunks
-        info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
-        for chunk in &entries.chunks(self.batch_size) {
-            let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
-            // Recover signers for the chunk in parallel
-            let recovered = transactions
-                .into_par_iter()
-                .map(|(tx_id, transaction)| {
-                    trace!(target: "sync::stages::sender_recovery", tx_id, hash = ?transaction.hash(), "Recovering sender");
-                    let signer =
-                        transaction.recover_signer().ok_or_else::<StageError, _>(|| {
-                            SenderRecoveryStageError::SenderRecovery { tx: tx_id }.into()
-                        })?;
-                    Ok((tx_id, signer))
-                })
-                .collect::<Result<Vec<_>, StageError>>()?;
-            // Append the signers to the table
-            recovered.into_iter().try_for_each(|(id, sender)| senders_cursor.append(id, sender))?;
+            for tx_entry in transactions {
+                let (id, transaction) = tx_entry?;
+                tx.put::<tables::TxHashNumber>(transaction.hash(), id)?;
+            }
         }
 
         let done = !capped;
-        info!(target: "sync::stages::sender_recovery", stage_progress = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: end_block, done })
+        info!(target: "sync::stages::transaction_lookup", stage_progress = end_block, done, "Sync iteration finished");
+        Ok(ExecOutput { done, stage_progress: end_block })
     }
 
     /// Unwind the stage.
@@ -116,35 +82,52 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, "Unwinding");
-        // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.get_block_body_by_num(input.unwind_to)?.last_tx_index();
-        tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
+        info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, "Unwinding");
+        // Cursors to unwind tx hash to number
+        let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
+        let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+        let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut rev_walker = body_cursor.walk_back(None)?;
+        while let Some((key, body)) = rev_walker.next().transpose()? {
+            if key.number() <= input.unwind_to {
+                break
+            }
+
+            // Delete all transactions that belong to this block
+            for tx_id in body.tx_id_range() {
+                // First delete the transaction and hash to id mapping
+                if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
+                    if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
+                        tx_hash_number_cursor.delete_current()?;
+                    }
+                }
+            }
+        }
+
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
-    use reth_primitives::{BlockNumber, SealedBlock, H256};
-
     use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
+    use assert_matches::assert_matches;
+    use reth_interfaces::test_utils::generators::{random_block, random_block_range};
+    use reth_primitives::{BlockNumber, SealedBlock, H256};
 
-    stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
+    // Implement stage test suite.
+    stage_test_suite_ext!(TransactionLookupTestRunner, transaction_lookup);
 
-    /// Execute a block range with a single transaction
     #[tokio::test]
-    async fn execute_single_transaction() {
+    async fn execute_single_transaction_lookup() {
         let (previous_stage, stage_progress) = (500, 100);
 
         // Set up the runner
-        let runner = SenderRecoveryTestRunner::default();
+        let runner = TransactionLookupTestRunner::default();
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -175,9 +158,9 @@ mod tests {
 
     /// Execute the stage twice with input range that exceeds the commit threshold
     #[tokio::test]
-    async fn execute_intermediate_commit() {
+    async fn execute_intermediate_commit_transaction_lookup() {
         let threshold = 50;
-        let mut runner = SenderRecoveryTestRunner::default();
+        let mut runner = TransactionLookupTestRunner::default();
         runner.set_threshold(threshold);
         let (stage_progress, previous_stage) = (1000, 1100); // input exceeds threshold
         let first_input = ExecInput {
@@ -212,39 +195,38 @@ mod tests {
         assert!(runner.validate_execution(first_input, result.ok()).is_ok(), "validation failed");
     }
 
-    struct SenderRecoveryTestRunner {
+    struct TransactionLookupTestRunner {
         tx: TestTransaction,
         threshold: u64,
     }
 
-    impl Default for SenderRecoveryTestRunner {
+    impl Default for TransactionLookupTestRunner {
         fn default() -> Self {
             Self { threshold: 1000, tx: TestTransaction::default() }
         }
     }
 
-    impl SenderRecoveryTestRunner {
+    impl TransactionLookupTestRunner {
         fn set_threshold(&mut self, threshold: u64) {
             self.threshold = threshold;
         }
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TxSenders] table above
+        /// 1. If there are any entries in the [tables::TxHashNumber] table above
         ///    a given block number.
         ///
         /// 2. If the is no requested block entry in the bodies table,
-        ///    but [tables::TxSenders] is not empty.
-        fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
+        ///    but [tables::TxHashNumber] is not empty.
+        fn ensure_no_hash_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self.tx.inner().get_block_body_by_num(block);
             match body_result {
-                Ok(body) => self
-                    .tx
-                    .ensure_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
-                        key
-                    })?,
+                Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
+                    body.last_tx_index(),
+                    |key| key,
+                )?,
                 Err(_) => {
-                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
+                    assert!(self.tx.table_is_empty::<tables::TxHashNumber>()?);
                 }
             };
 
@@ -252,19 +234,19 @@ mod tests {
         }
     }
 
-    impl StageTestRunner for SenderRecoveryTestRunner {
-        type S = SenderRecoveryStage;
+    impl StageTestRunner for TransactionLookupTestRunner {
+        type S = TransactionLookupStage;
 
         fn tx(&self) -> &TestTransaction {
             &self.tx
         }
 
         fn stage(&self) -> Self::S {
-            SenderRecoveryStage { batch_size: 100, commit_threshold: self.threshold }
+            TransactionLookupStage { commit_threshold: self.threshold }
         }
     }
 
-    impl ExecuteStageTestRunner for SenderRecoveryTestRunner {
+    impl ExecuteStageTestRunner for TransactionLookupTestRunner {
         type Seed = Vec<SealedBlock>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -299,26 +281,24 @@ mod tests {
                             let transaction = tx
                                 .get::<tables::Transactions>(tx_id)?
                                 .expect("no transaction entry");
-                            let signer =
-                                transaction.recover_signer().expect("failed to recover signer");
-                            assert_eq!(Some(signer), tx.get::<tables::TxSenders>(tx_id)?);
+                            assert_eq!(
+                                Some(tx_id),
+                                tx.get::<tables::TxHashNumber>(transaction.hash)?,
+                            );
                         }
                     }
 
                     Ok(())
                 })?,
-                None => {
-                    self.ensure_no_senders_by_block(input.stage_progress.unwrap_or_default())?
-                }
+                None => self.ensure_no_hash_by_block(input.stage_progress.unwrap_or_default())?,
             };
-
             Ok(())
         }
     }
 
-    impl UnwindStageTestRunner for SenderRecoveryTestRunner {
+    impl UnwindStageTestRunner for TransactionLookupTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            self.ensure_no_senders_by_block(input.unwind_to)
+            self.ensure_no_hash_by_block(input.unwind_to)
         }
     }
 }
