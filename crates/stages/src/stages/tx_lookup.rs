@@ -53,24 +53,20 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let start_key = tx.get_block_numhash(start_block)?;
 
         // Walk over block bodies within a specified range.
-        let bodies = cursor_bodies
-            .walk(start_key)?
-            .take_while(|entry| {
-                entry
-                    .as_ref()
-                    .map(|(block_num_hash, _)| block_num_hash.number() <= end_block)
-                    .unwrap_or_default()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let bodies = cursor_bodies.walk(start_key)?.take_while(|entry| {
+            entry
+                .as_ref()
+                .map(|(block_num_hash, _)| block_num_hash.number() <= end_block)
+                .unwrap_or_default()
+        });
 
         // Collect tranasctions for each body and insert the reverse lookup for hash -> tx_id.
-        for (_, body) in bodies {
-            let transactions = tx_cursor
-                .walk(body.start_tx_id)?
-                .take(body.tx_count as usize)
-                .collect::<Result<Vec<_>, _>>()?;
+        for body_entry in bodies {
+            let (_, body) = body_entry?;
+            let transactions = tx_cursor.walk(body.start_tx_id)?.take(body.tx_count as usize);
 
-            for (id, transaction) in transactions {
+            for tx_entry in transactions {
+                let (id, transaction) = tx_entry?;
                 tx.put::<tables::TxHashNumber>(transaction.hash(), id)?;
             }
         }
