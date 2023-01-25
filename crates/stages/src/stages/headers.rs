@@ -462,9 +462,9 @@ mod tests {
                 block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
                 self.tx
-                    .check_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
-                self.tx.check_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
-                self.tx.check_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
+                    .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
+                self.tx.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.tx.ensure_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
                 Ok(())
             }
         }
