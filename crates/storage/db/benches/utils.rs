@@ -15,8 +15,6 @@ const BENCH_DB_PATH: &str = "/tmp/reth-benches";
 const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
-///
-/// TBD, so for now only loads 3 default values.
 fn load_vectors<T: reth_db::table::Table>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
 where
     T: Default,
