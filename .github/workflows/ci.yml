@@ -185,7 +185,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: run
-          args: --bin reth -- db gen-table-vectors
+          args: --bin reth -- test-vectors tables
 
       - name: Set main baseline
         uses: actions-rs/cargo@v1
