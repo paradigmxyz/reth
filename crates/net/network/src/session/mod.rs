@@ -153,7 +153,8 @@ impl SessionManager {
         self.hello_message.clone()
     }
 
-    /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].
+    /// Spawns the given future onto a new task that is tracked in the `spawned_tasks`
+    /// [`JoinSet`](tokio::task::JoinSet).
     fn spawn<F>(&self, f: F)
     where
         F: Future<Output = ()> + Send + 'static,

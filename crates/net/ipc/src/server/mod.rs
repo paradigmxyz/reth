@@ -430,8 +430,7 @@ impl<B, L> Builder<B, L> {
     /// registered resources on this server instance would exceed 8.
     ///
     /// See the module documentation for
-    /// [`resurce_limiting`](../jsonrpsee_utils/server/resource_limiting/index.html#
-    /// resource-limiting) for details.
+    /// [`resurce_limiting`](../jsonrpsee_utils/server/resource_limiting/index.html#resource-limiting) for details.
     pub fn register_resource(
         mut self,
         label: &'static str,
