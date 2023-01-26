@@ -19,7 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_net_common::metered_stream::{MeteredStream, MeteredStreamMetrics, MeteredStreamCounts};
+use reth_net_common::metered_stream::{MeteredStream, MeteredStreamCounts, MeteredStreamMetrics};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
@@ -57,7 +57,7 @@ impl Display for SessionId {
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
 #[derive(Debug)]
-pub(crate) struct SessionManager {
+pub(crate) struct SessionManager<'a> {
     /// Tracks the identifier for the next session.
     next_id: usize,
     /// Keeps track of all sessions
@@ -87,9 +87,9 @@ pub(crate) struct SessionManager {
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
     /// get a clone of this sender half.
-    pending_sessions_tx: mpsc::Sender<PendingSessionEvent>,
+    pending_sessions_tx: mpsc::Sender<PendingSessionEvent<'a>>,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
-    pending_session_rx: ReceiverStream<PendingSessionEvent>,
+    pending_session_rx: ReceiverStream<PendingSessionEvent<'a>>,
     /// The original Sender half of the [`ActiveSessionEvent`] channel.
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
@@ -105,7 +105,7 @@ const SESSIONS_METER_NAME: &str = "peer_sessions_total";
 
 // === impl SessionManager ===
 
-impl SessionManager {
+impl SessionManager<'_> {
     /// Creates a new empty [`SessionManager`].
     pub(crate) fn new(
         secret_key: SecretKey,
@@ -637,11 +637,11 @@ pub struct ExceedsSessionLimit(pub(crate) u32);
 ///
 /// This will wait for the _incoming_ handshake request and answer it.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn start_pending_incoming_session(
+pub(crate) async fn start_pending_incoming_session<'a>(
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
-    stream: MeteredStream<TcpStream>,
-    events: mpsc::Sender<PendingSessionEvent>,
+    stream: MeteredStream<'a, TcpStream>,
+    events: mpsc::Sender<PendingSessionEvent<'a>>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
     hello: HelloMessage,
@@ -668,7 +668,7 @@ pub(crate) async fn start_pending_incoming_session(
 #[allow(clippy::too_many_arguments)]
 async fn start_pending_outbound_session(
     disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent>,
+    events: mpsc::Sender<PendingSessionEvent<'_>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     remote_peer_id: PeerId,
@@ -680,13 +680,13 @@ async fn start_pending_outbound_session(
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
-            let metered_stream = MeteredStream::new(stream);
+            let mut metered_stream = MeteredStream::new(stream);
             // Attach meter for total across all sessions
             metered_stream.add_meter(SESSIONS_METER_NAME, metered_stream_counts);
             // Attach meter for this session
             metered_stream.add_meter("session", MeteredStreamCounts::default());
             metered_stream
-        },
+        }
         Err(error) => {
             let _ = events
                 .send(PendingSessionEvent::OutgoingConnectionError {
@@ -716,10 +716,10 @@ async fn start_pending_outbound_session(
 
 /// Authenticates a session
 #[allow(clippy::too_many_arguments)]
-async fn authenticate(
+async fn authenticate<'a>(
     disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent>,
-    stream: MeteredStream<TcpStream>,
+    events: mpsc::Sender<PendingSessionEvent<'a>>,
+    stream: MeteredStream<'a, TcpStream>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -796,8 +796,8 @@ async fn authenticate(
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`]
 #[allow(clippy::too_many_arguments)]
-async fn authenticate_stream(
-    stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,
+async fn authenticate_stream<'a>(
+    stream: UnauthedP2PStream<ECIESStream<MeteredStream<'a, TcpStream>>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     peer_id: PeerId,
@@ -805,7 +805,7 @@ async fn authenticate_stream(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
-) -> PendingSessionEvent {
+) -> PendingSessionEvent<'a> {
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
         Ok(stream_res) => stream_res,
@@ -821,7 +821,7 @@ async fn authenticate_stream(
 
     // if the hello handshake was successful we can try status handshake
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
-    let (mut eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
+    let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,
         Err(err) => {
             return PendingSessionEvent::Disconnected {

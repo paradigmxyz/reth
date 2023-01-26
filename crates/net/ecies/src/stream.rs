@@ -142,11 +142,11 @@ where
     }
 }
 
-impl<S, M> AsMut<MeteredStream<M>> for ECIESStream<S>
+impl<'a, S, M> AsMut<MeteredStream<'a, M>> for ECIESStream<S>
 where
-    S: AsMut<MeteredStream<M>>,
+    S: AsMut<MeteredStream<'a, M>>,
 {
-    fn as_mut(&mut self) -> &mut MeteredStream<M> {
+    fn as_mut(&mut self) -> &mut MeteredStream<'a, M> {
         self.stream.get_mut().as_mut()
     }
 }

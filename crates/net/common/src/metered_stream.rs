@@ -24,6 +24,7 @@ use crate::stream::HasRemoteAddr;
 use metrics::Counter;
 use reth_metrics_derive::Metrics;
 use std::{
+    collections::HashMap,
     convert::TryFrom as _,
     io,
     net::SocketAddr,
@@ -33,7 +34,6 @@ use std::{
         Arc,
     },
     task::{ready, Context, Poll},
-    collections::HashMap,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
@@ -148,7 +148,11 @@ impl<'a, S> MeteredStream<'a, S> {
     }
 
     /// Attaches the provided  [`MeteredStreamMetrics`]
-    pub fn set_metrics(&mut self, meter_name: &'a str, metrics: MeteredStreamMetrics) -> Result<(), MeterNotFoundError> {
+    pub fn set_metrics(
+        &mut self,
+        meter_name: &'a str,
+        metrics: MeteredStreamMetrics,
+    ) -> Result<(), MeterNotFoundError> {
         let meter_metrics = self.meters.get_mut(meter_name).ok_or(MeterNotFoundError)?;
         meter_metrics.1 = Some(metrics);
         Ok(())
@@ -182,7 +186,7 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<'_, Stream> {
         this.meters.iter().for_each(|(_, (meter, metrics))| {
             let current_ingress =
                 meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
-    
+
             if let Some(metered_stream_metrics) = metrics {
                 metered_stream_metrics.inner.ingress_bytes.absolute(current_ingress);
             }
@@ -205,7 +209,7 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<'_, Stream> {
         this.meters.iter().for_each(|(_, (meter, metrics))| {
             let current_egress =
                 meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
-    
+
             if let Some(metered_stream_metrics) = metrics {
                 metered_stream_metrics.inner.egress_bytes.absolute(current_egress);
             }
@@ -304,10 +308,9 @@ mod tests {
 
         let client_stream = TcpStream::connect(server_addr).await.unwrap();
         let mut metered_client_stream = MeteredStream::new(client_stream);
-        
+
         let client_meter = MeteredStreamCounts::default();
         metered_client_stream.add_meter("session", client_meter.clone());
-
 
         let handle = tokio::spawn(async move {
             let (server_stream, _) = listener.accept().await.unwrap();

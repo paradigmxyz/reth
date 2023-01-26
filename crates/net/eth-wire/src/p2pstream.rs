@@ -494,11 +494,11 @@ where
     }
 }
 
-impl<S, M> AsMut<MeteredStream<M>> for P2PStream<S>
+impl<'a, S, M> AsMut<MeteredStream<'a, M>> for P2PStream<S>
 where
-    S: AsMut<MeteredStream<M>>,
+    S: AsMut<MeteredStream<'a, M>>,
 {
-    fn as_mut(&mut self) -> &mut MeteredStream<M> {
+    fn as_mut(&mut self) -> &mut MeteredStream<'a, M> {
         self.inner.as_mut()
     }
 }
