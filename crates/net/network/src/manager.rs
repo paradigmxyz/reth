@@ -25,7 +25,7 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::NetworkMetrics,
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeersHandle, PeersManager, ReputationChangeKind},
+    peers::{PeersHandle, PeersManager},
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
@@ -38,14 +38,14 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, Status,
 };
-use reth_network_api::{EthProtocolInfo, NetworkStatus};
+use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -208,6 +208,7 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
+            Arc::new(AtomicU64::new(chain_spec.chain.id())),
         );
 
         Ok(Self {
@@ -241,7 +242,7 @@ where
     ///     let local_key = rng_secret_key();
     ///
     ///     let config =
-    ///         NetworkConfig::builder(Arc::clone(&client), local_key).boot_nodes(mainnet_nodes()).build();
+    ///         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(Arc::clone(&client));
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
@@ -302,9 +303,11 @@ where
     pub fn status(&self) -> NetworkStatus {
         let sessions = self.swarm.sessions();
         let status = sessions.status();
+        let hello_message = sessions.hello_message();
 
         NetworkStatus {
-            client_version: sessions.hello_message().client_version,
+            client_version: hello_message.client_version,
+            protocol_version: hello_message.protocol_version as u64,
             eth_protocol_info: EthProtocolInfo {
                 difficulty: status.total_difficulty,
                 head: status.blockhash,

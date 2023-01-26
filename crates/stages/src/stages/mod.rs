@@ -14,3 +14,5 @@ pub mod merkle;
 pub mod sender_recovery;
 /// The total difficulty stage
 pub mod total_difficulty;
+/// The transaction lookup stage
+pub mod tx_lookup;

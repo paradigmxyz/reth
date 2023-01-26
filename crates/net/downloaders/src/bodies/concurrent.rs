@@ -1,3 +1,5 @@
+use crate::metrics::DownloaderMetrics;
+
 use super::queue::BodiesRequestQueue;
 use futures::Stream;
 use futures_util::StreamExt;
@@ -25,6 +27,9 @@ use std::{
 /// of concurrent requests, since we are expecting to connect to more peers
 /// in the near future.
 const CONCURRENCY_PEER_MULTIPLIER: usize = 4;
+
+/// The scope for headers downloader metrics.
+pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
 
 /// Downloads bodies in batches.
 ///
@@ -57,6 +62,8 @@ pub struct ConcurrentDownloader<B, DB> {
     buffered_responses: BinaryHeap<OrderedBodiesResponse>,
     /// Queued body responses
     queued_bodies: Vec<BlockResponse>,
+    /// The bodies downloader metrics.
+    metrics: DownloaderMetrics,
 }
 
 impl<B, DB> ConcurrentDownloader<B, DB>
@@ -64,31 +71,6 @@ where
     B: BodiesClient + 'static,
     DB: Database,
 {
-    fn new(
-        client: Arc<B>,
-        consensus: Arc<dyn Consensus>,
-        db: Arc<DB>,
-        request_limit: u64,
-        stream_batch_size: usize,
-        max_buffered_responses: usize,
-        concurrent_requests_range: RangeInclusive<usize>,
-    ) -> Self {
-        Self {
-            client,
-            consensus,
-            db,
-            request_limit,
-            stream_batch_size,
-            max_buffered_responses,
-            concurrent_requests_range,
-            download_range: Default::default(),
-            latest_queued_block_number: None,
-            in_progress_queue: Default::default(),
-            buffered_responses: Default::default(),
-            queued_bodies: Default::default(),
-        }
-    }
-
     /// Returns the next contiguous request.
     fn next_headers_request(&mut self) -> Result<Option<Vec<SealedHeader>>, db::Error> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
@@ -368,6 +350,7 @@ where
             // Yield next batch
             if this.queued_bodies.len() >= this.stream_batch_size {
                 let next_batch = this.queued_bodies.drain(..this.stream_batch_size);
+                this.metrics.total_flushed.increment(next_batch.len() as u64);
                 return Poll::Ready(Some(Ok(next_batch.collect())))
             }
 
@@ -384,6 +367,7 @@ where
 
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size);
+            this.metrics.total_flushed.increment(next_batch.len() as u64);
             return Poll::Ready(Some(Ok(next_batch.collect())))
         }
 
@@ -507,15 +491,29 @@ impl ConcurrentDownloaderBuilder {
         B: BodiesClient + 'static,
         DB: Database,
     {
-        ConcurrentDownloader::new(
+        let Self {
+            request_limit,
+            stream_batch_size,
+            concurrent_requests_range,
+            max_buffered_responses,
+        } = self;
+        let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
+        let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
+        ConcurrentDownloader {
             client,
             consensus,
             db,
-            self.request_limit,
-            self.stream_batch_size,
-            self.max_buffered_responses,
-            self.concurrent_requests_range,
-        )
+            request_limit,
+            stream_batch_size,
+            max_buffered_responses,
+            concurrent_requests_range,
+            in_progress_queue,
+            metrics,
+            download_range: Default::default(),
+            latest_queued_block_number: None,
+            buffered_responses: Default::default(),
+            queued_bodies: Default::default(),
+        }
     }
 }
 

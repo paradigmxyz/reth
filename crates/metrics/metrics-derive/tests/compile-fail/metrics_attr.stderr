@@ -29,10 +29,10 @@ error: Value **must** be a string literal.
 23 | #[metrics(scope = 123)]
    |                   ^^^
 
-error: Value must match regex ^[a-zA-Z_:][a-zA-Z0-9_:]*$
+error: Value must match regex ^[a-zA-Z_:.][a-zA-Z0-9_:.]*$
   --> tests/compile-fail/metrics_attr.rs:27:19
    |
-27 | #[metrics(scope = "some.scope")]
+27 | #[metrics(scope = "some-scope")]
    |                   ^^^^^^^^^^^^
 
 error: Duplicate `scope` value provided.

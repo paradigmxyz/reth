@@ -2,7 +2,7 @@ use crate::{
     config::NetworkMode,
     manager::NetworkEvent,
     message::PeerRequest,
-    peers::{PeerKind, PeersHandle, ReputationChangeKind},
+    peers::{PeerKind, PeersHandle},
     session::PeerInfo,
     FetchClient,
 };
@@ -13,12 +13,12 @@ use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
-use reth_network_api::{NetworkError, NetworkInfo, NetworkStatus, PeersInfo};
+use reth_network_api::{NetworkError, NetworkInfo, NetworkStatus, PeersInfo, ReputationChangeKind};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -38,6 +38,7 @@ pub struct NetworkHandle {
 
 impl NetworkHandle {
     /// Creates a single new instance.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
@@ -45,6 +46,7 @@ impl NetworkHandle {
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
+        chain_id: Arc<AtomicU64>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -54,6 +56,7 @@ impl NetworkHandle {
             peers,
             network_mode,
             is_syncing: Arc::new(Default::default()),
+            chain_id,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -219,6 +222,10 @@ impl NetworkInfo for NetworkHandle {
         let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
         rx.await.map_err(Into::into)
     }
+
+    fn chain_id(&self) -> u64 {
+        self.inner.chain_id.load(Ordering::Relaxed)
+    }
 }
 
 impl StatusUpdater for NetworkHandle {
@@ -257,6 +264,8 @@ struct NetworkInner {
     network_mode: NetworkMode,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
+    /// The chain id
+    chain_id: Arc<AtomicU64>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
