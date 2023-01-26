@@ -110,6 +110,8 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 /// Collection of database test utilities
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
+    use reth_libmdbx::WriteMap;
+
     use super::{Env, EnvKind, EnvironmentKind, Path};
     use std::sync::Arc;
 
@@ -121,7 +123,7 @@ pub mod test_utils {
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
     /// Create rw database for testing
-    pub fn create_test_rw_db<E: EnvironmentKind>() -> Arc<Env<E>> {
+    pub fn create_test_rw_db() -> Arc<Env<WriteMap>> {
         create_test_db(EnvKind::RW)
     }
     /// Create database for testing

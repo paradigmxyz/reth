@@ -230,6 +230,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
                     let mut cursor_storage_changeset =
                         tx.cursor_write::<tables::StorageChangeSet>()?;
+                    cursor_storage_changeset.seek_exact(storage_id)?;
 
                     if wipe_storage {
                         // iterate over storage and save them before entry is deleted.
@@ -240,7 +241,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             })
                             .try_for_each(|entry| {
                                 let (_, old_value) = entry?;
-                                cursor_storage_changeset.append(storage_id.clone(), old_value)
+                                cursor_storage_changeset.append(storage_id, old_value)
                             })?;
 
                         // delete all entries
@@ -262,8 +263,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             let old_entry = StorageEntry { key, value: old_value };
                             let new_entry = StorageEntry { key, value: new_value };
                             // insert into StorageChangeSet
-                            cursor_storage_changeset
-                                .append(storage_id.clone(), old_entry.clone())?;
+                            cursor_storage_changeset.append(storage_id, old_entry)?;
 
                             // Always delete old value as duplicate table, put will not override it
                             tx.delete::<tables::PlainStorageState>(address, Some(old_entry))?;
@@ -361,7 +361,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // revert all changes to PlainStorage
         for (key, storage) in storage_changeset_batch.into_iter().rev() {
             let address = key.address();
-            tx.put::<tables::PlainStorageState>(address, storage.clone())?;
+            tx.put::<tables::PlainStorageState>(address, storage)?;
             if storage.value == U256::ZERO {
                 // delete value that is zero
                 tx.delete::<tables::PlainStorageState>(address, Some(storage))?;
