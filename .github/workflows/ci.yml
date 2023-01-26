@@ -175,7 +175,7 @@ jobs:
       - name: Checkout PR sources
         uses: actions/checkout@v3
         with:
-          submodules: true
+          ref: main
 
       - uses: Swatinem/rust-cache@v1
         with:
@@ -185,13 +185,11 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: bench
-          args: --package reth-db --bench iai
+          # args: --package reth-db --bench iai
 
       - name: Checkout main sources
         uses: actions/checkout@v3
         with:
-          ref: main
-          submodules: true
           clean: false
 
       - name: Compare main's benchmark
