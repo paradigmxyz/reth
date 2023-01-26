@@ -7,7 +7,7 @@ use proptest::{
 };
 use reth_db::{table::Table, tables};
 
-const VECTORS_FOLDER: &str = "test-vectors";
+const VECTORS_FOLDER: &str = "testdata/micro/db";
 
 pub(crate) fn generate_db_vectors() -> Result<()> {
     let mut runner = TestRunner::new(ProptestConfig::default());
