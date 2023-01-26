@@ -52,6 +52,10 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         decode!(self.inner.set_key(key.encode().as_ref()))
     }
 
+    fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        decode!(self.inner.set_range(key.encode().as_ref()))
+    }
+
     fn next(&mut self) -> PairResult<T> {
         decode!(self.inner.next())
     }
@@ -107,10 +111,6 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
 }
 
 impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, K, T> {
-    fn seek(&mut self, key: <T as DupSort>::SubKey) -> PairResult<T> {
-        decode!(self.inner.set_range(key.encode().as_ref()))
-    }
-
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
         decode!(self.inner.next_dup())

@@ -109,6 +109,10 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
         todo!()
     }
 
+    fn seek(&mut self, _key: T::Key) -> PairResult<T> {
+        todo!()
+    }
+
     fn next(&mut self) -> PairResult<T> {
         todo!()
     }
@@ -148,10 +152,6 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
 
 impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
     fn next_dup(&mut self) -> PairResult<T> {
-        todo!()
-    }
-
-    fn seek(&mut self, _key: T::SubKey) -> PairResult<T> {
         todo!()
     }
 
