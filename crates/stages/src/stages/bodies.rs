@@ -401,13 +401,14 @@ mod tests {
         use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             consensus::Consensus,
-            db,
             p2p::{
                 bodies::{
-                    client::BodiesClient, downloader::BodyDownloader, response::BlockResponse,
+                    client::BodiesClient,
+                    downloader::{BodyDownloader, BodyDownloaderResult},
+                    response::BlockResponse,
                 },
                 download::DownloadClient,
-                error::PeerRequestResult,
+                error::{DownloadResult, PeerRequestResult},
                 priority::Priority,
             },
             test_utils::{
@@ -703,30 +704,32 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
-                self.headers = VecDeque::from(self.db.view(|tx| {
-                    let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
+            fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
+                self.headers =
+                    VecDeque::from(self.db.view(|tx| -> DownloadResult<Vec<SealedHeader>> {
+                        let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
-                    let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-                    let walker = canonical_cursor.walk(range.start)?.take_while(|entry| {
-                        entry.as_ref().map(|(num, _)| *num < range.end).unwrap_or_default()
-                    });
+                        let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+                        let walker = canonical_cursor.walk(range.start)?.take_while(|entry| {
+                            entry.as_ref().map(|(num, _)| *num < range.end).unwrap_or_default()
+                        });
 
-                    let mut headers = Vec::default();
-                    for entry in walker {
-                        let (num, hash) = entry?;
-                        let (_, header) =
-                            header_cursor.seek_exact((num, hash).into())?.expect("missing header");
-                        headers.push(SealedHeader::new(header, hash));
-                    }
-                    Ok(headers)
-                })??);
+                        let mut headers = Vec::default();
+                        for entry in walker {
+                            let (num, hash) = entry?;
+                            let (_, header) = header_cursor
+                                .seek_exact((num, hash).into())?
+                                .expect("missing header");
+                            headers.push(SealedHeader::new(header, hash));
+                        }
+                        Ok(headers)
+                    })??);
                 Ok(())
             }
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = Result<Vec<BlockResponse>, db::Error>;
+            type Item = BodyDownloaderResult;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 
