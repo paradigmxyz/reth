@@ -86,7 +86,8 @@ const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
 /// How much the new measurements affect the current timeout (X percent)
 const SAMPLE_IMPACT: f64 = 0.1;
 /// Amount of RTTs before timeout
-const TIMEOUT_SCALING: u32 = 3;
+// This was updated from the initial value of 3, see https://github.com/paradigmxyz/reth/issues/1054s
+const TIMEOUT_SCALING: u32 = 10;
 
 impl ActiveSession {
     /// Returns `true` if the session is currently in the process of disconnecting
