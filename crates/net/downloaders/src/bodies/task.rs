@@ -119,8 +119,8 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
             }
 
             match ready!(this.downloader.poll_next_unpin(cx)) {
-                Some(headers) => {
-                    let _ = this.bodies_tx.send(headers);
+                Some(bodies) => {
+                    let _ = this.bodies_tx.send(bodies);
                 }
                 None => return Poll::Pending,
             }
@@ -162,7 +162,7 @@ mod tests {
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(0..20).expect("failed to set header range");
+        downloader.set_download_range(0..20).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,
@@ -191,13 +191,13 @@ mod tests {
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(10..20).expect("failed to set header range");
+        downloader.set_download_range(10..20).expect("failed to set download range");
         assert_matches!(
             downloader.next().await,
             Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(10), &mut bodies))
         );
 
-        downloader.set_download_range(0..20).expect("failed to set header range");
+        downloader.set_download_range(0..20).expect("failed to set download range");
         assert_matches!(
             downloader.next().await,
             Some(Err(DownloadError::MissingHeader { block_number: 0 }))

@@ -257,11 +257,11 @@ where
     /// downloaded or are not in progress, they will be re-requested.
     fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
         if range.is_empty() {
-            tracing::warn!(target: "downloaders::bodies", "New header range is empty");
+            tracing::warn!(target: "downloaders::bodies", "New download range is empty");
             return Ok(())
         }
 
-        tracing::trace!(target: "downloaders::bodies", ?range, "Setting new header range");
+        tracing::trace!(target: "downloaders::bodies", ?range, "Setting new download range");
 
         // Drain queued bodies.
         let queued_bodies = std::mem::take(&mut self.queued_bodies)
@@ -325,7 +325,7 @@ where
 
         self.download_range = range;
         self.latest_queued_block_number = None;
-        tracing::trace!(target: "downloaders::bodies", range = ?self.download_range, "New header range set");
+        tracing::trace!(target: "downloaders::bodies", range = ?self.download_range, "New download range set");
         Ok(())
     }
 }
@@ -584,7 +584,7 @@ mod tests {
             Arc::new(TestConsensus::default()),
             db,
         );
-        downloader.set_download_range(0..20).expect("failed to set header range");
+        downloader.set_download_range(0..20).expect("failed to set download range");
 
         assert_matches!(
             downloader.next().await,
@@ -615,7 +615,7 @@ mod tests {
 
         let mut range_start = 0;
         while range_start < 100 {
-            downloader.set_download_range(range_start..100).expect("failed to set header range");
+            downloader.set_download_range(range_start..100).expect("failed to set download range");
             assert_eq!(downloader.latest_queued_block_number, None);
 
             assert_matches!(
@@ -649,7 +649,7 @@ mod tests {
             .build(client.clone(), Arc::new(TestConsensus::default()), db);
 
         // Set and download the first range
-        downloader.set_download_range(0..100).expect("failed to set header range");
+        downloader.set_download_range(0..100).expect("failed to set download range");
         assert_matches!(
             downloader.next().await,
             Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
@@ -659,7 +659,7 @@ mod tests {
         assert!(downloader.next().await.is_none());
 
         // Set and download the second range
-        downloader.set_download_range(100..200).expect("failed to set header range");
+        downloader.set_download_range(100..200).expect("failed to set download range");
         assert_matches!(
             downloader.next().await,
             Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
