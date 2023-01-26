@@ -104,8 +104,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::{
         test_utils::{
@@ -121,12 +119,13 @@ mod tests {
         transaction::DbTx,
     };
     use reth_interfaces::test_utils::generators::{
-        random_block_range, random_contract_account_range,
+        random_block, random_block_range, random_contract_account_range,
     };
     use reth_primitives::{
         keccak256, proofs::KeccakHasher, Account, Address, SealedBlock, StorageEntry, H256, U256,
     };
     use reth_rlp::Encodable;
+    use std::collections::BTreeMap;
     use triehash::sec_trie_root;
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
@@ -193,19 +192,27 @@ mod tests {
             let stage_progress = input.stage_progress.unwrap_or_default();
             let end = input.previous_stage_progress() + 1;
 
-            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
-
-            self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
-
-            let iter = blocks.iter();
-            let (mut transition_id, mut tx_id) = (0, 0);
-
             let n_accounts = 11;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
 
+            let SealedBlock { header, body, ommers } =
+                random_block(stage_progress, None, None, None);
+            let mut header = header.unseal();
+            header.state_root = self.generate_initial_trie(&accounts)?;
+            let sealed_head = SealedBlock { header: header.seal(), body, ommers };
+
+            let head_hash = sealed_head.hash();
+            let mut blocks = vec![sealed_head];
+
+            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..2));
+
+            self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+
+            let (mut transition_id, mut tx_id) = (0, 0);
+
             let mut storages: BTreeMap<Address, BTreeMap<H256, U256>> = BTreeMap::new();
 
-            for progress in iter {
+            for progress in blocks.iter() {
                 // Insert last progress data
                 self.tx.commit(|tx| {
                     let key: BlockNumHash = (progress.number, progress.hash()).into();
@@ -331,6 +338,22 @@ mod tests {
                     Ok(sec_trie_root::<KeccakHasher, _, _, _>(accounts))
                 })
                 .map_err(|e| e.into())
+        }
+
+        pub(crate) fn generate_initial_trie(
+            &self,
+            accounts: &[(Address, Account)],
+        ) -> Result<H256, TestRunnerError> {
+            self.insert_accounts(accounts)?;
+
+            let loader = DBTrieLoader::default();
+
+            let mut tx = self.tx.inner();
+            let root = loader.calculate_root(&tx).expect("couldn't create initial trie");
+
+            tx.commit()?;
+
+            Ok(root)
         }
 
         pub(crate) fn insert_accounts(

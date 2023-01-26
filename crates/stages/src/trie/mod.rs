@@ -78,13 +78,14 @@ where
 {
     fn get(&self, key: &H::Out, _prefix: Prefix<'_>) -> Option<V> {
         // TODO: see if there's a better way to transmit database errors
-        match self.tx.get::<tables::AccountsTrie>((*key).into()) {
+        let res = match self.tx.get::<tables::AccountsTrie>((*key).into()) {
             Ok(v) => v.map(V::from),
             Err(e) => {
                 error!(target: "sync::trie::db", ?key, ?e, "Error while fetching value from Database");
                 None
             }
-        }
+        };
+        res
     }
 
     fn contains(&self, key: &H::Out, prefix: Prefix<'_>) -> bool {
