@@ -1,6 +1,7 @@
 use crate::{AccountProvider, BlockHashProvider, StateProvider};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
+    models::storage_sharded_key::StorageShardedKey,
     tables,
     transaction::DbTx,
 };
@@ -53,8 +54,9 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         // TODO when StorageHistory is defined
+        let transition_id = StorageShardedKey::new(account, storage_key, self.transition);
         let transaction_number =
-            self.tx.get::<tables::StorageHistory>(Vec::new())?.map(|_integer_list|
+            self.tx.get::<tables::StorageHistory>(transition_id)?.map(|_integer_list|
             // TODO select integer that is one less from transaction_number <- // TODO: (rkrasiuk) not sure this comment is still relevant
             self.transition);
 

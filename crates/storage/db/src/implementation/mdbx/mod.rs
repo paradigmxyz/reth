@@ -593,5 +593,22 @@ mod tests {
             let list200: IntegerList = vec![200u64].into();
             assert_eq!(list200, list);
         }
+        // Seek greatest index
+        {
+            let tx = db.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
+
+            // It will seek the MAX value of transition index and try to use prev to get first
+            // biggers.
+            let _unknown = cursor.seek_exact(ShardedKey::new(real_key, u64::MAX)).unwrap();
+            let (key, list) = cursor
+                .prev()
+                .expect("element should exist.")
+                .expect("should be able to retrieve it.");
+
+            assert_eq!(ShardedKey::new(real_key, 400), key);
+            let list400: IntegerList = vec![400u64].into();
+            assert_eq!(list400, list);
+        }
     }
 }
