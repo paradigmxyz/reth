@@ -266,7 +266,7 @@ where
 
     /// This advances all components.
     ///
-    /// Processes, delegates (internal) commands received from the [`NetworkManager`], then polls
+    /// Processes, delegates (internal) commands received from the [`NetworkManager`](crate::NetworkManager), then polls
     /// the [`SessionManager`] which yields messages produced by individual peer sessions that are
     /// then handled. Least priority are incoming connections that are handled and delegated to
     /// the [`SessionManager`] to turn them into a session.

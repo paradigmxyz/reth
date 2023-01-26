@@ -260,7 +260,7 @@ impl SyncStateUpdater for NetworkHandle {
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
-    /// Sender half of the message channel to the [`NetworkManager`].
+    /// Sender half of the message channel to the [`crate::NetworkManager`].
     to_manager_tx: UnboundedSender<NetworkHandleMessage>,
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
