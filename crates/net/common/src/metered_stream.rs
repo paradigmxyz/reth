@@ -37,7 +37,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::{TcpStream, ToSocketAddrs, UdpSocket},
+    net::TcpStream,
 };
 
 /// Meters ingress & egress of streams
@@ -234,38 +234,6 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<'_, Stream> {
     }
 }
 
-impl MeteredStream<'_, UdpSocket> {
-    /// Calls [`UdpSocket`]::send_to, while also tallying egress
-    pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], target: A) -> std::io::Result<usize> {
-        let num_bytes = self.inner.send_to(buf, target).await?;
-        let num_bytes_u64 = u64::try_from(num_bytes).unwrap_or(u64::max_value());
-        self.meters.iter().for_each(|(_, (meter, metrics))| {
-            let current_egress =
-                meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
-
-            if let Some(metered_stream_metrics) = metrics {
-                metered_stream_metrics.inner.egress_bytes.absolute(current_egress);
-            }
-        });
-        Ok(num_bytes)
-    }
-
-    /// Calls [`UdpSocket`]::recv_from, while also tallying egress
-    pub async fn recv_from(&self, buf: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
-        let (num_bytes, remote_addr) = self.inner.recv_from(buf).await?;
-        let num_bytes_u64 = u64::try_from(num_bytes).unwrap_or(u64::max_value());
-        self.meters.iter().for_each(|(_, (meter, metrics))| {
-            let current_ingress =
-                meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
-
-            if let Some(metered_stream_metrics) = metrics {
-                metered_stream_metrics.inner.ingress_bytes.absolute(current_ingress);
-            }
-        });
-        Ok((num_bytes, remote_addr))
-    }
-}
-
 impl HasRemoteAddr for MeteredStream<'_, TcpStream> {
     fn remote_addr(&self) -> Option<SocketAddr> {
         self.inner.remote_addr()
@@ -384,31 +352,5 @@ mod tests {
 
         assert_io_counts(&shared_client_counts, 8, 8);
         assert_io_counts(&shared_server_counts, 8, 8);
-    }
-
-    #[tokio::test]
-    async fn test_read_equals_write_udp() {
-        let mut metered_client =
-            MeteredStream::new(UdpSocket::bind("127.0.0.1:8080").await.unwrap());
-        let client_meter = MeteredStreamCounts::default();
-        metered_client.add_meter("session", client_meter.clone());
-
-        let mut metered_server =
-            MeteredStream::new(UdpSocket::bind("127.0.0.1:8081").await.unwrap());
-        let server_meter = MeteredStreamCounts::default();
-        metered_server.add_meter("session", server_meter.clone());
-
-        let handle = tokio::spawn(async move {
-            // Give excess room b/c if there are more bytes than can fit, they'll just get dropped.
-            let mut buf = [0u8; 8];
-            metered_server.recv_from(&mut buf).await.unwrap();
-
-            assert_eq!(server_meter.total_ingress(), client_meter.total_egress());
-            assert_eq!(server_meter.total_ingress(), 4);
-        });
-
-        metered_client.send_to(b"ping", "127.0.0.1:8081").await.unwrap();
-
-        handle.await.unwrap();
     }
 }

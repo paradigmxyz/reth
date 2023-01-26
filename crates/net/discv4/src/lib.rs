@@ -29,7 +29,6 @@ use discv5::{
 };
 use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
-use reth_net_common::metered_stream::{MeteredStream, MeteredStreamCounts, MeteredStreamMetrics};
 use reth_primitives::{ForkId, PeerId, H256};
 use secp256k1::SecretKey;
 use std::{
@@ -118,9 +117,6 @@ pub struct Discv4 {
     /// channel to send commands over to the service
     to_service: mpsc::Sender<Discv4Command>,
 }
-
-const DISCOVERY_METER_NAME: &str = "discovery_total";
-const DISCOVERY_METER_METRICS_SCOPE: &str = "discovery_net_io";
 
 // === impl Discv4 ===
 
@@ -345,7 +341,7 @@ pub struct Discv4Service {
     /// The secret key used to sign payloads
     secret_key: SecretKey,
     /// The UDP socket for sending and receiving messages.
-    _socket: Arc<MeteredStream<'static, UdpSocket>>,
+    _socket: Arc<UdpSocket>,
     /// The spawned UDP tasks.
     ///
     /// Note: If dropped, the spawned send+receive tasks are aborted.
@@ -401,19 +397,7 @@ impl Discv4Service {
         config: Discv4Config,
         commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     ) -> Self {
-        let mut socket = MeteredStream::new(socket);
-        let metered_stream_counts = MeteredStreamCounts::default();
-        socket.add_meter(DISCOVERY_METER_NAME, metered_stream_counts);
-        socket
-            .set_metrics(
-                DISCOVERY_METER_NAME,
-                MeteredStreamMetrics::new(DISCOVERY_METER_METRICS_SCOPE),
-            )
-            // Unwrapping here is safe since we know we just wrote to key `DISCOVERY_METER_NAME` in
-            // the `HashMap` stored on `MeteredStream`.
-            .unwrap();
         let socket = Arc::new(socket);
-
         let (ingress_tx, ingress_rx) = mpsc::channel(config.udp_ingress_message_buffer);
         let (egress_tx, egress_rx) = mpsc::channel(config.udp_egress_message_buffer);
         let mut tasks = JoinSet::<()>::new();
@@ -1484,7 +1468,7 @@ pub enum Discv4Event {
 }
 
 /// Continuously reads new messages from the channel and writes them to the socket
-pub(crate) async fn send_loop(udp: Arc<MeteredStream<'_, UdpSocket>>, rx: EgressReceiver) {
+pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
     let mut stream = ReceiverStream::new(rx);
     while let Some((payload, to)) = stream.next().await {
         match udp.send_to(&payload, to).await {
@@ -1499,11 +1483,7 @@ pub(crate) async fn send_loop(udp: Arc<MeteredStream<'_, UdpSocket>>, rx: Egress
 }
 
 /// Continuously awaits new incoming messages and sends them back through the channel.
-pub(crate) async fn receive_loop(
-    udp: Arc<MeteredStream<'_, UdpSocket>>,
-    tx: IngressSender,
-    local_id: PeerId,
-) {
+pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
             warn!(

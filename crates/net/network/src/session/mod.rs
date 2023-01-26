@@ -25,7 +25,6 @@ use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
-    fmt::{Display, Formatter, Result as FmtResult},
     future::Future,
     net::SocketAddr,
     sync::{atomic::AtomicU64, Arc},
@@ -47,12 +46,6 @@ pub use config::SessionsConfig;
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
-
-impl Display for SessionId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.0)
-    }
-}
 
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
@@ -97,11 +90,7 @@ pub(crate) struct SessionManager {
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
-    /// Used to measure ingress & egress across all sessions
-    metered_stream_counts: MeteredStreamCounts,
 }
-
-const SESSIONS_METER_NAME: &str = "peer_sessions_total";
 
 // === impl SessionManager ===
 
@@ -134,7 +123,6 @@ impl SessionManager {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx,
             active_session_rx: ReceiverStream::new(active_session_rx),
-            metered_stream_counts: MeteredStreamCounts::default(),
         }
     }
 
@@ -211,8 +199,6 @@ impl SessionManager {
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         let mut metered_stream = MeteredStream::new(stream);
-        // Attach meter for total across all sessions
-        metered_stream.add_meter(SESSIONS_METER_NAME, self.metered_stream_counts.clone());
         // Attach meter for this session
         metered_stream.add_meter("session", MeteredStreamCounts::default());
         self.spawn(start_pending_incoming_session(
@@ -249,7 +235,6 @@ impl SessionManager {
             self.hello_message.clone(),
             self.status,
             self.fork_filter.clone(),
-            self.metered_stream_counts.clone(),
         ));
 
         let handle = PendingSessionHandle {
@@ -676,13 +661,10 @@ async fn start_pending_outbound_session(
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
-    metered_stream_counts: MeteredStreamCounts,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
         Ok(stream) => {
             let mut metered_stream = MeteredStream::new(stream);
-            // Attach meter for total across all sessions
-            metered_stream.add_meter(SESSIONS_METER_NAME, metered_stream_counts);
             // Attach meter for this session
             metered_stream.add_meter("session", MeteredStreamCounts::default());
             metered_stream
@@ -829,7 +811,6 @@ async fn authenticate_stream(
             }
         }
     };
-
     PendingSessionEvent::Established {
         session_id,
         remote_addr,

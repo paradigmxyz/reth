@@ -8,7 +8,6 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_net_common::metered_stream::MeteredStream;
 use reth_primitives::{hex_literal::hex, ForkHash, ForkId, NodeRecord, H256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
@@ -34,7 +33,7 @@ pub struct MockDiscovery {
     local_addr: SocketAddr,
     local_enr: NodeRecord,
     secret_key: SecretKey,
-    udp: Arc<MeteredStream<'static, UdpSocket>>,
+    udp: Arc<UdpSocket>,
     _tasks: JoinSet<()>,
     /// Receiver for incoming messages
     ingress: IngressReceiver,
@@ -52,7 +51,7 @@ impl MockDiscovery {
         let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
         let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-        let socket = UdpSocket::bind(socket).await?;
+        let socket = Arc::new(UdpSocket::bind(socket).await?);
         let local_addr = socket.local_addr()?;
         let local_enr = NodeRecord {
             address: local_addr.ip(),
@@ -64,8 +63,6 @@ impl MockDiscovery {
         let (ingress_tx, ingress_rx) = mpsc::channel(128);
         let (egress_tx, egress_rx) = mpsc::channel(128);
         let mut tasks = JoinSet::<()>::new();
-
-        let socket = Arc::new(MeteredStream::new(socket));
 
         let udp = Arc::clone(&socket);
         tasks.spawn(async move { receive_loop(udp, ingress_tx, local_enr.id).await });
