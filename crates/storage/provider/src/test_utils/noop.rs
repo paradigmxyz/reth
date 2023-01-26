@@ -1,6 +1,6 @@
-use crate::{BlockHashProvider, BlockProvider, ChainInfo, HeaderProvider};
+use crate::{BlockHashProvider, BlockProvider, HeaderProvider};
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, Header, H256, U256};
+use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug, Clone, Default)]

@@ -24,7 +24,7 @@ struct CustomMetrics4;
 struct CustomMetrics5;
 
 #[derive(Metrics)]
-#[metrics(scope = "some.scope")]
+#[metrics(scope = "some-scope")]
 struct CustomMetrics6;
 
 #[derive(Metrics)]
@@ -40,7 +40,7 @@ struct CustomMetrics8;
 struct CustomMetrics9;
 
 #[derive(Metrics)]
-#[metrics(separator = ".")]
+#[metrics(separator = "x")]
 struct CustomMetrics10;
 
 #[derive(Metrics)]

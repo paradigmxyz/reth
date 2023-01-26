@@ -8,7 +8,7 @@ use crate::{
     NetworkOpts,
 };
 use reth_consensus::BeaconConsensus;
-use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
+use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
 
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
@@ -150,14 +150,18 @@ impl Command {
                 let fetch_client = Arc::new(network.fetch_client().await?);
 
                 let mut stage = BodyStage {
-                    downloader: Arc::new(
-                        ConcurrentDownloader::new(fetch_client.clone(), consensus.clone())
-                            .with_batch_size(config.stages.bodies.downloader_batch_size)
-                            .with_retries(config.stages.bodies.downloader_retries)
-                            .with_concurrency(config.stages.bodies.downloader_concurrency),
-                    ),
+                    downloader: ConcurrentDownloaderBuilder::default()
+                        .with_stream_batch_size(num_blocks as usize)
+                        .with_request_limit(config.stages.bodies.downloader_request_limit)
+                        .with_max_buffered_responses(
+                            config.stages.bodies.downloader_max_buffered_responses,
+                        )
+                        .with_concurrent_requests_range(
+                            config.stages.bodies.downloader_min_concurrent_requests..=
+                                config.stages.bodies.downloader_max_concurrent_requests,
+                        )
+                        .build(fetch_client.clone(), consensus.clone(), db.clone()),
                     consensus: consensus.clone(),
-                    commit_threshold: num_blocks,
                 };
 
                 if !self.skip_unwind {

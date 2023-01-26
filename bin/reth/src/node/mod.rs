@@ -13,14 +13,13 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::BeaconConsensus;
 use reth_downloaders::{bodies, headers};
-use reth_interfaces::consensus::ForkchoiceState;
+use reth_interfaces::consensus::{Consensus, ForkchoiceState};
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
-    metrics::HeaderMetrics,
     stages::{
         bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
         hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
@@ -118,7 +117,23 @@ impl Command {
         let genesis = init_genesis(db.clone(), self.chain.clone())?;
         info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
-        let consensus: Arc<BeaconConsensus> = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        // TODO: This should be in a builder/factory in the consensus crate
+        let consensus: Arc<dyn Consensus> = {
+            let beacon_consensus = BeaconConsensus::new(self.chain.clone());
+
+            if let Some(tip) = self.tip {
+                debug!(target: "reth::cli", %tip, "Tip manually set");
+                beacon_consensus.notify_fork_choice_state(ForkchoiceState {
+                    head_block_hash: tip,
+                    safe_block_hash: tip,
+                    finalized_block_hash: tip,
+                })?;
+            } else {
+                warn!(target: "reth::cli", "No tip specified. reth cannot communicate with consensus clients, so a tip must manually be provided for the online stages with --debug.tip <HASH>.");
+            }
+
+            Arc::new(beacon_consensus)
+        };
 
         let network = config
             .network_config(
@@ -157,23 +172,23 @@ impl Command {
                     ),
                 consensus: consensus.clone(),
                 sync_status_updates: network.clone(),
-                metrics: HeaderMetrics::default(),
             })
             .push(TotalDifficultyStage {
                 commit_threshold: config.stages.total_difficulty.commit_threshold,
             })
             .push(BodyStage {
-                downloader: Arc::new(
-                    bodies::concurrent::ConcurrentDownloader::new(
-                        fetch_client.clone(),
-                        consensus.clone(),
+                downloader: bodies::concurrent::ConcurrentDownloaderBuilder::default()
+                    .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
+                    .with_request_limit(config.stages.bodies.downloader_request_limit)
+                    .with_max_buffered_responses(
+                        config.stages.bodies.downloader_max_buffered_responses,
                     )
-                    .with_batch_size(config.stages.bodies.downloader_batch_size)
-                    .with_retries(config.stages.bodies.downloader_retries)
-                    .with_concurrency(config.stages.bodies.downloader_concurrency),
-                ),
+                    .with_concurrent_requests_range(
+                        config.stages.bodies.downloader_min_concurrent_requests..=
+                            config.stages.bodies.downloader_max_concurrent_requests,
+                    )
+                    .build(fetch_client.clone(), consensus.clone(), db.clone()),
                 consensus: consensus.clone(),
-                commit_threshold: config.stages.bodies.commit_threshold,
             })
             .push(SenderRecoveryStage {
                 batch_size: config.stages.sender_recovery.batch_size,
@@ -189,17 +204,6 @@ impl Command {
             .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
             // This merkle stage is used only for execute
             .push(MerkleStage { is_execute: true });
-
-        if let Some(tip) = self.tip {
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            consensus.notify_fork_choice_state(ForkchoiceState {
-                head_block_hash: tip,
-                safe_block_hash: tip,
-                finalized_block_hash: tip,
-            })?;
-        } else {
-            warn!(target: "reth::cli", "No tip specified. reth cannot communicate with consensus clients, so a tip must manually be provided for the online stages with --debug.tip <HASH>.");
-        }
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");

@@ -6,7 +6,6 @@ use crate::{
     message::{PeerRequest, PeerRequestSender},
     metrics::TransactionsManagerMetrics,
     network::NetworkHandleMessage,
-    peers::ReputationChangeKind,
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
@@ -14,6 +13,7 @@ use reth_eth_wire::{
     GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
 };
