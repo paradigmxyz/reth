@@ -15,5 +15,5 @@ Reth integrated with Prometheus allows users to measure various metrics to gain 
 - **removed_transactions**: Number of removed transactions from the pool
 
 ## P2P
-- **session_net_io_ingress_bytes{peer_id=\<ID\>}**: Total # of bytes received from the given peer
-- **session_net_io_egress_bytes{peer_id=\<ID\>}**: Total # of bytes sent to the given peer
+- **discovery_net_io_ingress_bytes**: Total # of bytes received throughout discovery process
+- **discovery_net_io_egress_bytes**: Total # of bytes sent throughout discovery process

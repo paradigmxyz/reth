@@ -361,6 +361,7 @@ mod tests {
             metered_server_stream.read(&mut buf).await.unwrap();
 
             assert_eq!(server_meter.total_ingress(), client_meter.total_egress());
+            assert_eq!(server_meter.total_ingress(), 4);
         });
 
         metered_client_stream.write_all(b"ping").await.unwrap();
@@ -383,5 +384,31 @@ mod tests {
 
         assert_io_counts(&shared_client_counts, 8, 8);
         assert_io_counts(&shared_server_counts, 8, 8);
+    }
+
+    #[tokio::test]
+    async fn test_read_equals_write_udp() {
+        let mut metered_client =
+            MeteredStream::new(UdpSocket::bind("127.0.0.1:8080").await.unwrap());
+        let client_meter = MeteredStreamCounts::default();
+        metered_client.add_meter("session", client_meter.clone());
+
+        let mut metered_server =
+            MeteredStream::new(UdpSocket::bind("127.0.0.1:8081").await.unwrap());
+        let server_meter = MeteredStreamCounts::default();
+        metered_server.add_meter("session", server_meter.clone());
+
+        let handle = tokio::spawn(async move {
+            // Give excess room b/c if there are more bytes than can fit, they'll just get dropped.
+            let mut buf = [0u8; 8];
+            metered_server.recv_from(&mut buf).await.unwrap();
+
+            assert_eq!(server_meter.total_ingress(), client_meter.total_egress());
+            assert_eq!(server_meter.total_ingress(), 4);
+        });
+
+        metered_client.send_to(b"ping", "127.0.0.1:8081").await.unwrap();
+
+        handle.await.unwrap();
     }
 }

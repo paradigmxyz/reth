@@ -409,6 +409,8 @@ impl Discv4Service {
                 DISCOVERY_METER_NAME,
                 MeteredStreamMetrics::new(DISCOVERY_METER_METRICS_SCOPE),
             )
+            // Unwrapping here is safe since we know we just wrote to key `DISCOVERY_METER_NAME` in
+            // the `HashMap` stored on `MeteredStream`.
             .unwrap();
         let socket = Arc::new(socket);
 
