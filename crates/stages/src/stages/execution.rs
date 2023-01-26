@@ -31,8 +31,8 @@ const EXECUTION: StageId = StageId("Execution");
 /// [tables::CumulativeTxCount] to get tx number
 /// [tables::Transactions] to execute
 ///
-/// For state access [StateProvider] provides us latest state and history state
-/// For latest most recent state [StateProvider] would need (Used for execution Stage):
+/// For state access [StateProvider](reth_provider::StateProvider) provides us latest state and history state
+/// For latest most recent state [StateProvider](reth_provider::StateProvider) would need (Used for execution Stage):
 /// [tables::PlainAccountState]
 /// [tables::Bytecodes]
 /// [tables::PlainStorageState]

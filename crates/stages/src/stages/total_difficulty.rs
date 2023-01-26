@@ -16,7 +16,7 @@ const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
 /// The total difficulty stage.
 ///
 /// This stage walks over inserted headers and computes total difficulty
-/// at each block. The entries are inserted into [`HeaderTD`][reth_interfaces::db::tables::HeaderTD]
+/// at each block. The entries are inserted into [`HeaderTD`][reth_db::tables::HeaderTD]
 /// table.
 #[derive(Debug)]
 pub struct TotalDifficultyStage {

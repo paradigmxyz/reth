@@ -8,7 +8,7 @@ use tracing::*;
 const MERKLE_EXECUTION: StageId = StageId("MerkleExecuteStage");
 const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
 
-/// Merkle stage uses input from [AccountHashingStage] and [StorageHashingStage] stages
+/// Merkle stage uses input from [AccountHashingStage](super::hashing_account::AccountHashingStage) and [StorageHashingStage](super::hashing_storage::StorageHashingStage) stages
 /// and calculated intermediate hashed and state root.
 /// This stage depends on the Account and Storage stages. It will be executed after them during
 /// execution, and before them during unwinding.

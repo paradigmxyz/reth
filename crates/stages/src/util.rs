@@ -15,7 +15,7 @@ pub(crate) mod opt {
         a.map_or(Some(b), |v| Some(std::cmp::min(v, b)))
     }
 
-    /// The producing side of a [tokio::mpsc] channel that may or may not be set.
+    /// The producing side of a [tokio::sync::mpsc] channel that may or may not be set.
     #[derive(Default, Clone)]
     pub(crate) struct MaybeSender<T> {
         inner: Option<Sender<T>>,
