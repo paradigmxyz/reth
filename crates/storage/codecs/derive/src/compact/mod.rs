@@ -40,7 +40,7 @@ pub enum FieldTypes {
     EnumUnnamedField((FieldType, UseAlternative)),
 }
 
-/// Derives the [`Compact`] trait and its from/to implementations.
+/// Derives the [`Compact`](super::Compact) trait and its from/to implementations.
 pub fn derive(input: TokenStream) -> TokenStream {
     let mut output = quote! {};
 
