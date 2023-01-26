@@ -14,6 +14,9 @@ pub trait DbCursorRO<'tx, T: Table> {
     /// Seeks for the exact `(key, value)` pair with `key`.
     fn seek_exact(&mut self, key: T::Key) -> PairResult<T>;
 
+    /// Seeks for a `(key, value)` pair greater or equal than `key`.
+    fn seek(&mut self, key: T::Key) -> PairResult<T>;
+
     /// Returns the next `(key, value)` pair.
     #[allow(clippy::should_implement_trait)]
     fn next(&mut self) -> PairResult<T>;
@@ -48,9 +51,6 @@ pub trait DbCursorRO<'tx, T: Table> {
 
 /// Read only cursor over DupSort table.
 pub trait DbDupCursorRO<'tx, T: DupSort> {
-    /// Seeks for a `(key, value)` pair greater or equal than `key`.
-    fn seek(&mut self, key: T::SubKey) -> PairResult<T>;
-
     /// Returns the next `(key, value)` pair of a DupSort table.
     fn next_dup(&mut self) -> PairResult<T>;
 
