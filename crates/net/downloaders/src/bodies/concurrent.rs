@@ -89,7 +89,7 @@ where
             return Ok(None)
         }
 
-        Ok(self.query_headers(start_at..self.download_range.end, limit)?)
+        self.query_headers(start_at..self.download_range.end, limit)
     }
 
     /// Retrieve a batch of headers from the database starting from provided block number.
