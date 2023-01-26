@@ -164,8 +164,7 @@ where
         Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
     }
 
-    /// Get the next start transaction id and transition for the `block` by looking at the previous
-    /// block. Returns Zero/Zero for Genesis.
+    /// Query the block header by number
     pub(crate) fn get_header_by_num(&self, block: BlockNumber) -> Result<Header, StageError> {
         let key = self.get_block_numhash(block)?;
         let header = self

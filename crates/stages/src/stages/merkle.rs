@@ -116,6 +116,7 @@ mod tests {
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
         models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
+        transaction::DbTx,
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
@@ -255,7 +256,7 @@ mod tests {
             self.insert_storages(&storages)?;
 
             let last_numhash = self.tx.inner().get_block_numhash(end - 1).unwrap();
-            let root = dbg!(self.state_root()?);
+            let root = self.state_root()?;
             self.tx.commit(|tx| {
                 let mut last_header = tx.get::<tables::Headers>(last_numhash)?.unwrap();
                 last_header.state_root = root;
