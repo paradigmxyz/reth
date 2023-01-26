@@ -1,8 +1,6 @@
 use crate::{AccountProvider, BlockHashProvider, StateProvider};
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
-    transaction::DbTx,
+    cursor::DbCursorRO, models::storage_sharded_key::StorageShardedKey, tables, transaction::DbTx,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -53,8 +51,9 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get storage.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         // TODO when StorageHistory is defined
+        let transition_id = StorageShardedKey::new(account, storage_key, self.transition);
         let transaction_number =
-            self.tx.get::<tables::StorageHistory>(Vec::new())?.map(|_integer_list|
+            self.tx.get::<tables::StorageHistory>(transition_id)?.map(|_integer_list|
             // TODO select integer that is one less from transaction_number <- // TODO: (rkrasiuk) not sure this comment is still relevant
             self.transition);
 
@@ -69,11 +68,12 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
                 return Ok(Some(entry.value))
             }
 
-            if let Some((_, entry)) = cursor.seek(storage_key)? {
-                if entry.key == storage_key {
-                    return Ok(Some(entry.value))
-                }
-            }
+            // TODO(rakita) this will be reworked shortly in StorageHistory PR.
+            // if let Some((_, entry)) = cursor.seek(storage_key)? {
+            //     if entry.key == storage_key {
+            //         return Ok(Some(entry.value))
+            //     }
+            // }
         }
         Ok(None)
     }

@@ -1,5 +1,11 @@
+use reth_db::{
+    database::Database,
+    mdbx::{Env, WriteMap},
+    tables,
+    transaction::DbTxMut,
+};
 use reth_eth_wire::BlockBody;
-use reth_interfaces::p2p::bodies::response::BlockResponse;
+use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
 use reth_primitives::{SealedBlock, SealedHeader, H256};
 use std::collections::HashMap;
 
@@ -22,4 +28,17 @@ pub(crate) fn zip_blocks<'a>(
             }
         })
         .collect()
+}
+
+#[inline]
+pub(crate) fn insert_headers(db: &Env<WriteMap>, headers: &[SealedHeader]) {
+    db.update(|tx| -> Result<(), db::Error> {
+        for header in headers {
+            tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+            tx.put::<tables::Headers>(header.num_hash().into(), header.clone().unseal())?;
+        }
+        Ok(())
+    })
+    .expect("failed to commit")
+    .expect("failed to insert headers");
 }
