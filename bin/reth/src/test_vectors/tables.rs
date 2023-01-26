@@ -6,32 +6,58 @@ use proptest::{
     test_runner::TestRunner,
 };
 use reth_db::{table::Table, tables};
+use tracing::error;
 
 const VECTORS_FOLDER: &str = "testdata/micro/db";
+const PER_TABLE: usize = 1000;
 
-pub(crate) fn generate_db_vectors() -> Result<()> {
+/// Generates test vectors for specified `tables`. If list is empty, then generate for all tables.
+pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     let mut runner = TestRunner::new(ProptestConfig::default());
     std::fs::create_dir_all(VECTORS_FOLDER)?;
 
-    let per_table = 1000;
+    macro_rules! generate {
+        ([$(($table_type:ident, $per_table:expr)),*]) => {
+            let all_tables = vec![$(stringify!($table_type).to_string(),)*];
 
-    generate_table_vectors::<tables::CanonicalHeaders>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::HeaderTD>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::HeaderNumbers>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::Headers>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::BlockBodies>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::BlockOmmers>(&mut runner, 100)?;
-    generate_table_vectors::<tables::TxHashNumber>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::BlockTransitionIndex>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::TxTransitionIndex>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::Transactions>(&mut runner, 100)?;
-    generate_table_vectors::<tables::PlainStorageState>(&mut runner, per_table)?;
-    generate_table_vectors::<tables::PlainAccountState>(&mut runner, per_table)?;
+            if tables.is_empty() {
+                tables = all_tables;
+            }
+
+            for table in tables {
+                match table.as_str() {
+                    $(
+                        stringify!($table_type) => {
+                            generate_table_vector::<tables::$table_type>(&mut runner, $per_table)?;
+                        },
+                    )*
+                    _ => {
+                        error!(target: "reth::cli", "Unknown table: {}", table);
+                    }
+                }
+            }
+        }
+    }
+
+    generate!([
+        (CanonicalHeaders, PER_TABLE),
+        (HeaderTD, PER_TABLE),
+        (HeaderNumbers, PER_TABLE),
+        (Headers, PER_TABLE),
+        (BlockBodies, PER_TABLE),
+        (BlockOmmers, 100),
+        (TxHashNumber, PER_TABLE),
+        (BlockTransitionIndex, PER_TABLE),
+        (TxTransitionIndex, PER_TABLE),
+        (Transactions, 100),
+        (PlainStorageState, PER_TABLE),
+        (PlainAccountState, PER_TABLE)
+    ]);
 
     Ok(())
 }
 
-fn generate_table_vectors<T: Table>(runner: &mut TestRunner, per_table: usize) -> Result<()>
+fn generate_table_vector<T: Table>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
     T::Key: Arbitrary + serde::Serialize + Ord,
     T::Value: Arbitrary + serde::Serialize,
