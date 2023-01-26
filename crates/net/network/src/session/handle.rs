@@ -85,7 +85,7 @@ pub struct PeerInfo {
 ///
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
-pub(crate) enum PendingSessionEvent<'a> {
+pub(crate) enum PendingSessionEvent {
     /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Established {
         session_id: SessionId,
@@ -94,7 +94,7 @@ pub(crate) enum PendingSessionEvent<'a> {
         peer_id: PeerId,
         capabilities: Arc<Capabilities>,
         status: Status,
-        conn: EthStream<P2PStream<ECIESStream<MeteredStream<'a, TcpStream>>>>,
+        conn: EthStream<P2PStream<ECIESStream<MeteredStream<'static, TcpStream>>>>,
         direction: Direction,
         client_id: String,
     },

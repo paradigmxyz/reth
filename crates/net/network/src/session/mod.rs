@@ -57,7 +57,7 @@ impl Display for SessionId {
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
 #[derive(Debug)]
-pub(crate) struct SessionManager<'a> {
+pub(crate) struct SessionManager {
     /// Tracks the identifier for the next session.
     next_id: usize,
     /// Keeps track of all sessions
@@ -87,9 +87,9 @@ pub(crate) struct SessionManager<'a> {
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
     /// get a clone of this sender half.
-    pending_sessions_tx: mpsc::Sender<PendingSessionEvent<'a>>,
+    pending_sessions_tx: mpsc::Sender<PendingSessionEvent>,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
-    pending_session_rx: ReceiverStream<PendingSessionEvent<'a>>,
+    pending_session_rx: ReceiverStream<PendingSessionEvent>,
     /// The original Sender half of the [`ActiveSessionEvent`] channel.
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
@@ -105,7 +105,7 @@ const SESSIONS_METER_NAME: &str = "peer_sessions_total";
 
 // === impl SessionManager ===
 
-impl SessionManager<'_> {
+impl SessionManager {
     /// Creates a new empty [`SessionManager`].
     pub(crate) fn new(
         secret_key: SecretKey,
@@ -210,7 +210,7 @@ impl SessionManager<'_> {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        let metered_stream = MeteredStream::new(stream);
+        let mut metered_stream = MeteredStream::new(stream);
         // Attach meter for total across all sessions
         metered_stream.add_meter(SESSIONS_METER_NAME, self.metered_stream_counts.clone());
         // Attach meter for this session
@@ -637,11 +637,11 @@ pub struct ExceedsSessionLimit(pub(crate) u32);
 ///
 /// This will wait for the _incoming_ handshake request and answer it.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn start_pending_incoming_session<'a>(
+pub(crate) async fn start_pending_incoming_session(
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
-    stream: MeteredStream<'a, TcpStream>,
-    events: mpsc::Sender<PendingSessionEvent<'a>>,
+    stream: MeteredStream<'static, TcpStream>,
+    events: mpsc::Sender<PendingSessionEvent>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
     hello: HelloMessage,
@@ -668,7 +668,7 @@ pub(crate) async fn start_pending_incoming_session<'a>(
 #[allow(clippy::too_many_arguments)]
 async fn start_pending_outbound_session(
     disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent<'_>>,
+    events: mpsc::Sender<PendingSessionEvent>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     remote_peer_id: PeerId,
@@ -716,10 +716,10 @@ async fn start_pending_outbound_session(
 
 /// Authenticates a session
 #[allow(clippy::too_many_arguments)]
-async fn authenticate<'a>(
+async fn authenticate(
     disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent<'a>>,
-    stream: MeteredStream<'a, TcpStream>,
+    events: mpsc::Sender<PendingSessionEvent>,
+    stream: MeteredStream<'static, TcpStream>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -760,14 +760,12 @@ async fn authenticate<'a>(
             }
         }
     };
-    let peer_id = stream.remote_id();
     let unauthed = UnauthedP2PStream::new(stream);
 
     let auth = authenticate_stream(
         unauthed,
         session_id,
         remote_addr,
-        peer_id,
         direction,
         hello,
         status,
@@ -796,16 +794,15 @@ async fn authenticate<'a>(
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`]
 #[allow(clippy::too_many_arguments)]
-async fn authenticate_stream<'a>(
-    stream: UnauthedP2PStream<ECIESStream<MeteredStream<'a, TcpStream>>>,
+async fn authenticate_stream(
+    stream: UnauthedP2PStream<ECIESStream<MeteredStream<'static, TcpStream>>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
-    peer_id: PeerId,
     direction: Direction,
     hello: HelloMessage,
     status: Status,
     fork_filter: ForkFilter,
-) -> PendingSessionEvent<'a> {
+) -> PendingSessionEvent {
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
         Ok(stream_res) => stream_res,
