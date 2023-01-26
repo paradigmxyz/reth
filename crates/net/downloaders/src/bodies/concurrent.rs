@@ -6,8 +6,14 @@ use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     consensus::Consensus,
-    db,
-    p2p::bodies::{client::BodiesClient, downloader::BodyDownloader, response::BlockResponse},
+    p2p::{
+        bodies::{
+            client::BodiesClient,
+            downloader::{BodyDownloader, BodyDownloaderResult},
+            response::BlockResponse,
+        },
+        error::{DownloadError, DownloadResult},
+    },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
@@ -72,7 +78,7 @@ where
     DB: Database,
 {
     /// Returns the next contiguous request.
-    fn next_headers_request(&mut self) -> Result<Option<Vec<SealedHeader>>, db::Error> {
+    fn next_headers_request(&mut self) -> DownloadResult<Option<Vec<SealedHeader>>> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
             Some(num) => num + 1,
             None => self.download_range.start,
@@ -83,12 +89,7 @@ where
             return Ok(None)
         }
 
-        let request = self.query_headers(start_at, limit)?;
-        if request.is_empty() {
-            return Ok(None)
-        }
-
-        Ok(Some(request))
+        Ok(self.query_headers(start_at..self.download_range.end, limit)?)
     }
 
     /// Retrieve a batch of headers from the database starting from provided block number.
@@ -98,37 +99,61 @@ where
     ///     1. The number of non-empty headers in the batch equals requested.
     ///     2. The total number of headers in the batch (both empty and non-empty)
     ///        is greater than or equal to the stream batch size.
-    ///     3. There are no more headers in the database.
+    ///     3. Downloader reached the end of the range
     ///
     /// NOTE: The batches returned have a variable length.
     fn query_headers(
         &self,
-        start: BlockNumber,
+        range: Range<BlockNumber>,
         max_non_empty: u64,
-    ) -> Result<Vec<SealedHeader>, db::Error> {
-        let tx = self.db.tx()?;
+    ) -> DownloadResult<Option<Vec<SealedHeader>>> {
+        if range.start >= self.download_range.end {
+            return Ok(None)
+        }
 
         // Acquire cursors over canonical and header tables
+        let tx = self.db.tx()?;
         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
+        // Non empty headers count
         let mut non_empty_headers = 0;
+
+        // Collection of results
         let mut headers = Vec::<SealedHeader>::default();
-        let mut canonical_entry = canonical_cursor.seek_exact(start)?;
-        while let Some((number, hash)) = canonical_entry {
-            let (_, header) =
-                header_cursor.seek_exact((number, hash).into())?.expect("database corrupted");
+
+        let mut current_block_num = range.start;
+
+        // Collect headers while
+        //      1. Current block number is in range
+        //      2. The number of non empty headers is less than maximum
+        //      3. The total number of headers is less than the stream batch size
+        while current_block_num < range.end &&
+            non_empty_headers < max_non_empty &&
+            headers.len() < self.stream_batch_size
+        {
+            // Find the block hash
+            let (number, hash) = canonical_cursor
+                .seek_exact(current_block_num)?
+                .ok_or(DownloadError::MissingHeader { block_number: current_block_num })?;
+            // Find the block number
+            let (_, header) = header_cursor
+                .seek_exact((number, hash).into())?
+                .ok_or(DownloadError::MissingHeader { block_number: number })?;
+
+            // If the header is not empty, increment the counter
             if !header.is_empty() {
                 non_empty_headers += 1;
             }
+
+            // Add header to the result collection
             headers.push(SealedHeader::new(header, hash));
-            if non_empty_headers >= max_non_empty || headers.len() >= self.stream_batch_size {
-                break
-            }
-            canonical_entry = canonical_cursor.next()?;
+
+            // Increment current block number
+            current_block_num += 1;
         }
 
-        Ok(headers)
+        Ok(Some(headers).filter(|h| !h.is_empty()))
     }
 
     /// Get the next expected block number for queueing.
@@ -230,7 +255,7 @@ where
     /// back into the buffer.
     /// If there are any bodies between the range start and last queued body that have not been
     /// downloaded or are not in progress, they will be re-requested.
-    fn set_download_range(&mut self, range: Range<BlockNumber>) -> Result<(), db::Error> {
+    fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
         if range.is_empty() {
             tracing::warn!(target: "downloaders::bodies", "New header range is empty");
             return Ok(())
@@ -271,11 +296,20 @@ where
                     } else if request_range.end + 1 == num {
                         request_range.end = num;
                     } else {
+                        let headers = self
+                            .query_headers(
+                                request_range.start..request_range.end + 1, // exclusive
+                                request_range.clone().count() as u64,
+                            )?
+                            .ok_or(DownloadError::MissingHeader {
+                                block_number: request_range.start,
+                            })?;
+
                         // Dispatch contiguous request.
                         self.in_progress_queue.push_new_request(
                             Arc::clone(&self.client),
                             Arc::clone(&self.consensus),
-                            self.query_headers(request_range.start, request_range.count() as u64)?,
+                            headers,
                         );
                         // Clear the current request range
                         request_range = Range::default();
@@ -301,7 +335,7 @@ where
     B: BodiesClient + 'static,
     DB: Database,
 {
-    type Item = Result<Vec<BlockResponse>, db::Error>;
+    type Item = BodyDownloaderResult;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -314,7 +348,9 @@ where
         loop {
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
+                println!("RESPONSE LEN >> {}", response.len());
                 let response = OrderedBodiesResponse(response);
+                println!("RESPONSE RANGE >> {:?}", response.block_range());
                 this.buffered_responses.push(response);
             }
 
@@ -521,30 +557,14 @@ impl ConcurrentDownloaderBuilder {
 mod tests {
     use super::*;
     use crate::{
-        bodies::test_utils::zip_blocks,
+        bodies::test_utils::{insert_headers, zip_blocks},
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
-    use reth_db::{
-        mdbx::{test_utils::create_test_db, Env, EnvKind, WriteMap},
-        transaction::DbTxMut,
-    };
+    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_interfaces::test_utils::TestConsensus;
     use std::sync::Arc;
-
-    #[inline]
-    fn insert_headers(db: &Env<WriteMap>, headers: &[SealedHeader]) {
-        db.update(|tx| -> Result<(), db::Error> {
-            for header in headers {
-                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-                tx.put::<tables::Headers>(header.num_hash().into(), header.clone().unseal())?;
-            }
-            Ok(())
-        })
-        .expect("failed to commit")
-        .expect("failed to insert headers");
-    }
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded
