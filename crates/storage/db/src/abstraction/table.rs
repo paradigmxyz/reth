@@ -66,9 +66,9 @@ pub trait Table: Send + Sync + Debug + 'static {
 }
 
 /// DupSort allows for keys not to be repeated in the database,
-/// for more check: https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
+/// for more check: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
 pub trait DupSort: Table {
-    /// Subkey type. For more check https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
+    /// Subkey type. For more check <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
     ///
     /// Sorting should be taken into account when encoding this.
     type SubKey: Key;
