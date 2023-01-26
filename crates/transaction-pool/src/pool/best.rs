@@ -13,7 +13,7 @@ use tracing::debug;
 /// An iterator that returns transactions that can be executed on the current state (*best*
 /// transactions).
 ///
-/// The [`PendingPool`] contains transactions that *could* all be executed on the current state, but
+/// The [`PendingPool`](crate::pool::PendingPool) contains transactions that *could* all be executed on the current state, but
 /// only yields transactions that are ready to be executed now.
 /// While it contains all gapless transactions of a sender, it _always_ only returns the transaction
 /// with the current on chain nonce.
