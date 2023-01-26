@@ -55,49 +55,52 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
         let to_transition = tx.get_block_transition(to_block)?;
 
-        tx.cursor_read::<tables::AccountChangeSet>()?
+        let account_changesets = tx
+            .cursor_read::<tables::AccountChangeSet>()?
             .walk(from_transition)?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition).unwrap_or_default())
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let account_changeset_lists = account_changesets
             .into_iter()
             // fold all account to one set of changed accounts
-            .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
-                accounts.entry(account.address).or_default().push(index);
-                accounts
-            })
-            .into_iter()
-            // insert indexes to AccontHistory.
-            .try_for_each(|(address, mut indices)| -> Result<(), StageError> {
-                let mut last_shard = take_last_account_shard(tx, address)?;
-                last_shard.append(&mut indices);
-                // chunk indices and insert them in shards of N size.
-                let mut chunks = last_shard
-                    .iter()
-                    .chunks(NUM_OF_INDICES_IN_SHARD)
-                    .into_iter()
-                    .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
-                    .collect::<Vec<_>>();
-                let last_chunk = chunks.pop();
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
+                    accounts.entry(account.address).or_default().push(index);
+                    accounts
+                },
+            );
+        // insert indexes to AccontHistory.
+        for (address, mut indices) in account_changeset_lists {
+            let mut last_shard = take_last_account_shard(tx, address)?;
+            last_shard.append(&mut indices);
+            // chunk indices and insert them in shards of N size.
+            let mut chunks = last_shard
+                .iter()
+                .chunks(NUM_OF_INDICES_IN_SHARD)
+                .into_iter()
+                .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
+                .collect::<Vec<_>>();
+            let last_chunk = chunks.pop();
 
-                chunks.into_iter().try_for_each(|list| {
-                    tx.put::<tables::AccountHistory>(
-                        ShardedKey::new(
-                            address,
-                            *list.last().expect("Chuck does not return empty list") as TransitionId,
-                        ),
-                        TransitionList::new(list).expect("Indices are presorted and not empty"),
-                    )
-                })?;
-                // Insert last list with u64::MAX
-                if let Some(last_list) = last_chunk {
-                    tx.put::<tables::AccountHistory>(
-                        ShardedKey::new(address, u64::MAX),
-                        TransitionList::new(last_list)
-                            .expect("Indices are presorted and not empty"),
-                    )?
-                }
-                Ok(())
+            chunks.into_iter().try_for_each(|list| {
+                tx.put::<tables::AccountHistory>(
+                    ShardedKey::new(
+                        address,
+                        *list.last().expect("Chuck does not return empty list") as TransitionId,
+                    ),
+                    TransitionList::new(list).expect("Indices are presorted and not empty"),
+                )
             })?;
+            // Insert last list with u64::MAX
+            if let Some(last_list) = last_chunk {
+                tx.put::<tables::AccountHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    TransitionList::new(last_list).expect("Indices are presorted and not empty"),
+                )?
+            }
+        }
 
         info!(target: "sync::stages::index_account_history", "Stage finished");
         Ok(ExecOutput { stage_progress: to_block, done: true })
@@ -115,11 +118,13 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let mut cursor = tx.cursor_write::<tables::AccountHistory>()?;
 
-        //<<DB as DatabaseGat>::TXMut as DbTxMutGAT>::CursorMut
-        tx.cursor_read::<tables::AccountChangeSet>()?
+        let account_changeset = tx
+            .cursor_read::<tables::AccountChangeSet>()?
             .walk(from_transition_rev)?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition_rev).unwrap_or_default())
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let last_indices = account_changeset
             .into_iter()
             // reverse so we can get lowest transition id where we need to unwind account.
             .rev()
@@ -128,24 +133,21 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
                 // we just need address and lowest transition id.
                 accounts.insert(account.address, index);
                 accounts
-            })
-            .into_iter()
-            // try to unwind the index
-            .try_for_each(|(address, rem_index)| -> Result<(), StageError> {
-                let shard_part =
-                    unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
+            });
+        // try to unwind the index
+        for (address, rem_index) in last_indices {
+            let shard_part = unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
 
-                // check last shard_part, if present, items needs to be reinserted.
-                if !shard_part.is_empty() {
-                    // there are items in list
-                    tx.put::<tables::AccountHistory>(
-                        ShardedKey::new(address, u64::MAX),
-                        TransitionList::new(shard_part)
-                            .expect("There is at least one element in list and it is sorted."),
-                    )?;
-                }
-                Ok(())
-            })?;
+            // check last shard_part, if present, items needs to be reinserted.
+            if !shard_part.is_empty() {
+                // there are items in list
+                tx.put::<tables::AccountHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    TransitionList::new(shard_part)
+                        .expect("There is at least one element in list and it is sorted."),
+                )?;
+            }
+        }
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
