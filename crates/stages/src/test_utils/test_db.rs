@@ -69,7 +69,7 @@ impl TestTransaction {
         })
     }
 
-    /// Return full table as BTreeMap
+    /// Return full table as Vec
     pub(crate) fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
     where
         T::Key: Default + Ord,
