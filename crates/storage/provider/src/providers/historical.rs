@@ -1,9 +1,6 @@
 use crate::{AccountProvider, BlockHashProvider, StateProvider};
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
-    models::storage_sharded_key::StorageShardedKey,
-    tables,
-    transaction::DbTx,
+    cursor::DbCursorRO, models::storage_sharded_key::StorageShardedKey, tables, transaction::DbTx,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -71,11 +68,12 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
                 return Ok(Some(entry.value))
             }
 
-            if let Some((_, entry)) = cursor.seek(storage_key)? {
-                if entry.key == storage_key {
-                    return Ok(Some(entry.value))
-                }
-            }
+            // TODO(rakita) this will be reworked shortly in StorageHistory PR.
+            // if let Some((_, entry)) = cursor.seek(storage_key)? {
+            //     if entry.key == storage_key {
+            //         return Ok(Some(entry.value))
+            //     }
+            // }
         }
         Ok(None)
     }
