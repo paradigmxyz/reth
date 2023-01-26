@@ -1,12 +1,8 @@
 use crate::{
-    db::Transaction, trie::DBTrieLoader, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, trie::DBTrieLoader, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
-use reth_db::{
-    database::Database,
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
+use reth_db::{database::Database, tables, transaction::DbTxMut};
 use reth_interfaces::consensus;
 use std::fmt::Debug;
 use tracing::*;
@@ -56,28 +52,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(stage_progress)?;
         let to_transition = tx.get_block_transition(previous_stage_progress)?;
 
-        // TODO: transform into Transaction helper method
-        let previous_numhash = tx.get_block_numhash(previous_stage_progress)?;
-        let block_root = tx
-            .get::<tables::Headers>(previous_numhash)?
-            .ok_or_else(|| {
-                StageError::DatabaseIntegrity(DatabaseIntegrityError::Header {
-                    number: previous_stage_progress,
-                    hash: previous_numhash.hash(),
-                })
-            })?
-            .state_root;
-
-        let current_numhash = tx.get_block_numhash(stage_progress)?;
-        let mut current_root = tx
-            .get::<tables::Headers>(current_numhash)?
-            .ok_or_else(|| {
-                StageError::DatabaseIntegrity(DatabaseIntegrityError::Header {
-                    number: previous_stage_progress,
-                    hash: current_numhash.hash(),
-                })
-            })?
-            .state_root;
+        let block_root = tx.get_header_by_num(previous_stage_progress)?.state_root;
 
         let trie_root = if to_transition - from_transition > self.clean_threshold {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
@@ -90,6 +65,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
+            let mut current_root = tx.get_header_by_num(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
             loader
                 .update_root(tx, &mut current_root, from_transition, to_transition)
@@ -279,7 +255,7 @@ mod tests {
             self.insert_storages(&storages)?;
 
             let last_numhash = self.tx.inner().get_block_numhash(end - 1).unwrap();
-            let root = self.state_root()?;
+            let root = dbg!(self.state_root()?);
             self.tx.commit(|tx| {
                 let mut last_header = tx.get::<tables::Headers>(last_numhash)?.unwrap();
                 last_header.state_root = root;
