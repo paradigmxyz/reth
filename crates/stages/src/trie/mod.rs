@@ -12,11 +12,11 @@ use reth_primitives::{
     proofs::{KeccakHasher, EMPTY_ROOT},
     Account, Address, StorageEntry, StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
 };
-use reth_rlp::{encode_iter, Encodable, RlpDecodable, RlpEncodable};
+use reth_rlp::{encode_iter, DecodeError, Encodable, Header, RlpDecodable, RlpEncodable};
 use std::{borrow::Borrow, marker::PhantomData};
 use tracing::*;
 use trie_db::{
-    node::{NodePlan, Value},
+    node::{NibbleSlicePlan, NodeHandlePlan, NodePlan, Value, ValuePlan},
     ChildReference, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout, TrieMut,
 };
 
@@ -29,6 +29,8 @@ pub(crate) enum TrieError {
     MissingRoot(H256),
     #[error("{0:?}")]
     DatabaseError(#[from] reth_db::Error),
+    #[error("{0:?}")]
+    DecodeError(#[from] DecodeError),
 }
 
 struct DBTrieLayout;
@@ -224,32 +226,101 @@ where
     }
 }
 
-// Encodes a partial path in the trie, adding necessary flags.
-fn encode_partial(
-    mut partial: impl Iterator<Item = u8>,
-    nibbles: usize,
-    terminating: bool,
-) -> Vec<u8> {
-    debug_assert_ne!(nibbles, 0);
-    let mut out = Vec::with_capacity(nibbles / 2 + 1);
-
-    let mut flag_byte = if terminating { 0x20 } else { 0x00 };
-
-    if nibbles % 2 != 0 {
-        flag_byte |= 0x10;
-        flag_byte |= match partial.next() {
-            Some(v) => v,
-            None => unreachable!("partial should be non-empty"),
-        };
-    }
-    out.push(flag_byte);
-    out.extend(partial);
-    out
-}
-
 /// Responsible for encoding/decoding the trie nodes.
 #[derive(Debug, Default, Clone)]
 struct RLPNodeCodec<H: Hasher>(PhantomData<H>);
+
+impl<H: Hasher> RLPNodeCodec<H> {
+    // Encodes a partial path in the trie, adding necessary flags.
+    fn encode_partial(
+        mut partial: impl Iterator<Item = u8>,
+        nibbles: usize,
+        terminating: bool,
+    ) -> Vec<u8> {
+        debug_assert_ne!(nibbles, 0);
+        let mut out = Vec::with_capacity(nibbles / 2 + 1);
+
+        let mut flag_byte = if terminating { 0x20 } else { 0x00 };
+
+        if nibbles % 2 != 0 {
+            flag_byte |= 0x10;
+            flag_byte |= match partial.next() {
+                Some(v) => v,
+                None => unreachable!("partial should be non-empty"),
+            };
+        }
+        out.push(flag_byte);
+        out.extend(partial);
+        out
+    }
+
+    fn partial_decode_plan(data: &[u8]) -> Result<NibbleSlicePlan, <Self as NodeCodec>::Error> {
+        let mut partial_data = &data[1..];
+        let header = Header::decode(&mut partial_data)?;
+        let offset = if data[2] & 0x10 == 0 { 1 } else { 0 };
+        let end = header.payload_length + 2;
+        Ok(NibbleSlicePlan::new(2..end, offset))
+    }
+
+    fn small_node_decode_plan(data: &[u8]) -> Result<NodePlan, <Self as NodeCodec>::Error> {
+        let partial = Self::partial_decode_plan(data)?;
+        let value_range = (1 + partial.len())..(data.len());
+        // skip node header and partial header
+        if data[2] & 0x20 == 0 {
+            // it's a leaf
+            let value = if value_range.len() == 32 {
+                ValuePlan::Node(value_range)
+            } else {
+                ValuePlan::Inline(value_range)
+            };
+            Ok(NodePlan::Leaf { partial, value })
+        } else {
+            // it's an extension
+            let child = if value_range.len() == 32 {
+                NodeHandlePlan::Hash(value_range)
+            } else {
+                NodeHandlePlan::Inline(value_range)
+            };
+            Ok(NodePlan::Extension { partial, child })
+        }
+    }
+
+    fn branch_decode_plan(data: &[u8]) -> Result<NodePlan, <Self as NodeCodec>::Error> {
+        let mut start = 1;
+        let mut children: [Option<NodeHandlePlan>; 16] = Default::default();
+        for child in &mut children {
+            let mut child_data = &data[start..];
+            let header = Header::decode(&mut child_data)?;
+            if header.list {
+                return Err(TrieError::DecodeError(DecodeError::UnexpectedList))
+            }
+            let end = 1 + start + header.payload_length;
+
+            *child = match header.payload_length.cmp(&32) {
+                std::cmp::Ordering::Equal => Some(NodeHandlePlan::Hash(start..end)),
+                std::cmp::Ordering::Less => Some(NodeHandlePlan::Inline(start..end)),
+                std::cmp::Ordering::Greater => {
+                    return Err(TrieError::DecodeError(DecodeError::UnexpectedLength))
+                }
+            };
+            start = end;
+        }
+        let mut value_data = &data[start..];
+        let header = Header::decode(&mut value_data)?;
+        if header.list {
+            return Err(TrieError::DecodeError(DecodeError::UnexpectedList))
+        }
+        let end = 1 + start + header.payload_length;
+        let value = match header.payload_length.cmp(&32) {
+            std::cmp::Ordering::Equal => Some(ValuePlan::Node(start..end)),
+            std::cmp::Ordering::Less => Some(ValuePlan::Inline(start..end)),
+            std::cmp::Ordering::Greater => {
+                return Err(TrieError::DecodeError(DecodeError::UnexpectedLength))
+            }
+        };
+        Ok(NodePlan::Branch { value, children })
+    }
+}
 
 impl<H> NodeCodec for RLPNodeCodec<H>
 where
@@ -267,7 +338,16 @@ where
         if data == Self::empty_node() {
             return Ok(NodePlan::Empty)
         }
-        todo!()
+        let mut ptr = data;
+        let header = Header::decode(&mut ptr)?;
+        match header {
+            Header { list: true, payload_length: 2 } => Self::small_node_decode_plan(data),
+            Header { list: true, payload_length: 17 } => Self::branch_decode_plan(data),
+            Header { list: false, .. } => {
+                Err(TrieError::DecodeError(DecodeError::UnexpectedString))
+            }
+            _ => Err(TrieError::DecodeError(DecodeError::UnexpectedLength)),
+        }
     }
 
     fn is_empty_node(data: &[u8]) -> bool {
@@ -284,7 +364,7 @@ where
         number_nibble: usize,
         value: Value<'_>,
     ) -> Vec<u8> {
-        let encoded_vec = encode_partial(partial, number_nibble, true);
+        let encoded_vec = Self::encode_partial(partial, number_nibble, true);
         let encoded_partial = encoded_vec.as_ref();
         let value = match value {
             Value::Inline(node) => node,
@@ -302,7 +382,7 @@ where
         number_nibble: usize,
         child: ChildReference<Self::HashOut>,
     ) -> Vec<u8> {
-        let encoded_vec = encode_partial(partial, number_nibble, false);
+        let encoded_vec = Self::encode_partial(partial, number_nibble, false);
         let encoded_partial = encoded_vec.as_ref();
 
         let value = match child {
