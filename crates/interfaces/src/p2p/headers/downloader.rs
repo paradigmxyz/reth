@@ -83,8 +83,8 @@ pub fn validate_header_download(
 pub fn ensure_parent(header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
     if !(parent.hash() == header.parent_hash && parent.number + 1 == header.number) {
         return Err(DownloadError::MismatchedHeaders {
-            header_number: header.number.into(),
-            parent_number: parent.number.into(),
+            header_number: header.number,
+            parent_number: parent.number,
             header_hash: header.hash(),
             parent_hash: parent.hash(),
         })
