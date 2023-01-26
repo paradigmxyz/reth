@@ -120,6 +120,7 @@ pub struct Discv4 {
 }
 
 const DISCOVERY_METER_NAME: &str = "discovery_total";
+const DISCOVERY_METER_METRICS_SCOPE: &str = "discovery_net_io";
 
 // === impl Discv4 ===
 
@@ -344,7 +345,7 @@ pub struct Discv4Service {
     /// The secret key used to sign payloads
     secret_key: SecretKey,
     /// The UDP socket for sending and receiving messages.
-    _socket: Arc<UdpSocket>,
+    _socket: Arc<MeteredStream<'static, UdpSocket>>,
     /// The spawned UDP tasks.
     ///
     /// Note: If dropped, the spawned send+receive tasks are aborted.
@@ -400,21 +401,26 @@ impl Discv4Service {
         config: Discv4Config,
         commands_rx: Option<mpsc::Receiver<Discv4Command>>,
     ) -> Self {
+        let mut socket = MeteredStream::new(socket);
+        let metered_stream_counts = MeteredStreamCounts::default();
+        socket.add_meter(DISCOVERY_METER_NAME, metered_stream_counts);
+        socket
+            .set_metrics(
+                DISCOVERY_METER_NAME,
+                MeteredStreamMetrics::new(DISCOVERY_METER_METRICS_SCOPE),
+            )
+            .unwrap();
         let socket = Arc::new(socket);
+
         let (ingress_tx, ingress_rx) = mpsc::channel(config.udp_ingress_message_buffer);
         let (egress_tx, egress_rx) = mpsc::channel(config.udp_egress_message_buffer);
         let mut tasks = JoinSet::<()>::new();
 
-        let metered_stream_counts = MeteredStreamCounts::default();
-        let cloned_counts = metered_stream_counts.clone();
+        let udp = Arc::clone(&socket);
+        tasks.spawn(async move { receive_loop(udp, ingress_tx, local_node_record.id).await });
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(async move {
-            receive_loop(udp, ingress_tx, local_node_record.id, metered_stream_counts).await
-        });
-
-        let udp = Arc::clone(&socket);
-        tasks.spawn(async move { send_loop(udp, egress_rx, cloned_counts).await });
+        tasks.spawn(async move { send_loop(udp, egress_rx).await });
 
         let kbuckets = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
@@ -1476,19 +1482,10 @@ pub enum Discv4Event {
 }
 
 /// Continuously reads new messages from the channel and writes them to the socket
-pub(crate) async fn send_loop(
-    udp: Arc<UdpSocket>,
-    rx: EgressReceiver,
-    metered_stream_counts: MeteredStreamCounts,
-) {
-    let mut metered_udp = MeteredStream::new(udp);
-    metered_udp.add_meter(DISCOVERY_METER_NAME, metered_stream_counts);
-    metered_udp
-        .set_metrics(DISCOVERY_METER_NAME, MeteredStreamMetrics::new("discovery_net_io"))
-        .unwrap();
+pub(crate) async fn send_loop(udp: Arc<MeteredStream<'_, UdpSocket>>, rx: EgressReceiver) {
     let mut stream = ReceiverStream::new(rx);
     while let Some((payload, to)) = stream.next().await {
-        match metered_udp.send_to(&payload, to).await {
+        match udp.send_to(&payload, to).await {
             Ok(size) => {
                 trace!( target : "discv4",  ?to, ?size,"sent payload");
             }
@@ -1501,10 +1498,9 @@ pub(crate) async fn send_loop(
 
 /// Continuously awaits new incoming messages and sends them back through the channel.
 pub(crate) async fn receive_loop(
-    udp: Arc<UdpSocket>,
+    udp: Arc<MeteredStream<'_, UdpSocket>>,
     tx: IngressSender,
     local_id: PeerId,
-    metered_stream_counts: MeteredStreamCounts,
 ) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
@@ -1516,15 +1512,9 @@ pub(crate) async fn receive_loop(
         });
     };
 
-    let mut metered_udp = MeteredStream::new(udp);
-    metered_udp.add_meter(DISCOVERY_METER_NAME, metered_stream_counts);
-    metered_udp
-        .set_metrics(DISCOVERY_METER_NAME, MeteredStreamMetrics::new("discovery_net_io"))
-        .unwrap();
-
     loop {
         let mut buf = [0; MAX_PACKET_SIZE];
-        let res = metered_udp.recv_from(&mut buf).await;
+        let res = udp.recv_from(&mut buf).await;
         match res {
             Err(err) => {
                 warn!(target : "discv4",  ?err, "Failed to read datagram.");

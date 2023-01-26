@@ -234,7 +234,7 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<'_, Stream> {
     }
 }
 
-impl MeteredStream<'_, Arc<UdpSocket>> {
+impl MeteredStream<'_, UdpSocket> {
     /// Calls [`UdpSocket`]::send_to, while also tallying egress
     pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], target: A) -> std::io::Result<usize> {
         let num_bytes = self.inner.send_to(buf, target).await?;
