@@ -21,7 +21,7 @@ use reth_primitives::{
     TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
-use self::models::StoredBlockBody;
+use self::models::{storage_sharded_key::StorageShardedKey, StoredBlockBody};
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
@@ -198,54 +198,47 @@ dupsort!(
 );
 
 table!(
-    /// Stores the transaction numbers that changed each account.
+    /// Stores pointers to transition changeset with changes for each account key.
     ///
-    /// ```
-    /// use reth_primitives::{Address, IntegerList};
-    /// use reth_db::{transaction::{DbTxMut,DbTx}, mdbx::{EnvKind, Env, test_utils,WriteMap}, cursor::DbCursorRO,database::Database, tables::{AccountHistory,models::ShardedKey}};
-    /// use std::{str::FromStr,sync::Arc};
+    /// Last shard key of the storage will contains `u64::MAX` `TransitionId`,
+    /// this would allows us small optimization on db access when change is in plain state.
     ///
+    /// Imagine having shards as:
+    /// * `Address | 100`
+    /// * `Address | u64::MAX`
     ///
-    /// fn main() {
-    ///     let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
-    ///     let account = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
+    /// What we need to find is id that is one greater than N. Db `seek` function allows us to fetch
+    /// the shard that equal or more than asked. For example:
+    /// * For N=50 we would get first shard.
+    /// * for N=150 we would get second shard.
+    /// * If max transition id is 200 and we ask for N=250 we would fetch last shard and
+    ///     know that needed entry is in `AccountPlainState`.
+    /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
-    ///     // Setup if each shard can only take 1 transaction.
-    ///     for i in 1..3 {
-    ///         let key = ShardedKey::new(account, i * 100);
-    ///         let list: IntegerList = vec![i * 100u64].into();
-
-    ///         db.update(|tx| tx.put::<AccountHistory>(key.clone(), list.clone()).expect("")).unwrap();
-    ///     }
-    ///
-    ///     // Is there any transaction after number 150 that changed this account?
-    ///     {
-    ///         let tx = db.tx().expect("");
-    ///         let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
-
-    ///         // It will seek the one greater or equal to the query. Since we have `Address | 100`,
-    ///         // `Address | 200` in the database and we're querying `Address | 150` it will return us
-    ///         // `Address | 200`.
-    ///         let mut walker = cursor.walk(ShardedKey::new(account, 150)).unwrap();
-    ///         let (key, list) = walker
-    ///             .next()
-    ///             .expect("element should exist.")
-    ///             .expect("should be able to retrieve it.");
-
-    ///         assert_eq!(ShardedKey::new(account, 200), key);
-    ///         let list200: IntegerList = vec![200u64].into();
-    ///         assert_eq!(list200, list);
-    ///         assert!(walker.next().is_none());
-    ///     }
-    /// }
-    /// ```
-    ///
+    /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
     ( AccountHistory ) ShardedKey<Address> | TransitionList
 );
 
 table!(
-    /// Stores pointers to transactions that changed each storage key.
-    ( StorageHistory ) AddressStorageKey | TransitionList
+    /// Stores pointers to transition changeset with changes for each storage key.
+    ///
+    /// Last shard key of the storage will contains `u64::MAX` `TransitionId`,
+    /// this would allows us small optimization on db access when change is in plain state.
+    ///
+    /// Imagine having shards as:
+    /// * `Address | StorageKey | 100`
+    /// * `Address | StorageKey | u64::MAX`
+    ///
+    /// What we need to find is id that is one greater than N. Db `seek` function allows us to fetch
+    /// the shard that equal or more than asked. For example:
+    /// * For N=50 we would get first shard.
+    /// * for N=150 we would get second shard.
+    /// * If max transition id is 200 and we ask for N=250 we would fetch last shard and
+    ///     know that needed entry is in `StoragePlainState`.
+    /// * If there were no shard we would get `None` entry or entry of different storage key.
+    ///
+    /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
+    ( StorageHistory ) StorageShardedKey | TransitionList
 );
 
 dupsort!(
@@ -313,7 +306,5 @@ pub type ConfigKey = Vec<u8>;
 pub type ConfigValue = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type BlockNumHashTxNumber = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type AddressStorageKey = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type Bytecode = Vec<u8>;
