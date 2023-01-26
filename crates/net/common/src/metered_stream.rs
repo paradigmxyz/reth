@@ -37,7 +37,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::TcpStream,
+    net::{TcpStream, ToSocketAddrs, UdpSocket},
 };
 
 /// Meters ingress & egress of streams
@@ -105,7 +105,12 @@ pub struct MeteredStreamMetrics {
 
 impl MeteredStreamMetrics {
     /// Creates an instance of  [`MeteredStreamMetrics`] with the given scope
-    pub fn new(scope: &str, labels: impl metrics::IntoLabels + Clone) -> Self {
+    pub fn new(scope: &str) -> Self {
+        Self { inner: Arc::new(MeteredStreamMetricsInner::new(scope)) }
+    }
+
+    /// Creates an instance of  [`MeteredStreamMetrics`] with the given scope and labels
+    pub fn new_with_labels(scope: &str, labels: impl metrics::IntoLabels + Clone) -> Self {
         Self { inner: Arc::new(MeteredStreamMetricsInner::new_with_labels(scope, labels)) }
     }
 }
@@ -226,6 +231,38 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<'_, Stream> {
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.project();
         this.inner.poll_shutdown(cx)
+    }
+}
+
+impl MeteredStream<'_, Arc<UdpSocket>> {
+    /// Calls [`UdpSocket`]::send_to, while also tallying egress
+    pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], target: A) -> std::io::Result<usize> {
+        let num_bytes = self.inner.send_to(buf, target).await?;
+        let num_bytes_u64 = u64::try_from(num_bytes).unwrap_or(u64::max_value());
+        self.meters.iter().for_each(|(_, (meter, metrics))| {
+            let current_egress =
+                meter.inner.egress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
+
+            if let Some(metered_stream_metrics) = metrics {
+                metered_stream_metrics.inner.egress_bytes.absolute(current_egress);
+            }
+        });
+        Ok(num_bytes)
+    }
+
+    /// Calls [`UdpSocket`]::recv_from, while also tallying egress
+    pub async fn recv_from(&self, buf: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+        let (num_bytes, remote_addr) = self.inner.recv_from(buf).await?;
+        let num_bytes_u64 = u64::try_from(num_bytes).unwrap_or(u64::max_value());
+        self.meters.iter().for_each(|(_, (meter, metrics))| {
+            let current_ingress =
+                meter.inner.ingress.fetch_add(num_bytes_u64, Ordering::Relaxed) + num_bytes_u64;
+
+            if let Some(metered_stream_metrics) = metrics {
+                metered_stream_metrics.inner.ingress_bytes.absolute(current_ingress);
+            }
+        });
+        Ok((num_bytes, remote_addr))
     }
 }
 

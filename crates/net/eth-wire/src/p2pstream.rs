@@ -10,7 +10,6 @@ use futures::{Sink, SinkExt, StreamExt};
 use metrics::counter;
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
-use reth_net_common::metered_stream::MeteredStream;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -491,15 +490,6 @@ where
         ready!(self.as_mut().poll_flush(cx))?;
 
         Poll::Ready(Ok(()))
-    }
-}
-
-impl<'a, S, M> AsMut<MeteredStream<'a, M>> for P2PStream<S>
-where
-    S: AsMut<MeteredStream<'a, M>>,
-{
-    fn as_mut(&mut self) -> &mut MeteredStream<'a, M> {
-        self.inner.as_mut()
     }
 }
 

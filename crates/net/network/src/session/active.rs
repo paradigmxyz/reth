@@ -50,7 +50,7 @@ pub(crate) struct ActiveSession {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
-    pub(crate) conn: EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>,
+    pub(crate) conn: EthStream<P2PStream<ECIESStream<MeteredStream<'_, TcpStream>>>>,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.

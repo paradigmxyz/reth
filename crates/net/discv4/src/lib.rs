@@ -29,6 +29,7 @@ use discv5::{
 };
 use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
+use reth_net_common::metered_stream::{MeteredStream, MeteredStreamCounts, MeteredStreamMetrics};
 use reth_primitives::{ForkId, PeerId, H256};
 use secp256k1::SecretKey;
 use std::{
@@ -117,6 +118,8 @@ pub struct Discv4 {
     /// channel to send commands over to the service
     to_service: mpsc::Sender<Discv4Command>,
 }
+
+const DISCOVERY_METER_NAME: &str = "discovery_total";
 
 // === impl Discv4 ===
 
@@ -402,11 +405,16 @@ impl Discv4Service {
         let (egress_tx, egress_rx) = mpsc::channel(config.udp_egress_message_buffer);
         let mut tasks = JoinSet::<()>::new();
 
-        let udp = Arc::clone(&socket);
-        tasks.spawn(async move { receive_loop(udp, ingress_tx, local_node_record.id).await });
+        let metered_stream_counts = MeteredStreamCounts::default();
+        let cloned_counts = metered_stream_counts.clone();
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(async move { send_loop(udp, egress_rx).await });
+        tasks.spawn(async move {
+            receive_loop(udp, ingress_tx, local_node_record.id, metered_stream_counts).await
+        });
+
+        let udp = Arc::clone(&socket);
+        tasks.spawn(async move { send_loop(udp, egress_rx, cloned_counts).await });
 
         let kbuckets = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
@@ -1468,10 +1476,19 @@ pub enum Discv4Event {
 }
 
 /// Continuously reads new messages from the channel and writes them to the socket
-pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
+pub(crate) async fn send_loop(
+    udp: Arc<UdpSocket>,
+    rx: EgressReceiver,
+    metered_stream_counts: MeteredStreamCounts,
+) {
+    let mut metered_udp = MeteredStream::new(udp);
+    metered_udp.add_meter(DISCOVERY_METER_NAME, metered_stream_counts);
+    metered_udp
+        .set_metrics(DISCOVERY_METER_NAME, MeteredStreamMetrics::new("discovery_net_io"))
+        .unwrap();
     let mut stream = ReceiverStream::new(rx);
     while let Some((payload, to)) = stream.next().await {
-        match udp.send_to(&payload, to).await {
+        match metered_udp.send_to(&payload, to).await {
             Ok(size) => {
                 trace!( target : "discv4",  ?to, ?size,"sent payload");
             }
@@ -1483,7 +1500,12 @@ pub(crate) async fn send_loop(udp: Arc<UdpSocket>, rx: EgressReceiver) {
 }
 
 /// Continuously awaits new incoming messages and sends them back through the channel.
-pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_id: PeerId) {
+pub(crate) async fn receive_loop(
+    udp: Arc<UdpSocket>,
+    tx: IngressSender,
+    local_id: PeerId,
+    metered_stream_counts: MeteredStreamCounts,
+) {
     let send = |event: IngressEvent| async {
         let _ = tx.send(event).await.map_err(|err| {
             warn!(
@@ -1494,9 +1516,15 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
         });
     };
 
+    let mut metered_udp = MeteredStream::new(udp);
+    metered_udp.add_meter(DISCOVERY_METER_NAME, metered_stream_counts);
+    metered_udp
+        .set_metrics(DISCOVERY_METER_NAME, MeteredStreamMetrics::new("discovery_net_io"))
+        .unwrap();
+
     loop {
         let mut buf = [0; MAX_PACKET_SIZE];
-        let res = udp.recv_from(&mut buf).await;
+        let res = metered_udp.recv_from(&mut buf).await;
         match res {
             Err(err) => {
                 warn!(target : "discv4",  ?err, "Failed to read datagram.");

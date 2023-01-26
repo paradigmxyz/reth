@@ -66,7 +66,7 @@ pub(crate) struct Swarm<C> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
-    sessions: SessionManager,
+    sessions: SessionManager<'_>,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
 }
@@ -80,7 +80,7 @@ where
     /// Configures a new swarm instance.
     pub(crate) fn new(
         incoming: ConnectionListener,
-        sessions: SessionManager,
+        sessions: SessionManager<'_>,
         state: NetworkState<C>,
     ) -> Self {
         Self { incoming, sessions, state }
@@ -102,12 +102,12 @@ where
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) fn sessions(&self) -> &SessionManager {
+    pub(crate) fn sessions(&self) -> &SessionManager<'_> {
         &self.sessions
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
+    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<'_> {
         &mut self.sessions
     }
 
