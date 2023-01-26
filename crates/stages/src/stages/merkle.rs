@@ -54,9 +54,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let block_root = tx.get_header_by_num(previous_stage_progress)?.state_root;
 
-        let trie_root = if dbg!(
-            to_transition - from_transition > self.clean_threshold || stage_progress == 0
-        ) {
+        let trie_root = if to_transition - from_transition > self.clean_threshold ||
+            stage_progress == 0
+        {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
             tx.clear::<tables::AccountsTrie>()?;
@@ -110,10 +110,11 @@ mod tests {
     use crate::{
         test_utils::{
             stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-            TestTransaction, UnwindStageTestRunner,
+            TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
         },
         trie::EthAccount,
     };
+    use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
         models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
@@ -131,34 +132,34 @@ mod tests {
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
     /// Execute with low clean threshold so as to hash whole storage
-    // #[tokio::test]
-    // async fn execute_clean() {
-    //     let (previous_stage, stage_progress) = (500, 100);
+    #[tokio::test]
+    async fn execute_clean_merkle() {
+        let (previous_stage, stage_progress) = (500, 0);
 
-    //     // Set up the runner
-    //     let mut runner = MerkleTestRunner::default();
-    //     // set low threshold so we hash the whole storage
-    //     runner.set_clean_threshold(1);
-    //     let input = ExecInput {
-    //         previous_stage: Some((PREV_STAGE_ID, previous_stage)),
-    //         stage_progress: Some(stage_progress),
-    //     };
+        // Set up the runner
+        let mut runner = MerkleTestRunner::default();
+        // set low threshold so we hash the whole storage
+        runner.set_clean_threshold(1);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
 
-    //     runner.seed_execution(input).expect("failed to seed execution");
+        runner.seed_execution(input).expect("failed to seed execution");
 
-    //     let rx = runner.execute(input);
+        let rx = runner.execute(input);
 
-    //     // Assert the successful result
-    //     let result = rx.await.unwrap();
-    //     assert_matches!(
-    //         result,
-    //         Ok(ExecOutput { done, stage_progress })
-    //             if done && stage_progress == previous_stage
-    //     );
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done, stage_progress })
+                if done && stage_progress == previous_stage
+        );
 
-    //     // Validate the stage execution
-    //     assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
-    // }
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
 
     struct MerkleTestRunner {
         tx: TestTransaction,
@@ -168,7 +169,7 @@ mod tests {
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), clean_threshold: 0, is_execute: true }
+            Self { tx: TestTransaction::default(), clean_threshold: 100000, is_execute: true }
         }
     }
 
@@ -192,14 +193,14 @@ mod tests {
             let stage_progress = input.stage_progress.unwrap_or_default();
             let end = input.previous_stage_progress() + 1;
 
-            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..3);
+            let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
             let iter = blocks.iter();
             let (mut transition_id, mut tx_id) = (0, 0);
 
-            let n_accounts = 31;
+            let n_accounts = 11;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
 
             let mut storages: BTreeMap<Address, BTreeMap<H256, U256>> = BTreeMap::new();
@@ -257,7 +258,7 @@ mod tests {
             self.insert_storages(&storages)?;
 
             let last_numhash = self.tx.inner().get_block_numhash(end - 1).unwrap();
-            let root = dbg!(self.state_root()?);
+            let root = self.state_root()?;
             self.tx.commit(|tx| {
                 let mut last_header = tx.get::<tables::Headers>(last_numhash)?.unwrap();
                 last_header.state_root = root;

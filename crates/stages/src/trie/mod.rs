@@ -1,7 +1,7 @@
 use crate::Transaction;
 use hash_db::{AsHashDB, HashDB, Prefix};
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::AccountBeforeTx,
     tables,
@@ -24,7 +24,7 @@ use trie_db::{
 pub(crate) enum TrieError {
     // TODO: decompose into various different errors
     #[error("Some error occurred")]
-    InternalError,
+    InternalError(Box<trie_db::TrieError<H256, TrieError>>),
     #[error("The root node wasn't found in the DB")]
     MissingRoot(H256),
     #[error("{0:?}")]
@@ -136,7 +136,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
         let root = RLPNodeCodec::<KeccakHasher>::hashed_null_node();
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
         if cursor.seek_by_key_subkey(key, root)?.is_none() {
-            cursor.append_dup(
+            tx.put::<tables::StoragesTrie>(
                 key,
                 StorageTrieEntry {
                     hash: root,
@@ -189,12 +189,17 @@ where
     fn insert(&mut self, _prefix: Prefix<'_>, value: &[u8]) -> H::Out {
         let hash = H::hash(value);
         let res = self.tx.cursor_dup_write::<tables::StoragesTrie>().and_then(|mut c| {
-            c.seek_by_key_subkey(self.key, hash.into())?.map(|_| c.delete_current()).transpose()?;
-            c.append_dup(self.key, StorageTrieEntry { hash: hash.into(), node: value.to_vec() })
+            if c.seek_by_key_subkey(self.key, hash.into())?.is_some() {
+                c.delete_current()?;
+            }
+            self.tx.put::<tables::StoragesTrie>(
+                self.key,
+                StorageTrieEntry { hash: hash.into(), node: value.to_vec() },
+            )
         });
         if let Err(e) = res {
             error!(target: "sync::trie::db", ?value, ?e, "Error while inserting value in Database");
-            panic!("failed to insert value in Database")
+            panic!("failed to insert value in Database: {e:?}")
         }
         hash
     }
@@ -205,7 +210,10 @@ where
 
     fn remove(&mut self, key: &H::Out, _prefix: Prefix<'_>) {
         let _ = self.tx.cursor_dup_write::<tables::StoragesTrie>().and_then(|mut c| {
-            c.seek_by_key_subkey(self.key, (*key).into())?.map(|_| c.delete_current()).transpose()
+            if c.seek_by_key_subkey(self.key, (*key).into())?.is_some() {
+                c.delete_current()?;
+            }
+            Ok(())
         });
     }
 }
@@ -367,7 +375,10 @@ where
         let encoded_vec = Self::encode_partial(partial, number_nibble, true);
         let encoded_partial = encoded_vec.as_ref();
         let value = match value {
-            Value::Inline(node) => node,
+            Value::Inline(node) => {
+                // debug_assert!(node.len() < 32, "node.len() is {} >= 32", node.len());
+                node
+            }
             Value::Node(hash) => hash,
         };
 
@@ -491,8 +502,10 @@ impl DBTrieLoader {
 
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(hashed_address.as_bytes(), out.as_ref())
-                .map_err(|_| TrieError::InternalError)?;
+            trie.insert(hashed_address.as_bytes(), out.as_ref()).map_err(|e| match *e {
+                trie_db::TrieError::DecoderError(_, err) => err,
+                _ => TrieError::InternalError(e),
+            })?;
         }
 
         Ok(*trie.root())
@@ -514,7 +527,10 @@ impl DBTrieLoader {
         while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(storage_key.as_bytes(), &out).map_err(|_| TrieError::InternalError)?;
+            trie.insert(storage_key.as_bytes(), &out).map_err(|e| match *e {
+                trie_db::TrieError::DecoderError(_, err) => err,
+                _ => TrieError::InternalError(e),
+            })?;
         }
 
         Ok(*trie.root())
@@ -551,10 +567,15 @@ impl DBTrieLoader {
 
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(hashed_address.as_bytes(), out.as_ref())
-                    .map_err(|_| TrieError::InternalError)?;
+                trie.insert(hashed_address.as_bytes(), out.as_ref()).map_err(|e| match *e {
+                    trie_db::TrieError::DecoderError(_, err) => err,
+                    _ => TrieError::InternalError(e),
+                })?;
             } else {
-                trie.remove(hashed_address.as_bytes()).map_err(|_| TrieError::InternalError)?;
+                trie.remove(hashed_address.as_bytes()).map_err(|e| match *e {
+                    trie_db::TrieError::DecoderError(_, err) => err,
+                    _ => TrieError::InternalError(e),
+                })?;
             }
         }
 
@@ -588,9 +609,15 @@ impl DBTrieLoader {
             {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(storage_key.as_bytes(), &out).map_err(|_| TrieError::InternalError)?;
+                trie.insert(storage_key.as_bytes(), &out).map_err(|e| match *e {
+                    trie_db::TrieError::DecoderError(_, err) => err,
+                    _ => TrieError::InternalError(e),
+                })?;
             } else {
-                trie.remove(storage_key.as_bytes()).map_err(|_| TrieError::InternalError)?;
+                trie.remove(storage_key.as_bytes()).map_err(|e| match *e {
+                    trie_db::TrieError::DecoderError(_, err) => err,
+                    _ => TrieError::InternalError(e),
+                })?;
             }
         }
 
