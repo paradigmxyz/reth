@@ -140,10 +140,9 @@ impl ActiveSession {
                         self.update_request_timeout(req.timestamp, Instant::now())
                     } else {
                         req.request.send_bad_response();
-                        self.on_bad_message();
                     }
                 } else {
-                    self.on_bad_message()
+                    // TODO: this could be a late response to timed out request <https://github.com/paradigmxyz/reth/issues/1067>
                 }
             };
         }
@@ -291,6 +290,7 @@ impl ActiveSession {
     }
 
     /// Notify the manager that the peer sent a bad message
+    #[allow(unused)]
     fn on_bad_message(&self) {
         let _ = self
             .to_session
