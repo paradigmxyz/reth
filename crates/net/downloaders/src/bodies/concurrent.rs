@@ -348,9 +348,7 @@ where
         loop {
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
-                println!("RESPONSE LEN >> {}", response.len());
                 let response = OrderedBodiesResponse(response);
-                println!("RESPONSE RANGE >> {:?}", response.block_range());
                 this.buffered_responses.push(response);
             }
 
