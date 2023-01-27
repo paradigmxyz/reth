@@ -39,7 +39,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, trace, warn};
 
 /// The type that advances an established session by listening for incoming messages (from local
-/// node or read from connection) and emitting events back to the [`SessionManager`](super::SessionManager).
+/// node or read from connection) and emitting events back to the
+/// [`SessionManager`](super::SessionManager).
 ///
 /// It listens for
 ///    - incoming commands from the [`SessionManager`](super::SessionManager)
