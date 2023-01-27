@@ -179,7 +179,20 @@ impl BranchEntry {
     ///
     /// Caution: This assumes the prefix is already removed.
     fn parse_value(input: &str) -> ParseEntryResult<Self> {
-        let children = input.trim().split(',').map(str::to_string).collect();
+        fn ensure_valid_hash(hash: &str) -> ParseEntryResult<String> {
+            let decoded_len = BASE32_NOPAD.decode_len(hash.as_bytes().len()).map_err(|err| {
+                ParseDnsEntryError::Base32DecodeError(format!(
+                    "invalid base32 child {hash} in branch: {err}"
+                ))
+            })?;
+            if !(12..=32).contains(&decoded_len) || hash.chars().any(|c| c.is_whitespace()) {
+                return Err(ParseDnsEntryError::InvalidChildHash(hash.to_string()))
+            }
+            Ok(hash.to_string())
+        }
+
+        let children =
+            input.trim().split(',').map(ensure_valid_hash).collect::<ParseEntryResult<Vec<_>>>()?;
         Ok(Self { children })
     }
 }
@@ -339,6 +352,24 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn parse_invalid_branch_entry() {
+        let s = "enrtree-branch:1,2";
+        let res = s.parse::<BranchEntry>();
+        assert!(res.is_err());
+        let s = "enrtree-branch:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let res = s.parse::<BranchEntry>();
+        assert!(res.is_err());
+
+        let s = "enrtree-branch:,BBBBBBBBBBBBBBBBBBBB";
+        let res = s.parse::<BranchEntry>();
+        assert!(res.is_err());
+
+        let s = "enrtree-branch:CCCCCCCCCCCCCCCCCCCC\n,BBBBBBBBBBBBBBBBBBBB";
+        let res = s.parse::<BranchEntry>();
+        assert!(res.is_err());
     }
 
     #[test]
