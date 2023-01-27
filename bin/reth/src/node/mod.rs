@@ -157,18 +157,14 @@ impl Command {
         let fetch_client = Arc::new(network.fetch_client().await?);
 
         // Spawn headers downloader
+        let tip = consensus.fork_choice_state().borrow().head_block_hash;
         let headers_downloader = headers::task::TaskDownloader::spawn(
             headers::linear::LinearDownloadBuilder::default()
                 .request_limit(config.stages.headers.downloader_batch_size)
                 .stream_batch_size(config.stages.headers.commit_threshold as usize)
                 // NOTE: the head and target will be set from inside the stage before the
                 // downloader is called
-                .build(
-                    consensus.clone(),
-                    fetch_client.clone(),
-                    Default::default(),
-                    Default::default(),
-                ),
+                .build(consensus.clone(), fetch_client.clone(), Default::default(), tip),
         );
 
         // Spawn bodies downloader
