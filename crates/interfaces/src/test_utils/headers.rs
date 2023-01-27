@@ -104,8 +104,7 @@ impl Stream for TestHeaderDownloader {
     }
 }
 
-type TestHeadersFut =
-    Pin<Box<dyn Future<Output = Result<PeerRequestResult<BlockHeaders>, RecvError>> + Sync + Send>>;
+type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send>>;
 
 struct TestDownload {
     client: Arc<TestHeadersClient>,
@@ -165,12 +164,7 @@ impl Stream for TestDownload {
                 })))
             }
 
-            let resp = match ready!(this.get_or_init_fut().poll_unpin(cx)) {
-                Ok(resp) => resp,
-                Err(err) => Err(RequestError::from(err)),
-            };
-
-            match resp {
+            match ready!(this.get_or_init_fut().poll_unpin(cx)) {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
@@ -250,14 +244,14 @@ impl HeadersClient for TestHeadersClient {
 
         Box::pin(async move {
             if let Some(err) = &mut *error.lock().await {
-                return Ok(Err(err.clone()))
+                return Err(err.clone())
             }
 
             let mut lock = responses.lock().await;
             let len = lock.len().min(request.limit as usize);
             let resp = lock.drain(..len).collect();
             let with_peer_id = WithPeerId::from((PeerId::default(), BlockHeaders(resp)));
-            Ok(Ok(with_peer_id))
+            Ok(with_peer_id)
         })
     }
 }

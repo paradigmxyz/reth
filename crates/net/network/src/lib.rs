@@ -131,6 +131,7 @@ mod message;
 mod metrics;
 mod network;
 pub mod peers;
+mod receiver;
 mod session;
 mod state;
 mod swarm;

@@ -657,11 +657,6 @@ impl Future for HeadersRequestFuture {
         let outcome = ready!(this.fut.poll_unpin(cx));
         let request = this.request.take().unwrap();
 
-        let outcome = match outcome {
-            Ok(outcome) => outcome,
-            Err(err) => Err(err.into()),
-        };
-
         Poll::Ready(HeadersRequestOutcome { request, outcome })
     }
 }

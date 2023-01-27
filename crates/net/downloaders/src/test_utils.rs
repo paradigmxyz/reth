@@ -107,7 +107,7 @@ impl BodiesClient for TestBodiesClient {
             }
 
             let bodies = &mut *bodies.lock().await;
-            Ok(Ok((
+            Ok((
                 PeerId::default(),
                 hashes
                     .into_iter()
@@ -119,7 +119,7 @@ impl BodiesClient for TestBodiesClient {
                     })
                     .collect(),
             )
-                .into()))
+                .into())
         })
     }
 }

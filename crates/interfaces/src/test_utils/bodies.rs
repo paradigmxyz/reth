@@ -5,7 +5,7 @@ use crate::p2p::{
     priority::Priority,
 };
 use async_trait::async_trait;
-use futures::{future, Future};
+use futures::{future, Future, FutureExt};
 use reth_eth_wire::BlockBody;
 use reth_primitives::{WithPeerId, H256};
 use std::{
@@ -49,6 +49,9 @@ where
     ) -> Self::Output {
         let (tx, rx) = oneshot::channel();
         tx.send((self.responder)(hashes));
-        Box::pin(rx)
+        Box::pin(rx.map(|x| match x {
+            Ok(value) => value,
+            Err(err) => Err(err.into()),
+        }))
     }
 }

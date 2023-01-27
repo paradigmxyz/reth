@@ -3,7 +3,6 @@ use futures::Future;
 pub use reth_eth_wire::BlockHeaders;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
 use std::{fmt::Debug, pin::Pin};
-use tokio::sync::oneshot::error::RecvError;
 
 /// The header request struct to be sent to connected peers, which
 /// will proceed to ask them to stream the requested headers to us.
@@ -18,14 +17,13 @@ pub struct HeadersRequest {
 }
 
 /// The headers future type
-pub type HeadersFut =
-    Pin<Box<dyn Future<Output = Result<PeerRequestResult<BlockHeaders>, RecvError>> + Send + Sync>>;
+pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The headers type
-    type Output: Future<Output = Result<PeerRequestResult<BlockHeaders>, RecvError>> + Sync + Send;
+    type Output: Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.

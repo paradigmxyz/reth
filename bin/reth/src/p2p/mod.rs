@@ -138,7 +138,7 @@ impl Command {
                 })
                 .retry(backoff)
                 .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))
-                .await??
+                .await?
                 .split();
                 if result.len() != 1 {
                     eyre::bail!(
@@ -166,7 +166,7 @@ impl Command {
             start: id,
         };
 
-        let (_, response) = client.get_headers(request).await??.split();
+        let (_, response) = client.get_headers(request).await?.split();
 
         if response.0.len() != 1 {
             eyre::bail!(

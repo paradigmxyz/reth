@@ -154,12 +154,7 @@ where
             // Check if there is a pending requests. It might not exist if all
             // headers are empty and there is nothing to download.
             if let Some(fut) = this.fut.as_mut() {
-                let response = match ready!(fut.poll_unpin(cx)) {
-                    Ok(response) => response,
-                    Err(err) => Err(err.into()),
-                };
-
-                match response {
+                match ready!(fut.poll_unpin(cx)) {
                     Ok(response) => {
                         let (peer_id, bodies) = response.split();
                         let request_len = this.hashes_to_download.len();
