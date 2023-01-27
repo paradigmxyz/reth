@@ -181,4 +181,4 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Check if documentation builds
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --all
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items
