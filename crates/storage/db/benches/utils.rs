@@ -60,9 +60,8 @@ where
     {
         // Prepare data to be read
         let tx = db.tx_mut().expect("tx");
-        let mut cursor = tx.cursor_write::<T>().expect("cursor");
         for (k, _, v, _) in pair.clone() {
-            cursor.append(k, v).expect("submit");
+            tx.put::<T>(k, v).expect("submit");
         }
         tx.inner.commit().unwrap();
     }
