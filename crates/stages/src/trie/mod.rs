@@ -335,8 +335,8 @@ impl DBTrieLoader {
     fn gather_changes<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
-        start_tid: u64,
-        end_tid: u64,
+        start_tid: TransitionId,
+        end_tid: TransitionId,
     ) -> Result<BTreeMap<H256, BTreeSet<H256>>, TrieError> {
         let mut account_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
 

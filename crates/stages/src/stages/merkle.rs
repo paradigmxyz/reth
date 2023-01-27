@@ -18,20 +18,29 @@ const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
 pub struct MerkleStage {
     /// Flag if true would do `execute` but skip unwind but if it false it would skip execution but
     /// do unwind.
-    pub is_execute: bool,
+    pub stage: StageType,
     /// The threshold for switching from incremental trie building
     /// of changes to whole rebuild. Num of transitions.
     pub clean_threshold: u64,
 }
 
+/// Possible variant of the merkle stage.
+#[derive(Debug)]
+pub enum StageType {
+    /// An execute stage.
+    Execute,
+    /// An unwind stage.
+    Unwind,
+    /// Stage that has both, for testing.
+    Both,
+}
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        if self.is_execute {
-            MERKLE_EXECUTION
-        } else {
-            MERKLE_UNWIND
+        match self.stage {
+            StageType::Execute => MERKLE_EXECUTION,
+            _ => MERKLE_UNWIND,
         }
     }
 
@@ -41,10 +50,14 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if !self.is_execute {
+        if matches!(self.stage, StageType::Unwind) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
             return Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
         }
+        // if !self.is_execute {
+        //     info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
+        //     return Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true
+        // }); }
 
         let stage_progress = input.stage_progress.unwrap_or_default();
         let previous_stage_progress = input.previous_stage_progress();
@@ -89,14 +102,17 @@ impl<DB: Database> Stage<DB> for MerkleStage {
     /// Unwind the stage.
     async fn unwind(
         &mut self,
-        _tx: &mut Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        if self.is_execute {
+        if matches!(self.stage, StageType::Execute) {
             info!(target: "sync::stages::merkle::exec", "Stage is always skipped");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
-
+        // We can assume that the Accounts and Storage are already set to its
+        // previous state, so we only build the Trie from scratch.
+        let loader = DBTrieLoader::default();
+        loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?;
         info!(target: "sync::stages::merkle::unwind", "Stage finished");
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -163,12 +179,12 @@ mod tests {
     struct MerkleTestRunner {
         tx: TestTransaction,
         clean_threshold: u64,
-        is_execute: bool,
+        stage: StageType,
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), clean_threshold: 100000, is_execute: true }
+            Self { tx: TestTransaction::default(), clean_threshold: 100000, stage: StageType::Both }
         }
     }
 
@@ -180,7 +196,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { clean_threshold: self.clean_threshold, is_execute: self.is_execute }
+            Self::S { clean_threshold: self.clean_threshold, stage: StageType::Both }
         }
     }
 
@@ -302,11 +318,6 @@ mod tests {
         #[allow(dead_code)]
         fn set_clean_threshold(&mut self, threshold: u64) {
             self.clean_threshold = threshold;
-        }
-
-        #[allow(dead_code)]
-        fn set_is_execute(&mut self, is_execute: bool) {
-            self.is_execute = is_execute;
         }
 
         fn state_root(&self) -> Result<H256, TestRunnerError> {
