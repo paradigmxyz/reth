@@ -335,7 +335,7 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn kinds(&self) -> &TransactionKind {
+    fn kind(&self) -> &TransactionKind {
         match self {
             MockTransaction::Legacy { to, .. } => to,
             MockTransaction::Eip1559 { to, .. } => to,

@@ -273,7 +273,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
 
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    fn kinds(&self) -> &TransactionKind;
+    fn kind(&self) -> &TransactionKind;
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;

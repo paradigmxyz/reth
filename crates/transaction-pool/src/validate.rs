@@ -67,8 +67,7 @@ pub trait TransactionValidator: Send + Sync {
         //     return Ok(())
         // }
 
-        if *transaction.kinds() == TransactionKind::Create &&
-            transaction.size() > max_init_code_size
+        if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
         {
             Err(PoolError::TxExceedsMaxInitCodeSize(
                 *transaction.hash(),
