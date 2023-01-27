@@ -8,7 +8,7 @@ use reth_interfaces::{
     p2p::{
         error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
-            client::{BlockHeaders, HeadersClient, HeadersFuture, HeadersRequest},
+            client::{BlockHeaders, HeadersClient, HeadersFut, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
@@ -90,7 +90,7 @@ pub struct LinearDownloader<H> {
 
 impl<H> LinearDownloader<H>
 where
-    H: HeadersClient<Output = BlockHeaders> + 'static,
+    H: HeadersClient<Output = HeadersFut> + 'static,
 {
     /// Convenience method to create a [LinearDownloadBuilder] without importing it
     pub fn builder() -> LinearDownloadBuilder {
@@ -475,7 +475,7 @@ where
 
 impl<H> HeaderDownloader for LinearDownloader<H>
 where
-    H: HeadersClient<Output = BlockHeaders> + 'static,
+    H: HeadersClient<Output = HeadersFut> + 'static,
 {
     fn update_local_head(&mut self, head: SealedHeader) {
         self.local_head = head;
@@ -541,7 +541,7 @@ where
 
 impl<H> Stream for LinearDownloader<H>
 where
-    H: HeadersClient<Output = BlockHeaders> + 'static,
+    H: HeadersClient<Output = HeadersFut> + 'static,
 {
     type Item = Vec<SealedHeader>;
 
@@ -642,8 +642,6 @@ where
         Poll::Pending
     }
 }
-
-type HeadersFut = HeadersFuture<BlockHeaders>;
 
 /// A future that returns a list of [`BlockHeaders`] on success.
 struct HeadersRequestFuture {
@@ -819,7 +817,7 @@ impl LinearDownloadBuilder {
         sync_target_block_hash: H256,
     ) -> LinearDownloader<H>
     where
-        H: HeadersClient<Output = BlockHeaders> + 'static,
+        H: HeadersClient<Output = HeadersFut> + 'static,
     {
         let Self {
             request_limit,

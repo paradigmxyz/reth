@@ -18,18 +18,18 @@ pub struct HeadersRequest {
 }
 
 /// The headers future type
-pub type HeadersFuture<T> =
-    Pin<Box<dyn Future<Output = Result<PeerRequestResult<T>, RecvError>> + Send + Sync>>;
+pub type HeadersFut =
+    Pin<Box<dyn Future<Output = Result<PeerRequestResult<BlockHeaders>, RecvError>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The headers type
-    type Output;
+    type Output: Future<Output = Result<PeerRequestResult<BlockHeaders>, RecvError>> + Sync + Send;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
-    fn get_headers(&self, request: HeadersRequest) -> HeadersFuture<Self::Output> {
+    fn get_headers(&self, request: HeadersRequest) -> Self::Output {
         self.get_headers_with_priority(request, Priority::Normal)
     }
 
@@ -39,7 +39,7 @@ pub trait HeadersClient: DownloadClient {
         &self,
         request: HeadersRequest,
         priority: Priority,
-    ) -> HeadersFuture<Self::Output>;
+    ) -> Self::Output;
 }
 
 /// The status updater for updating the status of the p2p node

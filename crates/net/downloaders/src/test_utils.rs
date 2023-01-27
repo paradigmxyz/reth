@@ -3,7 +3,7 @@
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     p2p::{
-        bodies::client::{BodiesClient, BodiesFuture},
+        bodies::client::{BodiesClient, BodiesFut},
         download::DownloadClient,
         priority::Priority,
     },
@@ -88,13 +88,13 @@ impl DownloadClient for TestBodiesClient {
 }
 
 impl BodiesClient for TestBodiesClient {
-    type Output = Vec<BlockBody>;
+    type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(
         &self,
         hashes: Vec<H256>,
         _priority: Priority,
-    ) -> BodiesFuture<Self::Output> {
+    ) -> Self::Output {
         let should_delay = self.should_delay;
         let bodies = self.bodies.clone();
         let max_batch_size = self.max_batch_size.clone();

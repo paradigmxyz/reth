@@ -2,12 +2,11 @@
 
 use crate::{fetch::DownloadRequest, peers::PeersHandle};
 use futures::TryFutureExt;
-use reth_eth_wire::{BlockBody, BlockHeaders};
 use reth_interfaces::p2p::{
-    bodies::client::{BodiesClient, BodiesFuture},
+    bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
-    headers::client::{HeadersClient, HeadersFuture, HeadersRequest},
+    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
@@ -80,14 +79,14 @@ impl DownloadClient for FetchClient {
 }
 
 impl HeadersClient for FetchClient {
-    type Output = BlockHeaders;
+    type Output = HeadersFut;
 
     /// Sends a `GetBlockHeaders` request to an available peer.
     fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
         priority: Priority,
-    ) -> HeadersFuture<Self::Output> {
+    ) -> Self::Output {
         let (response, rx) = oneshot::channel();
         if self
             .request_tx
@@ -102,14 +101,14 @@ impl HeadersClient for FetchClient {
 }
 
 impl BodiesClient for FetchClient {
-    type Output = Vec<BlockBody>;
+    type Output = BodiesFut;
 
     /// Sends a `GetBlockBodies` request to an available peer.
     fn get_block_bodies_with_priority(
         &self,
         request: Vec<H256>,
         priority: Priority,
-    ) -> BodiesFuture<Self::Output> {
+    ) -> Self::Output {
         let (response, rx) = oneshot::channel();
         if self
             .request_tx

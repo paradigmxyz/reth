@@ -5,7 +5,7 @@ use crate::{
         download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
-            client::{HeadersClient, HeadersFuture, HeadersRequest, StatusUpdater},
+            client::{HeadersClient, HeadersRequest, StatusUpdater},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
@@ -125,7 +125,7 @@ impl TestDownload {
                 start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
             };
             let client = Arc::clone(&self.client);
-            self.fut = Some(Box::pin(async move { client.get_headers(request).await }));
+            self.fut = Some(Box::pin(client.get_headers(request)));
         }
         self.fut.as_mut().unwrap()
     }
@@ -236,13 +236,13 @@ impl DownloadClient for TestHeadersClient {
 }
 
 impl HeadersClient for TestHeadersClient {
-    type Output = BlockHeaders;
+    type Output = TestHeadersFut;
 
     fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
         _priority: Priority,
-    ) -> HeadersFuture<Self::Output> {
+    ) -> Self::Output {
         let responses = self.responses.clone();
         let error = self.error.clone();
 

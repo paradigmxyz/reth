@@ -1,5 +1,5 @@
 use crate::p2p::{
-    bodies::client::{BodiesClient, BodiesFuture},
+    bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::PeerRequestResult,
     priority::Priority,
@@ -40,13 +40,13 @@ impl<F> BodiesClient for TestBodiesClient<F>
 where
     F: Fn(Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> + Send + Sync,
 {
-    type Output = Vec<BlockBody>;
+    type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(
         &self,
         hashes: Vec<H256>,
         _priority: Priority,
-    ) -> BodiesFuture<Self::Output> {
+    ) -> Self::Output {
         let (tx, rx) = oneshot::channel();
         tx.send((self.responder)(hashes));
         Box::pin(rx)

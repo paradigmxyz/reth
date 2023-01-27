@@ -5,7 +5,7 @@ use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
         bodies::{
-            client::{BodiesClient, BodiesFuture},
+            client::{BodiesClient, BodiesFut},
             response::BlockResponse,
         },
         error::DownloadError,
@@ -17,8 +17,6 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-
-type BodiesFut = BodiesFuture<Vec<BlockBody>>;
 
 /// Body request implemented as a [Future].
 ///
@@ -53,7 +51,7 @@ pub(crate) struct BodiesRequestFuture<B> {
 
 impl<B> BodiesRequestFuture<B>
 where
-    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
+    B: BodiesClient<Output = BodiesFut> + 'static,
 {
     /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
     pub(crate) fn new(
@@ -145,7 +143,7 @@ where
 
 impl<B> Future for BodiesRequestFuture<B>
 where
-    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
+    B: BodiesClient<Output = BodiesFut> + 'static,
 {
     type Output = Vec<BlockResponse>;
 

@@ -4,12 +4,11 @@ use super::queue::BodiesRequestQueue;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
-use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
         bodies::{
-            client::BodiesClient,
+            client::{BodiesClient, BodiesFut},
             downloader::{BodyDownloader, BodyDownloaderResult},
             response::BlockResponse,
         },
@@ -75,7 +74,7 @@ pub struct ConcurrentDownloader<B, DB> {
 
 impl<B, DB> ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
+    B: BodiesClient<Output = BodiesFut> + 'static,
     DB: Database,
 {
     /// Returns the next contiguous request.
@@ -247,7 +246,7 @@ where
 
 impl<B, DB> BodyDownloader for ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
+    B: BodiesClient<Output = BodiesFut> + 'static,
     DB: Database,
 {
     /// Set a new download range (exclusive).
@@ -333,7 +332,7 @@ where
 
 impl<B, DB> Stream for ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
+    B: BodiesClient<Output = BodiesFut> + 'static,
     DB: Database,
 {
     type Item = BodyDownloaderResult;
@@ -510,7 +509,7 @@ impl ConcurrentDownloaderBuilder {
         db: Arc<DB>,
     ) -> ConcurrentDownloader<B, DB>
     where
-        B: BodiesClient<Output = Vec<BlockBody>> + 'static,
+        B: BodiesClient<Output = BodiesFut> + 'static,
         DB: Database,
     {
         let Self {
