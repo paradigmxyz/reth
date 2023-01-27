@@ -14,7 +14,7 @@ use reth_primitives::{
     SealedHeader, StorageEntry, H256, U256,
 };
 use reth_rlp::Decodable;
-use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageId, Transaction};
+use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId, Transaction};
 use std::{
     collections::HashMap,
     ffi::OsStr,

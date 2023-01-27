@@ -12,7 +12,6 @@ use reth_primitives::{ChainSpec, ForkFilter, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -120,7 +119,8 @@ where
 }
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(missing_docs)]
 pub struct NetworkConfigBuilder {
     /// The node's secret key, from which the node's identity is derived.
@@ -338,7 +338,8 @@ impl NetworkConfigBuilder {
 /// This affects block propagation in the `eth` sub-protocol [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
 ///
 /// In POS `NewBlockHashes` and `NewBlock` messages become invalid.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NetworkMode {
     /// Network is in proof-of-work mode.
     Work,

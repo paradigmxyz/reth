@@ -773,7 +773,7 @@ struct HeadersResponseError {
 }
 
 /// The block to which we want to close the gap: (local head...sync target]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct SyncTargetBlock {
     /// Block hash of the targeted block
     hash: H256,
@@ -943,7 +943,6 @@ mod tests {
 
         let mut downloader = LinearDownloadBuilder::default()
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
-
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -1015,6 +1014,7 @@ mod tests {
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
+
         downloader.next_request_block_number = start;
 
         let mut total = 0;

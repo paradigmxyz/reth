@@ -24,6 +24,12 @@ pub struct TotalDifficultyStage {
     pub commit_threshold: u64,
 }
 
+impl Default for TotalDifficultyStage {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000 }
+    }
+}
+
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for TotalDifficultyStage {
     /// Return the id of the stage

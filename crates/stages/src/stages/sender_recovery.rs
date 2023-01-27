@@ -30,6 +30,12 @@ pub struct SenderRecoveryStage {
     pub commit_threshold: u64,
 }
 
+impl Default for SenderRecoveryStage {
+    fn default() -> Self {
+        Self { batch_size: 1000, commit_threshold: 5000 }
+    }
+}
+
 // TODO(onbjerg): Should unwind
 #[derive(Error, Debug)]
 enum SenderRecoveryStageError {

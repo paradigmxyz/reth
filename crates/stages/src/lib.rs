@@ -6,14 +6,48 @@
 ))]
 //! Staged syncing primitives for reth.
 //!
-//! See [Stage] and [Pipeline].
+//! This crate contains the syncing primitives [`Pipeline`] and [`Stage`], as well as all stages
+//! that reth uses to sync.
 //!
-//! # Metrics
+//! A pipeline can be configured using [`Pipeline::builder()`].
 //!
-//! This library exposes metrics via the [`metrics`][metrics_core] crate:
+//! For ease of use, this crate also exposes a set of [`StageSet`]s, which are collections of stages
+//! that perform specific functions during sync. Stage sets can be customized; it is possible to
+//! add, disable and replace stages in the set.
 //!
-//! - `stage_progress{stage}`: The block number each stage has currently reached.
-
+//! # Examples
+//!
+//! ```
+//! # use std::sync::Arc;
+//! # use reth_db::mdbx::test_utils::create_test_rw_db;
+//! # use reth_db::mdbx::{Env, WriteMap};
+//! # use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
+//! # use reth_downloaders::headers::linear::LinearDownloadBuilder;
+//! # use reth_interfaces::consensus::Consensus;
+//! # use reth_interfaces::sync::NoopSyncStateUpdate;
+//! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
+//! # use reth_primitives::PeerId;
+//! # use reth_stages::Pipeline;
+//! # use reth_stages::sets::DefaultStages;
+//! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
+//! # let headers_downloader = LinearDownloadBuilder::default().build(
+//! #    consensus.clone(),
+//! #    Arc::new(TestHeadersClient::default())
+//! # );
+//! # let bodies_downloader = ConcurrentDownloaderBuilder::default().build(
+//! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::zero(), vec![]).into()) }),
+//! #    consensus.clone(),
+//! #    create_test_rw_db()
+//! # );
+//! // Create a pipeline that can fully sync
+//! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
+//! Pipeline::builder()
+//!     .add_stages(
+//!         DefaultStages::new(consensus, headers_downloader, bodies_downloader)
+//!     )
+//!     .build();
+//! #
+//! ```
 mod db;
 mod error;
 mod id;
@@ -24,8 +58,13 @@ mod util;
 #[cfg(test)]
 mod test_utils;
 
+/// A re-export of common structs and traits.
+pub mod prelude;
+
 /// Implementations of stages.
 pub mod stages;
+
+pub mod sets;
 
 pub use db::Transaction;
 pub use error::*;

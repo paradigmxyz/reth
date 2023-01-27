@@ -12,16 +12,14 @@ use reth_db::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::headers::{
-        client::StatusUpdater,
-        downloader::{HeaderDownloader, SyncTarget},
-    },
+    p2p::headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_primitives::{BlockNumber, Header, SealedHeader, U256};
+use reth_primitives::{BlockNumber, Header, SealedHeader};
 use std::sync::Arc;
 use tracing::*;
 
-pub(crate) const HEADERS: StageId = StageId("Headers");
+/// The [`StageId`] of the headers downloader stage.
+pub const HEADERS: StageId = StageId("Headers");
 
 /// The headers stage.
 ///
@@ -37,34 +35,22 @@ pub(crate) const HEADERS: StageId = StageId("Headers");
 /// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
 /// the stage progress is not updated unless this stage is done.
 #[derive(Debug)]
-pub struct HeaderStage<D: HeaderDownloader, S: StatusUpdater> {
+pub struct HeaderStage<D: HeaderDownloader> {
     /// Strategy for downloading the headers
-    pub downloader: D,
+    downloader: D,
     /// Consensus client implementation
-    pub consensus: Arc<dyn Consensus>,
-    /// Emits updates about the sync status
-    pub sync_status_updates: S,
+    consensus: Arc<dyn Consensus>,
 }
 
 // === impl HeaderStage ===
 
-impl<D, S> HeaderStage<D, S>
+impl<D> HeaderStage<D>
 where
     D: HeaderDownloader,
-    S: StatusUpdater,
 {
-    fn update_head<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
-        height: BlockNumber,
-    ) -> Result<(), StageError> {
-        let block_key = tx.get_block_numhash(height)?;
-        let td: U256 = *tx
-            .get::<tables::HeaderTD>(block_key)?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
-        // TODO: This should happen in the last stage
-        self.sync_status_updates.update_status(height, block_key.hash(), td);
-        Ok(())
+    /// Create a new header stage
+    pub fn new(downloader: D, consensus: Arc<dyn Consensus>) -> Self {
+        Self { downloader, consensus }
     }
 
     fn is_stage_done<DB: Database>(
@@ -175,11 +161,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<DB, D, S> Stage<DB> for HeaderStage<D, S>
+impl<DB, D> Stage<DB> for HeaderStage<D>
 where
     DB: Database,
     D: HeaderDownloader,
-    S: StatusUpdater,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -194,7 +179,6 @@ where
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let current_progress = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(tx, current_progress)?;
 
         // Lookup the head and tip of the sync range
         let gap = self.get_sync_gap(tx, current_progress).await?;
@@ -305,7 +289,7 @@ mod tests {
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
-                TestConsensus, TestHeaderDownloader, TestHeadersClient, TestStatusUpdater,
+                TestConsensus, TestHeaderDownloader, TestHeadersClient,
             },
         };
         use reth_primitives::{BlockNumber, SealedHeader, U256};
@@ -315,7 +299,6 @@ mod tests {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
-            network_handle: TestStatusUpdater,
             tx: TestTransaction,
         }
 
@@ -329,14 +312,13 @@ mod tests {
                     downloader_factory: Box::new(move || {
                         TestHeaderDownloader::new(client.clone(), consensus.clone(), 1000, 1000)
                     }),
-                    network_handle: TestStatusUpdater::default(),
                     tx: TestTransaction::default(),
                 }
             }
         }
 
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<D, TestStatusUpdater>;
+            type S = HeaderStage<D>;
 
             fn tx(&self) -> &TestTransaction {
                 &self.tx
@@ -346,7 +328,6 @@ mod tests {
                 HeaderStage {
                     consensus: self.consensus.clone(),
                     downloader: (*self.downloader_factory)(),
-                    sync_status_updates: self.network_handle.clone(),
                 }
             }
         }
@@ -447,7 +428,6 @@ mod tests {
                             .stream_batch_size(500)
                             .build(consensus.clone(), client.clone())
                     }),
-                    network_handle: TestStatusUpdater::default(),
                     tx: TestTransaction::default(),
                 }
             }
