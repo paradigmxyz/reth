@@ -37,7 +37,7 @@
 //! # let bodies_downloader = ConcurrentDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::zero(), vec![]).into()) }),
 //! #    consensus.clone(),
-//! #    create_test_rw_db::<WriteMap>()
+//! #    create_test_rw_db()
 //! # );
 //! // Create a pipeline that can fully sync
 //! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
