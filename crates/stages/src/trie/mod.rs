@@ -1,33 +1,23 @@
 use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
-use hash_db::{AsHashDB, HashDB, Prefix};
 use hasher::HasherKeccak;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256,
-    proofs::{KeccakHasher, EMPTY_ROOT},
-    Account, Address, StorageEntry, StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
+    keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
+    H256, KECCAK_EMPTY, U256,
 };
-use reth_rlp::{
-    encode_iter, Decodable, DecodeError, Encodable, Header, RlpDecodable, RlpEncodable,
-};
+use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable, EMPTY_STRING_CODE};
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, BTreeSet},
-    marker::PhantomData,
     sync::Arc,
 };
 use tracing::*;
-use trie_db::{
-    node::{NibbleSlicePlan, NodeHandlePlan, NodePlan, Value, ValuePlan},
-    ChildReference, Hasher, NodeCodec, TrieLayout,
-};
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub(crate) enum TrieError {
@@ -40,18 +30,6 @@ pub(crate) enum TrieError {
     DatabaseError(#[from] reth_db::Error),
     #[error("{0:?}")]
     DecodeError(#[from] DecodeError),
-}
-
-struct DBTrieLayout;
-
-impl TrieLayout for DBTrieLayout {
-    const USE_EXTENSION: bool = true;
-
-    const ALLOW_EMPTY: bool = false;
-    const MAX_INLINE_VALUE: Option<u32> = None;
-
-    type Hash = KeccakHasher;
-    type Codec = RLPNodeCodec<Self::Hash>;
 }
 
 /// Database wrapper implementing HashDB trait.
@@ -91,12 +69,9 @@ where
 
 impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
     fn new(tx: &'tx Transaction<'itx, DB>) -> Result<Self, TrieError> {
-        let root = RLPNodeCodec::<KeccakHasher>::hashed_null_node();
+        let root = EMPTY_ROOT;
         if tx.get::<tables::AccountsTrie>(root)?.is_none() {
-            tx.put::<tables::AccountsTrie>(
-                root,
-                RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
-            )?;
+            tx.put::<tables::AccountsTrie>(root, [EMPTY_STRING_CODE].to_vec())?;
         }
         Ok(Self { tx })
     }
@@ -108,63 +83,6 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
         }
         tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx })
-    }
-}
-
-impl<H, DB, V> HashDB<H, V> for HashDatabase<'_, '_, DB>
-where
-    H: Hasher,
-    DB: Database,
-    V: From<Vec<u8>>,
-    H::Out: Into<H256>,
-{
-    fn get(&self, key: &H::Out, _prefix: Prefix<'_>) -> Option<V> {
-        // TODO: see if there's a better way to transmit database errors
-        let res = match self.tx.get::<tables::AccountsTrie>((*key).into()) {
-            Ok(v) => v.map(V::from),
-            Err(e) => {
-                error!(target: "sync::trie::db", ?key, ?e, "Error while fetching value from Database");
-                None
-            }
-        };
-        res
-    }
-
-    fn contains(&self, key: &H::Out, prefix: Prefix<'_>) -> bool {
-        <Self as HashDB<H, V>>::get(self, key, prefix).is_some()
-    }
-
-    fn insert(&mut self, _prefix: Prefix<'_>, value: &[u8]) -> H::Out {
-        let hash = H::hash(value);
-        if let Err(e) = self.tx.put::<tables::AccountsTrie>(hash.into(), value.to_vec()) {
-            error!(target: "sync::trie::db", ?value, ?e, "Error while inserting value in Database");
-            panic!("failed to insert value in Database")
-        }
-        hash
-    }
-
-    fn emplace(&mut self, _key: H::Out, _prefix: Prefix<'_>, _value: V) {
-        todo!()
-    }
-
-    fn remove(&mut self, key: &H::Out, _prefix: Prefix<'_>) {
-        let _ = self.tx.delete::<tables::AccountsTrie>((*key).into(), None);
-    }
-}
-
-impl<H: Hasher, DB: Database, T> AsHashDB<H, T> for HashDatabase<'_, '_, DB>
-where
-    H: Hasher,
-    DB: Database,
-    T: From<Vec<u8>>,
-    H::Out: Into<H256>,
-{
-    fn as_hash_db(&self) -> &dyn HashDB<H, T> {
-        self
-    }
-
-    fn as_hash_db_mut<'a>(&'a mut self) -> &'a mut (dyn HashDB<H, T> + 'a) {
-        self
     }
 }
 
@@ -216,15 +134,12 @@ where
 
 impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
     fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
-        let root = RLPNodeCodec::<KeccakHasher>::hashed_null_node();
+        let root = EMPTY_ROOT;
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
         if cursor.seek_by_key_subkey(key, root)?.is_none() {
             tx.put::<tables::StoragesTrie>(
                 key,
-                StorageTrieEntry {
-                    hash: root,
-                    node: RLPNodeCodec::<KeccakHasher>::empty_node().to_vec(),
-                },
+                StorageTrieEntry { hash: root, node: [EMPTY_STRING_CODE].to_vec() },
             )?;
         }
         Ok(Self { tx, key })
@@ -240,290 +155,6 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
             .seek_by_key_subkey(key, root)?
             .ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx, key })
-    }
-}
-
-impl<H, DB, V> HashDB<H, V> for DupHashDatabase<'_, '_, DB>
-where
-    H: Hasher,
-    DB: Database,
-    V: From<Vec<u8>>,
-    H::Out: Into<H256>,
-{
-    fn get(&self, key: &H::Out, _prefix: Prefix<'_>) -> Option<V> {
-        // TODO: see if there's a better way to transmit database errors
-        let res = self
-            .tx
-            .cursor_dup_read::<tables::StoragesTrie>()
-            .and_then(|mut c| c.seek_by_key_subkey(self.key, (*key).into()));
-        match res {
-            Ok(v) => v.map(|entry| V::from(entry.node)),
-            Err(e) => {
-                error!(target: "sync::trie::db", ?key, ?e, "Error while fetching value from Database");
-                None
-            }
-        }
-    }
-
-    fn contains(&self, key: &H::Out, prefix: Prefix<'_>) -> bool {
-        <Self as HashDB<H, V>>::get(self, key, prefix).is_some()
-    }
-
-    fn insert(&mut self, _prefix: Prefix<'_>, value: &[u8]) -> H::Out {
-        let hash = H::hash(value);
-        let res = self.tx.cursor_dup_write::<tables::StoragesTrie>().and_then(|mut c| {
-            if c.seek_by_key_subkey(self.key, hash.into())?.is_some() {
-                c.delete_current()?;
-            }
-            self.tx.put::<tables::StoragesTrie>(
-                self.key,
-                StorageTrieEntry { hash: hash.into(), node: value.to_vec() },
-            )
-        });
-        if let Err(e) = res {
-            error!(target: "sync::trie::db", ?value, ?e, "Error while inserting value in Database");
-            panic!("failed to insert value in Database: {e:?}")
-        }
-        hash
-    }
-
-    fn emplace(&mut self, _key: H::Out, _prefix: Prefix<'_>, _value: V) {
-        todo!()
-    }
-
-    fn remove(&mut self, key: &H::Out, _prefix: Prefix<'_>) {
-        let _ = self.tx.cursor_dup_write::<tables::StoragesTrie>().and_then(|mut c| {
-            if c.seek_by_key_subkey(self.key, (*key).into())?.is_some() {
-                c.delete_current()?;
-            }
-            Ok(())
-        });
-    }
-}
-
-impl<H: Hasher, DB: Database, T> AsHashDB<H, T> for DupHashDatabase<'_, '_, DB>
-where
-    H: Hasher,
-    DB: Database,
-    T: From<Vec<u8>>,
-    H::Out: Into<H256>,
-{
-    fn as_hash_db(&self) -> &dyn HashDB<H, T> {
-        self
-    }
-
-    fn as_hash_db_mut<'a>(&'a mut self) -> &'a mut (dyn HashDB<H, T> + 'a) {
-        self
-    }
-}
-
-/// Responsible for encoding/decoding the trie nodes.
-#[derive(Debug, Default, Clone)]
-struct RLPNodeCodec<H: Hasher>(PhantomData<H>);
-
-impl<H: Hasher> RLPNodeCodec<H> {
-    // Encodes a partial path in the trie, adding necessary flags.
-    fn encode_partial(
-        mut partial: impl Iterator<Item = u8>,
-        nibbles: usize,
-        terminating: bool,
-    ) -> Vec<u8> {
-        debug_assert_ne!(nibbles, 0);
-        let mut out = Vec::with_capacity(nibbles / 2 + 1);
-
-        let mut flag_byte = if terminating { 0x20 } else { 0x00 };
-
-        if nibbles % 2 != 0 {
-            flag_byte |= 0x10;
-            flag_byte |= match partial.next() {
-                Some(v) => v,
-                None => unreachable!("partial should be non-empty"),
-            };
-        }
-        out.push(flag_byte);
-        out.extend(partial);
-        out
-    }
-
-    fn partial_decode_plan(data: &[u8]) -> Result<NibbleSlicePlan, <Self as NodeCodec>::Error> {
-        let mut partial_data = &data[1..];
-        let header = Header::decode(&mut partial_data)?;
-        let offset = if data[2] & 0x10 == 0 { 1 } else { 0 };
-        let end = header.payload_length + 2;
-        Ok(NibbleSlicePlan::new(2..end, offset))
-    }
-
-    fn small_node_decode_plan(data: &[u8]) -> Result<NodePlan, <Self as NodeCodec>::Error> {
-        let partial = Self::partial_decode_plan(data)?;
-        let value_range = (1 + partial.len())..(data.len());
-        // skip node header and partial header
-        if data[2] & 0x20 == 0 {
-            // it's a leaf
-            let value = if value_range.len() == 32 {
-                ValuePlan::Node(value_range)
-            } else {
-                ValuePlan::Inline(value_range)
-            };
-            Ok(NodePlan::Leaf { partial, value })
-        } else {
-            // it's an extension
-            let child = if value_range.len() == 32 {
-                NodeHandlePlan::Hash(value_range)
-            } else {
-                NodeHandlePlan::Inline(value_range)
-            };
-            Ok(NodePlan::Extension { partial, child })
-        }
-    }
-
-    fn branch_decode_plan(data: &[u8]) -> Result<NodePlan, <Self as NodeCodec>::Error> {
-        let mut start = 1;
-        let mut children: [Option<NodeHandlePlan>; 16] = Default::default();
-        for child in &mut children {
-            let mut child_data = &data[start..];
-            let header = Header::decode(&mut child_data)?;
-            if header.list {
-                return Err(TrieError::DecodeError(DecodeError::UnexpectedList))
-            }
-            let end = 1 + start + header.payload_length;
-
-            *child = match header.payload_length.cmp(&32) {
-                std::cmp::Ordering::Equal => Some(NodeHandlePlan::Hash(start..end)),
-                std::cmp::Ordering::Less => Some(NodeHandlePlan::Inline(start..end)),
-                std::cmp::Ordering::Greater => {
-                    return Err(TrieError::DecodeError(DecodeError::UnexpectedLength))
-                }
-            };
-            start = end;
-        }
-        let mut value_data = &data[start..];
-        let header = Header::decode(&mut value_data)?;
-        if header.list {
-            return Err(TrieError::DecodeError(DecodeError::UnexpectedList))
-        }
-        let end = 1 + start + header.payload_length;
-        let value = match header.payload_length.cmp(&32) {
-            std::cmp::Ordering::Equal => Some(ValuePlan::Node(start..end)),
-            std::cmp::Ordering::Less => Some(ValuePlan::Inline(start..end)),
-            std::cmp::Ordering::Greater => {
-                return Err(TrieError::DecodeError(DecodeError::UnexpectedLength))
-            }
-        };
-        Ok(NodePlan::Branch { value, children })
-    }
-}
-
-impl<H> NodeCodec for RLPNodeCodec<H>
-where
-    H: Hasher,
-{
-    type Error = TrieError;
-
-    type HashOut = <H as Hasher>::Out;
-
-    fn hashed_null_node() -> <H as Hasher>::Out {
-        H::hash(<Self as NodeCodec>::empty_node())
-    }
-
-    fn decode_plan(data: &[u8]) -> Result<NodePlan, Self::Error> {
-        if data == Self::empty_node() {
-            return Ok(NodePlan::Empty)
-        }
-        let mut ptr = data;
-        let header = Header::decode(&mut ptr)?;
-        match header {
-            Header { list: true, payload_length: 2 } => Self::small_node_decode_plan(data),
-            Header { list: true, payload_length: 17 } => Self::branch_decode_plan(data),
-            Header { list: false, .. } => {
-                Err(TrieError::DecodeError(DecodeError::UnexpectedString))
-            }
-            _ => Err(TrieError::DecodeError(DecodeError::UnexpectedLength)),
-        }
-    }
-
-    fn is_empty_node(data: &[u8]) -> bool {
-        data == <Self as NodeCodec>::empty_node()
-    }
-
-    fn empty_node() -> &'static [u8] {
-        // rlp('')
-        &[reth_rlp::EMPTY_STRING_CODE]
-    }
-
-    fn leaf_node(
-        partial: impl Iterator<Item = u8>,
-        number_nibble: usize,
-        value: Value<'_>,
-    ) -> Vec<u8> {
-        let encoded_vec = Self::encode_partial(partial, number_nibble, true);
-        let encoded_partial = encoded_vec.as_ref();
-        let value = match value {
-            Value::Inline(node) => {
-                // debug_assert!(node.len() < 32, "node.len() is {} >= 32", node.len());
-                node
-            }
-            Value::Node(hash) => hash,
-        };
-
-        let mut output = Vec::new();
-
-        encode_iter([encoded_partial, value].into_iter(), &mut output);
-        output
-    }
-
-    fn extension_node(
-        partial: impl Iterator<Item = u8>,
-        number_nibble: usize,
-        child: ChildReference<Self::HashOut>,
-    ) -> Vec<u8> {
-        let encoded_vec = Self::encode_partial(partial, number_nibble, false);
-        let encoded_partial = encoded_vec.as_ref();
-
-        let value = match child {
-            ChildReference::Hash(ref hash) => hash.as_ref(),
-            ChildReference::Inline(ref _inline_data, _len) => {
-                unreachable!("can't happen")
-            }
-        };
-
-        let mut output = Vec::new();
-        encode_iter([encoded_partial, value].into_iter(), &mut output);
-        output
-    }
-
-    fn branch_node(
-        children: impl Iterator<Item = impl Borrow<Option<ChildReference<Self::HashOut>>>>,
-        maybe_value: Option<Value<'_>>,
-    ) -> Vec<u8> {
-        let mut output = Vec::new();
-        let mut children: Vec<_> = children
-            .map(|c| -> Vec<u8> {
-                match c.borrow() {
-                    Some(ChildReference::Hash(hash)) => hash.as_ref().to_vec(),
-                    Some(ChildReference::Inline(_value, _len)) => {
-                        unreachable!("can't happen because all keys are equal length");
-                    }
-                    None => vec![],
-                }
-            })
-            .collect();
-
-        children.push(match maybe_value {
-            Some(Value::Inline(value)) => value.to_vec(),
-            None => vec![],
-            _ => unimplemented!("unsupported"),
-        });
-        encode_iter(children.iter().map(|c| c.as_slice()), &mut output);
-        output
-    }
-
-    fn branch_node_nibbled(
-        _partial: impl Iterator<Item = u8>,
-        _number_nibble: usize,
-        _children: impl Iterator<Item = impl Borrow<Option<ChildReference<<H as Hasher>::Out>>>>,
-        _value: Option<Value<'_>>,
-    ) -> Vec<u8> {
-        unimplemented!("unused");
     }
 }
 
@@ -586,7 +217,7 @@ impl DBTrieLoader {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(hashed_address.as_bytes().to_vec(), out)
-                .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+                .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
         }
 
         let root = H256::from_slice(trie.root().unwrap().as_slice());
@@ -612,7 +243,7 @@ impl DBTrieLoader {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(storage_key.as_bytes().to_vec(), out)
-                .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+                .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
         }
 
         let root = H256::from_slice(trie.root().unwrap().as_slice());
@@ -620,7 +251,7 @@ impl DBTrieLoader {
         Ok(root)
     }
 
-    /// Calculates the root of the state trie, saving intermediate hashes in the database.
+    /// Calculates the root of the state trie by updating an existing trie.
     pub(crate) fn update_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
@@ -637,16 +268,16 @@ impl DBTrieLoader {
         let hasher = Arc::new(HasherKeccak::new());
 
         let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
-            .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+            .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
 
         for (address, changed_storages) in changed_accounts {
             if let Some(account) = trie
                 .get(address.as_slice())
-                .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?
+                .map_err(|e| TrieError::InternalError(format!("{e:?}")))?
             {
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
                 trie.remove(address.as_bytes())
-                    .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+                    .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
 
                 if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
                     let value = EthAccount::from_with_root(
@@ -657,7 +288,7 @@ impl DBTrieLoader {
                     let mut out = Vec::new();
                     Encodable::encode(&value, &mut out);
                     trie.insert(address.as_bytes().to_vec(), out)
-                        .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+                        .map_err(|e| TrieError::InternalError(format!("{e:?}",)))?;
                 }
             }
         }
@@ -679,7 +310,7 @@ impl DBTrieLoader {
         let hasher = Arc::new(HasherKeccak::new());
 
         let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
-            .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+            .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         for key in changed_storages {
@@ -689,10 +320,10 @@ impl DBTrieLoader {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
                 trie.insert(key.as_bytes().to_vec(), out)
-                    .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+                    .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
             } else {
                 trie.remove(key.as_bytes())
-                    .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+                    .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
             }
         }
 
@@ -743,7 +374,12 @@ mod tests {
         tables,
         transaction::DbTxMut,
     };
-    use reth_primitives::{hex_literal::hex, keccak256, proofs::EMPTY_ROOT, Address, ChainSpec};
+    use reth_primitives::{
+        hex_literal::hex,
+        keccak256,
+        proofs::{KeccakHasher, EMPTY_ROOT},
+        Address, ChainSpec,
+    };
     use reth_staged_sync::utils::chainspec::chain_spec_value_parser;
     use std::{collections::HashMap, str::FromStr};
     use triehash::sec_trie_root;
@@ -788,7 +424,7 @@ mod tests {
                 Account { nonce: 3, balance: U256::from(78978), bytecode_hash: None },
             ),
         ];
-        for (address, account) in accounts.clone() {
+        for (address, account) in accounts {
             tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
         }
         let encoded_accounts = accounts.iter().map(|(k, v)| {

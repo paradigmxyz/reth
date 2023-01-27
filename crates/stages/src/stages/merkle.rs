@@ -241,7 +241,7 @@ mod tests {
                         prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
 
                         let new_entry = StorageEntry {
-                            key: H256::from(keccak256(&[rand::random::<u8>()])),
+                            key: keccak256([rand::random::<u8>()]),
                             value: U256::from(rand::random::<u8>()),
                         };
                         let storage = storages.entry(*addr).or_default();
@@ -323,7 +323,6 @@ mod tests {
                         let storage = storage_cursor
                             .walk_dup(address, H256::zero())
                             .unwrap()
-                            .into_iter()
                             .map_while(|res| {
                                 let Ok((_, StorageEntry { key, value })) = res else { return None };
                                 let mut bytes = Vec::new();
@@ -384,11 +383,11 @@ mod tests {
                         })
                     })?;
                     storages
-                        .into_iter()
+                        .iter()
                         .map(|(addr, storage)| {
                             (
                                 keccak256(addr),
-                                storage.into_iter().map(|(key, value)| (keccak256(key), value)),
+                                storage.iter().map(|(key, value)| (keccak256(key), value)),
                             )
                         })
                         .collect::<BTreeMap<_, _>>()
