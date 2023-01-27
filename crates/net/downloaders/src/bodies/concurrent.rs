@@ -288,7 +288,7 @@ where
                     }
 
                     if range.is_empty() {
-                        request_range.start = num;
+                        request_range = num..num + 1;
                     } else if request_range.end + 1 == num {
                         request_range.end = num;
                     } else {
