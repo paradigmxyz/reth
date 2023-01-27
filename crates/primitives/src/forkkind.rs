@@ -49,8 +49,8 @@ impl ForkDiscriminant {
         Self { block_number, ..Default::default() }
     }
 
-    /// Return a [ForkDiscriminant] with the given timestamp
-    pub fn tdd(total_difficulty: U256, block_number: Option<BlockNumber>) -> Self {
+    /// Return a [ForkDiscriminant] with the given ttd
+    pub fn ttd(total_difficulty: U256, block_number: Option<BlockNumber>) -> Self {
         Self {
             block_number: block_number.unwrap_or_default(),
             total_difficulty,
@@ -68,7 +68,7 @@ impl ForkDiscriminant {
         match kind {
             ForkKind::Block(block_number) => ForkDiscriminant::block(block_number),
             ForkKind::TTD(block_number) => {
-                ForkDiscriminant::tdd(chain_spec.paris_ttd.unwrap_or_default(), block_number)
+                ForkDiscriminant::ttd(chain_spec.paris_ttd.unwrap_or_default(), block_number)
             }
             ForkKind::Time(timestamp) => ForkDiscriminant::timestamp(timestamp),
         }

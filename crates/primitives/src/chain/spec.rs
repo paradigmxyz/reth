@@ -1,6 +1,6 @@
 use crate::{
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
-    H160, H256, U256, ForkKind, ForkDiscriminant,
+    BlockNumber, Chain, ForkDiscriminant, ForkFilter, ForkHash, ForkId, ForkKind, Genesis,
+    GenesisAccount, Hardfork, Header, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
@@ -131,12 +131,14 @@ impl ChainSpec {
         })
     }
 
-    /// Get the first block number of the hardfork.
+    /// Get the first block number/timestamp of the hardfork.
     pub fn fork_kind(&self, fork: Hardfork) -> Option<ForkKind> {
         self.hardforks.get(&fork).copied()
     }
 
-    /// Returns `true` if the given fork is active on the given block
+    /// Returns `true` if the given fork is active on the given should update docs here to reflect
+    /// that this returns true if the fork is active on the given block / ttd / timestamp contained
+    /// in the [ForkDiscriminant]
     pub fn fork_active(&self, fork: Hardfork, discriminant: ForkDiscriminant) -> bool {
         match self.hardforks.get(&fork) {
             Some(kind) => match kind {

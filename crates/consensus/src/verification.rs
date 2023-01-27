@@ -50,7 +50,7 @@ pub fn validate_header_standalone(
     // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
     if chain_spec.fork_active(
         Hardfork::Paris,
-        ForkDiscriminant::tdd(
+        ForkDiscriminant::ttd(
             chain_spec.terminal_total_difficulty().unwrap_or_default(),
             Some(header.number),
         ),
@@ -269,7 +269,7 @@ pub fn validate_header_regarding_parent(
     // difficulty check is done by consensus.
     if !chain_spec.fork_active(
         Hardfork::Paris,
-        ForkDiscriminant::tdd(
+        ForkDiscriminant::ttd(
             chain_spec.terminal_total_difficulty().unwrap_or_default(),
             Some(child.number),
         ),

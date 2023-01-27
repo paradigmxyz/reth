@@ -50,7 +50,7 @@ impl Consensus for BeaconConsensus {
 
         if !self.chain_spec.fork_active(
             Hardfork::Paris,
-            ForkDiscriminant::tdd(
+            ForkDiscriminant::ttd(
                 self.chain_spec.terminal_total_difficulty().unwrap_or_default(),
                 Some(header.number),
             ),
@@ -69,7 +69,7 @@ impl Consensus for BeaconConsensus {
     fn has_block_reward(&self, block_num: BlockNumber) -> bool {
         !self.chain_spec.fork_active(
             Hardfork::Paris,
-            ForkDiscriminant::tdd(
+            ForkDiscriminant::ttd(
                 self.chain_spec.terminal_total_difficulty().unwrap_or_default(),
                 Some(block_num),
             ),

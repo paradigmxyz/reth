@@ -72,7 +72,7 @@ impl FromStr for Hardfork {
             "berlin" | "11" => Hardfork::Berlin,
             "london" | "12" => Hardfork::London,
             "arrowglacier" | "13" => Hardfork::ArrowGlacier,
-            "latest" | "14" | "grayglacier" => Hardfork::GrayGlacier,
+            "grayglacier" | "14" => Hardfork::GrayGlacier,
             _ => return Err(format!("Unknown hardfork {s}")),
         };
         Ok(hardfork)
