@@ -5,7 +5,7 @@ use hasher::HasherKeccak;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::AccountBeforeTx,
+    models::{AccountBeforeTx, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -17,7 +17,12 @@ use reth_primitives::{
 use reth_rlp::{
     encode_iter, Decodable, DecodeError, Encodable, Header, RlpDecodable, RlpEncodable,
 };
-use std::{borrow::Borrow, marker::PhantomData, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::{BTreeMap, BTreeSet},
+    marker::PhantomData,
+    sync::Arc,
+};
 use tracing::*;
 use trie_db::{
     node::{NibbleSlicePlan, NodeHandlePlan, NodePlan, Value, ValuePlan},
@@ -624,11 +629,8 @@ impl DBTrieLoader {
         end_tid: TransitionId,
     ) -> Result<H256, TrieError> {
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
-        let mut changes_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
 
-        let mut walker = changes_cursor
-            .walk(start_tid)?
-            .take_while(|v| v.as_ref().map(|(k, _)| *k <= end_tid).unwrap_or(false));
+        let changed_accounts = self.gather_changes(tx, start_tid, end_tid)?;
 
         let db = Arc::new(HashDatabase::new_with_root(tx, root)?);
 
@@ -637,26 +639,24 @@ impl DBTrieLoader {
         let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
             .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
 
-        // TODO: consider accounts which had only their storage changed
-        while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
-            let hashed_address = dbg!(keccak256(address));
+        for (address, changed_storages) in changed_accounts {
             if let Some(account) = trie
-                .get(hashed_address.as_slice())
+                .get(address.as_slice())
                 .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?
             {
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
-                trie.remove(hashed_address.as_bytes())
+                trie.remove(address.as_bytes())
                     .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
 
-                if let Some((_, account)) = accounts_cursor.seek_exact(hashed_address)? {
+                if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
                     let value = EthAccount::from_with_root(
                         account,
-                        self.update_storage_root(tx, storage_root, address, start_tid, end_tid)?,
+                        self.update_storage_root(tx, storage_root, address, changed_storages)?,
                     );
 
                     let mut out = Vec::new();
                     Encodable::encode(&value, &mut out);
-                    trie.insert(hashed_address.as_bytes().to_vec(), out)
+                    trie.insert(address.as_bytes().to_vec(), out)
                         .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
                 }
             }
@@ -671,36 +671,27 @@ impl DBTrieLoader {
         &self,
         tx: &Transaction<'_, DB>,
         root: H256,
-        address: Address,
-        start_tid: TransitionId,
-        end_tid: TransitionId,
+        address: H256,
+        changed_storages: BTreeSet<H256>,
     ) -> Result<H256, TrieError> {
-        let hashed_address = keccak256(address);
-        let db = Arc::new(DupHashDatabase::new_with_root(tx, hashed_address, root)?);
+        let db = Arc::new(DupHashDatabase::new_with_root(tx, address, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
         let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
             .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
-
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
-        let mut changes_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
-        let mut walker = changes_cursor.walk((start_tid, address).into())?.take_while(|v| {
-            v.as_ref().map(|(k, _)| *k <= (end_tid, address).into()).unwrap_or(false)
-        });
-
-        while let Some((_, StorageEntry { key: storage_key, .. })) = walker.next().transpose()? {
-            let key = keccak256(storage_key);
+        for key in changed_storages {
             if let Some(StorageEntry { value, .. }) =
-                storage_cursor.seek_by_key_subkey(hashed_address, key)?
+                storage_cursor.seek_by_key_subkey(address, key)?
             {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(storage_key.as_bytes().to_vec(), out)
+                trie.insert(key.as_bytes().to_vec(), out)
                     .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
             } else {
-                trie.remove(storage_key.as_bytes())
+                trie.remove(key.as_bytes())
                     .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
             }
         }
@@ -708,6 +699,39 @@ impl DBTrieLoader {
         let root = H256::from_slice(trie.root().unwrap().as_slice());
 
         Ok(root)
+    }
+
+    fn gather_changes<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        start_tid: u64,
+        end_tid: u64,
+    ) -> Result<BTreeMap<H256, BTreeSet<H256>>, TrieError> {
+        let mut account_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
+
+        let mut account_changes: BTreeMap<H256, BTreeSet<H256>> = BTreeMap::new();
+
+        let mut walker = account_cursor
+            .walk(start_tid)?
+            .take_while(|res| res.as_ref().map(|(k, _)| *k < end_tid).unwrap_or_default());
+
+        while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
+            account_changes.insert(keccak256(address), Default::default());
+        }
+
+        let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
+
+        let mut walker = storage_cursor
+            .walk((start_tid, Address::zero()).into())?
+            .take_while(|res| res.as_ref().map(|(k, _)| k.0 .0 < end_tid).unwrap_or_default());
+
+        while let Some((TransitionIdAddress((_, address)), StorageEntry { key, .. })) =
+            walker.next().transpose()?
+        {
+            account_changes.entry(keccak256(address)).or_default().insert(keccak256(key));
+        }
+
+        Ok(account_changes)
     }
 }
 
