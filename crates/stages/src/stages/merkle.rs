@@ -18,7 +18,11 @@ pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
 ///
 /// This stage should be run with the above two stages, otherwise it is a no-op.
 ///
-/// This stage is split in two: one for calculating hashes and one for unwinding. TODO: Why?
+/// This stage is split in two: one for calculating hashes and one for unwinding.
+///
+/// When run in execution, it's going to be executed AFTER the hashing stages, to generate
+/// the state root. When run in unwind mode, it's going to be executed BEFORE the hashing stages,
+/// so that it unwinds the intermediate hashes based on the unwound hashed state from the hashing stages.
 /// The order of these two variants is important. The unwind variant should be added to the pipeline
 /// before the execution variant.
 ///
