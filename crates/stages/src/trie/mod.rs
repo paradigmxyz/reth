@@ -212,7 +212,7 @@ impl DBTrieLoader {
         while let Some((hashed_address, account)) = walker.next().transpose()? {
             let value = EthAccount::from_with_root(
                 account,
-                dbg!(self.calculate_storage_root(tx, hashed_address)?),
+                self.calculate_storage_root(tx, hashed_address)?,
             );
 
             let mut out = Vec::new();
@@ -243,7 +243,7 @@ impl DBTrieLoader {
         while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(dbg!(storage_key).as_bytes().to_vec(), out)
+            trie.insert(storage_key.as_bytes().to_vec(), out)
                 .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
         }
 
@@ -283,12 +283,7 @@ impl DBTrieLoader {
                 if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
                     let value = EthAccount::from_with_root(
                         account,
-                        dbg!(self.update_storage_root(
-                            tx,
-                            dbg!(storage_root),
-                            address,
-                            changed_storages
-                        )?),
+                        self.update_storage_root(tx, storage_root, address, changed_storages)?,
                     );
 
                     let mut out = Vec::new();
@@ -325,7 +320,7 @@ impl DBTrieLoader {
             {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(dbg!(key).as_bytes().to_vec(), out)
+                trie.insert(key.as_bytes().to_vec(), out)
                     .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
             } else {
                 trie.remove(key.as_bytes())
@@ -368,6 +363,7 @@ impl DBTrieLoader {
             account_changes.entry(keccak256(address)).or_default().insert(keccak256(key));
         }
 
+        account_changes.iter().map(|(_, v)| v.len()).sum::<usize>();
         Ok(account_changes)
     }
 }
@@ -541,5 +537,48 @@ mod tests {
         tx.commit().unwrap();
 
         assert_eq!(trie.calculate_root(&tx), Ok(genesis.state_root));
+    }
+
+    #[test]
+    fn gather_changes() {
+        let db = create_test_rw_db::<WriteMap>();
+        let tx = Transaction::new(db.as_ref()).unwrap();
+
+        let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
+        let hashed_address = keccak256(address);
+
+        let storage = HashMap::from([
+            (H256::zero(), U256::from(3)),
+            (H256::from_low_u64_be(2), U256::from(1)),
+        ]);
+        let code = "el buen fla";
+        let account = Account {
+            nonce: 155,
+            balance: U256::from(414241124u32),
+            bytecode_hash: Some(keccak256(code)),
+        };
+        tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
+        tx.put::<tables::AccountChangeSet>(31, AccountBeforeTx { address, info: None }).unwrap();
+
+        for (k, v) in storage.clone() {
+            tx.put::<tables::HashedStorage>(
+                hashed_address,
+                StorageEntry { key: keccak256(k), value: v },
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSet>(
+                (32, address).into(),
+                StorageEntry { key: k, value: U256::ZERO },
+            )
+            .unwrap();
+        }
+
+        assert_eq!(
+            DBTrieLoader::default().gather_changes(&tx, 32, 33),
+            Ok(BTreeMap::from([(
+                hashed_address,
+                BTreeSet::from([keccak256(H256::zero()), keccak256(H256::from_low_u64_be(2))])
+            )]))
+        );
     }
 }
