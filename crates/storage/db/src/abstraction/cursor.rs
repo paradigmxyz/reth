@@ -100,7 +100,8 @@ pub trait DbDupCursorRW<'tx, T: DupSort> {
 
     /// Append duplicate value.
     ///
-    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use [`insert`].
+    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use
+    /// [`insert`](DbCursorRW::insert).
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 }
 

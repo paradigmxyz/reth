@@ -48,12 +48,12 @@ impl<T> Value for T where T: Compress + Decompress + Serialize {}
 
 /// Generic trait that a database table should follow.
 ///
-/// [`Table::Key`], [`Table::Value`], [`Table::SeekKey`] types should implement [`Encode`] and
+/// [`Table::Key`], [`Table::Value`] types should implement [`Encode`] and
 /// [`Decode`] when appropriate. These traits define how the data is stored and read from the
 /// database.
 ///
-/// It allows for the use of codecs. See [`crate::kv::models::blocks::BlockNumHash`] for a custom
-/// implementation, and [`crate::kv::codecs::scale`] for the use of an external codec.
+/// It allows for the use of codecs. See [`crate::tables::models::BlockNumHash`] for a custom
+/// implementation, and [`crate::tables::codecs::scale`] for the use of an external codec.
 pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.
     const NAME: &'static str;

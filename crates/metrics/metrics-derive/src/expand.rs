@@ -9,7 +9,7 @@ use syn::{
 use crate::{metric::Metric, with_attrs::WithAttrs};
 
 /// Metric name regex according to Prometheus data model
-/// https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
+/// <https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels>
 static METRIC_NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_:.][a-zA-Z0-9_:.]*$").unwrap());
 

@@ -1,4 +1,4 @@
-//! Builder structs for [`Status`](crate::types::Status) and [`Hello`](crate::types::Hello)
+//! Builder structs for [`Status`](crate::types::Status) and [`HelloMessage`]
 //! messages.
 
 use crate::{
@@ -84,13 +84,13 @@ impl StatusBuilder {
     }
 }
 
-/// Builder for [`Hello`](crate::types::Hello) messages.
+/// Builder for [`HelloMessage`].
 pub struct HelloBuilder {
     hello: HelloMessage,
 }
 
 impl HelloBuilder {
-    /// Creates a new [`HelloBuilder`](crate::builder::HelloBuilder) with default [`Hello`] values,
+    /// Creates a new [`HelloBuilder`](crate::builder::HelloBuilder) with default [`HelloMessage`] values,
     /// and a `PeerId` corresponding to the given pubkey.
     pub fn new(pubkey: PeerId) -> Self {
         Self {
@@ -106,7 +106,7 @@ impl HelloBuilder {
         }
     }
 
-    /// Consumes the type and creates the actual [`Hello`](crate::types::Hello) message.
+    /// Consumes the type and creates the actual [`HelloMessage`] message.
     pub fn build(self) -> HelloMessage {
         self.hello
     }

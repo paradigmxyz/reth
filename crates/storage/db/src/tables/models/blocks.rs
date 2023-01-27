@@ -58,7 +58,7 @@ pub struct StoredBlockOmmers {
     pub ommers: Vec<Header>,
 }
 
-/// Hash of the block header. Value for [`CanonicalHeaders`](reth_db::tables::CanonicalHeaders)
+/// Hash of the block header. Value for [`CanonicalHeaders`](crate::CanonicalHeaders)
 pub type HeaderHash = H256;
 
 /// BlockNumber concatenated with BlockHash. Used as a key for multiple tables. Having the first

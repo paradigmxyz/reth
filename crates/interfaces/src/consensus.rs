@@ -36,7 +36,7 @@ pub trait Consensus: Debug + Send + Sync {
     /// After the Merge (aka Paris) block rewards became obsolete.
     /// This flag is needed as reth change set is indexed of transaction granularity
     /// (change set is indexed per transaction) we are introducing one additional index for block
-    /// reward This in essence would introduce gaps in [Transaction] table
+    /// reward This in essence would introduce gaps in Transaction table
     /// More on it [here](https://github.com/paradigmxyz/reth/issues/237)
     fn has_block_reward(&self, block_num: BlockNumber) -> bool;
 }

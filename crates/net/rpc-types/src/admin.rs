@@ -7,7 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 /// known about the running node at the networking granularity.
 ///
 /// Note: this format is not standardized.  Reth follows geth's format,
-/// see: https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-admin
+/// see: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-admin>
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeInfo {
     /// Enode in URL format.
