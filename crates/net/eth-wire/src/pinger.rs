@@ -112,7 +112,7 @@ pub(crate) enum PingState {
     TimedOut,
 }
 
-/// The element type produced by a [`IntervalPingerStream`], representing either a new
+/// The element type produced by a [`Pinger`], representing either a new
 /// [`Ping`](super::P2PMessage::Ping)
 /// message to send, or an indication that the peer should be timed out.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -89,7 +89,7 @@ mod best;
 mod events;
 mod listener;
 mod parked;
-mod pending;
+pub(crate) mod pending;
 pub(crate) mod size;
 pub(crate) mod state;
 mod transaction;
