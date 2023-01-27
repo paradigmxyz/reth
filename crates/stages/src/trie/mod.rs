@@ -76,7 +76,6 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
         Ok(Self { tx })
     }
 
-    #[allow(dead_code)]
     fn new_with_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
             return Self::new(tx)
@@ -145,13 +144,15 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
         Ok(Self { tx, key })
     }
 
-    #[allow(dead_code)]
     fn new_with_root(
         tx: &'tx Transaction<'itx, DB>,
         key: H256,
         root: H256,
     ) -> Result<Self, TrieError> {
-        tx.cursor_dup_write::<tables::StoragesTrie>()?
+        if root == EMPTY_ROOT {
+            return Self::new(tx, key)
+        }
+        tx.cursor_dup_read::<tables::StoragesTrie>()?
             .seek_by_key_subkey(key, root)?
             .ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx, key })
@@ -211,7 +212,7 @@ impl DBTrieLoader {
         while let Some((hashed_address, account)) = walker.next().transpose()? {
             let value = EthAccount::from_with_root(
                 account,
-                self.calculate_storage_root(tx, hashed_address)?,
+                dbg!(self.calculate_storage_root(tx, hashed_address)?),
             );
 
             let mut out = Vec::new();
@@ -242,7 +243,7 @@ impl DBTrieLoader {
         while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(storage_key.as_bytes().to_vec(), out)
+            trie.insert(dbg!(storage_key).as_bytes().to_vec(), out)
                 .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
         }
 
@@ -282,7 +283,12 @@ impl DBTrieLoader {
                 if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
                     let value = EthAccount::from_with_root(
                         account,
-                        self.update_storage_root(tx, storage_root, address, changed_storages)?,
+                        dbg!(self.update_storage_root(
+                            tx,
+                            dbg!(storage_root),
+                            address,
+                            changed_storages
+                        )?),
                     );
 
                     let mut out = Vec::new();
@@ -319,7 +325,7 @@ impl DBTrieLoader {
             {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(key.as_bytes().to_vec(), out)
+                trie.insert(dbg!(key).as_bytes().to_vec(), out)
                     .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
             } else {
                 trie.remove(key.as_bytes())
