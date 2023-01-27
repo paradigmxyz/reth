@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Account storage entry.
 #[derive_arbitrary(compact)]
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct StorageEntry {
     /// Storage key.
     pub key: H256,
