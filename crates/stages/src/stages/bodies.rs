@@ -408,7 +408,7 @@ mod tests {
                     response::BlockResponse,
                 },
                 download::DownloadClient,
-                error::{DownloadResult, PeerRequestResult},
+                error::DownloadResult,
                 priority::Priority,
             },
             test_utils::{

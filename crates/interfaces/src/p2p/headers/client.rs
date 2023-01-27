@@ -25,7 +25,7 @@ pub type HeadersFuture<T> =
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The headers type
-    type Output: Send;
+    type Output;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
