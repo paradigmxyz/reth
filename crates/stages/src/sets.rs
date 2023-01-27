@@ -31,8 +31,9 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, HeaderStage, MerkleStage,
-        SenderRecoveryStage, StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, ExecutionStage, HeaderStage, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TotalDifficultyStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -121,7 +122,7 @@ pub struct OfflineStages;
 
 impl<DB: Database> StageSet<DB> for OfflineStages {
     fn build(self) -> StageSetBuilder<DB> {
-        ExecutionStages::default().build().add_set(HashingStages)
+        ExecutionStages::default().build().add_set(HashingStages).add_set(HistoryIndexingStages)
     }
 }
 
@@ -164,5 +165,17 @@ impl<DB: Database> StageSet<DB> for HashingStages {
             .add_stage(AccountHashingStage::default())
             .add_stage(StorageHashingStage::default())
             .add_stage(MerkleStage::Execution)
+    }
+}
+
+/// A set containing all stages that do additional indexing for historical state.
+#[derive(Debug)]
+pub struct HistoryIndexingStages;
+
+impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
+    fn build(self) -> StageSetBuilder<DB> {
+        StageSetBuilder::default()
+            .add_stage(IndexStorageHistoryStage::default())
+            .add_stage(IndexAccountHistoryStage::default())
     }
 }
