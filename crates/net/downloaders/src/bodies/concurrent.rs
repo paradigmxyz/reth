@@ -85,7 +85,7 @@ where
         };
 
         let limit = self.download_range.end.saturating_sub(start_at).min(self.request_limit);
-        self.query_headers(start_at..self.download_range.end, limit)
+        self.query_headers(start_at..=self.download_range.end, limit)
     }
 
     /// Retrieve a batch of headers from the database starting from provided block number.
@@ -100,7 +100,7 @@ where
     /// NOTE: The batches returned have a variable length.
     fn query_headers(
         &self,
-        range: Range<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
         max_non_empty: u64,
     ) -> DownloadResult<Option<Vec<SealedHeader>>> {
         if range.is_empty() || max_non_empty == 0 {
@@ -118,13 +118,13 @@ where
         // Collection of results
         let mut headers = Vec::<SealedHeader>::default();
 
-        let mut current_block_num = range.start;
+        let mut current_block_num = *range.start();
 
         // Collect headers while
         //      1. Current block number is in range
         //      2. The number of non empty headers is less than maximum
         //      3. The total number of headers is less than the stream batch size
-        while current_block_num < range.end &&
+        while range.contains(&current_block_num) &&
             non_empty_headers < max_non_empty &&
             headers.len() < self.stream_batch_size
         {
@@ -277,7 +277,8 @@ where
                     (Some(first), Some(last)) => first.block_number()..last.block_number() + 1,
                     _ => Range::default(),
                 };
-                let mut request_range = Range::default();
+
+                let mut requests = Vec::<RangeInclusive<BlockNumber>>::default();
                 for num in range.start..=latest_queued {
                     // Check if block has been downloaded or is currently in progress
                     if queued_bodies_range.contains(&num) ||
@@ -287,29 +288,28 @@ where
                         continue
                     }
 
-                    if range.is_empty() {
-                        request_range = num..num + 1;
-                    } else if request_range.end == num {
-                        request_range.end = num + 1; // exclusive
-                    } else {
-                        let headers = self
-                            .query_headers(
-                                request_range.clone(),
-                                request_range.clone().count() as u64,
-                            )?
-                            .ok_or(DownloadError::MissingHeader {
-                                block_number: request_range.start,
-                            })?;
+                    match requests.last().map(|range| *range.end()) {
+                        // Extend the last range if contiguous
+                        Some(range_end) if range_end + 1 == num => {
+                            let range = requests.pop().unwrap();
+                            requests.push(*range.start()..=num);
+                        }
+                        // Push the new request range
+                        Some(_) | None => requests.push(num..=num),
+                    };
+                }
 
-                        // Dispatch contiguous request.
-                        self.in_progress_queue.push_new_request(
-                            Arc::clone(&self.client),
-                            Arc::clone(&self.consensus),
-                            headers,
-                        );
-                        // Clear the current request range
-                        request_range = Range::default();
-                    }
+                for range in requests {
+                    let headers = self
+                        .query_headers(range.clone(), range.clone().count() as u64)?
+                        .ok_or(DownloadError::MissingHeader { block_number: *range.start() })?;
+
+                    // Dispatch contiguous request.
+                    self.in_progress_queue.push_new_request(
+                        Arc::clone(&self.client),
+                        Arc::clone(&self.consensus),
+                        headers,
+                    );
                 }
             }
         }
