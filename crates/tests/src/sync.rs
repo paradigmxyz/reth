@@ -1,22 +1,24 @@
-use crate::{
-    clique::CliqueGethBuilder,
-    reth_builder::{RethBuilder, RethTestInstance},
-};
+use crate::clique::CliqueGethBuilder;
 use ethers_core::types::{
     transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, H160, U64,
 };
 use ethers_providers::Middleware;
 use reth_db::mdbx::{Env, WriteMap};
-use reth_interfaces::test_utils::TestConsensus;
+use reth_downloaders::{
+    bodies::concurrent::ConcurrentDownloaderBuilder, headers::linear::LinearDownloadBuilder,
+};
+use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
 use reth_network::{
     test_utils::{unused_tcp_udp, NetworkEventStream, GETH_TIMEOUT},
     NetworkConfig, NetworkManager,
 };
 use reth_primitives::{
-    constants::EIP1559_INITIAL_BASE_FEE, ChainSpec, Hardfork, Header, PeerId, SealedHeader,
+    constants::EIP1559_INITIAL_BASE_FEE, ChainSpec, ForkKind, Hardfork, Header, PeerId,
+    SealedHeader, H256,
 };
 use reth_provider::test_utils::NoopProvider;
 use reth_staged_sync::utils::init::init_db;
+use reth_stages::{sets::DefaultStages, Pipeline};
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::fs;
@@ -69,7 +71,7 @@ async fn sync_from_clique_geth() {
         let hardforks = chainspec.hardforks();
 
         // set initial base fee depending on eip-1559
-        if Some(&0u64) == hardforks.get(&Hardfork::London) {
+        if let Some(ForkKind::Block(0)) = hardforks.get(&Hardfork::London) {
             local_genesis_header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
         }
 
@@ -99,7 +101,7 @@ async fn sync_from_clique_geth() {
 
         // get the current tip hash for pipeline configuration
         let tip = clique.tip().await;
-        let tip_hash = tip.hash.unwrap().0.into();
+        let tip_hash: H256 = tip.hash.unwrap().0.into();
 
         tracing::info!(genesis_hash = ?chainspec.genesis_hash, "genesis hash");
         tracing::info!(tip_hash = ?tip_hash, "tip hash");
@@ -131,18 +133,22 @@ async fn sync_from_clique_geth() {
         // initialize consensus
         let consensus = Arc::new(TestConsensus::default());
 
-        // build reth and start the pipeline
-        let reth: RethTestInstance<Env<WriteMap>> = RethBuilder::new()
-            .db(db)
-            .consensus(consensus)
-            .chain_spec(chainspec)
-            .network(handle.clone())
-            .tip(tip_hash)
+        // set up downloaders
+        let fetch_client = Arc::new(network.fetch_client());
+
+        let bodies_downloader = ConcurrentDownloaderBuilder::default()
+            .build(fetch_client.clone(), consensus.clone(), db.clone());
+        let headers_downloader = LinearDownloadBuilder::default()
+            .build(consensus.clone(), fetch_client);
+
+        // initialize pipeline
+        let mut reth: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> = Pipeline::builder()
+            .add_stages(DefaultStages::new(consensus, headers_downloader, bodies_downloader))
             .build();
 
         // start reth then manually connect geth
         let pipeline_handle = tokio::task::spawn(async move {
-            reth.start().await.unwrap();
+            reth.run(db).await.unwrap();
         });
 
         tokio::task::spawn(network);
@@ -218,7 +224,7 @@ async fn geth_clique_keepalive() {
         let hardforks = chainspec.hardforks();
 
         // set initial base fee depending on eip-1559
-        if Some(&0u64) == hardforks.get(&Hardfork::London) {
+        if let Some(ForkKind::Block(0)) = hardforks.get(&Hardfork::London) {
             local_genesis_header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
         }
 

@@ -8,6 +8,4 @@
 ))]
 
 mod clique;
-mod reth_builder;
-mod stage_config;
 mod sync;

@@ -271,18 +271,4 @@ impl CliqueGethInstance {
             .unwrap()
             .expect("a chain tip should exist")
     }
-
-    /// Returns the chain tip hash of the [`Geth`](ethers_core::utils::Geth) instance by calling
-    /// from geth's `eth_getBlock`.
-    #[allow(dead_code)]
-    pub(crate) async fn tip_hash(&self) -> reth_primitives::H256 {
-        self.tip().await.hash.unwrap().0.into()
-    }
-
-    /// Returns the genesis hash of the [`Geth`](ethers_core::utils::Geth) instance by calling
-    /// geth's `eth_getBlock`.
-    #[allow(dead_code)]
-    pub(crate) async fn genesis_hash(&self) -> reth_primitives::H256 {
-        self.remote_genesis().await.hash.unwrap().0.into()
-    }
 }
