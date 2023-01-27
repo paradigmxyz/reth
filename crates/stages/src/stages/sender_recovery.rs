@@ -123,7 +123,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::{cursor::DbCursorRO, models::StoredBlockBody, transaction::DbTx};
+    use reth_db::{cursor::DbCursorRO, transaction::DbTx};
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{BlockNumber, SealedBlock, H256};
 
