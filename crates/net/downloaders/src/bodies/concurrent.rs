@@ -85,7 +85,7 @@ where
         };
 
         let limit = self.download_range.end.saturating_sub(start_at).min(self.request_limit);
-        self.query_headers(start_at..=self.download_range.end, limit)
+        self.query_headers(start_at..self.download_range.end, limit)
     }
 
     /// Retrieve a batch of headers from the database starting from provided block number.
@@ -100,7 +100,7 @@ where
     /// NOTE: The batches returned have a variable length.
     fn query_headers(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        range: Range<BlockNumber>,
         max_non_empty: u64,
     ) -> DownloadResult<Option<Vec<SealedHeader>>> {
         if range.is_empty() || max_non_empty == 0 {
@@ -118,7 +118,7 @@ where
         // Collection of results
         let mut headers = Vec::<SealedHeader>::default();
 
-        let mut current_block_num = *range.start();
+        let mut current_block_num = range.start;
 
         // Collect headers while
         //      1. Current block number is in range
@@ -301,7 +301,10 @@ where
 
                 for range in requests {
                     let headers = self
-                        .query_headers(range.clone(), range.clone().count() as u64)?
+                        .query_headers(
+                            *range.start()..*range.end() + 1, //
+                            range.clone().count() as u64,
+                        )?
                         .ok_or(DownloadError::MissingHeader { block_number: *range.start() })?;
 
                     // Dispatch contiguous request.
