@@ -443,12 +443,9 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader_factory: Box::new(move || {
-                        LinearDownloadBuilder::default().stream_batch_size(500).build(
-                            consensus.clone(),
-                            client.clone(),
-                            Default::default(),
-                            Default::default(),
-                        )
+                        LinearDownloadBuilder::default()
+                            .stream_batch_size(500)
+                            .build(consensus.clone(), client.clone())
                     }),
                     network_handle: TestStatusUpdater::default(),
                     tx: TestTransaction::default(),
