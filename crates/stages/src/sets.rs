@@ -16,7 +16,7 @@
 //! # use reth_stages::sets::{OfflineStages};
 //! // Build a pipeline with all offline stages.
 //! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
-//! Pipeline::builder().add_stages(OfflineStages).build();
+//! Pipeline::builder().add_stages(OfflineStages::default()).build();
 //! ```
 //!
 //! ```ignore
@@ -25,7 +25,7 @@
 //! // Build a pipeline with all offline stages and a custom stage at the end.
 //! Pipeline::builder()
 //!     .add_stages(
-//!         OfflineStages.build().add_stage(MyCustomStage)
+//!         OfflineStages::default().builder().add_stage(MyCustomStage)
 //!     )
 //!     .build();
 //! ```
@@ -70,8 +70,8 @@ where
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
 {
-    fn build(self) -> StageSetBuilder<DB> {
-        self.online.build().add_set(OfflineStages)
+    fn builder(self) -> StageSetBuilder<DB> {
+        self.online.builder().add_set(OfflineStages)
     }
 }
 
@@ -102,7 +102,7 @@ where
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
 {
-    fn build(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(self.header_downloader, self.consensus.clone()))
             .add_stage(TotalDifficultyStage::default())
@@ -117,17 +117,20 @@ where
 ///
 /// - [`ExecutionStages`]
 /// - [`HashingStages`]
-#[derive(Debug)]
+/// - [`HistoryIndexingStages`]
+#[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct OfflineStages;
 
 impl<DB: Database> StageSet<DB> for OfflineStages {
-    fn build(self) -> StageSetBuilder<DB> {
-        ExecutionStages::default().build().add_set(HashingStages).add_set(HistoryIndexingStages)
+    fn builder(self) -> StageSetBuilder<DB> {
+        ExecutionStages::default().builder().add_set(HashingStages).add_set(HistoryIndexingStages)
     }
 }
 
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct ExecutionStages {
     /// The chain specification to use for execution.
     chain_spec: ChainSpec,
@@ -147,7 +150,7 @@ impl ExecutionStages {
 }
 
 impl<DB: Database> StageSet<DB> for ExecutionStages {
-    fn build(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())
             .add_stage(ExecutionStage { chain_spec: self.chain_spec, ..Default::default() })
@@ -155,11 +158,12 @@ impl<DB: Database> StageSet<DB> for ExecutionStages {
 }
 
 /// A set containing all stages that hash account state.
-#[derive(Debug)]
+#[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct HashingStages;
 
 impl<DB: Database> StageSet<DB> for HashingStages {
-    fn build(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(MerkleStage::Unwind)
             .add_stage(AccountHashingStage::default())
@@ -169,11 +173,12 @@ impl<DB: Database> StageSet<DB> for HashingStages {
 }
 
 /// A set containing all stages that do additional indexing for historical state.
-#[derive(Debug)]
+#[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct HistoryIndexingStages;
 
 impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
-    fn build(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(IndexStorageHistoryStage::default())
             .add_stage(IndexAccountHistoryStage::default())

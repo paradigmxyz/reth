@@ -22,9 +22,9 @@ pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
 ///
 /// When run in execution, it's going to be executed AFTER the hashing stages, to generate
 /// the state root. When run in unwind mode, it's going to be executed BEFORE the hashing stages,
-/// so that it unwinds the intermediate hashes based on the unwound hashed state from the hashing stages.
-/// The order of these two variants is important. The unwind variant should be added to the pipeline
-/// before the execution variant.
+/// so that it unwinds the intermediate hashes based on the unwound hashed state from the hashing
+/// stages. The order of these two variants is important. The unwind variant should be added to the
+/// pipeline before the execution variant.
 ///
 /// An example pipeline to only hash state would be:
 ///

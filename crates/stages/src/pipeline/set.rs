@@ -13,7 +13,7 @@ use std::{
 /// Individual stages in the set can be added, removed and overriden using [`StageSetBuilder`].
 pub trait StageSet<DB: Database>: Sized {
     /// Configures the stages in the set.
-    fn build(self) -> StageSetBuilder<DB>;
+    fn builder(self) -> StageSetBuilder<DB>;
 
     /// Overrides the given [`Stage`], if it is in this set.
     ///
@@ -21,7 +21,7 @@ pub trait StageSet<DB: Database>: Sized {
     ///
     /// Panics if the [`Stage`] is not in this set.
     fn set<S: Stage<DB> + 'static>(self, stage: S) -> StageSetBuilder<DB> {
-        self.build().set(stage)
+        self.builder().set(stage)
     }
 }
 
@@ -119,7 +119,7 @@ where
     /// If a stage is in both sets, it is removed from its previous place in this set. Because of
     /// this, it is advisable to merge sets first and re-order stages after if needed.
     pub fn add_set<Set: StageSet<DB>>(mut self, set: Set) -> Self {
-        for stage in set.build().finish() {
+        for stage in set.builder().build() {
             let target_index = self.order.len();
             self.order.push(stage.id());
             self.upsert_stage_state(stage, target_index);
@@ -187,7 +187,7 @@ where
     }
 
     /// Consumes the builder and returns the contained [`Stage`]s in the order specified.
-    pub fn finish(mut self) -> Vec<Box<dyn Stage<DB>>> {
+    pub fn build(mut self) -> Vec<Box<dyn Stage<DB>>> {
         let mut stages = Vec::new();
         for id in &self.order {
             if let Some(entry) = self.stages.remove(id) {
@@ -201,7 +201,7 @@ where
 }
 
 impl<DB: Database> StageSet<DB> for StageSetBuilder<DB> {
-    fn build(self) -> StageSetBuilder<DB> {
+    fn builder(self) -> StageSetBuilder<DB> {
         self
     }
 }

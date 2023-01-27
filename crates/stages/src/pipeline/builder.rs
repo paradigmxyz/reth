@@ -42,7 +42,7 @@ where
     /// [`build`][StageSet::build] on the set which will convert it to a
     /// [`StageSetBuilder`][crate::StageSetBuilder].
     pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
-        for stage in set.build().finish() {
+        for stage in set.builder().build() {
             self.pipeline.stages.push(QueuedStage { stage });
         }
         self
