@@ -73,7 +73,6 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256,
 mod tests {
 
     use super::init_genesis;
-    use crate::utils::init::WriteMap;
     use reth_db::mdbx::test_utils::create_test_rw_db;
     use reth_primitives::{
         GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
@@ -81,7 +80,7 @@ mod tests {
 
     #[test]
     fn success_init_genesis_mainnet() {
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let genesis_hash = init_genesis(db.clone(), MAINNET.clone()).unwrap();
 
         // actual, expected
@@ -90,7 +89,7 @@ mod tests {
 
     #[test]
     fn success_init_genesis_goerli() {
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let genesis_hash = init_genesis(db.clone(), GOERLI.clone()).unwrap();
 
         // actual, expected
@@ -99,7 +98,7 @@ mod tests {
 
     #[test]
     fn success_init_genesis_sepolia() {
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let genesis_hash = init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
 
         // actual, expected
