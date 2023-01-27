@@ -41,7 +41,8 @@ pub enum StageError {
     StageProgress(u64),
     /// The stage encountered a recoverable error.
     ///
-    /// These types of errors are caught by the [Pipeline] and trigger a restart of the stage.
+    /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
+    /// of the stage.
     #[error(transparent)]
     Recoverable(Box<dyn std::error::Error + Send + Sync>),
     /// The stage encountered a fatal error.

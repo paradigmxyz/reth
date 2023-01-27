@@ -217,7 +217,7 @@ pub(crate) struct ServiceData<L: Logger> {
 /// JsonRPSee service compatible with `tower`.
 ///
 /// # Note
-/// This is similar to [`hyper::service::service_fn`].
+/// This is similar to [`hyper::service::service_fn`](https://docs.rs/hyper/latest/hyper/service/fn.service_fn.html).
 #[derive(Debug)]
 pub struct TowerService<L: Logger> {
     inner: ServiceData<L>,
@@ -430,8 +430,7 @@ impl<B, L> Builder<B, L> {
     /// registered resources on this server instance would exceed 8.
     ///
     /// See the module documentation for
-    /// [`resurce_limiting`](../jsonrpsee_utils/server/resource_limiting/index.html#
-    /// resource-limiting) for details.
+    /// [`resource_limiting`][jsonrpsee::core::server::resource_limiting] for details.
     pub fn register_resource(
         mut self,
         label: &'static str,

@@ -76,7 +76,7 @@ pub enum P2PHandshakeError {
     DecodeError(#[from] reth_rlp::DecodeError),
 }
 
-/// An error that can occur when interacting with a [`Pinger`].
+/// An error that can occur when interacting with a pinger.
 #[derive(Debug, thiserror::Error)]
 pub enum PingerError {
     /// An unexpected pong was received while the pinger was in the `Ready` state.

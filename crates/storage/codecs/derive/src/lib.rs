@@ -134,7 +134,7 @@ pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
-/// To be used for types that implement `Arbitrary` manually. See [`derive_arbitrary`] for more.
+/// To be used for types that implement `Arbitrary` manually. See [`derive_arbitrary()`] for more.
 #[proc_macro_attribute]
 pub fn add_arbitrary_tests(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);

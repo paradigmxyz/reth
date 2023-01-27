@@ -1,8 +1,8 @@
-//! Code generator for the [`Compact`] trait.
+//! Code generator for the `Compact` trait.
 
 use super::*;
 
-/// Generates code to implement the [`Compact`] trait for a data type.
+/// Generates code to implement the `Compact` trait for a data type.
 pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 

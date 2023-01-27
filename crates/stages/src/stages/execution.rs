@@ -27,28 +27,28 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// update history indexes.
 ///
 /// Input tables:
-/// [tables::CanonicalHeaders] get next block to execute.
-/// [tables::Headers] get for revm environment variables.
-/// [tables::CumulativeTxCount] to get tx number
-/// [tables::Transactions] to execute
+/// - [tables::CanonicalHeaders] get next block to execute.
+/// - [tables::Headers] get for revm environment variables.
+/// - [tables::BlockBodies] to get tx number
+/// - [tables::Transactions] to execute
 ///
-/// For state access [StateProvider] provides us latest state and history state
-/// For latest most recent state [StateProvider] would need (Used for execution Stage):
-/// [tables::PlainAccountState]
-/// [tables::Bytecodes]
-/// [tables::PlainStorageState]
+/// For state access [LatestStateProviderRef] provides us latest state and history state
+/// For latest most recent state [LatestStateProviderRef] would need (Used for execution Stage):
+/// - [tables::PlainAccountState]
+/// - [tables::Bytecodes]
+/// - [tables::PlainStorageState]
 ///
 /// Tables updated after state finishes execution:
-/// [tables::PlainAccountState]
-/// [tables::PlainStorageState]
-/// [tables::Bytecodes]
-/// [tables::AccountChangeSet]
-/// [tables::StorageChangeSet]
+/// - [tables::PlainAccountState]
+/// - [tables::PlainStorageState]
+/// - [tables::Bytecodes]
+/// - [tables::AccountChangeSet]
+/// - [tables::StorageChangeSet]
 ///
 /// For unwinds we are accessing:
-/// [tables::CumulativeTxCount] get tx index to know what needs to be unwinded
-/// [tables::AccountHistory] to remove change set and apply old values to
-/// [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
+/// - [tables::BlockBodies] get tx index to know what needs to be unwinded
+/// - [tables::AccountHistory] to remove change set and apply old values to
+/// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
 #[derive(Debug)]
 pub struct ExecutionStage {
