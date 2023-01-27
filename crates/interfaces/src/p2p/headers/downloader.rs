@@ -28,9 +28,6 @@ pub trait HeaderDownloader: Send + Sync + Stream<Item = Vec<SealedHeader>> + Unp
 
     /// Sets the headers batch size that the Stream should return.
     fn set_batch_size(&mut self, limit: usize);
-
-    /// Validate whether the header is valid in relation to it's parent
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()>;
 }
 
 /// Specifies the target to sync for [HeaderDownloader::update_sync_target]
@@ -86,8 +83,8 @@ pub fn validate_header_download(
 pub fn ensure_parent(header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
     if !(parent.hash() == header.parent_hash && parent.number + 1 == header.number) {
         return Err(DownloadError::MismatchedHeaders {
-            header_number: header.number.into(),
-            parent_number: parent.number.into(),
+            header_number: header.number,
+            parent_number: parent.number,
             header_hash: header.hash(),
             parent_hash: parent.hash(),
         })

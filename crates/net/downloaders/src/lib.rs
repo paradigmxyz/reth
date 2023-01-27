@@ -13,5 +13,8 @@ pub mod bodies;
 /// The collection of algorithms for downloading block headers.
 pub mod headers;
 
+/// Common downloader metrics.
+pub mod metrics;
+
 #[cfg(test)]
 mod test_utils;

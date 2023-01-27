@@ -5,6 +5,14 @@ use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
+// The chain spec module.
+mod spec;
+pub use spec::{ChainSpec, ChainSpecBuilder, ParisStatus, GOERLI, MAINNET, SEPOLIA};
+
+// The chain info module.
+mod info;
+pub use info::ChainInfo;
+
 /// Either a named or chain id or the actual id value
 #[add_arbitrary_tests(rlp)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

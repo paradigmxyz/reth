@@ -1,9 +1,8 @@
-use crate::consensus;
-use reth_primitives::{rpc::BlockNumber, BlockHashOrNumber, Header, WithPeerId, H256};
+use super::headers::client::HeadersRequest;
+use crate::{consensus, db};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, H256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-
-use super::headers::client::HeadersRequest;
 
 /// Result alias for result of a request.
 pub type RequestResult<T> = Result<T, RequestError>;
@@ -155,6 +154,12 @@ pub enum DownloadError {
         /// How many bodies we expected.
         expected: usize,
     },
+    /// Headers missing from the database.
+    #[error("Header missing from the database: {block_number}")]
+    MissingHeader {
+        /// Missing header block number.
+        block_number: BlockNumber,
+    },
     /* ==================== COMMON ERRORS ==================== */
     /// Timed out while waiting for request id response.
     #[error("Timed out while waiting for response.")]
@@ -165,4 +170,7 @@ pub enum DownloadError {
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
+    /// Error while reading data from database.
+    #[error(transparent)]
+    DatabaseError(#[from] db::Error),
 }
