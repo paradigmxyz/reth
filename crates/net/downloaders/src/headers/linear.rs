@@ -575,6 +575,18 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // The downloader boundaries (local head and sync target) have to be set in order
+        // to start downloading data.
+        if this.local_head.is_none() || this.sync_target.is_none() {
+            tracing::warn!(
+                target: "downloaders::headers",
+                head=?this.local_block_number(),
+                sync_target=?this.sync_target,
+                "The downloader sync boundaries have not been set"
+            );
+            return Poll::Pending
+        }
+
         // If we have a new tip request we need to complete that first before we send batched
         // requests
         while let Some(mut req) = this.sync_target_request.take() {
