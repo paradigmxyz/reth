@@ -85,10 +85,6 @@ where
         };
 
         let limit = self.download_range.end.saturating_sub(start_at).min(self.request_limit);
-        if limit == 0 {
-            return Ok(None)
-        }
-
         self.query_headers(start_at..self.download_range.end, limit)
     }
 
@@ -107,7 +103,7 @@ where
         range: Range<BlockNumber>,
         max_non_empty: u64,
     ) -> DownloadResult<Option<Vec<SealedHeader>>> {
-        if range.start >= self.download_range.end {
+        if range.is_empty() || max_non_empty == 0 {
             return Ok(None)
         }
 
