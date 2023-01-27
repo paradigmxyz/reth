@@ -58,6 +58,9 @@ mod util;
 #[cfg(test)]
 mod test_utils;
 
+/// A re-export of common structs and traits.
+pub mod prelude;
+
 /// Implementations of stages.
 pub mod stages;
 

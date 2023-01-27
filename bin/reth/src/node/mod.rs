@@ -20,9 +20,8 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
-    sets::{OfflineStages, OnlineStages},
+    prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
-    Pipeline, PipelineEvent, StageId, StageSet,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::select;
