@@ -128,11 +128,11 @@ where
             non_empty_headers < max_non_empty &&
             headers.len() < self.stream_batch_size
         {
-            // Find the block hash
+            // Find the block hash.
             let (number, hash) = canonical_cursor
                 .seek_exact(current_block_num)?
                 .ok_or(DownloadError::MissingHeader { block_number: current_block_num })?;
-            // Find the block number
+            // Find the block header.
             let (_, header) = header_cursor
                 .seek_exact((number, hash).into())?
                 .ok_or(DownloadError::MissingHeader { block_number: number })?;
@@ -289,12 +289,12 @@ where
 
                     if range.is_empty() {
                         request_range = num..num + 1;
-                    } else if request_range.end + 1 == num {
-                        request_range.end = num;
+                    } else if request_range.end == num {
+                        request_range.end = num + 1; // exclusive
                     } else {
                         let headers = self
                             .query_headers(
-                                request_range.start..request_range.end + 1, // exclusive
+                                request_range.clone(),
                                 request_range.clone().count() as u64,
                             )?
                             .ok_or(DownloadError::MissingHeader {
