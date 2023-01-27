@@ -1,5 +1,7 @@
 use crate::Transaction;
+use cita_trie::{PatriciaTrie, Trie};
 use hash_db::{AsHashDB, HashDB, Prefix};
+use hasher::HasherKeccak;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -12,19 +14,21 @@ use reth_primitives::{
     proofs::{KeccakHasher, EMPTY_ROOT},
     Account, Address, StorageEntry, StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
 };
-use reth_rlp::{encode_iter, DecodeError, Encodable, Header, RlpDecodable, RlpEncodable};
-use std::{borrow::Borrow, marker::PhantomData};
+use reth_rlp::{
+    encode_iter, Decodable, DecodeError, Encodable, Header, RlpDecodable, RlpEncodable,
+};
+use std::{borrow::Borrow, marker::PhantomData, sync::Arc};
 use tracing::*;
 use trie_db::{
     node::{NibbleSlicePlan, NodeHandlePlan, NodePlan, Value, ValuePlan},
-    ChildReference, Hasher, NodeCodec, TrieDBMut, TrieDBMutBuilder, TrieLayout, TrieMut,
+    ChildReference, Hasher, NodeCodec, TrieLayout,
 };
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub(crate) enum TrieError {
     // TODO: decompose into various different errors
-    #[error("Some error occurred")]
-    InternalError(Box<trie_db::TrieError<H256, TrieError>>),
+    #[error("Some error occurred: {0}")]
+    InternalError(String),
     #[error("The root node wasn't found in the DB")]
     MissingRoot(H256),
     #[error("{0:?}")]
@@ -50,6 +54,36 @@ struct HashDatabase<'tx, 'itx, DB: Database> {
     tx: &'tx Transaction<'itx, DB>,
 }
 
+// TODO: implement caching and bulk inserting
+impl<'tx, 'itx, DB> cita_trie::DB for HashDatabase<'tx, 'itx, DB>
+where
+    DB: Database,
+{
+    type Error = TrieError;
+
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(self.tx.get::<tables::AccountsTrie>(H256::from_slice(key))?)
+    }
+
+    fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
+        Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
+    }
+
+    fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
+        self.tx.put::<tables::AccountsTrie>(H256::from_slice(key.as_slice()), value.to_vec())?;
+        Ok(())
+    }
+
+    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
+        self.tx.delete::<tables::AccountsTrie>(H256::from_slice(key), None)?;
+        Ok(())
+    }
+
+    fn flush(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
 impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
     fn new(tx: &'tx Transaction<'itx, DB>) -> Result<Self, TrieError> {
         let root = RLPNodeCodec::<KeccakHasher>::hashed_null_node();
@@ -64,6 +98,9 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
 
     #[allow(dead_code)]
     fn new_with_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
+        if root == EMPTY_ROOT {
+            return Self::new(tx)
+        }
         tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx })
     }
@@ -130,6 +167,46 @@ where
 struct DupHashDatabase<'tx, 'itx, DB: Database> {
     tx: &'tx Transaction<'itx, DB>,
     key: H256,
+}
+
+// TODO: implement caching and bulk inserting
+impl<'tx, 'itx, DB> cita_trie::DB for DupHashDatabase<'tx, 'itx, DB>
+where
+    DB: Database,
+{
+    type Error = TrieError;
+
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+        let mut cursor = self.tx.cursor_dup_read::<tables::StoragesTrie>()?;
+        Ok(cursor.seek_by_key_subkey(self.key, H256::from_slice(key))?.map(|entry| entry.node))
+    }
+
+    fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
+        Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
+    }
+
+    fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
+        self.tx.put::<tables::StoragesTrie>(
+            self.key,
+            StorageTrieEntry { hash: H256::from_slice(key.as_slice()), node: value },
+        )?;
+        Ok(())
+    }
+
+    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
+        let opt_value = <Self as cita_trie::DB>::get(self, key)?;
+        if let Some(value) = opt_value {
+            self.tx.delete::<tables::StoragesTrie>(
+                self.key,
+                Some(StorageTrieEntry { hash: H256::from_slice(key), node: value }),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn flush(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
@@ -489,11 +566,11 @@ impl DBTrieLoader {
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(H256::zero())?;
 
-        let mut db = HashDatabase::new(tx)?;
+        let db = Arc::new(HashDatabase::new(tx)?);
 
-        let mut root = H256::zero();
-        let mut trie: TrieDBMut<'_, DBTrieLayout> =
-            TrieDBMutBuilder::new(&mut db, &mut root).build();
+        let hasher = Arc::new(HasherKeccak::new());
+
+        let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
 
         while let Some((hashed_address, account)) = walker.next().transpose()? {
             let value = EthAccount::from_with_root(
@@ -503,13 +580,13 @@ impl DBTrieLoader {
 
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(hashed_address.as_bytes(), out.as_ref()).map_err(|e| match *e {
-                trie_db::TrieError::DecoderError(_, err) => err,
-                _ => TrieError::InternalError(e),
-            })?;
+            trie.insert(hashed_address.as_bytes().to_vec(), out)
+                .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
         }
 
-        Ok(*trie.root())
+        let root = H256::from_slice(trie.root().unwrap().as_slice());
+
+        Ok(root)
     }
 
     fn calculate_storage_root<DB: Database>(
@@ -517,10 +594,11 @@ impl DBTrieLoader {
         tx: &Transaction<'_, DB>,
         address: H256,
     ) -> Result<H256, TrieError> {
-        let mut db = DupHashDatabase::new(tx, address)?;
-        let mut root = H256::zero();
-        let mut trie: TrieDBMut<'_, DBTrieLayout> =
-            TrieDBMutBuilder::new(&mut db, &mut root).build();
+        let db = Arc::new(DupHashDatabase::new(tx, address)?);
+
+        let hasher = Arc::new(HasherKeccak::new());
+
+        let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
         let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
@@ -528,20 +606,20 @@ impl DBTrieLoader {
         while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(storage_key.as_bytes(), &out).map_err(|e| match *e {
-                trie_db::TrieError::DecoderError(_, err) => err,
-                _ => TrieError::InternalError(e),
-            })?;
+            trie.insert(storage_key.as_bytes().to_vec(), out)
+                .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
         }
 
-        Ok(*trie.root())
+        let root = H256::from_slice(trie.root().unwrap().as_slice());
+
+        Ok(root)
     }
 
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
     pub(crate) fn update_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
-        root: &mut H256,
+        root: H256,
         start_tid: TransitionId,
         end_tid: TransitionId,
     ) -> Result<H256, TrieError> {
@@ -552,49 +630,58 @@ impl DBTrieLoader {
             .walk(start_tid)?
             .take_while(|v| v.as_ref().map(|(k, _)| *k <= end_tid).unwrap_or(false));
 
-        let mut db = HashDatabase::new(tx)?;
+        let db = Arc::new(HashDatabase::new_with_root(tx, root)?);
 
-        let mut trie: TrieDBMut<'_, DBTrieLayout> =
-            TrieDBMutBuilder::from_existing(&mut db, root).build();
+        let hasher = Arc::new(HasherKeccak::new());
+
+        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
+            .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
 
         // TODO: consider accounts which had only their storage changed
         while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
-            let hashed_address = keccak256(address);
-            if let Some((_, account)) = accounts_cursor.seek_exact(hashed_address)? {
-                let value = EthAccount::from_with_root(
-                    account,
-                    self.update_storage_root(tx, address, start_tid, end_tid)?,
-                );
+            let hashed_address = dbg!(keccak256(address));
+            if let Some(account) = trie
+                .get(hashed_address.as_slice())
+                .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?
+            {
+                let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
+                trie.remove(hashed_address.as_bytes())
+                    .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
 
-                let mut out = Vec::new();
-                Encodable::encode(&value, &mut out);
-                trie.insert(hashed_address.as_bytes(), out.as_ref()).map_err(|e| match *e {
-                    trie_db::TrieError::DecoderError(_, err) => err,
-                    _ => TrieError::InternalError(e),
-                })?;
-            } else {
-                trie.remove(hashed_address.as_bytes()).map_err(|e| match *e {
-                    trie_db::TrieError::DecoderError(_, err) => err,
-                    _ => TrieError::InternalError(e),
-                })?;
+                if let Some((_, account)) = accounts_cursor.seek_exact(hashed_address)? {
+                    let value = EthAccount::from_with_root(
+                        account,
+                        self.update_storage_root(tx, storage_root, address, start_tid, end_tid)?,
+                    );
+
+                    let mut out = Vec::new();
+                    Encodable::encode(&value, &mut out);
+                    trie.insert(hashed_address.as_bytes().to_vec(), out)
+                        .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
+                }
             }
         }
 
-        Ok(*trie.root())
+        let root = H256::from_slice(trie.root().unwrap().as_slice());
+
+        Ok(root)
     }
 
     fn update_storage_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
+        root: H256,
         address: Address,
         start_tid: TransitionId,
         end_tid: TransitionId,
     ) -> Result<H256, TrieError> {
         let hashed_address = keccak256(address);
-        let mut db = DupHashDatabase::new(tx, hashed_address)?;
-        let mut root = H256::zero();
-        let mut trie: TrieDBMut<'_, DBTrieLayout> =
-            TrieDBMutBuilder::new(&mut db, &mut root).build();
+        let db = Arc::new(DupHashDatabase::new_with_root(tx, hashed_address, root)?);
+
+        let hasher = Arc::new(HasherKeccak::new());
+
+        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
+            .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
         let mut changes_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
@@ -610,36 +697,19 @@ impl DBTrieLoader {
             {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(storage_key.as_bytes(), &out).map_err(|e| match *e {
-                    trie_db::TrieError::DecoderError(_, err) => err,
-                    _ => TrieError::InternalError(e),
-                })?;
+                trie.insert(storage_key.as_bytes().to_vec(), out)
+                    .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
             } else {
-                trie.remove(storage_key.as_bytes()).map_err(|e| match *e {
-                    trie_db::TrieError::DecoderError(_, err) => err,
-                    _ => TrieError::InternalError(e),
-                })?;
+                trie.remove(storage_key.as_bytes())
+                    .map_err(|e| TrieError::InternalError(format!("{:?}", e)))?;
             }
         }
 
-        Ok(*trie.root())
+        let root = H256::from_slice(trie.root().unwrap().as_slice());
+
+        Ok(root)
     }
 }
-
-// another possible implementation, using cita_trie
-/*
-fn calculate_root<K: Into<Vec<u8>>, V: Into<Vec<u8>>>(storage: Vec<(K, V)>) -> H256 {
-    let memdb = Arc::new(cita_trie::MemoryDB::new(true));
-    let hasher = Arc::new(HasherKeccak::new());
-
-    let mut trie = PatriciaTrie::new(Arc::clone(&memdb), Arc::clone(&hasher));
-
-    for (key, value) in storage {
-        trie.insert(key.into(), value.into()).unwrap();
-    }
-    H256::from_slice(trie.root().unwrap().as_slice())
-}
-*/
 
 #[cfg(test)]
 mod tests {

@@ -604,6 +604,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cita_trie"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afe7baab47f510f52ca8dc9c0eb9082020c627c7f22285bea30edc3511f7ee29"
+dependencies = [
+ "hasher",
+ "parking_lot 0.12.1",
+ "rlp",
+]
+
+[[package]]
 name = "clang-sys"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2157,6 +2168,15 @@ checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
 dependencies = [
  "ahash 0.8.2",
  "serde",
+]
+
+[[package]]
+name = "hasher"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbba678b6567f27ce22870d951f4208e1dc2fef64993bd4521b1d497ef8a3aa"
+dependencies = [
+ "tiny-keccak",
 ]
 
 [[package]]
@@ -4586,8 +4606,10 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-trait",
+ "cita_trie",
  "futures-util",
  "hash-db",
+ "hasher",
  "itertools 0.10.5",
  "metrics",
  "parity-scale-codec",

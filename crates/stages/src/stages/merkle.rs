@@ -54,9 +54,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let block_root = tx.get_header_by_num(previous_stage_progress)?.state_root;
 
-        let trie_root = if to_transition - from_transition > self.clean_threshold ||
-            stage_progress == 0
-        {
+        let trie_root = if from_transition == to_transition {
+            block_root
+        } else if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
             tx.clear::<tables::AccountsTrie>()?;
@@ -67,10 +67,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
-            let mut current_root = tx.get_header_by_num(stage_progress)?.state_root;
+            let current_root = tx.get_header_by_num(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
             loader
-                .update_root(tx, &mut current_root, from_transition, to_transition)
+                .update_root(tx, current_root, from_transition, to_transition)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 

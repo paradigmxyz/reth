@@ -39,6 +39,8 @@ rayon = "1.6.0"
 trie-db = "0.24.0"
 hash-db = "0.15.2"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+cita_trie = "4.0.0"
+hasher = "0.1.4"
 
 [dev-dependencies]
 # reth
@@ -56,5 +58,3 @@ paste = "1.0"
 # trie
 reth-staged-sync = { path = "../staged-sync" }
 triehash = "0.8"
-# cita_trie = "4.0.0"
-# hasher = "0.1.4"
