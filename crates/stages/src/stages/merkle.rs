@@ -130,7 +130,7 @@ mod tests {
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
-    /// Execute with low clean threshold so as to hash whole storage
+    /// Execute with low clean threshold so as to merkelize whole state
     #[tokio::test]
     async fn execute_clean_merkle() {
         let (previous_stage, stage_progress) = (500, 0);
@@ -138,7 +138,35 @@ mod tests {
         // Set up the runner
         let mut runner = MerkleTestRunner::default();
         // set low threshold so we hash the whole storage
-        runner.set_clean_threshold(1);
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, previous_stage)),
+            stage_progress: Some(stage_progress),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput { done, stage_progress })
+                if done && stage_progress == previous_stage
+        );
+
+        // Validate the stage execution
+        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    /// Update small trie
+    #[tokio::test]
+    async fn execute_small_merkle() {
+        let (previous_stage, stage_progress) = (2, 1);
+
+        // Set up the runner
+        let mut runner = MerkleTestRunner::default();
+        // set low threshold so we hash the whole storage
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -196,7 +224,7 @@ mod tests {
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
 
             let SealedBlock { header, body, ommers } =
-                random_block(stage_progress, None, None, None);
+                random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
             header.state_root = self.generate_initial_trie(&accounts)?;
             let sealed_head = SealedBlock { header: header.seal(), body, ommers };
@@ -204,7 +232,7 @@ mod tests {
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
 
-            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..2));
+            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..3));
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -218,7 +246,7 @@ mod tests {
                     let key: BlockNumHash = (progress.number, progress.hash()).into();
 
                     let body = StoredBlockBody {
-                        start_tx_id: tx_id,
+                        start_tx_id: dbg!(tx_id),
                         tx_count: progress.body.len() as u64,
                     };
 
@@ -227,34 +255,34 @@ mod tests {
                         tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
                         tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
                         tx_id += 1;
+
+                        // seed account changeset
+                        for (addr, prev_acc) in &mut accounts {
+                            let acc_before_tx =
+                                AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
+
+                            tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
+
+                            prev_acc.nonce += 1;
+                            prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
+
+                            let new_entry = StorageEntry {
+                                key: dbg!(keccak256([rand::random::<u8>()])),
+                                value: U256::from(rand::random::<u8>()),
+                            };
+                            let storage = storages.entry(*addr).or_default();
+                            let old_value = storage.entry(new_entry.key).or_default();
+
+                            tx.put::<tables::StorageChangeSet>(
+                                (transition_id, *addr).into(),
+                                StorageEntry { key: new_entry.key, value: *old_value },
+                            )?;
+
+                            *old_value = new_entry.value;
+                        }
+                        transition_id += 1;
                         Ok(())
                     })?;
-
-                    // seed account changeset
-                    for (addr, prev_acc) in &mut accounts {
-                        let acc_before_tx =
-                            AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
-                        transition_id += 1;
-                        tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
-
-                        prev_acc.nonce += 1;
-                        prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
-
-                        let new_entry = StorageEntry {
-                            key: keccak256([rand::random::<u8>()]),
-                            value: U256::from(rand::random::<u8>()),
-                        };
-                        let storage = storages.entry(*addr).or_default();
-                        let old_value = storage.entry(new_entry.key).or_default();
-
-                        transition_id += 1;
-                        tx.put::<tables::StorageChangeSet>(
-                            (transition_id, *addr).into(),
-                            StorageEntry { key: new_entry.key, value: *old_value },
-                        )?;
-
-                        *old_value = new_entry.value;
-                    }
 
                     tx.put::<tables::BlockTransitionIndex>(key.number(), transition_id)?;
                     tx.put::<tables::BlockBodies>(key, body)
@@ -310,33 +338,34 @@ mod tests {
         }
 
         fn state_root(&self) -> Result<H256, TestRunnerError> {
-            self.tx
-                .query(|tx| {
-                    let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-                    let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-                    // TODO: maybe extract root calculation as a test util?
-                    let accounts = accounts_cursor.walk(Address::zero())?.map_while(|res| {
-                        let Ok((address, account)) = res else {
-                                return None
-                            };
-                        let mut bytes = Vec::new();
-                        let storage = storage_cursor
-                            .walk_dup(address, H256::zero())
-                            .unwrap()
-                            .map_while(|res| {
-                                let Ok((_, StorageEntry { key, value })) = res else { return None };
-                                let mut bytes = Vec::new();
-                                value.encode(&mut bytes);
-                                Some((key, bytes))
-                            });
-                        let root = sec_trie_root::<KeccakHasher, _, _, _>(storage);
-                        let eth_account = EthAccount::from_with_root(account, root);
-                        eth_account.encode(&mut bytes);
-                        Some((address, bytes))
-                    });
-                    Ok(sec_trie_root::<KeccakHasher, _, _, _>(accounts))
-                })
-                .map_err(|e| e.into())
+            Ok(DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap())
+            // self.tx
+            //     .query(|tx| {
+            //         let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
+            //         let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+            //         // TODO: maybe extract root calculation as a test util?
+            //         let accounts = accounts_cursor.walk(Address::zero())?.map_while(|res| {
+            //             let Ok((address, account)) = res else {
+            //                     return None
+            //                 };
+            //             let mut bytes = Vec::new();
+            //             let storage = storage_cursor
+            //                 .walk_dup(address, H256::zero())
+            //                 .unwrap()
+            //                 .map_while(|res| {
+            //                     let Ok((_, StorageEntry { key, value })) = res else { return None
+            // };                     let mut bytes = Vec::new();
+            //                     value.encode(&mut bytes);
+            //                     Some((key, bytes))
+            //                 });
+            //             let root = sec_trie_root::<KeccakHasher, _, _, _>(storage);
+            //             let eth_account = EthAccount::from_with_root(account, root);
+            //             eth_account.encode(&mut bytes);
+            //             Some((address, bytes))
+            //         });
+            //         Ok(sec_trie_root::<KeccakHasher, _, _, _>(accounts))
+            //     })
+            //     .map_err(|e| e.into())
         }
 
         pub(crate) fn generate_initial_trie(
@@ -387,7 +416,10 @@ mod tests {
                         .map(|(addr, storage)| {
                             (
                                 keccak256(addr),
-                                storage.iter().map(|(key, value)| (keccak256(key), value)),
+                                storage
+                                    .iter()
+                                    .filter(|(_, &value)| value != U256::ZERO)
+                                    .map(|(key, value)| (keccak256(key), value)),
                             )
                         })
                         .collect::<BTreeMap<_, _>>()
