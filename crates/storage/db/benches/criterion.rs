@@ -123,9 +123,7 @@ where
             || {
                 // Reset DB
                 let _ = std::fs::remove_dir_all(bench_db_path);
-                let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
-
-                (input.clone(), db)
+                (input.clone(), create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
             },
             |(input, db)| {
                 // Create TX
