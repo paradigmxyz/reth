@@ -70,7 +70,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             let current_root = tx.get_header_by_num(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
             loader
-                .update_root(tx, current_root, from_transition, to_transition)
+                .update_root(tx, current_root, from_transition + 1, to_transition + 1)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
@@ -105,12 +105,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{
-            stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-            TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
-        },
-        trie::EthAccount,
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -121,12 +118,8 @@ mod tests {
     use reth_interfaces::test_utils::generators::{
         random_block, random_block_range, random_contract_account_range,
     };
-    use reth_primitives::{
-        keccak256, proofs::KeccakHasher, Account, Address, SealedBlock, StorageEntry, H256, U256,
-    };
-    use reth_rlp::Encodable;
+    use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
     use std::collections::BTreeMap;
-    use triehash::sec_trie_root;
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
@@ -220,7 +213,7 @@ mod tests {
             let stage_progress = input.stage_progress.unwrap_or_default();
             let end = input.previous_stage_progress() + 1;
 
-            let n_accounts = 11;
+            let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
 
             let SealedBlock { header, body, ommers } =
@@ -236,7 +229,7 @@ mod tests {
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
-            let (mut transition_id, mut tx_id) = (0, 0);
+            let (mut transition_id, mut tx_id) = (1, 0);
 
             let mut storages: BTreeMap<Address, BTreeMap<H256, U256>> = BTreeMap::new();
 
@@ -246,7 +239,7 @@ mod tests {
                     let key: BlockNumHash = (progress.number, progress.hash()).into();
 
                     let body = StoredBlockBody {
-                        start_tx_id: dbg!(tx_id),
+                        start_tx_id: tx_id,
                         tx_count: progress.body.len() as u64,
                     };
 
@@ -267,8 +260,8 @@ mod tests {
                             prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
 
                             let new_entry = StorageEntry {
-                                key: dbg!(keccak256([rand::random::<u8>()])),
-                                value: U256::from(rand::random::<u8>()),
+                                key: keccak256([rand::random::<u8>()]),
+                                value: U256::from(rand::random::<u8>() % 30 + 1),
                             };
                             let storage = storages.entry(*addr).or_default();
                             let old_value = storage.entry(new_entry.key).or_default();
@@ -315,14 +308,14 @@ mod tests {
                     return Ok(())
                 }
             }
-            self.check_table_is_populated()
+            self.check_root(input.previous_stage_progress())
         }
     }
 
     impl UnwindStageTestRunner for MerkleTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.unwind_storage(input)?;
-            self.check_table_is_populated()
+            self.check_root(input.unwind_to)
         }
     }
 
@@ -464,15 +457,13 @@ mod tests {
             Ok(())
         }
 
-        fn check_table_is_populated(&self) -> Result<(), TestRunnerError> {
-            assert_eq!(
-                self.tx.table_is_empty::<tables::AccountsTrie>()?,
-                self.tx.table_is_empty::<tables::PlainAccountState>()?
-            );
-            assert_eq!(
-                self.tx.table_is_empty::<tables::StoragesTrie>()?,
-                self.tx.table_is_empty::<tables::PlainStorageState>()?
-            );
+        fn check_root(&self, previous_stage_progress: u64) -> Result<(), TestRunnerError> {
+            if previous_stage_progress != 0 {
+                let block_root =
+                    self.tx.inner().get_header_by_num(previous_stage_progress).unwrap().state_root;
+                let root = DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap();
+                assert_eq!(block_root, root);
+            }
             Ok(())
         }
     }
