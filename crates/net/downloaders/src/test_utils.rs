@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     p2p::{
-        bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult,
+        bodies::client::BodiesClient, download::DownloadClient, error::PeerRequestResult,
         priority::Priority,
     },
     test_utils::generators::random_block_range,
@@ -17,6 +17,9 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Mutex;
+
+/// Metrics scope used for testing.
+pub(crate) const TEST_SCOPE: &str = "downloaders.test";
 
 /// Generate a set of bodies and their corresponding block hashes
 pub(crate) fn generate_bodies(
@@ -93,7 +96,6 @@ impl BodiesClient for TestBodiesClient {
         }
         self.times_requested.fetch_add(1, Ordering::Relaxed);
         let bodies = &mut *self.bodies.lock().await;
-        println!("HASHES {}", hashes.len());
         Ok((
             PeerId::default(),
             hashes

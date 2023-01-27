@@ -1,5 +1,5 @@
 use crate::p2p::{
-    bodies::client::BodiesClient, downloader::DownloadClient, error::PeerRequestResult,
+    bodies::client::BodiesClient, download::DownloadClient, error::PeerRequestResult,
     priority::Priority,
 };
 use async_trait::async_trait;

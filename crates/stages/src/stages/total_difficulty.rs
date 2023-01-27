@@ -237,7 +237,7 @@ mod tests {
 
     impl TotalDifficultyTestRunner {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            self.tx.check_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
+            self.tx.ensure_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
             Ok(())
         }
 

@@ -1,22 +1,21 @@
 //! A headers downloader that can handle multiple requests concurrently.
 
+use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
-        downloader::Downloader,
-        error::{DownloadError, PeerRequestResult},
+        error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
+            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
     },
 };
 use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, H256};
 use std::{
-    borrow::Borrow,
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     future::Future,
@@ -31,6 +30,9 @@ use tracing::trace;
 /// downloader is yielding a next batch of headers that is being committed to the database.
 const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 
+/// The scope for headers downloader metrics.
+pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
+
 /// Downloads headers concurrently.
 ///
 /// This [Downloader] downloads headers using the configured [HeadersClient].
@@ -42,9 +44,9 @@ const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-pub struct LinearDownloader<C, H> {
+pub struct LinearDownloader<H> {
     /// Consensus client used to validate headers
-    consensus: Arc<C>,
+    consensus: Arc<dyn Consensus>,
     /// Client used to download headers.
     client: Arc<H>,
     /// The local head of the chain.
@@ -80,15 +82,21 @@ pub struct LinearDownloader<C, H> {
     ///
     /// Note: headers are sorted from high to low
     queued_validated_headers: Vec<SealedHeader>,
+    /// Header downloader metrics.
+    metrics: DownloaderMetrics,
 }
 
 // === impl LinearDownloader ===
 
-impl<C, H> LinearDownloader<C, H>
+impl<H> LinearDownloader<H>
 where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
+    /// Convenience method to create a [LinearDownloadBuilder] without importing it
+    pub fn builder() -> LinearDownloadBuilder {
+        LinearDownloadBuilder::default()
+    }
+
     /// Returns the block number the local node is at.
     #[inline]
     fn local_block_number(&self) -> u64 {
@@ -246,6 +254,9 @@ where
                 let (peer_id, headers) = res.split();
                 let mut headers = headers.0;
 
+                // update total downloaded metric
+                self.metrics.total_downloaded.increment(headers.len() as u64);
+
                 // sort headers from highest to lowest block number
                 headers.sort_unstable_by_key(|h| Reverse(h.number));
 
@@ -300,6 +311,9 @@ where
             Ok(res) => {
                 let (peer_id, headers) = res.split();
                 let mut headers = headers.0;
+
+                // update total downloaded metric
+                self.metrics.total_downloaded.increment(headers.len() as u64);
 
                 trace!(target: "downloaders::headers", len=%headers.len(), "Received headers response");
 
@@ -383,7 +397,10 @@ where
 
         self.penalize_peer(peer_id, &error);
 
-        // re-submit the request
+        // Update error metric
+        self.metrics.increment_errors(&error);
+
+        // Re-submit the request
         self.submit_request(request, Priority::High);
     }
 
@@ -434,6 +451,11 @@ where
         }
     }
 
+    /// Validate whether the header is valid in relation to it's parent
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)
+    }
+
     /// Clears all requests/responses.
     fn clear(&mut self) {
         self.lowest_validated_header.take();
@@ -451,26 +473,8 @@ where
     }
 }
 
-impl<C, H> Downloader for LinearDownloader<C, H>
+impl<H> HeaderDownloader for LinearDownloader<H>
 where
-    C: Consensus,
-    H: HeadersClient,
-{
-    type Client = H;
-    type Consensus = C;
-
-    fn client(&self) -> &Self::Client {
-        self.client.borrow()
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        self.consensus.borrow()
-    }
-}
-
-impl<C, H> HeaderDownloader for LinearDownloader<C, H>
-where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     fn update_local_head(&mut self, head: SealedHeader) {
@@ -535,9 +539,8 @@ where
     }
 }
 
-impl<C, H> Stream for LinearDownloader<C, H>
+impl<H> Stream for LinearDownloader<H>
 where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     type Item = Vec<SealedHeader>;
@@ -552,6 +555,7 @@ where
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
                         this.penalize_peer(err.peer_id, &err.error);
+                        this.metrics.increment_errors(&err.error);
                         this.sync_target_request =
                             Some(this.request_fut(err.request, Priority::High));
                     } else {
@@ -615,6 +619,7 @@ where
 
                 trace!(target: "downloaders::headers", batch=%next_batch.len(), "Returning validated batch");
 
+                this.metrics.total_flushed.increment(next_batch.len() as u64);
                 return Poll::Ready(Some(next_batch))
             }
 
@@ -630,6 +635,7 @@ where
                 this.clear();
                 return Poll::Ready(None)
             }
+            this.metrics.total_flushed.increment(next_batch.len() as u64);
             return Poll::Ready(Some(next_batch))
         }
 
@@ -642,12 +648,7 @@ where
 /// enforce `Sync` (async_trait). The future itself does not use any interior mutability whatsoever:
 /// All the mutations are performed through an exclusive reference on `LinearDownloader` when
 /// the Stream is polled. This means it suffices that `LinearDownloader` is Sync:
-unsafe impl<C, H> Sync for LinearDownloader<C, H>
-where
-    C: Consensus,
-    H: HeadersClient,
-{
-}
+unsafe impl<H> Sync for LinearDownloader<H> where H: HeadersClient {}
 
 type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
 
@@ -811,15 +812,14 @@ impl LinearDownloadBuilder {
 
     /// Build [LinearDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<C, H>(
+    pub fn build<H>(
         self,
-        consensus: Arc<C>,
+        consensus: Arc<dyn Consensus>,
         client: Arc<H>,
         local_head: SealedHeader,
         sync_target_block_hash: H256,
-    ) -> LinearDownloader<C, H>
+    ) -> LinearDownloader<H>
     where
-        C: Consensus + 'static,
         H: HeadersClient + 'static,
     {
         let Self {
@@ -848,6 +848,7 @@ impl LinearDownloadBuilder {
             in_progress_queue: Default::default(),
             buffered_responses: Default::default(),
             queued_validated_headers: Default::default(),
+            metrics: DownloaderMetrics::new(HEADERS_DOWNLOADER_SCOPE),
         };
 
         downloader.sync_target_request =
@@ -879,19 +880,10 @@ fn calc_next_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
+
+    use crate::headers::test_utils::child_header;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
-
-    static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
-
-    fn child_header(parent: &SealedHeader) -> SealedHeader {
-        let mut child = parent.as_ref().clone();
-        child.number += 1;
-        child.parent_hash = parent.hash_slow();
-        let hash = child.hash_slow();
-        SealedHeader::new(child, hash)
-    }
 
     /// Tests that request calc works
     #[test]
@@ -901,7 +893,7 @@ mod tests {
         let genesis = SealedHeader::default();
 
         let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             genesis,
             H256::random(),
@@ -928,7 +920,7 @@ mod tests {
         let header = SealedHeader::default();
 
         let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             header.clone(),
             H256::random(),
@@ -970,7 +962,7 @@ mod tests {
         let batch_size = 99;
         let start = 1000;
         let mut downloader = LinearDownloadBuilder::default().request_limit(batch_size).build(
-            CONSENSUS.clone(),
+            Arc::new(TestConsensus::default()),
             Arc::clone(&client),
             genesis,
             H256::random(),
@@ -1021,7 +1013,7 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
             .extend(vec![
@@ -1051,7 +1043,7 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
 
         client
             .extend(vec![

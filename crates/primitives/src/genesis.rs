@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     keccak256,
-    proofs::{KeccakHasher, EMPTY_ROOT},
+    proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
     utils::serde_helpers::deserialize_stringified_u64,
     Address, Bytes, Header, H256, KECCAK_EMPTY, U256,
 };
@@ -33,8 +33,6 @@ pub struct Genesis {
     pub mix_hash: H256,
     /// The genesis header coinbase address.
     pub coinbase: Address,
-    /// The genesis state root.
-    pub state_root: H256,
     /// The initial state of accounts in the genesis block.
     pub alloc: HashMap<Address, GenesisAccount>,
 }
@@ -46,7 +44,7 @@ impl From<Genesis> for Header {
             difficulty: genesis.difficulty,
             nonce: genesis.nonce,
             extra_data: genesis.extra_data,
-            state_root: genesis.state_root,
+            state_root: genesis_state_root(genesis.alloc),
             timestamp: genesis.timestamp,
             mix_hash: genesis.mix_hash,
             beneficiary: genesis.coinbase,

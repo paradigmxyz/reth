@@ -2,13 +2,14 @@ use crate::{
     error::{BackoffKind, SessionError},
     peers::{
         reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
-        ReputationChangeKind, ReputationChangeWeights,
+        ReputationChangeWeights,
     },
     session::{Direction, PendingSessionHandshakeError},
 };
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -1067,7 +1068,7 @@ mod test {
         error::BackoffKind,
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
-            PeerAction, ReputationChangeKind,
+            PeerAction,
         },
         session::PendingSessionHandshakeError,
         PeersConfig,
@@ -1078,6 +1079,7 @@ mod test {
         DisconnectReason,
     };
     use reth_net_common::ban_list::BanList;
+    use reth_network_api::ReputationChangeKind;
     use reth_primitives::{PeerId, H512};
     use std::{
         collections::HashSet,
@@ -1139,6 +1141,43 @@ mod test {
 
         match event!(peers) {
             PeerAction::BanPeer { peer_id } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_unban() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.ban_peer(peer);
+        peers.add_peer(peer, socket_addr, None);
+
+        match event!(peers) {
+            PeerAction::BanPeer { peer_id } => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+
+        poll_fn(|cx| {
+            assert!(peers.poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        peers.unban_peer(peer);
+
+        match event!(peers) {
+            PeerAction::UnBanPeer { peer_id } => {
                 assert_eq!(peer_id, peer);
             }
             _ => unreachable!(),

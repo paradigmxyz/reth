@@ -2,26 +2,24 @@ use crate::{
     config::NetworkMode,
     manager::NetworkEvent,
     message::PeerRequest,
-    peers::{PeerKind, PeersHandle, ReputationChangeKind},
+    peers::{PeerKind, PeersHandle},
     session::PeerInfo,
     FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions, Status,
-};
+use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{EthProtocolInfo, NetworkError, NetworkInfo, NetworkStatus, PeersInfo};
+use reth_network_api::{NetworkError, NetworkInfo, NetworkStatus, PeersInfo, ReputationChangeKind};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -41,6 +39,7 @@ pub struct NetworkHandle {
 
 impl NetworkHandle {
     /// Creates a single new instance.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
@@ -49,6 +48,7 @@ impl NetworkHandle {
         peers: PeersHandle,
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
+        chain_id: Arc<AtomicU64>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -59,6 +59,7 @@ impl NetworkHandle {
             network_mode,
             bandwidth_meter,
             is_syncing: Arc::new(Default::default()),
+            chain_id,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -127,13 +128,6 @@ impl NetworkHandle {
     /// Update the status of the node.
     pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
         self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
-    }
-
-    /// Get the current status of the node.
-    pub async fn get_status(&self) -> Result<Status, oneshot::error::RecvError> {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
-        rx.await
     }
 
     /// Announce a block over devp2p
@@ -232,17 +226,13 @@ impl NetworkInfo for NetworkHandle {
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
-        let status = self.get_status().await?;
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
+        rx.await.map_err(Into::into)
+    }
 
-        Ok(NetworkStatus {
-            client_version: "Reth".to_string(),
-            eth_protocol_info: EthProtocolInfo {
-                difficulty: status.total_difficulty,
-                head: status.blockhash,
-                network: status.chain.id(),
-                genesis: status.genesis,
-            },
-        })
+    fn chain_id(&self) -> u64 {
+        self.inner.chain_id.load(Ordering::Relaxed)
     }
 }
 
@@ -284,6 +274,8 @@ struct NetworkInner {
     bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
+    /// The chain id
+    chain_id: Arc<AtomicU64>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
@@ -317,7 +309,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
     /// Get the currenet status
-    GetStatus(oneshot::Sender<Status>),
+    GetStatus(oneshot::Sender<NetworkStatus>),
     /// Get PeerInfo from all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer

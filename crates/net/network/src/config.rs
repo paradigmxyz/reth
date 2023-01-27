@@ -190,7 +190,7 @@ impl NetworkConfigBuilder {
     /// ```
     /// # use reth_eth_wire::HelloMessage;
     /// # use reth_network::NetworkConfigBuilder;
-    /// # fn builder<C>(builder: NetworkConfigBuilder<C>) {
+    /// # fn builder(builder: NetworkConfigBuilder) {
     ///    let peer_id = builder.get_peer_id();
     ///     builder.hello_message(
     ///         HelloMessage::builder(peer_id).build()

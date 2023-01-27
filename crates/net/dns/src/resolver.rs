@@ -48,6 +48,10 @@ where
 ///  let resolver = DnsResolver::from_system_conf().unwrap();
 /// # }
 /// ```
+///
+/// Note: This [Resolver] can send multiple lookup attempts, See also
+/// [ResolverOpts](trust_dns_resolver::config::ResolverOpts) which configures 2 attempts (1 retry)
+/// by default.
 #[derive(Clone)]
 pub struct DnsResolver(TokioAsyncResolver);
 

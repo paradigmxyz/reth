@@ -206,7 +206,7 @@ pub struct OnNewBlockEvent {
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
-    pub pending_block_base_fee: U256,
+    pub pending_block_base_fee: u128,
     /// Provides a set of state changes that affected the accounts.
     pub state_changes: StateDiff,
     /// All mined transactions in the block
@@ -256,7 +256,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// Returns the effective gas price for this transaction.
     ///
     /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
-    fn effective_gas_price(&self) -> U256;
+    fn effective_gas_price(&self) -> u128;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
     fn gas_limit(&self) -> u64;
@@ -264,12 +264,12 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// This will return `None` for non-EIP1559 transactions
-    fn max_fee_per_gas(&self) -> Option<U256>;
+    fn max_fee_per_gas(&self) -> Option<u128>;
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
-    fn max_priority_fee_per_gas(&self) -> Option<U256>;
+    fn max_priority_fee_per_gas(&self) -> Option<u128>;
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
@@ -288,7 +288,7 @@ pub(crate) struct PooledTransaction {
     pub(crate) cost: U256,
 
     /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
-    pub(crate) effective_gas_price: U256,
+    pub(crate) effective_gas_price: u128,
 }
 
 impl PoolTransaction for PooledTransaction {
@@ -317,7 +317,7 @@ impl PoolTransaction for PooledTransaction {
     /// Returns the effective gas price for this transaction.
     ///
     /// This is `priority + basefee`for EIP-1559 and `gasPrice` for legacy transactions.
-    fn effective_gas_price(&self) -> U256 {
+    fn effective_gas_price(&self) -> u128 {
         self.effective_gas_price
     }
 
@@ -329,22 +329,22 @@ impl PoolTransaction for PooledTransaction {
     /// Returns the EIP-1559 Max base fee the caller is willing to pay.
     ///
     /// This will return `None` for non-EIP1559 transactions
-    fn max_fee_per_gas(&self) -> Option<U256> {
+    fn max_fee_per_gas(&self) -> Option<u128> {
         match &self.transaction.transaction {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(tx) => Some(U256::from(tx.max_fee_per_gas)),
+            Transaction::Eip1559(tx) => Some(tx.max_fee_per_gas),
         }
     }
 
     /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
     ///
     /// This will return `None` for non-EIP1559 transactions
-    fn max_priority_fee_per_gas(&self) -> Option<U256> {
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match &self.transaction.transaction {
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
-            Transaction::Eip1559(tx) => Some(U256::from(tx.max_priority_fee_per_gas)),
+            Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
         }
     }
 
@@ -359,18 +359,18 @@ impl FromRecoveredTransaction for PooledTransaction {
         let (cost, effective_gas_price) = match &tx.transaction {
             Transaction::Legacy(t) => {
                 let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = U256::from(t.gas_price);
+                let effective_gas_price = t.gas_price;
                 (cost, effective_gas_price)
             }
             Transaction::Eip2930(t) => {
                 let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = U256::from(t.gas_price);
+                let effective_gas_price = t.gas_price;
                 (cost, effective_gas_price)
             }
             Transaction::Eip1559(t) => {
                 let cost =
                     U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = U256::from(t.max_priority_fee_per_gas);
+                let effective_gas_price = t.max_priority_fee_per_gas;
                 (cost, effective_gas_price)
             }
         };

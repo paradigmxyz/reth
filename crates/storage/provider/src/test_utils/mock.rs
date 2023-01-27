@@ -1,15 +1,13 @@
+use crate::{AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider};
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, Bytes, Header, StorageKey, StorageValue, H256, U256,
+    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
+    U256,
 };
 use std::{collections::HashMap, sync::Arc};
-
-use crate::{
-    AccountProvider, BlockHashProvider, BlockProvider, ChainInfo, HeaderProvider, StateProvider,
-};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]

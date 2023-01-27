@@ -22,5 +22,5 @@ mod web3;
 pub use self::{
     admin::AdminApiServer, debug::DebugApiServer, engine::EngineApiServer, eth::EthApiServer,
     eth_filter::EthFilterApiServer, eth_pubsub::EthPubSubApiServer, net::NetApiServer,
-    web3::Web3ApiServer,
+    trace::TraceApiServer, web3::Web3ApiServer,
 };
