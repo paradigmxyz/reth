@@ -145,17 +145,7 @@ where
             || {
                 // Reset DB
                 let _ = std::fs::remove_dir_all(bench_db_path);
-                let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
-
-                (
-                    input
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| RANDOM_INDEXES.contains(i))
-                        .map(|(i, e)| (i, e.clone()))
-                        .collect::<Vec<_>>(),
-                    db,
-                )
+                (input, create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path))
             },
             |(input, db)| {
                 // Create TX
@@ -163,7 +153,8 @@ where
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
 
                 black_box({
-                    for (_, (k, _, v, _)) in input {
+                    for index in RANDOM_INDEXES {
+                        let (k, _, v, _) = input.get(index).unwrap().clone();
                         crsr.insert(k, v).expect("submit");
                     }
 
