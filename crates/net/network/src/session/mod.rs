@@ -204,7 +204,7 @@ impl SessionManager {
             "new pending incoming session"
         );
 
-        let (disconnect_tx, disconnect_rx) = mpsc::channel(10);
+        let (disconnect_tx, disconnect_rx) = mpsc::channel(1);
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
         self.spawn(start_pending_incoming_session(
@@ -228,7 +228,7 @@ impl SessionManager {
     /// Starts a new pending session from the local node to the given remote node.
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_peer_id: PeerId) {
         let session_id = self.next_id();
-        let (disconnect_tx, disconnect_rx) = mpsc::channel(10);
+        let (disconnect_tx, disconnect_rx) = mpsc::channel(1);
         let pending_events = self.pending_sessions_tx.clone();
         self.spawn(start_pending_outbound_session(
             disconnect_rx,

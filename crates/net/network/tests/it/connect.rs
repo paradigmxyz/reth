@@ -51,27 +51,21 @@ async fn test_establish_connections() {
 
         let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
         let mut expected_peers = expected_connections.clone();
-        println!("EXPECTED PEERS: {:?}", expected_peers);
-        println!("LISTENER0: {:?}", listener0);
 
         // wait for all initiator connections
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
                 NetworkEvent::SessionClosed { .. } => {
-                    println!("ENTRE 1");
                     panic!("unexpected event")
                 }
                 NetworkEvent::SessionEstablished { peer_id, .. } => {
-                    println!("SessionEstablished");
                     assert!(expected_connections.remove(&peer_id))
                 }
                 NetworkEvent::PeerAdded(peer_id) => {
-                    println!("PeerAdded");
                     assert!(expected_peers.remove(&peer_id))
                 }
                 NetworkEvent::PeerRemoved(x) => {
-                    println!("ENTRE 2: {:?}", x);
                     panic!("unexpected event")
                 }
             }
