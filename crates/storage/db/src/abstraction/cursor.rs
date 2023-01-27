@@ -61,7 +61,7 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
     fn next_dup_val(&mut self) -> ValueOnlyResult<T>;
 
     /// Seek by key and subkey
-    fn seek_by_key_subkey(&mut self, key: T::Key, value: T::SubKey) -> ValueOnlyResult<T>;
+    fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T>;
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DupSort
     /// table.
