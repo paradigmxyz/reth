@@ -57,6 +57,7 @@ impl StageError {
         matches!(
             self,
             StageError::Database(_) |
+                StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageProgress(_) |
                 StageError::Fatal(_)
