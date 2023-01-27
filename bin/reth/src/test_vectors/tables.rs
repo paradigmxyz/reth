@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use eyre::Result;
 use proptest::{
     arbitrary::Arbitrary,
@@ -59,7 +61,7 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
 
 fn generate_table_vector<T: Table>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
-    T::Key: Arbitrary + serde::Serialize + Ord,
+    T::Key: Arbitrary + serde::Serialize + Ord + std::hash::Hash,
     T::Value: Arbitrary + serde::Serialize,
 {
     println!("Generating test vectors for <{}>.", T::NAME);
@@ -67,7 +69,7 @@ where
     let mut rows = vec![];
 
     // We don't want repeated keys
-    let mut seen_keys = vec![];
+    let mut seen_keys = HashSet::new();
 
     while rows.len() < per_table {
         let strategy = proptest::collection::vec(
@@ -87,13 +89,7 @@ where
                 .map_err(|e| eyre::eyre!("{e}"))?
                 .current()
                 .into_iter()
-                .filter(|e| {
-                    if seen_keys.contains(&e.0) {
-                        return false
-                    }
-                    seen_keys.push(e.0.clone());
-                    true
-                }),
+                .filter(|e| seen_keys.insert(e.0.clone())),
         );
     }
 
