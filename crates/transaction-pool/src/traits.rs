@@ -1,7 +1,7 @@
 use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionSignedEcRecovered, TxHash, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, sync::Arc};
@@ -271,6 +271,10 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128>;
 
+    /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
+    /// [`TransactionKind::Create`] if the transaction is a contract creation.
+    fn kind(&self) -> &TransactionKind;
+
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
 }
@@ -346,6 +350,12 @@ impl PoolTransaction for PooledTransaction {
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
         }
+    }
+
+    /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
+    /// [`TransactionKind::Create`] if the transaction is a contract creation.
+    fn kind(&self) -> &TransactionKind {
+        self.transaction.kind()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.

@@ -5,7 +5,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
 };
-use reth_primitives::{Address, TxHash, U256};
+use reth_primitives::{Address, TransactionKind, TxHash, U256};
 use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
@@ -54,6 +54,30 @@ pub trait TransactionValidator: Send + Sync {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction>;
+
+    /// Ensure that the code size is not greater than `max_init_code_size`.
+    /// `max_init_code_size` should be configurable so this will take it as an argument.
+    fn ensure_max_init_code_size(
+        &self,
+        transaction: Self::Transaction,
+        max_init_code_size: usize,
+    ) -> Result<(), PoolError> {
+        // TODO check whether we are in the Shanghai stage.
+        // if !self.shanghai {
+        //     return Ok(())
+        // }
+
+        if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
+        {
+            Err(PoolError::TxExceedsMaxInitCodeSize(
+                *transaction.hash(),
+                transaction.size(),
+                max_init_code_size,
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// A valid transaction in the pool.
