@@ -98,7 +98,7 @@ pub struct BlockBody {
 }
 
 impl BlockBody {
-    /// Create a [`Block`] from the body and its header.
+    /// Create a [`RawBlockBody`] from the body and its header.
     pub fn create_block(&self, header: &Header) -> RawBlockBody {
         RawBlockBody {
             header: header.clone(),

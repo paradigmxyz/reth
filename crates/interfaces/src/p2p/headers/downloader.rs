@@ -8,7 +8,8 @@ use reth_primitives::{SealedHeader, H256};
 /// A downloader capable of fetching and yielding block headers.
 ///
 /// A downloader represents a distinct strategy for submitting requests to download block headers,
-/// while a [HeadersClient] represents a client capable of fulfilling these requests.
+/// while a [HeadersClient][crate::p2p::headers::client::HeadersClient] represents a client capable
+/// of fulfilling these requests.
 ///
 /// A [HeaderDownloader] is a [Stream] that returns batches for headers.
 pub trait HeaderDownloader: Send + Sync + Stream<Item = Vec<SealedHeader>> + Unpin {

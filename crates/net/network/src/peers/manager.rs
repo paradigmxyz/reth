@@ -604,7 +604,7 @@ impl PeersManager {
     /// Advances the state.
     ///
     /// Event hooks invoked externally may trigger a new [`PeerAction`] that are buffered until
-    /// [`PeersManager::poll_next`] is called.
+    /// [`PeersManager`] is polled.
     pub fn poll(&mut self, cx: &mut Context<'_>) -> Poll<PeerAction> {
         loop {
             // drain buffered actions

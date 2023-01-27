@@ -35,7 +35,7 @@ pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
 
 /// Downloads headers concurrently.
 ///
-/// This [Downloader] downloads headers using the configured [HeadersClient].
+/// This [HeaderDownloader] downloads headers using the configured [HeadersClient].
 /// Headers can be requested by hash or block number and take a `limit` parameter. This downloader
 /// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
 /// requests at a time but yielding them in batches on [Stream::poll_next].
@@ -689,7 +689,7 @@ where
     }
 }
 
-/// SAFETY: we need to ensure `LinearDownloader` is `Sync` because the of the [Downloader]
+/// SAFETY: we need to ensure `LinearDownloader` is `Sync` because the of the [HeaderDownloader]
 /// trait. While [HeadersClient] is also `Sync`, the [HeadersClient::get_headers] future does not
 /// enforce `Sync` (async_trait). The future itself does not use any interior mutability whatsoever:
 /// All the mutations are performed through an exclusive reference on `LinearDownloader` when

@@ -41,7 +41,7 @@ impl LowerHex for Bytes {
 }
 
 impl Bytes {
-    /// Return bytes as [Vec::<u8>]
+    /// Return bytes as [`Vec::<u8>`]
     pub fn to_vec(&self) -> Vec<u8> {
         self.as_ref().to_vec()
     }

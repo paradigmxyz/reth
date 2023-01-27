@@ -163,12 +163,22 @@ jobs:
           args: --all --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  docs-test:
+  doc-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: "test --doc --all --all-features"
+      - name: Run doctests
         run: cargo test --doc --all --all-features
+  
+  doc-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check if documentation builds
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items

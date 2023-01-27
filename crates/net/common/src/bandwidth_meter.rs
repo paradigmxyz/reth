@@ -1,4 +1,6 @@
-//! Support for metering bandwidth. Takes heavy inspiration from https://github.com/libp2p/rust-libp2p/blob/master/src/bandwidth.rs
+//! Support for metering bandwidth.
+//!
+//! Takes heavy inspiration from <https://github.com/libp2p/rust-libp2p/blob/master/src/bandwidth.rs>
 
 // Copyright 2019 Parity Technologies (UK) Ltd.
 //

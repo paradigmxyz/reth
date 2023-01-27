@@ -9,10 +9,10 @@ use reth_primitives::SealedBlock;
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.
 ///
 ///
-/// Check parent dependency in [tables::HeaderNumbers] and in [tables::CumulativeTxCount] tables.
+/// Check parent dependency in [tables::HeaderNumbers] and in [tables::BlockBodies] tables.
 /// Inserts blocks data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers],
 /// and transactions data to [tables::TxSenders], [tables::Transactions],
-/// [tables::CumulativeTxCount] and [tables::BlockBodies]
+/// [tables::BlockBodies] and [tables::BlockBodies]
 pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: &SealedBlock,
