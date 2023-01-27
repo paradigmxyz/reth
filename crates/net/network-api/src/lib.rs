@@ -16,7 +16,11 @@ use std::net::SocketAddr;
 
 /// Network Error
 pub mod error;
+/// Reputation score
+pub mod reputation;
+
 pub use error::NetworkError;
+pub use reputation::{Reputation, ReputationChangeKind};
 
 /// Provides general purpose information about the network.
 #[async_trait]
@@ -26,6 +30,9 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns the current status of the network being ran by the local node.
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError>;
+
+    /// Returns the chain id
+    fn chain_id(&self) -> u64;
 }
 
 /// Provides general purpose information about Peers in the network.
@@ -44,6 +51,8 @@ pub trait PeersInfo: Send + Sync {
 pub struct NetworkStatus {
     /// The local node client version.
     pub client_version: String,
+    /// The current ethereum protocol version
+    pub protocol_version: u64,
     /// Information about the Ethereum Wire Protocol.
     pub eth_protocol_info: EthProtocolInfo,
 }

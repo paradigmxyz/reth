@@ -110,6 +110,8 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 /// Collection of database test utilities
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
+    use reth_libmdbx::WriteMap;
+
     use super::{Env, EnvKind, EnvironmentKind, Path};
     use std::sync::Arc;
 
@@ -121,7 +123,7 @@ pub mod test_utils {
     pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
 
     /// Create rw database for testing
-    pub fn create_test_rw_db<E: EnvironmentKind>() -> Arc<Env<E>> {
+    pub fn create_test_rw_db() -> Arc<Env<WriteMap>> {
         create_test_db(EnvKind::RW)
     }
     /// Create database for testing
@@ -144,12 +146,12 @@ pub mod test_utils {
 mod tests {
     use super::{test_utils, Env, EnvKind};
     use crate::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, ReverseWalker, Walker},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         database::Database,
-        models::ShardedKey,
+        models::{AccountBeforeTx, ShardedKey},
         tables::{AccountHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState},
         transaction::{DbTx, DbTxMut},
-        Error,
+        AccountChangeSet, Error,
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
     use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};
@@ -158,6 +160,7 @@ mod tests {
 
     const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
     const ERROR_PUT: &str = "Not able to insert value into table.";
+    const ERROR_APPEND: &str = "Not able to append the value to the table.";
     const ERROR_GET: &str = "Not able to get value from table.";
     const ERROR_COMMIT: &str = "Not able to commit transaction.";
     const ERROR_RETURN_VALUE: &str = "Mismatching result.";
@@ -346,6 +349,52 @@ mod tests {
         cursor.seek_exact(1).unwrap();
         assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(4294936878)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
+    }
+
+    #[test]
+    fn db_cursor_dupsort_append() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        let transition_id = 2;
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_write::<AccountChangeSet>().unwrap();
+        vec![0, 1, 3, 4, 5]
+            .into_iter()
+            .try_for_each(|val| {
+                cursor.append(
+                    transition_id,
+                    AccountBeforeTx { address: Address::from_low_u64_be(val), info: None },
+                )
+            })
+            .expect(ERROR_APPEND);
+        tx.commit().expect(ERROR_COMMIT);
+
+        // APPEND DUP & APPEND
+        let subkey_to_append = 2;
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_write::<AccountChangeSet>().unwrap();
+        assert_eq!(
+            cursor.append_dup(
+                transition_id,
+                AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
+            ),
+            Err(Error::Write(4294936878))
+        );
+        assert_eq!(
+            cursor.append(
+                transition_id - 1,
+                AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
+            ),
+            Err(Error::Write(4294936878))
+        );
+        assert_eq!(
+            cursor.append(
+                transition_id,
+                AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
+            ),
+            Ok(())
+        );
     }
 
     #[test]
@@ -545,6 +594,23 @@ mod tests {
             assert_eq!(ShardedKey::new(real_key, 200), key);
             let list200: IntegerList = vec![200u64].into();
             assert_eq!(list200, list);
+        }
+        // Seek greatest index
+        {
+            let tx = db.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_read::<AccountHistory>().unwrap();
+
+            // It will seek the MAX value of transition index and try to use prev to get first
+            // biggers.
+            let _unknown = cursor.seek_exact(ShardedKey::new(real_key, u64::MAX)).unwrap();
+            let (key, list) = cursor
+                .prev()
+                .expect("element should exist.")
+                .expect("should be able to retrieve it.");
+
+            assert_eq!(ShardedKey::new(real_key, 400), key);
+            let list400: IntegerList = vec![400u64].into();
+            assert_eq!(list400, list);
         }
     }
 }

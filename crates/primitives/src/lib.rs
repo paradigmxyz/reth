@@ -14,7 +14,6 @@ mod bits;
 mod block;
 pub mod bloom;
 mod chain;
-mod chain_spec;
 pub mod constants;
 mod error;
 mod forkid;
@@ -39,9 +38,12 @@ pub use account::Account;
 pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use bloom::Bloom;
-pub use chain::Chain;
-pub use chain_spec::{ChainSpec, ChainSpecBuilder, GOERLI, MAINNET, SEPOLIA};
-pub use constants::{EMPTY_OMMER_ROOT, KECCAK_EMPTY, MAINNET_GENESIS};
+pub use chain::{
+    Chain, ChainInfo, ChainSpec, ChainSpecBuilder, GOERLI, MAINNET, SEPOLIA,
+};
+pub use constants::{
+    EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
+};
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use forkkind::{ForkDiscriminant, ForkKind};
 pub use genesis::{Genesis, GenesisAccount};
