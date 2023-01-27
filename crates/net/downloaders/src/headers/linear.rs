@@ -578,7 +578,7 @@ where
         // The downloader boundaries (local head and sync target) have to be set in order
         // to start downloading data.
         if this.local_head.is_none() || this.sync_target.is_none() {
-            tracing::warn!(
+            tracing::trace!(
                 target: "downloaders::headers",
                 head=?this.local_block_number(),
                 sync_target=?this.sync_target,
