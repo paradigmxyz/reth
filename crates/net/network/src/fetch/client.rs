@@ -4,12 +4,13 @@ use crate::{
     fetch::DownloadRequest,
     peers::{PeersHandle, ReputationChangeKind},
 };
+use futures::TryFutureExt;
 use reth_eth_wire::{BlockBody, BlockHeaders};
 use reth_interfaces::p2p::{
-    bodies::client::BodiesClient,
+    bodies::client::{BodiesClient, BodiesFuture},
     download::DownloadClient,
-    error::PeerRequestResult,
-    headers::client::{HeadersClient, HeadersRequest},
+    error::RequestError,
+    headers::client::{HeadersClient, HeadersFuture, HeadersRequest},
     priority::Priority,
 };
 use reth_primitives::{PeerId, WithPeerId, H256};
@@ -17,7 +18,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::{
+    mpsc::UnboundedSender,
+    oneshot::{self},
+};
 
 /// Front-end API for fetching data from the network.
 ///
@@ -77,30 +81,46 @@ impl DownloadClient for FetchClient {
     }
 }
 
-#[async_trait::async_trait]
 impl HeadersClient for FetchClient {
+    type Output = BlockHeaders;
+
     /// Sends a `GetBlockHeaders` request to an available peer.
-    async fn get_headers_with_priority(
+    fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
         priority: Priority,
-    ) -> PeerRequestResult<BlockHeaders> {
+    ) -> HeadersFuture<Self::Output> {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response, priority })?;
-        rx.await?.map(WithPeerId::transform)
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockHeaders { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(rx.map_ok(|x| x.map(WithPeerId::transform)))
+        } else {
+            Box::pin(rx.map_ok(|_| Err(RequestError::ChannelClosed)))
+        }
     }
 }
 
-#[async_trait::async_trait]
 impl BodiesClient for FetchClient {
+    type Output = Vec<BlockBody>;
+
     /// Sends a `GetBlockBodies` request to an available peer.
-    async fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority(
         &self,
         request: Vec<H256>,
         priority: Priority,
-    ) -> PeerRequestResult<Vec<BlockBody>> {
+    ) -> BodiesFuture<Self::Output> {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockBodies { request, response, priority })?;
-        rx.await?
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockBodies { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(rx)
+        } else {
+            Box::pin(rx.map_ok(|_| Err(RequestError::ChannelClosed)))
+        }
     }
 }

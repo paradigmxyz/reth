@@ -7,7 +7,7 @@ use reth_interfaces::{
     p2p::{
         error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
-            client::{BlockHeaders, HeadersClient, HeadersRequest},
+            client::{BlockHeaders, HeadersClient, HeadersFuture, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
@@ -88,7 +88,7 @@ pub struct LinearDownloader<H> {
 
 impl<H> LinearDownloader<H>
 where
-    H: HeadersClient + 'static,
+    H: HeadersClient<Output = BlockHeaders> + 'static,
 {
     /// Returns the block number the local node is at.
     #[inline]
@@ -440,7 +440,7 @@ where
         let client = Arc::clone(&self.client);
         HeadersRequestFuture {
             request: Some(request.clone()),
-            fut: Box::pin(async move { client.get_headers_with_priority(request, priority).await }),
+            fut: client.get_headers_with_priority(request, priority),
         }
     }
 
@@ -463,7 +463,7 @@ where
 
 impl<H> HeaderDownloader for LinearDownloader<H>
 where
-    H: HeadersClient + 'static,
+    H: HeadersClient<Output = BlockHeaders> + 'static,
 {
     fn update_local_head(&mut self, head: SealedHeader) {
         self.local_head = head;
@@ -534,7 +534,7 @@ where
 
 impl<H> Stream for LinearDownloader<H>
 where
-    H: HeadersClient + 'static,
+    H: HeadersClient<Output = BlockHeaders> + 'static,
 {
     type Item = Vec<SealedHeader>;
 
@@ -636,14 +636,7 @@ where
     }
 }
 
-/// SAFETY: we need to ensure `LinearDownloader` is `Sync` because the of the [Downloader]
-/// trait. While [HeadersClient] is also `Sync`, the [HeadersClient::get_headers] future does not
-/// enforce `Sync` (async_trait). The future itself does not use any interior mutability whatsoever:
-/// All the mutations are performed through an exclusive reference on `LinearDownloader` when
-/// the Stream is polled. This means it suffices that `LinearDownloader` is Sync:
-unsafe impl<H> Sync for LinearDownloader<H> where H: HeadersClient {}
-
-type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
+type HeadersFut = HeadersFuture<BlockHeaders>;
 
 /// A future that returns a list of [`BlockHeaders`] on success.
 struct HeadersRequestFuture {
@@ -658,6 +651,12 @@ impl Future for HeadersRequestFuture {
         let this = self.get_mut();
         let outcome = ready!(this.fut.poll_unpin(cx));
         let request = this.request.take().unwrap();
+
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(err) => Err(err.into()),
+        };
+
         Poll::Ready(HeadersRequestOutcome { request, outcome })
     }
 }
@@ -813,7 +812,7 @@ impl LinearDownloadBuilder {
         sync_target_block_hash: H256,
     ) -> LinearDownloader<H>
     where
-        H: HeadersClient + 'static,
+        H: HeadersClient<Output = BlockHeaders> + 'static,
     {
         let Self {
             request_limit,

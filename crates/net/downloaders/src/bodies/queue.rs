@@ -1,6 +1,7 @@
 use super::request::BodiesRequestFuture;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
+use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{client::BodiesClient, response::BlockResponse},
@@ -37,7 +38,7 @@ impl<B> Default for BodiesRequestQueue<B> {
 
 impl<B> BodiesRequestQueue<B>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
 {
     /// Returns `true` if the queue is empty.
     pub(crate) fn is_empty(&self) -> bool {
@@ -88,7 +89,7 @@ where
 
 impl<B> Stream for BodiesRequestQueue<B>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
 {
     type Item = Vec<BlockResponse>;
 

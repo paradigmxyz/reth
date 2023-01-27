@@ -5,16 +5,17 @@ use crate::{
         download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
-            client::{HeadersClient, HeadersRequest, StatusUpdater},
+            client::{HeadersClient, HeadersFuture, HeadersRequest, StatusUpdater},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
     },
 };
-use futures::{Future, FutureExt, Stream, StreamExt};
+use futures::{future, Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockHash, BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
+    BlockHash, BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
+    WithPeerId, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
@@ -26,7 +27,12 @@ use std::{
     },
     task::{ready, Context, Poll},
 };
-use tokio::sync::{watch, watch::error::SendError, Mutex};
+use tokio::sync::{
+    oneshot::{error::RecvError, Receiver},
+    watch,
+    watch::error::SendError,
+    Mutex,
+};
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]
@@ -98,7 +104,8 @@ impl Stream for TestHeaderDownloader {
     }
 }
 
-type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
+type TestHeadersFut =
+    Pin<Box<dyn Future<Output = Result<PeerRequestResult<BlockHeaders>, RecvError>> + Sync + Send>>;
 
 struct TestDownload {
     client: Arc<TestHeadersClient>,
@@ -108,9 +115,6 @@ struct TestDownload {
     buffer: Vec<SealedHeader>,
     done: bool,
 }
-
-/// SAFETY: All the mutations are performed through an exclusive reference on `poll`
-unsafe impl Sync for TestDownload {}
 
 impl TestDownload {
     fn get_or_init_fut(&mut self) -> &mut TestHeadersFut {
@@ -161,7 +165,12 @@ impl Stream for TestDownload {
                 })))
             }
 
-            match ready!(this.get_or_init_fut().poll_unpin(cx)) {
+            let resp = match ready!(this.get_or_init_fut().poll_unpin(cx)) {
+                Ok(resp) => resp,
+                Err(err) => Err(RequestError::from(err)),
+            };
+
+            match resp {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
@@ -226,22 +235,30 @@ impl DownloadClient for TestHeadersClient {
     }
 }
 
-#[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    async fn get_headers_with_priority(
+    type Output = BlockHeaders;
+
+    fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
         _priority: Priority,
-    ) -> PeerRequestResult<BlockHeaders> {
-        self.request_attempts.fetch_add(1, Ordering::SeqCst);
-        if let Some(err) = &mut *self.error.lock().await {
-            return Err(err.clone())
-        }
+    ) -> HeadersFuture<Self::Output> {
+        let responses = self.responses.clone();
+        let error = self.error.clone();
 
-        let mut lock = self.responses.lock().await;
-        let len = lock.len().min(request.limit as usize);
-        let resp = lock.drain(..len).collect();
-        return Ok((PeerId::default(), BlockHeaders(resp)).into())
+        self.request_attempts.fetch_add(1, Ordering::SeqCst);
+
+        Box::pin(async move {
+            if let Some(err) = &mut *error.lock().await {
+                return Ok(Err(err.clone()))
+            }
+
+            let mut lock = responses.lock().await;
+            let len = lock.len().min(request.limit as usize);
+            let resp = lock.drain(..len).collect();
+            let with_peer_id = WithPeerId::from((PeerId::default(), BlockHeaders(resp)));
+            Ok(Ok(with_peer_id))
+        })
     }
 }
 

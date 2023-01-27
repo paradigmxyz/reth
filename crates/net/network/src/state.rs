@@ -589,11 +589,12 @@ mod tests {
         });
 
         // send requests to the state via the client
-        let (peer, bodies) = client.get_block_bodies(vec![H256::random()]).await.unwrap().split();
+        let (peer, bodies) =
+            client.get_block_bodies(vec![H256::random()]).await.unwrap().unwrap().split();
         assert_eq!(peer, peer_id);
         assert_eq!(bodies, vec![body]);
 
-        let resp = client.get_block_bodies(vec![H256::random()]).await;
+        let resp = client.get_block_bodies(vec![H256::random()]).await.unwrap();
         assert!(resp.is_err());
         assert_eq!(resp.unwrap_err(), RequestError::ConnectionDropped);
     }

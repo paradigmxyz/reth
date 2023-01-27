@@ -2,6 +2,7 @@ use super::queue::BodiesRequestQueue;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::Consensus,
     db,
@@ -61,7 +62,7 @@ pub struct ConcurrentDownloader<B, DB> {
 
 impl<B, DB> ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
     DB: Database,
 {
     fn new(
@@ -239,7 +240,7 @@ where
 
 impl<B, DB> BodyDownloader for ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
     DB: Database,
 {
     /// Set a new download range (exclusive).
@@ -316,7 +317,7 @@ where
 
 impl<B, DB> Stream for ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
     DB: Database,
 {
     type Item = Result<Vec<BlockResponse>, db::Error>;
@@ -389,19 +390,6 @@ where
 
         Poll::Pending
     }
-}
-
-/// SAFETY: we need to ensure `ConcurrentDownloader` is `Sync` because the of the [Downloader]
-/// trait. While [HeadersClient] is also `Sync`, the [HeadersClient::get_block_bodies] future does
-/// not enforce `Sync` (async_trait). The future itself does not use any interior mutability
-/// whatsoever: All the mutations are performed through an exclusive reference on
-/// `ConcurrentDownloader` when the Stream is polled. This means it suffices that
-/// `ConcurrentDownloader` is Sync:
-unsafe impl<B, DB> Sync for ConcurrentDownloader<B, DB>
-where
-    B: BodiesClient,
-    DB: Database,
-{
 }
 
 #[derive(Debug)]
@@ -504,7 +492,7 @@ impl ConcurrentDownloaderBuilder {
         db: Arc<DB>,
     ) -> ConcurrentDownloader<B, DB>
     where
-        B: BodiesClient + 'static,
+        B: BodiesClient<Output = Vec<BlockBody>> + 'static,
         DB: Database,
     {
         ConcurrentDownloader::new(

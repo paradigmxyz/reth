@@ -3,8 +3,11 @@ use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
-        bodies::{client::BodiesClient, response::BlockResponse},
-        error::{DownloadError, PeerRequestResult},
+        bodies::{
+            client::{BodiesClient, BodiesFuture},
+            response::BlockResponse,
+        },
+        error::DownloadError,
     },
 };
 use reth_primitives::{PeerId, SealedBlock, SealedHeader, H256};
@@ -14,7 +17,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send>>;
+type BodiesFut = BodiesFuture<Vec<BlockBody>>;
 
 /// Body request implemented as a [Future].
 ///
@@ -48,7 +51,7 @@ pub(crate) struct BodiesRequestFuture<B> {
 
 impl<B> BodiesRequestFuture<B>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
 {
     /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
     pub(crate) fn new(client: Arc<B>, consensus: Arc<dyn Consensus>) -> Self {
@@ -85,7 +88,7 @@ where
         let client = Arc::clone(&self.client);
         let request = self.hashes_to_download.clone();
         tracing::trace!(target: "downloaders::bodies", request_len = request.len(), "Requesting bodies");
-        self.fut = Some(Box::pin(async move { client.get_block_bodies(request).await }));
+        self.fut = Some(client.get_block_bodies(request));
     }
 
     fn reset_hashes(&mut self) {
@@ -134,7 +137,7 @@ where
 
 impl<B> Future for BodiesRequestFuture<B>
 where
-    B: BodiesClient + 'static,
+    B: BodiesClient<Output = Vec<BlockBody>> + 'static,
 {
     type Output = Vec<BlockResponse>;
 
@@ -145,7 +148,12 @@ where
             // Check if there is a pending requests. It might not exist if all
             // headers are empty and there is nothing to download.
             if let Some(fut) = this.fut.as_mut() {
-                match ready!(fut.poll_unpin(cx)) {
+                let response = match ready!(fut.poll_unpin(cx)) {
+                    Ok(response) => response,
+                    Err(err) => Err(err.into()),
+                };
+
+                match response {
                     Ok(response) => {
                         let (peer_id, bodies) = response.split();
                         let request_len = this.hashes_to_download.len();
