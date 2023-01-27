@@ -21,7 +21,7 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(H256::from(MAINNET_GENESIS))
 ///     .genesis(H256::from(MAINNET_GENESIS))
-///     .forkid(Hardfork::Latest.fork_id(&MAINNET).unwrap())
+///     .forkid(Hardfork::London.fork_id(&MAINNET).unwrap())
 ///     .build();
 ///
 /// assert_eq!(
@@ -32,7 +32,7 @@ use reth_primitives::{Chain, ForkId, PeerId, H256, U256};
 ///         total_difficulty: U256::from(100),
 ///         blockhash: H256::from(MAINNET_GENESIS),
 ///         genesis: H256::from(MAINNET_GENESIS),
-///         forkid: Hardfork::Latest.fork_id(&MAINNET).unwrap(),
+///         forkid: Hardfork::London.fork_id(&MAINNET).unwrap(),
 ///     }
 /// );
 /// ```

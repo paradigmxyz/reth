@@ -83,8 +83,8 @@ impl Add<BlockNumber> for ForkHash {
 pub struct ForkId {
     /// CRC32 checksum of the all fork blocks from genesis.
     pub hash: ForkHash,
-    /// Next upcoming fork block number, 0 if not yet known.
-    pub next: BlockNumber,
+    /// Next upcoming fork block number or timestamp, 0 if not yet known.
+    pub next: u64,
 }
 
 /// Reason for rejecting provided `ForkId`.
@@ -127,7 +127,7 @@ impl ForkFilter {
     pub fn new<F, B>(head: BlockNumber, genesis: H256, forks: F) -> Self
     where
         F: IntoIterator<Item = B>,
-        B: Into<BlockNumber>,
+        B: Into<u64>,
     {
         let genesis_fork_hash = ForkHash::from(genesis);
         let mut forks = forks.into_iter().map(Into::into).collect::<BTreeSet<_>>();
