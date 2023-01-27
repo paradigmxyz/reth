@@ -20,7 +20,8 @@ use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
 use tracing::*;
 
-const EXECUTION: StageId = StageId("Execution");
+/// The [`StageId`] of the execution stage.
+pub const EXECUTION: StageId = StageId("Execution");
 
 /// The execution stage executes all transactions and
 /// update history indexes.

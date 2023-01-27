@@ -17,7 +17,8 @@ use reth_interfaces::{
 use std::sync::Arc;
 use tracing::*;
 
-pub(crate) const BODIES: StageId = StageId("Bodies");
+/// The [`StageId`] of the bodies downloader stage.
+pub const BODIES: StageId = StageId("Bodies");
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.

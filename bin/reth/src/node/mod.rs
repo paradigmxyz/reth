@@ -20,16 +20,11 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
-    stages::{
-        bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
-        hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::MerkleStage,
-        sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
-    },
-    PipelineEvent, StageId,
+    prelude::*,
+    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::select;
-use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -88,7 +83,7 @@ pub struct Command {
 impl Command {
     /// Execute `node` command
     // TODO: RPC
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
@@ -146,18 +141,12 @@ impl Command {
             .start_network()
             .await?;
 
-        let (sender, receiver) = tokio::sync::mpsc::channel(64);
-        tokio::spawn(handle_events(stream_select(
-            network.event_listener().map(Into::into),
-            ReceiverStream::new(receiver).map(Into::into),
-        )));
-
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         let fetch_client = Arc::new(network.fetch_client().await?);
 
         // Spawn headers downloader
-        let headers_downloader = headers::task::TaskDownloader::spawn(
+        let header_downloader = headers::task::TaskDownloader::spawn(
             headers::linear::LinearDownloadBuilder::default()
                 .request_limit(config.stages.headers.downloader_batch_size)
                 .stream_batch_size(config.stages.headers.commit_threshold as usize)
@@ -165,7 +154,7 @@ impl Command {
         );
 
         // Spawn bodies downloader
-        let bodies_downloader = bodies::task::TaskDownloader::spawn(
+        let body_downloader = bodies::task::TaskDownloader::spawn(
             bodies::concurrent::ConcurrentDownloaderBuilder::default()
                 .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
                 .with_request_limit(config.stages.bodies.downloader_request_limit)
@@ -177,32 +166,32 @@ impl Command {
                 .build(fetch_client.clone(), consensus.clone(), db.clone()),
         );
 
-        let mut pipeline = reth_stages::Pipeline::default()
+        let mut pipeline = Pipeline::builder()
             .with_sync_state_updater(network.clone())
-            .with_channel(sender)
-            .push(HeaderStage {
-                downloader: headers_downloader,
-                consensus: consensus.clone(),
-                sync_status_updates: network.clone(),
-            })
-            .push(TotalDifficultyStage {
-                commit_threshold: config.stages.total_difficulty.commit_threshold,
-            })
-            .push(BodyStage { downloader: bodies_downloader, consensus: consensus.clone() })
-            .push(SenderRecoveryStage {
-                batch_size: config.stages.sender_recovery.batch_size,
-                commit_threshold: config.stages.sender_recovery.commit_threshold,
-            })
-            .push(ExecutionStage {
-                chain_spec: self.chain.clone(),
-                commit_threshold: config.stages.execution.commit_threshold,
-            })
-            // This Merkle stage is used only on unwind
-            .push(MerkleStage { is_execute: false })
-            .push(AccountHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
-            .push(StorageHashingStage { clean_threshold: 500_000, commit_threshold: 100_000 })
-            // This merkle stage is used only for execute
-            .push(MerkleStage { is_execute: true });
+            .add_stages(
+                OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
+                    TotalDifficultyStage {
+                        commit_threshold: config.stages.total_difficulty.commit_threshold,
+                    },
+                ),
+            )
+            .add_stages(
+                OfflineStages::default()
+                    .set(SenderRecoveryStage {
+                        batch_size: config.stages.sender_recovery.batch_size,
+                        commit_threshold: config.stages.execution.commit_threshold,
+                    })
+                    .set(ExecutionStage {
+                        chain_spec: self.chain,
+                        commit_threshold: config.stages.execution.commit_threshold,
+                    }),
+            )
+            .build();
+
+        tokio::spawn(handle_events(stream_select(
+            network.event_listener().map(Into::into),
+            pipeline.events().map(Into::into),
+        )));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
