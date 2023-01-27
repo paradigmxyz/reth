@@ -354,7 +354,7 @@ impl PoolTransaction for PooledTransaction {
 
     /// Returns the transaction's [`TransactionKind`], which is the address of the recipient or
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
-    fn kinds(&self) -> &TransactionKind {
+    fn kind(&self) -> &TransactionKind {
         self.transaction.kind()
     }
 
