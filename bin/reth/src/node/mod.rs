@@ -161,14 +161,7 @@ impl Command {
             headers::linear::LinearDownloadBuilder::default()
                 .request_limit(config.stages.headers.downloader_batch_size)
                 .stream_batch_size(config.stages.headers.commit_threshold as usize)
-                // NOTE: the head and target will be set from inside the stage before the
-                // downloader is called
-                .build(
-                    consensus.clone(),
-                    fetch_client.clone(),
-                    Default::default(),
-                    Default::default(),
-                ),
+                .build(consensus.clone(), fetch_client.clone()),
         );
 
         // Spawn bodies downloader
