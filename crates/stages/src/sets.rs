@@ -74,9 +74,9 @@ where
     }
 }
 
-/// A set containing all stages that require an internet connection by default.
+/// A set containing all stages that require network access by default.
 ///
-/// These stages *can* be run without an internet connection if the specified downloaders are
+/// These stages *can* be run without network access if the specified downloaders are
 /// themselves offline.
 #[derive(Debug)]
 pub struct OnlineStages<H, B> {
@@ -109,7 +109,7 @@ where
     }
 }
 
-/// A set containing all stages that do not require an internet connection.
+/// A set containing all stages that do not require network access.
 ///
 /// A combination of (in order)
 ///
