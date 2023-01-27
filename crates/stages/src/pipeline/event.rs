@@ -4,6 +4,7 @@ use crate::{
 };
 use reth_primitives::BlockNumber;
 use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// An event emitted by a [Pipeline][crate::Pipeline].
 ///
@@ -75,9 +76,9 @@ impl PipelineEventListeners {
     }
 
     /// Add a new event listener.
-    pub(crate) fn new_listener(&mut self) -> mpsc::UnboundedReceiver<PipelineEvent> {
+    pub(crate) fn new_listener(&mut self) -> UnboundedReceiverStream<PipelineEvent> {
         let (sender, receiver) = mpsc::unbounded_channel();
         self.listeners.push(sender);
-        receiver
+        UnboundedReceiverStream::new(receiver)
     }
 }

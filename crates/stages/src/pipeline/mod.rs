@@ -9,7 +9,7 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
-use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod builder;
@@ -111,7 +111,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     }
 
     /// Listen for events on the pipeline.
-    pub fn events(&mut self) -> mpsc::UnboundedReceiver<PipelineEvent> {
+    pub fn events(&mut self) -> UnboundedReceiverStream<PipelineEvent> {
         self.listeners.new_listener()
     }
 
@@ -391,7 +391,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
     use reth_interfaces::{consensus, sync::NoopSyncStateUpdate};
-    use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
+    use tokio_stream::StreamExt;
     use utils::TestStage;
 
     /// Runs a simple pipeline.
@@ -417,7 +417,7 @@ mod tests {
 
         // Check that the stages were run in order
         assert_eq!(
-            UnboundedReceiverStream::new(events).collect::<Vec<PipelineEvent>>().await,
+            events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
                 PipelineEvent::Ran {
@@ -469,7 +469,7 @@ mod tests {
 
         // Check that the stages were unwound in reverse order
         assert_eq!(
-            UnboundedReceiverStream::new(events).collect::<Vec<PipelineEvent>>().await,
+            events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 // Executing
                 PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
@@ -559,7 +559,7 @@ mod tests {
 
         // Check that the stages were unwound in reverse order
         assert_eq!(
-            UnboundedReceiverStream::new(events).collect::<Vec<PipelineEvent>>().await,
+            events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
                 PipelineEvent::Ran {

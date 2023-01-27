@@ -26,7 +26,6 @@ use reth_stages::{
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::select;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -192,7 +191,7 @@ impl Command {
 
         tokio::spawn(handle_events(stream_select(
             network.event_listener().map(Into::into),
-            UnboundedReceiverStream::new(pipeline.events()).map(Into::into),
+            pipeline.events().map(Into::into),
         )));
 
         // Run pipeline
