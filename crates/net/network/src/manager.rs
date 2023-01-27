@@ -518,11 +518,10 @@ where
                 // new incoming connections as well as sending connection requests to newly
                 // discovered nodes.
                 self.swarm.on_shutdown_requested();
-
-                // drop pending connections
-
                 // Disconnect all active connections
                 self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
+                // drop pending connections
+                self.swarm.sessions_mut().disconnect_all_pending();
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);

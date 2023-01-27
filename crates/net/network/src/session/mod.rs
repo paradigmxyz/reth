@@ -222,8 +222,7 @@ impl SessionManager {
             self.fork_filter.clone(),
         ));
 
-        let handle =
-            PendingSessionHandle { _disconnect_tx: disconnect_tx, direction: Direction::Incoming };
+        let handle = PendingSessionHandle { disconnect_tx, direction: Direction::Incoming };
         self.pending_sessions.insert(session_id, handle);
         self.counter.inc_pending_inbound();
         Ok(session_id)
@@ -247,10 +246,8 @@ impl SessionManager {
             self.bandwidth_meter.clone(),
         ));
 
-        let handle = PendingSessionHandle {
-            _disconnect_tx: disconnect_tx,
-            direction: Direction::Outgoing(remote_peer_id),
-        };
+        let handle =
+            PendingSessionHandle { disconnect_tx, direction: Direction::Outgoing(remote_peer_id) };
         self.pending_sessions.insert(session_id, handle);
         self.counter.inc_pending_outbound();
     }
@@ -268,6 +265,12 @@ impl SessionManager {
     pub(crate) fn disconnect_all(&self, reason: Option<DisconnectReason>) {
         for (_, session) in self.active_sessions.iter() {
             session.disconnect(reason);
+        }
+    }
+
+    pub(crate) fn disconnect_all_pending(self) {
+        for (_, session) in self.pending_sessions.iter() {
+            session.disconnect();
         }
     }
 

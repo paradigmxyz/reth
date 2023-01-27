@@ -707,7 +707,7 @@ mod tests {
         async fn connect_incoming(&mut self, stream: TcpStream) -> ActiveSession {
             let remote_addr = stream.local_addr().unwrap();
             let session_id = self.next_id();
-            let (_disconnect_tx, disconnect_rx) = oneshot::channel();
+            let (disconnect_tx, disconnect_rx) = oneshot::channel();
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
             let metered_stream =
                 MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
