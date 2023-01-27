@@ -32,7 +32,7 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, HeaderStage, MerkleStage,
-        SenderRecoveryStage, StorageHashingStage, TotalDifficultyStage,
+        SenderRecoveryStage, StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -106,6 +106,7 @@ where
             .add_stage(HeaderStage::new(self.header_downloader, self.consensus.clone()))
             .add_stage(TotalDifficultyStage::default())
             .add_stage(BodyStage { downloader: self.body_downloader, consensus: self.consensus })
+            .add_stage(TransactionLookupStage::default())
     }
 }
 
