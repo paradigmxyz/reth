@@ -21,7 +21,7 @@
 //! The `Network` is made up of several, separate tasks:
 //!
 //!    - `Transactions Task`: is a spawned
-//!      [`TransactionManager`](crate::transactions::TransactionsManager) future that:
+//!      [`TransactionsManager`](crate::transactions::TransactionsManager) future that:
 //!
 //!        * Responds to incoming transaction related requests
 //!        * Requests missing transactions from the `Network`

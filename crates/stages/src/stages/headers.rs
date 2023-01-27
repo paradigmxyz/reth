@@ -28,9 +28,9 @@ pub const HEADERS: StageId = StageId("Headers");
 ///
 /// The headers are processed and data is inserted into these tables:
 ///
-/// - [`HeaderNumbers`][reth_interfaces::db::tables::HeaderNumbers]
-/// - [`Headers`][reth_interfaces::db::tables::Headers]
-/// - [`CanonicalHeaders`][reth_interfaces::db::tables::CanonicalHeaders]
+/// - [`HeaderNumbers`][reth_db::tables::HeaderNumbers]
+/// - [`Headers`][reth_db::tables::Headers]
+/// - [`CanonicalHeaders`][reth_db::tables::CanonicalHeaders]
 ///
 /// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
 /// the stage progress is not updated unless this stage is done.

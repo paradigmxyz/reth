@@ -39,10 +39,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, trace, warn};
 
 /// The type that advances an established session by listening for incoming messages (from local
-/// node or read from connection) and emitting events back to the [`SessionsManager`].
+/// node or read from connection) and emitting events back to the
+/// [`SessionManager`](super::SessionManager).
 ///
 /// It listens for
-///    - incoming commands from the [`SessionsManager`]
+///    - incoming commands from the [`SessionManager`](super::SessionManager)
 ///    - incoming requests via the request channel
 ///    - responses for handled ETH requests received from the remote peer.
 #[allow(unused)]
@@ -61,7 +62,7 @@ pub(crate) struct ActiveSession {
     pub(crate) session_id: SessionId,
     /// Incoming commands from the manager
     pub(crate) commands_rx: ReceiverStream<SessionCommand>,
-    /// Sink to send messages to the [`SessionManager`].
+    /// Sink to send messages to the [`SessionManager`](super::SessionManager).
     pub(crate) to_session: mpsc::Sender<ActiveSessionMessage>,
     /// Incoming request to send to delegate to the remote peer.
     pub(crate) request_tx: Fuse<ReceiverStream<PeerRequest>>,
@@ -257,7 +258,7 @@ impl ActiveSession {
         }
     }
 
-    /// Send a message back to the [`SessionsManager`]
+    /// Send a message back to the [`SessionManager`](super::SessionManager)
     fn emit_message(&self, message: PeerMessage) {
         let _ = self.try_emit_message(message).map_err(|err| {
             warn!(
@@ -268,7 +269,7 @@ impl ActiveSession {
         });
     }
 
-    /// Send a message back to the [`SessionsManager`]
+    /// Send a message back to the [`SessionManager`](super::SessionManager)
     /// covering both broadcasts and incoming requests
     fn safe_emit_message(
         &self,
@@ -280,7 +281,7 @@ impl ActiveSession {
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
     }
 
-    /// Send a message back to the [`SessionsManager`]
+    /// Send a message back to the [`SessionManager`](super::SessionManager)
     fn try_emit_message(
         &self,
         message: PeerMessage,

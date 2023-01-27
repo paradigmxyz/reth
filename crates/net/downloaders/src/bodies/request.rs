@@ -26,9 +26,9 @@ type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> 
 /// It then proceeds to verify the downloaded bodies. In case of an validation error,
 /// the future will start over.
 ///
-/// The future will filter out any empty headers (see [SealedHeader::is_empty]) from the request.
-/// If [BodiesRequestFuture] was initialized with all empty headers, no request will be dispatched
-/// and they will be immediately returned upon polling.
+/// The future will filter out any empty headers (see [reth_primitives::Header::is_empty]) from the
+/// request. If [BodiesRequestFuture] was initialized with all empty headers, no request will be
+/// dispatched and they will be immediately returned upon polling.
 ///
 /// NB: This assumes that peers respond with bodies in the order that they were requested.
 /// This is a reasonable assumption to make as that's [what Geth

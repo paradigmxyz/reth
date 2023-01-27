@@ -29,7 +29,7 @@ pub struct HelloMessage {
 // === impl HelloMessage ===
 
 impl HelloMessage {
-    /// Starts a new [`HelloMessageBuilder`]
+    /// Starts a new `HelloMessageBuilder`
     ///
     /// ```
     /// use secp256k1::{SECP256K1, SecretKey};

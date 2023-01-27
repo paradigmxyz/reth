@@ -1,5 +1,5 @@
-//! Builder structs for [`Status`](crate::types::Status) and [`Hello`](crate::types::Hello)
-//! messages.
+//! Builder structs for [`Status`](crate::types::Status) and
+//! [`HelloMessage`](crate::HelloMessage) messages.
 
 use crate::{
     capability::Capability, hello::HelloMessage, p2pstream::ProtocolVersion, EthVersion, Status,
@@ -84,14 +84,14 @@ impl StatusBuilder {
     }
 }
 
-/// Builder for [`Hello`](crate::types::Hello) messages.
+/// Builder for [`HelloMessage`](crate::HelloMessage) messages.
 pub struct HelloBuilder {
     hello: HelloMessage,
 }
 
 impl HelloBuilder {
-    /// Creates a new [`HelloBuilder`](crate::builder::HelloBuilder) with default [`Hello`] values,
-    /// and a `PeerId` corresponding to the given pubkey.
+    /// Creates a new [`HelloBuilder`](crate::builder::HelloBuilder) with default [`HelloMessage`]
+    /// values, and a `PeerId` corresponding to the given pubkey.
     pub fn new(pubkey: PeerId) -> Self {
         Self {
             hello: HelloMessage {
@@ -106,7 +106,7 @@ impl HelloBuilder {
         }
     }
 
-    /// Consumes the type and creates the actual [`Hello`](crate::types::Hello) message.
+    /// Consumes the type and creates the actual [`HelloMessage`] message.
     pub fn build(self) -> HelloMessage {
         self.hello
     }

@@ -17,8 +17,8 @@ use revm_interpreter::{B160 as H160, B256 as H256, U256};
 /// add their definitions to `get_bit_size()` or `known_types` in `generator.rs`.
 ///
 /// Regarding the `specialized_to/from_compact` methods: Mainly used as a workaround for not being
-/// able to specialize an impl over certain types like Vec<T>/Option<T> where T is a fixed size
-/// array like Vec<H256>.
+/// able to specialize an impl over certain types like `Vec<T>`/`Option<T>` where `T` is a fixed
+/// size array like `Vec<H256>`.
 pub trait Compact {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize;
@@ -113,7 +113,7 @@ where
         (list, buf)
     }
 
-    /// To be used by fixed sized types like Vec<H256>.
+    /// To be used by fixed sized types like `Vec<H256>`.
     fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         buf.put_u16(self.len() as u16);
 
@@ -123,7 +123,7 @@ where
         0
     }
 
-    /// To be used by fixed sized types like Vec<H256>.
+    /// To be used by fixed sized types like `Vec<H256>`.
     fn specialized_from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let mut list = vec![];
         let length = buf.get_u16();
@@ -169,7 +169,7 @@ where
         (Some(element), buf)
     }
 
-    /// To be used by fixed sized types like Option<H256>.
+    /// To be used by fixed sized types like `Option<H256>`.
     fn specialized_to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         if let Some(element) = self {
             element.to_compact(buf);
@@ -178,7 +178,7 @@ where
         0
     }
 
-    /// To be used by fixed sized types like Option<H256>.
+    /// To be used by fixed sized types like `Option<H256>`.
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
             return (None, buf)

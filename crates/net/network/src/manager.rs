@@ -130,7 +130,7 @@ impl<C> NetworkManager<C> {
         &self.handle
     }
 
-    /// Returns a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    /// Returns a shareable reference to the [`BandwidthMeter`] stored
     /// inside of the [`NetworkHandle`]
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         self.handle.bandwidth_meter()

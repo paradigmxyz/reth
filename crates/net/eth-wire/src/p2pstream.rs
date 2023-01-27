@@ -624,10 +624,10 @@ pub enum P2PMessage {
     /// immediately.
     Disconnect(DisconnectReason),
 
-    /// Requests an immediate reply of [`Pong`] from the peer.
+    /// Requests an immediate reply of [`P2PMessage::Pong`] from the peer.
     Ping,
 
-    /// Reply to the peer's [`Ping`] packet.
+    /// Reply to the peer's [`P2PMessage::Ping`] packet.
     Pong,
 }
 

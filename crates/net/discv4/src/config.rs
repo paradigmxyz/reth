@@ -1,7 +1,7 @@
 //! A set of configuration parameters to tune the discovery protocol.
 //!
 //! This basis of this file has been taken from the discv5 codebase:
-//! https://github.com/sigp/discv5
+//! <https://github.com/sigp/discv5>
 
 use bytes::{Bytes, BytesMut};
 use reth_net_common::ban_list::BanList;

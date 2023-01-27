@@ -10,7 +10,9 @@ use reth_codecs::Compact;
 use reth_primitives::{Account, Address, TransitionId};
 use serde::{Deserialize, Serialize};
 
-/// Account as it is saved inside [`AccountChangeSet`]. [`Address`] is the subkey.
+/// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
+///
+/// [`Address`] is the subkey.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Serialize)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.
@@ -39,7 +41,8 @@ impl Compact for AccountBeforeTx {
     }
 }
 
-/// [`TxNumber`] concatenated with [`Address`]. Used as a key for [`StorageChangeSet`]
+/// [`TransitionId`] concatenated with [`Address`]. Used as the key for
+/// [`StorageChangeSet`](crate::tables::StorageChangeSet)
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd)]
@@ -56,7 +59,7 @@ impl TransitionIdAddress {
         self.0 .1
     }
 
-    /// Consumes `Self` and returns [`TxNumber`], [`Address`]
+    /// Consumes `Self` and returns [`TransitionId`], [`Address`]
     pub fn take(self) -> (TransitionId, Address) {
         (self.0 .0, self.0 .1)
     }

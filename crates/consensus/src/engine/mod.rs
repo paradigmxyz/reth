@@ -112,7 +112,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EthConsensusEngine<
     /// NOTE: The log bloom is assumed to be validated during serialization.
     /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
     /// comparing the value with `payload.block_hash`.
-    /// Ref: https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145
+    ///
+    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
     fn try_construct_block(&self, payload: ExecutionPayload) -> EngineApiResult<SealedBlock> {
         if payload.extra_data.len() > 32 {
             return Err(EngineApiError::PayloadExtraData(payload.extra_data))

@@ -39,7 +39,7 @@ where
     /// Stages can be grouped into a set by using a [`StageSet`].
     ///
     /// To customize the stages in the set (reorder, disable, insert a stage) call
-    /// [`build`][StageSet::build] on the set which will convert it to a
+    /// [`builder`][StageSet::builder] on the set which will convert it to a
     /// [`StageSetBuilder`][crate::StageSetBuilder].
     pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
         for stage in set.builder().build() {
