@@ -179,12 +179,17 @@ impl BranchEntry {
     ///
     /// Caution: This assumes the prefix is already removed.
     fn parse_value(input: &str) -> ParseEntryResult<Self> {
+        #[inline]
         fn ensure_valid_hash(hash: &str) -> ParseEntryResult<String> {
-            let decoded_len = BASE32_NOPAD.decode_len(hash.as_bytes().len()).map_err(|err| {
-                ParseDnsEntryError::Base32DecodeError(format!(
-                    "invalid base32 child {hash} in branch: {err}"
-                ))
-            })?;
+            /// Returns the maximum length in bytes of the no-padding decoded data corresponding to
+            /// `n` bytes of base32-encoded data.
+            /// See also <https://cs.opensource.google/go/go/+/refs/tags/go1.19.5:src/encoding/base32/base32.go;l=526-531;drc=8a5845e4e34c046758af3729acf9221b8b6c01ae>
+            #[inline(always)]
+            fn base32_no_padding_decoded_len(n: usize) -> usize {
+                n * 5 / 8
+            }
+
+            let decoded_len = base32_no_padding_decoded_len(hash.bytes().len());
             if !(12..=32).contains(&decoded_len) || hash.chars().any(|c| c.is_whitespace()) {
                 return Err(ParseDnsEntryError::InvalidChildHash(hash.to_string()))
             }
@@ -343,6 +348,19 @@ mod tests {
     #[test]
     fn parse_branch_entry() {
         let s = "enrtree-branch:CCCCCCCCCCCCCCCCCCCC,BBBBBBBBBBBBBBBBBBBB";
+        let entry: BranchEntry = s.parse().unwrap();
+        assert_eq!(entry.to_string(), s);
+
+        match s.parse::<DnsEntry<SecretKey>>().unwrap() {
+            DnsEntry::Branch(entry) => {
+                assert_eq!(entry.to_string(), s);
+            }
+            _ => unreachable!(),
+        }
+    }
+    #[test]
+    fn parse_branch_entry_base32() {
+        let s = "enrtree-branch:YNEGZIWHOM7TOOSUATAPTM";
         let entry: BranchEntry = s.parse().unwrap();
         assert_eq!(entry.to_string(), s);
 
