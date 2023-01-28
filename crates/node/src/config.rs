@@ -18,6 +18,7 @@ pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
+    pub downloaders: Downloaders,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
 }

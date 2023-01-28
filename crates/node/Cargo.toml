@@ -1,11 +1,11 @@
 [package]
-name = "reth-staged-sync"
+name = "reth-node"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
-description = "Puts together all the Reth stages in a unified abstraction"
+description = "Helpers to build and configure a node"
 
 [package.metadata.cargo-udeps.ignore]
 normal = [
