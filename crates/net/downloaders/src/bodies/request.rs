@@ -4,10 +4,7 @@ use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
-        bodies::{
-            client::{BodiesClient, BodiesFut},
-            response::BlockResponse,
-        },
+        bodies::{client::BodiesClient, response::BlockResponse},
         error::DownloadError,
     },
 };
@@ -37,7 +34,7 @@ use std::{
 /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
 /// that try to give us bodies that do not match the requested order are going to be penalized
 /// and eventually disconnected.
-pub(crate) struct BodiesRequestFuture<B> {
+pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
     metrics: DownloaderMetrics,
@@ -46,12 +43,12 @@ pub(crate) struct BodiesRequestFuture<B> {
     // Remaining hashes to download
     hashes_to_download: Vec<H256>,
     buffer: Vec<(PeerId, BlockBody)>,
-    fut: Option<BodiesFut>,
+    fut: Option<B::Output>,
 }
 
 impl<B> BodiesRequestFuture<B>
 where
-    B: BodiesClient<Output = BodiesFut> + 'static,
+    B: BodiesClient + 'static,
 {
     /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
     pub(crate) fn new(
@@ -143,7 +140,7 @@ where
 
 impl<B> Future for BodiesRequestFuture<B>
 where
-    B: BodiesClient<Output = BodiesFut> + 'static,
+    B: BodiesClient + 'static,
 {
     type Output = Vec<BlockResponse>;
 

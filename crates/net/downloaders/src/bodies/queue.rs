@@ -4,10 +4,7 @@ use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
     consensus::Consensus,
-    p2p::bodies::{
-        client::{BodiesClient, BodiesFut},
-        response::BlockResponse,
-    },
+    p2p::bodies::{client::BodiesClient, response::BlockResponse},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
@@ -20,7 +17,7 @@ use std::{
 /// The wrapper around [FuturesUnordered] that keeps information
 /// about the blocks currently being requested.
 #[derive(Debug)]
-pub(crate) struct BodiesRequestQueue<B> {
+pub(crate) struct BodiesRequestQueue<B: BodiesClient> {
     /// Inner body request queue.
     inner: FuturesUnordered<BodiesRequestFuture<B>>,
     /// The block numbers being requested.
@@ -33,7 +30,7 @@ pub(crate) struct BodiesRequestQueue<B> {
 
 impl<B> BodiesRequestQueue<B>
 where
-    B: BodiesClient<Output = BodiesFut> + 'static,
+    B: BodiesClient + 'static,
 {
     /// Create new instance of request queue.
     pub(crate) fn new(metrics: DownloaderMetrics) -> Self {
@@ -96,7 +93,7 @@ where
 
 impl<B> Stream for BodiesRequestQueue<B>
 where
-    B: BodiesClient<Output = BodiesFut> + 'static,
+    B: BodiesClient + 'static,
 {
     type Item = Vec<BlockResponse>;
 

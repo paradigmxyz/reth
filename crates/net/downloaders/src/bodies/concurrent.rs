@@ -8,7 +8,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{
         bodies::{
-            client::{BodiesClient, BodiesFut},
+            client::BodiesClient,
             downloader::{BodyDownloader, BodyDownloaderResult},
             response::BlockResponse,
         },
@@ -42,7 +42,7 @@ pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct ConcurrentDownloader<B, DB> {
+pub struct ConcurrentDownloader<B: BodiesClient, DB> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
@@ -74,7 +74,7 @@ pub struct ConcurrentDownloader<B, DB> {
 
 impl<B, DB> ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient<Output = BodiesFut> + 'static,
+    B: BodiesClient + 'static,
     DB: Database,
 {
     /// Returns the next contiguous request.
@@ -242,7 +242,7 @@ where
 
 impl<B, DB> BodyDownloader for ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient<Output = BodiesFut> + 'static,
+    B: BodiesClient + 'static,
     DB: Database,
 {
     /// Set a new download range (exclusive).
@@ -331,7 +331,7 @@ where
 
 impl<B, DB> Stream for ConcurrentDownloader<B, DB>
 where
-    B: BodiesClient<Output = BodiesFut> + 'static,
+    B: BodiesClient + 'static,
     DB: Database,
 {
     type Item = BodyDownloaderResult;
@@ -508,7 +508,7 @@ impl ConcurrentDownloaderBuilder {
         db: Arc<DB>,
     ) -> ConcurrentDownloader<B, DB>
     where
-        B: BodiesClient<Output = BodiesFut> + 'static,
+        B: BodiesClient + 'static,
         DB: Database,
     {
         let Self {

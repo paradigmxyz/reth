@@ -12,7 +12,7 @@ pub type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: DownloadClient {
     /// The bodies type
-    type Output: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send;
+    type Output: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send + Unpin;
 
     /// Fetches the block body for the requested block.
     fn get_block_bodies(&self, hashes: Vec<H256>) -> Self::Output {

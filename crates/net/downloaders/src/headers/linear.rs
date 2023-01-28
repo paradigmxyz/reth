@@ -8,7 +8,7 @@ use reth_interfaces::{
     p2p::{
         error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
-            client::{BlockHeaders, HeadersClient, HeadersFut, HeadersRequest},
+            client::{BlockHeaders, HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
@@ -44,7 +44,7 @@ pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-pub struct LinearDownloader<H> {
+pub struct LinearDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
     consensus: Arc<dyn Consensus>,
     /// Client used to download headers.
@@ -73,9 +73,9 @@ pub struct LinearDownloader<H> {
     ///
     /// This will give us the block number of the `sync_target`, after which we can send multiple
     /// requests at a time.
-    sync_target_request: Option<HeadersRequestFuture>,
+    sync_target_request: Option<HeadersRequestFuture<H::Output>>,
     /// requests in progress
-    in_progress_queue: FuturesUnordered<HeadersRequestFuture>,
+    in_progress_queue: FuturesUnordered<HeadersRequestFuture<H::Output>>,
     /// Buffered, unvalidated responses
     buffered_responses: BinaryHeap<OrderedHeadersResponse>,
     /// Buffered, _sorted_ and validated headers ready to be returned.
@@ -90,7 +90,7 @@ pub struct LinearDownloader<H> {
 
 impl<H> LinearDownloader<H>
 where
-    H: HeadersClient<Output = HeadersFut> + 'static,
+    H: HeadersClient + 'static,
 {
     /// Convenience method to create a [LinearDownloadBuilder] without importing it
     pub fn builder() -> LinearDownloadBuilder {
@@ -467,7 +467,11 @@ where
         self.in_progress_queue.push(self.request_fut(request, priority));
     }
 
-    fn request_fut(&self, request: HeadersRequest, priority: Priority) -> HeadersRequestFuture {
+    fn request_fut(
+        &self,
+        request: HeadersRequest,
+        priority: Priority,
+    ) -> HeadersRequestFuture<H::Output> {
         let client = Arc::clone(&self.client);
         HeadersRequestFuture {
             request: Some(request.clone()),
@@ -499,7 +503,7 @@ where
 
 impl<H> HeaderDownloader for LinearDownloader<H>
 where
-    H: HeadersClient<Output = HeadersFut> + 'static,
+    H: HeadersClient + 'static,
 {
     fn update_local_head(&mut self, head: SealedHeader) {
         // ensure we're only yielding headers that are in range and follow the current local head.
@@ -575,7 +579,7 @@ where
 
 impl<H> Stream for LinearDownloader<H>
 where
-    H: HeadersClient<Output = HeadersFut> + 'static,
+    H: HeadersClient + 'static,
 {
     type Item = Vec<SealedHeader>;
 
@@ -690,12 +694,15 @@ where
 }
 
 /// A future that returns a list of [`BlockHeaders`] on success.
-struct HeadersRequestFuture {
+struct HeadersRequestFuture<F> {
     request: Option<HeadersRequest>,
-    fut: HeadersFut,
+    fut: F,
 }
 
-impl Future for HeadersRequestFuture {
+impl<F> Future for HeadersRequestFuture<F>
+where
+    F: Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send + Unpin,
+{
     type Output = HeadersRequestOutcome;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -865,7 +872,7 @@ impl LinearDownloadBuilder {
     /// and header client implementations
     pub fn build<H>(self, consensus: Arc<dyn Consensus>, client: Arc<H>) -> LinearDownloader<H>
     where
-        H: HeadersClient<Output = HeadersFut> + 'static,
+        H: HeadersClient + 'static,
     {
         let Self {
             request_limit,
