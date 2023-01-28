@@ -207,7 +207,7 @@ where
         Ok(())
     }
 
-    /// Unwind a table forward by a [Walker] on another table
+    /// Unwind a table forward by a [Walker][reth_db::abstraction::cursor::Walker] on another table
     pub(crate) fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), Error>
     where
         DB: Database,

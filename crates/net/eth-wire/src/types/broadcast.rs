@@ -1,6 +1,6 @@
 //! Types for broadcasting new data.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Header, TransactionSigned, H256, U128};
+use reth_primitives::{BlockNumber, Header, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -47,7 +47,7 @@ pub struct BlockHashNumber {
     /// The block hash
     pub hash: H256,
     /// The block number
-    pub number: u64,
+    pub number: BlockNumber,
 }
 
 impl From<Vec<BlockHashNumber>> for NewBlockHashes {

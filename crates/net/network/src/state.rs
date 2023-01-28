@@ -465,7 +465,7 @@ pub(crate) struct ActivePeer {
     pub(crate) blocks: LruCache<H256>,
 }
 
-/// Message variants triggered by the [`State`]
+/// Message variants triggered by the [`NetworkState`]
 pub(crate) enum StateAction {
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {

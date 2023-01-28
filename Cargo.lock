@@ -4601,6 +4601,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "serde",
  "tempfile",
  "thiserror",
  "tokio",

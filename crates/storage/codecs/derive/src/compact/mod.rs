@@ -40,7 +40,7 @@ pub enum FieldTypes {
     EnumUnnamedField((FieldType, UseAlternative)),
 }
 
-/// Derives the [`Compact`] trait and its from/to implementations.
+/// Derives the `Compact` trait and its from/to implementations.
 pub fn derive(input: TokenStream) -> TokenStream {
     let mut output = quote! {};
 
@@ -134,8 +134,9 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
 }
 
 /// Since there's no impl specialization in rust stable atm, once we find we have a
-/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type.
-/// eg, Vec<H256>. If so, we use another impl to code/decode its data.
+/// Vec/Option we try to find out if it's a Vec/Option of a fixed size data type, e.g. `Vec<H256>`.
+///
+/// If so, we use another impl to code/decode its data.
 fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
     if *ftype == "Vec" || *ftype == "Option" {
         if let syn::PathArguments::AngleBracketed(ref args) = segment.arguments {

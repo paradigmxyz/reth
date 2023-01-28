@@ -17,7 +17,8 @@ use reth_interfaces::{
 use std::sync::Arc;
 use tracing::*;
 
-pub(crate) const BODIES: StageId = StageId("Bodies");
+/// The [`StageId`] of the bodies downloader stage.
+pub const BODIES: StageId = StageId("Bodies");
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
@@ -37,17 +38,22 @@ pub(crate) const BODIES: StageId = StageId("Bodies");
 ///
 /// The bodies are processed and data is inserted into these tables:
 ///
-/// - [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers]
-/// - [`Transactions`][reth_interfaces::db::tables::Transactions]
+/// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
+/// - [`BlockBodies`][reth_db::tables::BlockBodies]
+/// - [`Transactions`][reth_db::tables::Transactions]
+/// - [`BlockTransitionIndex`][reth_db::tables::BlockTransitionIndex]
+/// - [`TxTransitionIndex`][reth_db::tables::TxTransitionIndex]
 ///
 /// # Genesis
 ///
 /// This stage expects that the genesis has been inserted into the appropriate tables:
 ///
-/// - The header tables (see [`HeaderStage`][crate::stages::headers::HeaderStage])
-/// - The [`BlockOmmers`][reth_interfaces::db::tables::BlockOmmers] table
-/// - The [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount] table
-/// - The [`Transactions`][reth_interfaces::db::tables::Transactions] table
+/// - The header tables (see [`HeaderStage`][crate::stages::HeaderStage])
+/// - The [`BlockOmmers`][reth_db::tables::BlockOmmers] table
+/// - The [`BlockBodies`][reth_db::tables::BlockBodies] table
+/// - The [`Transactions`][reth_db::tables::Transactions] table
+/// - The [`BlockTransitionIndex`][reth_db::tables::BlockTransitionIndex] table
+/// - The [`TxTransitionIndex`][reth_db::tables::TxTransitionIndex] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.

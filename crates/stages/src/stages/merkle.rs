@@ -5,28 +5,48 @@ use reth_db::database::Database;
 use std::fmt::Debug;
 use tracing::*;
 
-const MERKLE_EXECUTION: StageId = StageId("MerkleExecuteStage");
-const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
+/// The [`StageId`] of the merkle hashing execution stage.
+pub const MERKLE_EXECUTION: StageId = StageId("MerkleExecuteStage");
 
-/// Merkle stage uses input from [AccountHashingStage] and [StorageHashingStage] stages
-/// and calculated intermediate hashed and state root.
-/// This stage depends on the Account and Storage stages. It will be executed after them during
-/// execution, and before them during unwinding.
+/// The [`StageId`] of the merkle hashing unwind stage.
+pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
+
+/// The merkle hashing stage uses input from
+/// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
+/// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
+/// and state roots.
+///
+/// This stage should be run with the above two stages, otherwise it is a no-op.
+///
+/// This stage is split in two: one for calculating hashes and one for unwinding.
+///
+/// When run in execution, it's going to be executed AFTER the hashing stages, to generate
+/// the state root. When run in unwind mode, it's going to be executed BEFORE the hashing stages,
+/// so that it unwinds the intermediate hashes based on the unwound hashed state from the hashing
+/// stages. The order of these two variants is important. The unwind variant should be added to the
+/// pipeline before the execution variant.
+///
+/// An example pipeline to only hash state would be:
+///
+/// - [`MerkleStage::Unwind`]
+/// - [`AccountHashingStage`][crate::stages::AccountHashingStage]
+/// - [`StorageHashingStage`][crate::stages::StorageHashingStage]
+/// - [`MerkleStage::Execution`]
 #[derive(Debug)]
-pub struct MerkleStage {
-    /// Flag if true would do `execute` but skip unwind but if it false it would skip execution but
-    /// do unwind.
-    pub is_execute: bool,
+pub enum MerkleStage {
+    /// The execution portion of the hashing stage.
+    Execution,
+    /// The unwind portion of the hasing stage.
+    Unwind,
 }
 
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        if self.is_execute {
-            MERKLE_EXECUTION
-        } else {
-            MERKLE_UNWIND
+        match self {
+            MerkleStage::Execution => MERKLE_EXECUTION,
+            MerkleStage::Unwind => MERKLE_UNWIND,
         }
     }
 
@@ -36,7 +56,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         _tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if !self.is_execute {
+        if matches!(self, MerkleStage::Unwind) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
             return Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
         }
@@ -53,7 +73,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         _tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        if self.is_execute {
+        if matches!(self, MerkleStage::Execution) {
             info!(target: "sync::stages::merkle::exec", "Stage is always skipped");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }

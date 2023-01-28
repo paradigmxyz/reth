@@ -23,6 +23,12 @@ pub struct TransactionLookupStage {
     commit_threshold: u64,
 }
 
+impl Default for TransactionLookupStage {
+    fn default() -> Self {
+        Self { commit_threshold: 50_000 }
+    }
+}
+
 impl TransactionLookupStage {
     /// Create new instance of [TransactionLookupStage].
     pub fn new(commit_threshold: u64) -> Self {

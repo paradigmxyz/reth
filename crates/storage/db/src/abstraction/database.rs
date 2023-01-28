@@ -5,7 +5,7 @@ use crate::{
 };
 
 /// Implements the GAT method from:
-/// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats.
+/// <https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats>.
 ///
 /// Sealed trait which cannot be implemented by 3rd parties, exposed only for implementers
 pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + Sync {

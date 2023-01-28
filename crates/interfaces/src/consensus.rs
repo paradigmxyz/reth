@@ -3,7 +3,7 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedHeader, H256};
 use std::fmt::Debug;
 use tokio::sync::watch::{error::SendError, Receiver};
 
-/// Re-export forkchoice state
+/// Re-export fork choice state
 pub use reth_rpc_types::engine::ForkchoiceState;
 
 /// Consensus is a protocol that chooses canonical chain.
@@ -34,10 +34,10 @@ pub trait Consensus: Debug + Send + Sync {
     fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error>;
 
     /// After the Merge (aka Paris) block rewards became obsolete.
-    /// This flag is needed as reth change set is indexed of transaction granularity
-    /// (change set is indexed per transaction) we are introducing one additional index for block
-    /// reward This in essence would introduce gaps in [Transaction] table
-    /// More on it [here](https://github.com/paradigmxyz/reth/issues/237)
+    ///
+    /// This flag is needed as reth's changeset is indexed on transaction level granularity.
+    ///
+    /// More info [here](https://github.com/paradigmxyz/reth/issues/237)
     fn has_block_reward(&self, block_num: BlockNumber) -> bool;
 }
 

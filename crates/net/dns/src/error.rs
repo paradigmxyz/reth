@@ -5,7 +5,7 @@ pub(crate) type ParseEntryResult<T> = Result<T, ParseDnsEntryError>;
 
 pub(crate) type LookupResult<T> = Result<T, LookupError>;
 
-/// Error while parsing a [DnsEntry]
+/// Error while parsing a [DnsEntry](crate::tree::DnsEntry)
 #[derive(thiserror::Error, Debug)]
 #[allow(missing_docs)]
 pub enum ParseDnsEntryError {

@@ -1,8 +1,8 @@
-//! Code generator for the [`Compact`] trait.
+//! Code generator for the `Compact` trait.
 
 use super::*;
 
-/// Generates code to implement the [`Compact`] trait for a data type.
+/// Generates code to implement the `Compact` trait for a data type.
 pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     let flags = format_ident!("{ident}Flags");
 
@@ -47,7 +47,7 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
     }
 }
 
-/// Generates code to implement the [`Compact`] trait method `to_compact`.
+/// Generates code to implement the `Compact` trait method `to_compact`.
 fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![];
     let mut known_types = vec!["H256", "H160", "Address", "Bloom", "Vec"];
@@ -102,7 +102,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2>
     lines
 }
 
-/// Generates code to implement the [`Compact`] trait method `from_compact`.
+/// Generates code to implement the `Compact` trait method `from_compact`.
 fn generate_to_compact(fields: &FieldList, ident: &Ident) -> Vec<TokenStream2> {
     let mut lines = vec![quote! {
         let mut buffer = bytes::BytesMut::new();

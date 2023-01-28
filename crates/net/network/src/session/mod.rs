@@ -83,12 +83,12 @@ pub(crate) struct SessionManager {
     pending_sessions_tx: mpsc::Sender<PendingSessionEvent>,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
     pending_session_rx: ReceiverStream<PendingSessionEvent>,
-    /// The original Sender half of the [`ActiveSessionEvent`] channel.
+    /// The original Sender half of the [`ActiveSessionMessage`] channel.
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
-    /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
+    /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
@@ -153,7 +153,8 @@ impl SessionManager {
         self.hello_message.clone()
     }
 
-    /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].
+    /// Spawns the given future onto a new task that is tracked in the `spawned_tasks`
+    /// [`JoinSet`](tokio::task::JoinSet).
     fn spawn<F>(&self, f: F)
     where
         F: Future<Output = ()> + Send + 'static,

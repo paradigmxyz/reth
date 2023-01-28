@@ -12,7 +12,7 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    Address, FromRecoveredTransaction, IntoRecoveredTransaction, Transaction,
+    Address, FromRecoveredTransaction, IntoRecoveredTransaction, Transaction, TransactionKind,
     TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, H256, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
@@ -85,6 +85,7 @@ pub enum MockTransaction {
         nonce: u64,
         gas_price: u128,
         gas_limit: u64,
+        to: TransactionKind,
         value: U256,
     },
     Eip1559 {
@@ -94,6 +95,7 @@ pub enum MockTransaction {
         max_fee_per_gas: u128,
         max_priority_fee_per_gas: u128,
         gas_limit: u64,
+        to: TransactionKind,
         value: U256,
     },
 }
@@ -117,6 +119,7 @@ impl MockTransaction {
             nonce: 0,
             gas_price: 0,
             gas_limit: 0,
+            to: TransactionKind::Call(Address::random()),
             value: Default::default(),
         }
     }
@@ -130,6 +133,7 @@ impl MockTransaction {
             max_fee_per_gas: MIN_PROTOCOL_BASE_FEE,
             max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE,
             gas_limit: 0,
+            to: TransactionKind::Call(Address::random()),
             value: Default::default(),
         }
     }
@@ -331,6 +335,13 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
+    fn kind(&self) -> &TransactionKind {
+        match self {
+            MockTransaction::Legacy { to, .. } => to,
+            MockTransaction::Eip1559 { to, .. } => to,
+        }
+    }
+
     fn size(&self) -> usize {
         0
     }
@@ -356,6 +367,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 nonce,
                 gas_price,
                 gas_limit,
+                to,
                 value: U256::from(value),
             },
             Transaction::Eip1559(TxEip1559 {
@@ -375,6 +387,7 @@ impl FromRecoveredTransaction for MockTransaction {
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 gas_limit,
+                to,
                 value: U256::from(value),
             },
             Transaction::Eip2930 { .. } => {
