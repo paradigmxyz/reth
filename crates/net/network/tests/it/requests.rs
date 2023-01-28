@@ -68,7 +68,7 @@ async fn test_get_body() {
         let res = fetch0.get_block_bodies(vec![block_hash]).await;
         assert!(res.is_ok(), "{res:?}");
 
-        let blocks = res.unwrap().unwrap().1;
+        let blocks = res.unwrap().1;
         assert_eq!(blocks.len(), 1);
         let expected = BlockBody { transactions: block.body, ommers: block.ommers };
         assert_eq!(blocks[0], expected);
@@ -115,7 +115,7 @@ async fn test_get_header() {
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok());
 
-        let headers = res.unwrap().unwrap().1 .0;
+        let headers = res.unwrap().1 .0;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0], header);
     }
