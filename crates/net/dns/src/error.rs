@@ -19,6 +19,8 @@ pub enum ParseDnsEntryError {
     Base32DecodeError(String),
     #[error("{0}")]
     RlpDecodeError(String),
+    #[error("Invalid child hash in branch: {0}")]
+    InvalidChildHash(String),
     #[error("{0}")]
     Other(String),
 }
