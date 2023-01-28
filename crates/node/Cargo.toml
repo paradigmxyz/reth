@@ -15,12 +15,16 @@ normal = [
 
 [dependencies]
 # reth
-reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
-reth-discv4 = { path = "../../crates/net/discv4" }
-reth-network = {path = "../../crates/net/network", features = ["serde"] }
-reth-primitives = { path = "../../crates/primitives" }
-reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
-reth-net-nat = { path = "../../crates/net/nat" }
+reth-db = {path = "../storage/db", features = ["mdbx", "test-utils"] }
+reth-discv4 = { path = "../net/discv4" }
+reth-network = {path = "../net/network", features = ["serde"] }
+reth-primitives = { path = "../primitives" }
+reth-provider = { path = "../storage/provider", features = ["test-utils"] }
+reth-net-nat = { path = "../net/nat" }
+reth-downloaders = { path = "../net/downloaders" }
+reth-stages = { path = "../stages" }
+reth-consensus = { path = "../consensus" }
+reth-interfaces = { path = "../interfaces" }
 
 # io
 serde = "1.0"

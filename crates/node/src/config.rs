@@ -1,152 +1,109 @@
 //! Configuration files.
+use reth_consensus::BeaconConsensus;
+use reth_db::database::Database;
+use reth_downloaders::{
+    bodies, bodies::concurrent::ConcurrentDownloaderBuilder, headers,
+    headers::linear::LinearDownloadBuilder,
+};
+use reth_interfaces::consensus::Consensus;
+use reth_network::{NetworkConfigBuilder, NetworkHandle, NetworkManager};
+use reth_primitives::{ChainSpec, NodeRecord, MAINNET};
+use reth_provider::ShareableDatabase;
+use reth_stages::{sets::DefaultStages, Pipeline};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use reth_db::database::Database;
-use reth_discv4::Discv4Config;
-use reth_network::{
-    config::{mainnet_nodes, rng_secret_key},
-    NetworkConfig, NetworkConfigBuilder, PeersConfig,
-};
-use reth_primitives::{ChainSpec, NodeRecord};
-use reth_provider::ShareableDatabase;
-use serde::{Deserialize, Serialize};
+pub struct NodeHandle {
+    network_handle: NetworkHandle,
+}
+
+// todo: shutdown
+// todo: wait
+impl NodeHandle {
+    pub fn network_handle(&self) -> NetworkHandle {
+        self.network_handle.clone()
+    }
+}
+
+#[derive(Default)]
+#[must_use]
+pub struct NodeBuilder {
+    config: Config,
+}
+
+impl NodeBuilder {
+    pub fn new(config: Config) -> Self {
+        Self { config }
+    }
+
+    pub fn modify_config<F>(mut self, mut f: F) -> Self
+    where
+        F: FnMut(&mut Config),
+    {
+        f(&mut self.config);
+        self
+    }
+
+    pub fn modify_network_config<F>(mut self, mut f: F) -> Self
+    where
+        F: FnMut(&mut NetworkConfigBuilder),
+    {
+        f(&mut self.config.network);
+        self
+    }
+
+    pub async fn run<DB: Database + 'static>(self, db: Arc<DB>) -> NodeHandle {
+        // Build consensus
+        // TODO: Consensus engine factory
+        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(MAINNET.clone()));
+
+        // Build network
+        let Config { network, downloaders } = self.config;
+        let network_handle = network
+            .build(Arc::new(ShareableDatabase::new(db.clone())))
+            .start_network()
+            .await
+            .unwrap();
+        let fetch_client = Arc::new(network_handle.fetch_client().await.unwrap());
+
+        // Build downloaders
+        let Downloaders { headers, bodies } = downloaders;
+        let headers_downloader = headers::task::TaskDownloader::spawn(
+            headers.build(consensus.clone(), fetch_client.clone()),
+        );
+        let bodies_downloader = bodies::task::TaskDownloader::spawn(bodies.build(
+            fetch_client.clone(),
+            consensus.clone(),
+            db.clone(),
+        ));
+
+        // Build pipeline
+        let pipeline: Pipeline<DB, _> = Pipeline::builder()
+            .with_sync_state_updater(network_handle.clone())
+            .add_stages(DefaultStages::new(
+                consensus.clone(),
+                headers_downloader,
+                bodies_downloader,
+            ))
+            .build();
+
+        NodeHandle { network_handle }
+    }
+}
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
-    /// Configuration for each stage in the pipeline.
-    // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
-    pub stages: StageConfig,
+    pub network: NetworkConfigBuilder,
     pub downloaders: Downloaders,
-    /// Configuration for the discovery service.
-    pub peers: PeersConfig,
 }
 
-impl Config {
-    /// Initializes network config from read data
-    pub fn network_config<DB: Database>(
-        &self,
-        db: Arc<DB>,
-        chain_spec: ChainSpec,
-        disable_discovery: bool,
-        bootnodes: Option<Vec<NodeRecord>>,
-        nat_resolution_method: reth_net_nat::NatResolver,
-    ) -> NetworkConfig<ShareableDatabase<DB>> {
-        let peer_config = reth_network::PeersConfig::default()
-            .with_trusted_nodes(self.peers.trusted_nodes.clone())
-            .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
-        let discv4 =
-            Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(rng_secret_key())
-            .boot_nodes(bootnodes.unwrap_or_else(mainnet_nodes))
-            .peer_config(peer_config)
-            .discovery(discv4)
-            .chain_spec(chain_spec)
-            .set_discovery(disable_discovery)
-            .build(Arc::new(ShareableDatabase::new(db)))
-    }
-}
-
-/// Configuration for each stage in the pipeline.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct StageConfig {
-    /// Header stage configuration.
-    pub headers: HeadersConfig,
-    /// Total difficulty stage configuration
-    pub total_difficulty: TotalDifficultyConfig,
-    /// Body stage configuration.
-    pub bodies: BodiesConfig,
-    /// Sender recovery stage configuration.
-    pub sender_recovery: SenderRecoveryConfig,
-    /// Execution stage configuration.
-    pub execution: ExecutionConfig,
-}
-
-/// Header stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct HeadersConfig {
-    /// The maximum number of headers to download before committing progress to the database.
-    pub commit_threshold: u64,
-    /// The maximum number of headers to request from a peer at a time.
-    pub downloader_batch_size: u64,
-    /// The number of times to retry downloading a set of headers.
-    pub downloader_retries: usize,
-}
-
-impl Default for HeadersConfig {
-    fn default() -> Self {
-        Self { commit_threshold: 10_000, downloader_batch_size: 1000, downloader_retries: 5 }
-    }
-}
-
-/// Total difficulty stage configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TotalDifficultyConfig {
-    /// The maximum number of total difficulty entries to sum up before committing progress to the
-    /// database.
-    pub commit_threshold: u64,
-}
-
-impl Default for TotalDifficultyConfig {
-    fn default() -> Self {
-        Self { commit_threshold: 100_000 }
-    }
-}
-
-/// Body stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct BodiesConfig {
-    /// The batch size of non-empty blocks per one request
-    pub downloader_request_limit: u64,
-    /// The maximum number of block bodies returned at once from the stream
-    pub downloader_stream_batch_size: usize,
-    /// Maximum amount of received bodies to buffer internally.
-    pub downloader_max_buffered_responses: usize,
-    /// The minimum number of requests to send concurrently.
-    pub downloader_min_concurrent_requests: usize,
-    /// The maximum number of requests to send concurrently.
-    pub downloader_max_concurrent_requests: usize,
-}
-
-impl Default for BodiesConfig {
-    fn default() -> Self {
-        Self {
-            downloader_request_limit: 200,
-            downloader_stream_batch_size: 10000,
-            downloader_max_buffered_responses: 30000,
-            downloader_min_concurrent_requests: 5,
-            downloader_max_concurrent_requests: 100,
-        }
-    }
-}
-
-/// Sender recovery stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SenderRecoveryConfig {
-    /// The maximum number of blocks to process before committing progress to the database.
-    pub commit_threshold: u64,
-    /// The maximum number of transactions to recover senders for concurrently.
-    pub batch_size: usize,
-}
-
-impl Default for SenderRecoveryConfig {
-    fn default() -> Self {
-        Self { commit_threshold: 5_000, batch_size: 1000 }
-    }
-}
-
-/// Execution stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ExecutionConfig {
-    /// The maximum number of blocks to execution before committing progress to the database.
-    pub commit_threshold: u64,
-}
-
-impl Default for ExecutionConfig {
-    fn default() -> Self {
-        Self { commit_threshold: 5_000 }
-    }
+#[serde(default)]
+pub struct Downloaders {
+    pub headers: LinearDownloadBuilder,
+    pub bodies: ConcurrentDownloaderBuilder,
 }
 
 #[cfg(test)]

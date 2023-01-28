@@ -14,7 +14,7 @@ pub mod p2p;
 pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
-pub use reth_staged_sync::utils;
+pub use reth_node::utils;
 
 use clap::Args;
 use reth_primitives::NodeRecord;

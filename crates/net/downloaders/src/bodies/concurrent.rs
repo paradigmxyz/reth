@@ -463,6 +463,8 @@ impl Ord for OrderedBodiesResponse {
 }
 
 /// Builder for [ConcurrentDownloader].
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConcurrentDownloaderBuilder {
     /// The batch size of non-empty blocks per one request
     request_limit: u64,

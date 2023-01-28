@@ -25,6 +25,7 @@ tokio-stream = "0.1"
 # misc
 tracing = "0.1.37"
 metrics = "0.20.1"
+serde = { version = "1.0", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
@@ -34,3 +35,7 @@ reth-tracing = { path = "../../tracing" }
 async-trait = "0.1.58"
 assert_matches = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]

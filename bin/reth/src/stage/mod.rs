@@ -11,8 +11,8 @@ use reth_consensus::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
 
 use reth_net_nat::NatResolver;
+use reth_node::Config;
 use reth_primitives::ChainSpec;
-use reth_staged_sync::Config;
 use reth_stages::{
     stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
     ExecInput, Stage, StageId, Transaction, UnwindInput,

@@ -796,7 +796,8 @@ impl SyncTargetBlock {
 
 /// The builder for [LinearDownloader] with
 /// some default settings
-#[derive(Debug)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LinearDownloadBuilder {
     /// The batch size per one request
     request_limit: u64,

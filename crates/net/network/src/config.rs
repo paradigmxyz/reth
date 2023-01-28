@@ -119,7 +119,7 @@ where
 }
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(missing_docs)]
 pub struct NetworkConfigBuilder {
@@ -152,13 +152,10 @@ pub struct NetworkConfigBuilder {
     head: Option<BlockHashNumber>,
 }
 
-// === impl NetworkConfigBuilder ===
-
-#[allow(missing_docs)]
-impl NetworkConfigBuilder {
-    pub fn new(secret_key: SecretKey) -> Self {
+impl Default for NetworkConfigBuilder {
+    fn default() -> Self {
         Self {
-            secret_key,
+            secret_key: rng_secret_key(),
             dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
             boot_nodes: Default::default(),
@@ -172,6 +169,15 @@ impl NetworkConfigBuilder {
             hello_message: None,
             head: None,
         }
+    }
+}
+
+// === impl NetworkConfigBuilder ===
+
+#[allow(missing_docs)]
+impl NetworkConfigBuilder {
+    pub fn new(secret_key: SecretKey) -> Self {
+        Self { secret_key, ..Default::default() }
     }
 
     /// Returns the configured [`PeerId`]

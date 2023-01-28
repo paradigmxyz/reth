@@ -12,8 +12,8 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::FetchClient;
+use reth_node::Config;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
-use reth_staged_sync::Config;
 use std::sync::Arc;
 
 /// `reth p2p` command

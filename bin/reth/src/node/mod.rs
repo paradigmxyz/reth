@@ -17,8 +17,8 @@ use reth_interfaces::consensus::{Consensus, ForkchoiceState};
 use reth_net_nat::NatResolver;
 use reth_network::NetworkEvent;
 use reth_network_api::NetworkInfo;
+use reth_node::{config::NodeBuilder, utils::init::init_genesis, Config};
 use reth_primitives::{BlockNumber, ChainSpec, H256};
-use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
@@ -87,116 +87,35 @@ impl Command {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
-
-        let mut config: Config =
-            confy::load_path(&self.config).wrap_err("Could not load config")?;
-        config.peers.connect_trusted_nodes_only = self.network.trusted_only;
-
-        if !self.network.trusted_peers.is_empty() {
-            self.network.trusted_peers.iter().for_each(|peer| {
-                config.peers.trusted_nodes.insert(*peer);
-            });
-        }
-
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
+        // Load config
+        let mut config: Config =
+            confy::load_path(&self.config).wrap_err("Could not load config")?;
+
+        // Open database
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
 
+        // Initialize genesis
+        let genesis = init_genesis(db.clone(), self.chain.clone())?;
+        info!(target: "reth::cli", ?genesis, "Inserted genesis");
+
+        // Start metrics
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
             prometheus_exporter::initialize(listen_addr)?;
         }
 
-        let genesis = init_genesis(db.clone(), self.chain.clone())?;
-        info!(target: "reth::cli", ?genesis, "Inserted genesis");
-
-        // TODO: This should be in a builder/factory in the consensus crate
-        let consensus: Arc<dyn Consensus> = {
-            let beacon_consensus = BeaconConsensus::new(self.chain.clone());
-
-            if let Some(tip) = self.tip {
-                debug!(target: "reth::cli", %tip, "Tip manually set");
-                beacon_consensus.notify_fork_choice_state(ForkchoiceState {
-                    head_block_hash: tip,
-                    safe_block_hash: tip,
-                    finalized_block_hash: tip,
-                })?;
-            } else {
-                warn!(target: "reth::cli", "No tip specified. reth cannot communicate with consensus clients, so a tip must manually be provided for the online stages with --debug.tip <HASH>.");
-            }
-
-            Arc::new(beacon_consensus)
-        };
-
-        let network = config
-            .network_config(
-                db.clone(),
-                self.chain.clone(),
-                self.network.disable_discovery,
-                self.network.bootnodes.clone(),
-                self.nat,
-            )
-            .start_network()
-            .await?;
+        // Start node
+        let node = NodeBuilder::new(config).run(db).await;
+        let network = node.network_handle();
+        tokio::spawn(handle_events(node.events()));
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
-        let fetch_client = Arc::new(network.fetch_client().await?);
-
-        // Spawn headers downloader
-        let header_downloader = headers::task::TaskDownloader::spawn(
-            headers::linear::LinearDownloadBuilder::default()
-                .request_limit(config.stages.headers.downloader_batch_size)
-                .stream_batch_size(config.stages.headers.commit_threshold as usize)
-                .build(consensus.clone(), fetch_client.clone()),
-        );
-
-        // Spawn bodies downloader
-        let body_downloader = bodies::task::TaskDownloader::spawn(
-            bodies::concurrent::ConcurrentDownloaderBuilder::default()
-                .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
-                .with_request_limit(config.stages.bodies.downloader_request_limit)
-                .with_max_buffered_responses(config.stages.bodies.downloader_max_buffered_responses)
-                .with_concurrent_requests_range(
-                    config.stages.bodies.downloader_min_concurrent_requests..=
-                        config.stages.bodies.downloader_max_concurrent_requests,
-                )
-                .build(fetch_client.clone(), consensus.clone(), db.clone()),
-        );
-
-        let mut pipeline = Pipeline::builder()
-            .with_sync_state_updater(network.clone())
-            .add_stages(
-                OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
-                    TotalDifficultyStage {
-                        commit_threshold: config.stages.total_difficulty.commit_threshold,
-                    },
-                ),
-            )
-            .add_stages(
-                OfflineStages::default()
-                    .set(SenderRecoveryStage {
-                        batch_size: config.stages.sender_recovery.batch_size,
-                        commit_threshold: config.stages.execution.commit_threshold,
-                    })
-                    .set(ExecutionStage {
-                        chain_spec: self.chain,
-                        commit_threshold: config.stages.execution.commit_threshold,
-                    }),
-            )
-            .build();
-
-        tokio::spawn(handle_events(stream_select(
-            network.event_listener().map(Into::into),
-            pipeline.events().map(Into::into),
-        )));
-
-        // Run pipeline
-        info!(target: "reth::cli", "Starting sync pipeline");
-        pipeline.run(db.clone()).await?;
-
+        node.await?;
         info!(target: "reth::cli", "Finishing up");
         Ok(())
     }
