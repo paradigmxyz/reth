@@ -147,7 +147,7 @@ where
         Ok(())
     }
 
-    /// Attempt to buffer body responses. Returns an error of body response fails validation.
+    /// Attempt to buffer body responses. Returns an error if body response fails validation.
     /// Every body preceeding the failed one will be buffered.
     ///
     /// This method removes headers from the internal collection.
