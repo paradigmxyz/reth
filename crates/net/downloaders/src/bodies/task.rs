@@ -47,9 +47,9 @@ impl TaskDownloader {
     /// use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
     /// use reth_downloaders::bodies::task::TaskDownloader;
     /// use reth_interfaces::consensus::Consensus;
-    /// use reth_interfaces::p2p::bodies::client::BodiesClient;
+    /// use reth_interfaces::p2p::bodies::client::{BodiesClient, BodiesFut};
     /// use reth_db::database::Database;
-    /// fn t<B: BodiesClient + 'static, DB: Database + 'static>(client: Arc<B>, consensus:Arc<dyn Consensus>, db: Arc<DB>) {
+    /// fn t<B: BodiesClient<Output = BodiesFut> + 'static, DB: Database + 'static>(client: Arc<B>, consensus:Arc<dyn Consensus>, db: Arc<DB>) {
     ///     let downloader = ConcurrentDownloaderBuilder::default().build(
     ///         client,
     ///         consensus,

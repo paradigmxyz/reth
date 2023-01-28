@@ -43,8 +43,8 @@ impl TaskDownloader {
     /// # use reth_downloaders::headers::linear::LinearDownloader;
     /// # use reth_downloaders::headers::task::TaskDownloader;
     /// # use reth_interfaces::consensus::Consensus;
-    /// # use reth_interfaces::p2p::headers::client::HeadersClient;
-    /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
+    /// # use reth_interfaces::p2p::headers::client::{HeadersClient, HeadersFut};
+    /// # fn t<H: HeadersClient<Output = HeadersFut> + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
     ///    let downloader = LinearDownloader::<H>::builder().build(
     ///        consensus,
     ///        client,
