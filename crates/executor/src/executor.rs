@@ -149,7 +149,7 @@ pub fn commit_changes<DB: StateProvider>(
             db_account.account_state = AccountState::NotExisting;
             db_account.info = AccountInfo::default();
 
-            continue
+            continue;
         } else {
             // check if account code is new or old.
             // does it exist inside cached contracts if it doesn't it is new bytecode that
@@ -274,7 +274,7 @@ pub fn verify_receipt<'a>(
     // Check receipts root.
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts.clone());
     if receipts_root != expected_receipts_root {
-        return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
+        return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root });
     }
 
     // Create header log bloom.
@@ -283,7 +283,7 @@ pub fn verify_receipt<'a>(
         return Err(Error::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
-        })
+        });
     }
     Ok(())
 }
@@ -321,7 +321,7 @@ pub fn execute<DB: StateProvider>(
             return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
                 transaction_gas_limit: transaction.gas_limit(),
                 block_available_gas,
-            })
+            });
         }
 
         // Fill revm structure.
@@ -339,7 +339,7 @@ pub fn execute<DB: StateProvider>(
 
         // Fatal internal error.
         if exit_reason == revm::Return::FatalExternalError {
-            return Err(Error::ExecutionFatalError)
+            return Err(Error::ExecutionFatalError);
         }
 
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
@@ -385,7 +385,7 @@ pub fn execute<DB: StateProvider>(
 
     // Check if gas used matches the value set in header.
     if header.gas_used != cumulative_gas_used {
-        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
+        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used });
     }
 
     let db = evm.db.expect("Db is set at the start of the function");
@@ -505,9 +505,9 @@ pub fn block_reward_changeset<DB: StateProvider>(
                                 }
                             }
 
-                            AccountState::StorageCleared |
-                            AccountState::Touched |
-                            AccountState::None => {
+                            AccountState::StorageCleared
+                            | AccountState::Touched
+                            | AccountState::None => {
                                 // If account is None that means that EVM didn't touch it.
                                 // we are changing the state to Touched as account can have storage
                                 // in db.

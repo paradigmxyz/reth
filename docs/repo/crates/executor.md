@@ -163,7 +163,7 @@ pub fn execute<DB: StateProvider>(
             changeset,
             new_bytecodes,
         })    }
-        
+
     // --snip--
 
     if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
@@ -185,3 +185,34 @@ Finally the `execution` function ends by returning an `ExecutionResult` containi
 
 Once the `execute` function returns, the `execute_and_verify_receipt` continues with verifying the receipt. 
 
+
+[File: ]()
+```rust ignore
+/// Verify receipts
+pub fn verify_receipt<'a>(
+    expected_receipts_root: H256,
+    expected_logs_bloom: Bloom,
+    receipts: impl Iterator<Item = &'a Receipt> + Clone,
+) -> Result<(), Error> {
+    // Check receipts root.
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts.clone());
+    if receipts_root != expected_receipts_root {
+        return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
+    }
+
+    // Create header log bloom.
+    let logs_bloom = receipts.fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+    if logs_bloom != expected_logs_bloom {
+        return Err(Error::BloomLogDiff {
+            expected: Box::new(expected_logs_bloom),
+            got: Box::new(logs_bloom),
+        })
+    }
+    Ok(())
+}
+```
+
+//TODO: describe the verify receipt function
+
+
+Once the receipt has been successfully verified, the `execute_and_verify_receipt` completes, returning the `transaction_change_set` which is then handled in the next steps of the `ExecutionStage` of the Reth pipeline.
