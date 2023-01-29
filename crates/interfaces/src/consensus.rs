@@ -45,7 +45,7 @@ pub trait Consensus: Debug + Send + Sync {
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum Error {
-    #[error("Block used gas ({gas_used:?}) is greater then gas limit ({gas_limit:?}).")]
+    #[error("Block used gas ({gas_used:?}) is greater than gas limit ({gas_limit:?}).")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
     #[error("Block ommer hash ({got:?}) is different then expected: ({expected:?})")]
     BodyOmmersHashDiff { got: H256, expected: H256 },
