@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRO,
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -76,9 +76,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     // next key of iterator
                     let next_key = accounts.next()?;
 
-                    let mut hashes = tx.cursor_write::<tables::HashedAccount>()?;
-                    // iterate and append presorted hashed accounts
-                    hashed_batch.into_iter().try_for_each(|(k, v)| hashes.append(k, v))?;
+                    // iterate and put presorted hashed accounts
+                    hashed_batch
+                        .into_iter()
+                        .try_for_each(|(k, v)| tx.put::<tables::HashedAccount>(k, v))?;
                     next_key
                 };
                 tx.commit()?;
