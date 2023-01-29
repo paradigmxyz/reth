@@ -31,22 +31,28 @@ pub use error::{EngineApiError, EngineApiResult};
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
-/// Consensus engine API trait.
+/// The Consensus Engine API is a trait that grants the Consensus layer access to data and functions
+/// in the Execution layer that are crucial for the consensus process.
 pub trait ConsensusEngine {
-    /// Retrieves payload from local cache.
+    /// Called to retrieve the latest state of the network, validate new blocks, and maintain
+    /// consistency between the Consensus and Execution layers.
     fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload>;
 
-    /// Receives a payload to validate and execute.
+    /// The Consensus layer receives new blocks from Consensus peers in the network.
+    /// New blocks are then submitted for execution and validation to this
+    /// method on the Execution layer.
     fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus>;
 
-    /// Updates the fork choice state
+    /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
+    /// valid chain.
     fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated>;
 
-    /// Verifies the transition configuration between execution and consensus clients.
+    /// Called to verify network configuration parameters and ensure that Consensus and Execution
+    /// layers are using the latest configuration.
     fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
