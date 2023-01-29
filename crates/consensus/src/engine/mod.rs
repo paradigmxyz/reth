@@ -38,9 +38,12 @@ pub trait ConsensusEngine {
     /// consistency between the Consensus and Execution layers.
     fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload>;
 
-    /// The Consensus layer receives new blocks from Consensus peers in the network.
-    /// New blocks are then submitted for execution and validation to this
-    /// method on the Execution layer.
+    /// When the Consensus layer receives a new block via the consensus gossip protocol,
+    /// the transactions in the block are sent to the execution layer in the form of a
+    /// `ExecutionPayload`. The Execution layer executes the transactions and validates the
+    /// state in the block header, then passes validation data back to Consensus layer, that
+    /// adds the block to the head of its own blockchain and attests to it. The block is then
+    /// broadcasted over the consensus p2p network in the form of a "Beacon block".
     fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus>;
 
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
