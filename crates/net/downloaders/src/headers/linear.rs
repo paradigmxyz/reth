@@ -259,7 +259,7 @@ where
                     .iter()
                     .take_while(|last| last.number > target_block_number)
                     .count();
-                // removes all headers that are higher than then current target
+                // removes all headers that are higher than current target
                 self.queued_validated_headers.drain(..skip);
             }
         } else {
