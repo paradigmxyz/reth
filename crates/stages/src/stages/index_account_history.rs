@@ -16,8 +16,8 @@ use tracing::*;
 
 const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistoryStage");
 
-/// Account hashing stage hashes plain account.
-/// This is preparation before generating intermediate hashes and calculating Merkle tree root.
+/// Stage is indexing history the account changesets generated in [`ExecutionStage`]
+/// For more information on index sharding please look at [`tables::AccountHistory`]
 #[derive(Debug)]
 pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
