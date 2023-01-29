@@ -74,10 +74,110 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
 
 This function breaks down into two major parts, execution and receipt verification. The function takes in a block header, a slice of signed transactions with the recovered signer's account attached, a slice of ommer block headers, the chain specification and a reference to a provider that enables access to cached state used during execution. In the first part of the function, the transactions contained in the block are executed, returning an [`ExecutionResult`](). The `ExecutionResult` is then used to verify the execution result receipt along with the header receipt root and logs bloom.  
 
-Within the `execute` function, a new EVM environment is initialized using the `db`, `chain_spec` and `header` from the `execute_and_verify_receipt` function. Each transaction within the `transactions` slice is yielded from an iterator and executed with with EVM environment, returning an [`revm::ExecutionResult`](). 
+The `execute` function is responsible for executing all of the transactions within the block, handling the execution results and returning a `TransactionChangeSet` that will later be committed to the database. 
+
+At the beginning of the `execute` function, a new EVM environment is initialized using the `db`, `chain_spec` and `header` from the `execute_and_verify_receipt` function. Each transaction within the `transactions` slice is yielded from an iterator and executed with with EVM environment, returning an [`revm::ExecutionResult`](). 
 
 
-The `exit_reason` is a [`Return`]() enum from the[`revm` crate]() representing the reason that the transaction exited. Transaction success variants include `Continue`, `Stop`, `Return`, `SelfDestruct` while transaction revert cases are `Revert`, `CallTooDeep`, and `OutOfFund`. The `exit_reason` is recorded as a success or failure, which is used later in the transaction change set's receipt. 
+[File: ]()
+```rust ignore
+pub fn execute<DB: StateProvider>(
+    header: &Header,
+    transactions: &[TransactionSignedEcRecovered],
+    ommers: &[Header],
+    chain_spec: &ChainSpec,
+    db: &mut SubState<DB>,
+) -> Result<ExecutionResult, Error> {
+    let mut evm = EVM::new();
+    evm.database(db);
+
+    let spec_id = revm_spec(chain_spec, header.number);
+    evm.env.cfg.chain_id = U256::from(chain_spec.chain().id());
+    evm.env.cfg.spec_id = spec_id;
+    evm.env.cfg.perf_all_precompiles_have_balance = false;
+    evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
+
+    revm_wrap::fill_block_env(&mut evm.env.block, header, spec_id >= SpecId::MERGE);
+    let mut cumulative_gas_used = 0;
+    // output of verification
+    let mut changesets = Vec::with_capacity(transactions.len());
+
+    for transaction in transactions.iter() {
+        // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
+        // must be no greater than the block’s gasLimit.
+        let block_available_gas = header.gas_limit - cumulative_gas_used;
+        if transaction.gas_limit() > block_available_gas {
+            return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
+                transaction_gas_limit: transaction.gas_limit(),
+                block_available_gas,
+            })
+        }
+
+        // Fill revm structure.
+        revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
+
+        // Execute transaction.
+        let out = evm.transact();
+
+
+        let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
+
+        // Fatal internal error.
+        if exit_reason == revm::Return::FatalExternalError {
+            return Err(Error::ExecutionFatalError)
+        }
+
+        let is_success = match exit_reason {
+            revm::return_ok!() => true,
+            revm::return_revert!() => false,
+            _ => false,
+            //e => return Err(Error::EVMError { error_code: e as u32 }),
+        };
+
+        // Add spend gas.
+        cumulative_gas_used += gas_used;
+
+        // Transform logs to reth format.
+        let logs: Vec<Log> = logs
+            .into_iter()
+            .map(|l| Log {
+                address: H160(l.address.0),
+                topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
+                data: l.data.into(),
+            })
+            .collect();
+
+        // commit state
+        let (changeset, new_bytecodes) =
+            commit_changes(evm.db().expect("Db to not be moved."), state);
+
+        // Push transaction changeset and calculte header bloom filter for receipt.
+        changesets.push(TransactionChangeSet {
+            receipt: Receipt {
+                tx_type: transaction.tx_type(),
+                success: is_success,
+                cumulative_gas_used,
+                bloom: logs_bloom(logs.iter()),
+                logs,
+            },
+            changeset,
+            new_bytecodes,
+        })    }
+        
+    // --snip--
+
+    if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
+        let mut irregular_state_changeset = dao_fork_changeset(db)?;
+        irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
+        block_reward = Some(irregular_state_changeset);
+    }
+
+    Ok(ExecutionResult { changesets, block_reward })
+}
+```
+
+
+Following transaction execution the `exit_reason` is handled. The `exit_reason` is a [`Return`]() enum from the[`revm` crate]() representing the reason that the transaction exited. Transaction success variants include `Continue`, `Stop`, `Return`, `SelfDestruct` while transaction revert cases are `Revert`, `CallTooDeep`, and `OutOfFund`. The `exit_reason` is recorded as a success or failure, which is used later in the transaction change set's receipt. 
 
 Next, the cumulative gas used for the block is incremented by the gas used by the transaction and the changes generated from the transaction execution are used to update the `db` state. A new `TransactionChangeSet` is generated, and added to a `Vec<TransactionChangeSet>`. If the block reward is still active (before Paris/Merge) an additional `TransactionChangeSet` is generated for the account that receives the reward.
 
