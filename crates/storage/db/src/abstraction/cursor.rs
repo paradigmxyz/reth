@@ -204,7 +204,7 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     /// exclusive `key` where to stop the walk.
     end_key: T::Key,
     /// flag whether is ended
-    is_ended: bool,
+    is_done: bool,
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
     _tx_phantom: PhantomData<&'tx T>,
 }
