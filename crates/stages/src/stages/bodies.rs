@@ -409,12 +409,12 @@ mod tests {
             consensus::Consensus,
             p2p::{
                 bodies::{
-                    client::BodiesClient,
+                    client::{BodiesClient, BodiesFut},
                     downloader::{BodyDownloader, BodyDownloaderResult},
                     response::BlockResponse,
                 },
                 download::DownloadClient,
-                error::{DownloadResult, PeerRequestResult},
+                error::DownloadResult,
                 priority::Priority,
             },
             test_utils::{
@@ -679,13 +679,14 @@ mod tests {
             }
         }
 
-        #[async_trait::async_trait]
         impl BodiesClient for NoopClient {
-            async fn get_block_bodies_with_priority(
+            type Output = BodiesFut;
+
+            fn get_block_bodies_with_priority(
                 &self,
                 _hashes: Vec<H256>,
                 _priority: Priority,
-            ) -> PeerRequestResult<Vec<BlockBody>> {
+            ) -> Self::Output {
                 panic!("Noop client should not be called")
             }
         }

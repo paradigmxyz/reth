@@ -42,7 +42,7 @@ pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct ConcurrentDownloader<B, DB> {
+pub struct ConcurrentDownloader<B: BodiesClient, DB> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
@@ -406,19 +406,6 @@ where
 
         Poll::Pending
     }
-}
-
-/// SAFETY: we need to ensure `ConcurrentDownloader` is `Sync` because the of the [BodyDownloader]
-/// trait. While [BodiesClient] is also `Sync`, the [BodiesClient::get_block_bodies] future does
-/// not enforce `Sync` (async_trait). The future itself does not use any interior mutability
-/// whatsoever: All the mutations are performed through an exclusive reference on
-/// `ConcurrentDownloader` when the Stream is polled. This means it suffices that
-/// `ConcurrentDownloader` is Sync:
-unsafe impl<B, DB> Sync for ConcurrentDownloader<B, DB>
-where
-    B: BodiesClient,
-    DB: Database,
-{
 }
 
 #[derive(Debug)]

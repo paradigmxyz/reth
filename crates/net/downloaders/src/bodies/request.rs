@@ -5,7 +5,7 @@ use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
-        error::{DownloadError, DownloadResult, PeerRequestResult},
+        error::{DownloadError, DownloadResult},
     },
 };
 use reth_primitives::{PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
@@ -15,8 +15,6 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-
-type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send>>;
 
 /// Body request implemented as a [Future].
 ///
@@ -37,14 +35,14 @@ type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> 
 /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
 /// that try to give us bodies that do not match the requested order are going to be penalized
 /// and eventually disconnected.
-pub(crate) struct BodiesRequestFuture<B> {
+pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
     metrics: DownloaderMetrics,
     // Headers to download. The collection is shrinked as responses are buffered.
     headers: VecDeque<SealedHeader>,
     buffer: Vec<BlockResponse>,
-    fut: Option<BodiesFut>,
+    fut: Option<B::Output>,
     last_request_len: Option<usize>,
 }
 
@@ -104,7 +102,7 @@ where
         tracing::trace!(target: "downloaders::bodies", request_len = req.len(), "Requesting bodies");
         let client = Arc::clone(&self.client);
         self.last_request_len = Some(req.len());
-        self.fut = Some(Box::pin(async move { client.get_block_bodies(req).await }));
+        self.fut = Some(client.get_block_bodies(req));
     }
 
     /// Process block response.
