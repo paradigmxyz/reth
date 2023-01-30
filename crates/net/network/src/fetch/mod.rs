@@ -225,7 +225,7 @@ impl StateFetcher {
         peer_id: PeerId,
         res: RequestResult<Vec<Header>>,
     ) -> Option<BlockResponseOutcome> {
-        let is_error = res.is_err();
+        let reputation_change = res.reputation_change_err();
 
         let resp = self.inflight_headers_requests.remove(&peer_id);
         let is_likely_bad_response = resp
@@ -237,12 +237,9 @@ impl StateFetcher {
             let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
         }
 
-        if is_error {
+        if let Some(reputation_change) = reputation_change {
             // if the response was erroneous we want to report the peer.
-            return Some(BlockResponseOutcome::BadResponse(
-                peer_id,
-                ReputationChangeKind::BadMessage,
-            ))
+            return Some(BlockResponseOutcome::BadResponse(peer_id, reputation_change))
         }
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {

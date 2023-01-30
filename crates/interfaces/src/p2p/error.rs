@@ -1,5 +1,6 @@
 use super::headers::client::HeadersRequest;
 use crate::{consensus, db};
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, H256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -14,6 +15,9 @@ pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 pub trait EthResponseValidator {
     /// Determine whether the response matches what we requested in [HeadersRequest]
     fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool;
+
+    /// Return the response reputation impact if any
+    fn reputation_change_err(&self) -> Option<ReputationChangeKind>;
 }
 
 impl EthResponseValidator for RequestResult<Vec<Header>> {
@@ -35,6 +39,21 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
                 }
             }
             Err(_) => true,
+        }
+    }
+
+    fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
+        if let Err(err) = self {
+            match err {
+                RequestError::ChannelClosed => Some(ReputationChangeKind::Other(0)),
+                RequestError::NotConnected => Some(ReputationChangeKind::Other(0)),
+                RequestError::ConnectionDropped => Some(ReputationChangeKind::Dropped),
+                RequestError::UnsupportedCapability => Some(ReputationChangeKind::Other(0)),
+                RequestError::Timeout => Some(ReputationChangeKind::Timeout),
+                RequestError::BadResponse => Some(ReputationChangeKind::BadMessage),
+            }
+        } else {
+            None
         }
     }
 }
