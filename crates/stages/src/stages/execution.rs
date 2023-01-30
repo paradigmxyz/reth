@@ -3,7 +3,7 @@ use crate::{
     Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
     tables,
@@ -14,7 +14,8 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_primitives::{
-    Address, ChainSpec, Header, StorageEntry, TransactionSignedEcRecovered, H256, MAINNET, U256,
+    Address, ChainSpec, Hardfork, Header, StorageEntry, TransactionSignedEcRecovered, H256,
+    MAINNET, U256,
 };
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
@@ -199,15 +200,19 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push(changeset);
+            block_change_patches.push((changeset, num));
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
         let mut current_transition_id = tx.get_block_transition(last_block)?;
         info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
+        let spurious_dragon_activation =
+            self.chain_spec.fork_block(Hardfork::SpuriousDragon).unwrap_or_default();
+
         // apply changes to plain database.
-        for results in block_change_patches.into_iter() {
+        for (results, block_number) in block_change_patches.into_iter() {
+            let spurious_dragon_active = block_number >= spurious_dragon_activation;
             // insert state change set
             for result in results.changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {
@@ -215,7 +220,12 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
                     trace!(target: "sync::stages::execution", ?address, current_transition_id, ?account, wipe_storage, "Applying account changeset");
-                    account.apply_to_db(&**tx, address, current_transition_id)?;
+                    account.apply_to_db(
+                        &**tx,
+                        address,
+                        current_transition_id,
+                        spurious_dragon_active,
+                    )?;
 
                     let storage_id = TransitionIdAddress((current_transition_id, address));
 
@@ -293,7 +303,12 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 // we are sure that block reward index is present.
                 for (address, changeset) in block_reward_changeset.into_iter() {
                     trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
-                    changeset.apply_to_db(&**tx, address, current_transition_id)?;
+                    changeset.apply_to_db(
+                        &**tx,
+                        address,
+                        current_transition_id,
+                        spurious_dragon_active,
+                    )?;
                 }
                 current_transition_id += 1;
             }
@@ -341,7 +356,6 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
-            // TODO refactor in db fn called tx.aplly_account_changeset
             if let Some(account_info) = changeset.info {
                 tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
             } else {
@@ -360,12 +374,15 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
+        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
         for (key, storage) in storage_changeset_batch.into_iter().rev() {
             let address = key.address();
-            tx.put::<tables::PlainStorageState>(address, storage)?;
-            if storage.value == U256::ZERO {
-                // delete value that is zero
-                tx.delete::<tables::PlainStorageState>(address, Some(storage))?;
+            if plain_storage_cursor.seek_by_key_subkey(address, storage.key)?.is_some() {
+                plain_storage_cursor.delete_current()?;
+            }
+            if storage.value != U256::ZERO {
+                plain_storage_cursor.upsert(address, storage)?;
             }
         }
 
@@ -375,6 +392,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             if transition_id < from_transition_rev {
                 break
             }
+            // delete all changesets
             tx.delete::<tables::AccountChangeSet>(transition_id, None)?;
         }
 
@@ -383,6 +401,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             if key.transition_id() < from_transition_rev {
                 break
             }
+            // delete all changesets
             tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
@@ -651,7 +670,6 @@ mod tests {
         assert_eq!(
             plain_accounts,
             vec![
-                (H160::zero(), Account::default()),
                 (
                     beneficiary_address,
                     Account {
@@ -678,13 +696,6 @@ mod tests {
         assert_eq!(
             account_changesets,
             vec![
-                (
-                    1,
-                    AccountBeforeTx {
-                        address: H160(hex!("0000000000000000000000000000000000000000")),
-                        info: None
-                    }
-                ),
                 (1, AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) }),
                 (1, AccountBeforeTx { address: beneficiary_address, info: None }),
                 (1, AccountBeforeTx { address: caller_address, info: Some(caller_info) }),
