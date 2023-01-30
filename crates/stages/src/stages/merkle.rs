@@ -339,64 +339,78 @@ mod tests {
                 .tx
                 .inner()
                 .get_block_transition(input.unwind_to)
-                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
-            self.tx.commit(|tx| {
-                let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-                let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
-                let mut hash_cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
-                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
-
-                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
-                    if tid_address.transition_id() <= target_transition {
-                        break
-                    }
-
-                    storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?;
-                    storage_cursor.delete_current()?;
-                    hash_cursor.seek_by_key_subkey(
-                        keccak256(tid_address.address()),
-                        keccak256(entry.key),
-                    )?;
-                    hash_cursor.delete_current()?;
-                    if entry.value != U256::ZERO {
-                        storage_cursor.append_dup(tid_address.address(), entry.clone())?;
-                        let storage_entry =
-                            StorageEntry { key: keccak256(entry.key), value: entry.value };
-                        hash_cursor.append_dup(keccak256(tid_address.address()), storage_entry)?;
-                    }
-                }
-
-                let mut changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
-                while let Some((transition_id, account_before_tx)) =
-                    rev_changeset_walker.next().transpose()?
-                {
-                    if transition_id <= target_transition {
-                        break
-                    }
-
-                    match account_before_tx.info {
-                        Some(acc) => {
-                            tx.put::<tables::PlainAccountState>(account_before_tx.address, acc)?;
-                            tx.put::<tables::HashedAccount>(
-                                keccak256(account_before_tx.address),
-                                acc,
-                            )?;
+                .map_err(|e| TestRunnerError::Internal(Box::new(e)))
+                .unwrap();
+            self.tx
+                .commit(|tx| {
+                    let mut storage_cursor =
+                        tx.cursor_dup_write::<tables::PlainStorageState>().unwrap();
+                    let mut changeset_cursor =
+                        tx.cursor_dup_read::<tables::StorageChangeSet>().unwrap();
+                    let mut hash_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
+                    let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
+                    let mut trie: BTreeMap<H256, BTreeMap<H256, U256>> = BTreeMap::new();
+                    while let Some((tid_address, entry)) =
+                        rev_changeset_walker.next().transpose().unwrap()
+                    {
+                        if tid_address.transition_id() <= target_transition {
+                            break
                         }
-                        None => {
-                            tx.delete::<tables::PlainAccountState>(
-                                account_before_tx.address,
-                                None,
-                            )?;
-                            tx.delete::<tables::HashedAccount>(
-                                keccak256(account_before_tx.address),
-                                None,
-                            )?;
+
+                        trie.entry(keccak256(tid_address.address()))
+                            .or_default()
+                            .insert(keccak256(entry.key), entry.value);
+                    }
+                    for (key, val) in trie.into_iter() {
+                        for (entry_key, entry_val) in val.into_iter() {
+                            hash_cursor.seek_by_key_subkey(key, entry_key).unwrap();
+                            hash_cursor.delete_current().unwrap();
+
+                            if entry_val != U256::ZERO {
+                                let storage_entry =
+                                    StorageEntry { key: entry_key, value: entry_val };
+                                hash_cursor.append_dup(key, storage_entry).unwrap();
+                            }
                         }
                     }
-                }
-                Ok(())
-            })?;
+
+                    let mut changeset_cursor =
+                        tx.cursor_dup_write::<tables::AccountChangeSet>().unwrap();
+                    let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
+                    while let Some((transition_id, account_before_tx)) =
+                        rev_changeset_walker.next().transpose().unwrap()
+                    {
+                        if transition_id <= target_transition {
+                            break
+                        }
+
+                        match account_before_tx.info {
+                            Some(acc) => {
+                                tx.put::<tables::PlainAccountState>(account_before_tx.address, acc)
+                                    .unwrap();
+                                tx.put::<tables::HashedAccount>(
+                                    keccak256(account_before_tx.address),
+                                    acc,
+                                )
+                                .unwrap();
+                            }
+                            None => {
+                                tx.delete::<tables::PlainAccountState>(
+                                    account_before_tx.address,
+                                    None,
+                                )
+                                .unwrap();
+                                tx.delete::<tables::HashedAccount>(
+                                    keccak256(account_before_tx.address),
+                                    None,
+                                )
+                                .unwrap();
+                            }
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap();
             Ok(())
         }
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
