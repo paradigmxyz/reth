@@ -13,8 +13,7 @@ use reth_network::{
     NetworkConfig, NetworkManager,
 };
 use reth_primitives::{
-    constants::EIP1559_INITIAL_BASE_FEE, ChainSpec, ForkKind, Hardfork, Header, PeerId,
-    SealedHeader, H256,
+    constants::EIP1559_INITIAL_BASE_FEE, ChainSpec, Hardfork, Header, PeerId, SealedHeader, H256,
 };
 use reth_provider::test_utils::NoopProvider;
 use reth_staged_sync::{
@@ -76,7 +75,7 @@ async fn sync_from_clique_geth() {
         let hardforks = chainspec.hardforks();
 
         // set initial base fee depending on eip-1559
-        if let Some(ForkKind::Block(0)) = hardforks.get(&Hardfork::London) {
+        if let Some(0) = hardforks.get(&Hardfork::London) {
             local_genesis_header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
         }
 
@@ -231,7 +230,7 @@ async fn geth_clique_keepalive() {
         let hardforks = chainspec.hardforks();
 
         // set initial base fee depending on eip-1559
-        if let Some(ForkKind::Block(0)) = hardforks.get(&Hardfork::London) {
+        if let Some(0) = hardforks.get(&Hardfork::London) {
             local_genesis_header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
         }
 
