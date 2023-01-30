@@ -16,8 +16,9 @@ use tracing::*;
 
 const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistoryStage");
 
-/// Stage is indexing history the account changesets generated in [`ExecutionStage`]
-/// For more information on index sharding please look at [`tables::AccountHistory`]
+/// Stage is indexing history the account changesets generated in
+/// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
+/// on index sharding take a look at [`tables::AccountHistory`]
 #[derive(Debug)]
 pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
