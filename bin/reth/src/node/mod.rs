@@ -204,8 +204,8 @@ impl Command {
     ) -> eyre::Result<Pipeline<Env<WriteMap>, NetworkHandle>> {
         let fetch_client = Arc::new(network.fetch_client().await?);
 
-        let header_downloader = self.spawn_headers_downloader(&config, &consensus, &fetch_client);
-        let body_downloader = self.spawn_bodies_downloader(&config, &consensus, &fetch_client, &db);
+        let header_downloader = self.spawn_headers_downloader(config, consensus, &fetch_client);
+        let body_downloader = self.spawn_bodies_downloader(config, consensus, &fetch_client, db);
         let stage_conf = &config.stages;
 
         let pipeline = Pipeline::builder()
