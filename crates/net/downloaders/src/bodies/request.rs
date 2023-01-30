@@ -89,7 +89,7 @@ where
         self.submit_request(self.next_request().expect("existing hashes to resubmit"));
     }
 
-    /// Retrive header hashes for the next request.
+    /// Retrieve header hashes for the next request.
     fn next_request(&self) -> Option<Vec<H256>> {
         let mut hashes = self.headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).peekable();
         if hashes.peek().is_some() {
