@@ -9,7 +9,7 @@ use reth_downloaders::{
 };
 use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
 use reth_network::{
-    test_utils::{unused_tcp_udp, NetworkEventStream, GETH_TIMEOUT},
+    test_utils::{unused_port, unused_tcp_udp, NetworkEventStream, GETH_TIMEOUT},
     NetworkConfig, NetworkManager,
 };
 use reth_primitives::{
@@ -45,7 +45,8 @@ async fn sync_from_clique_geth() {
         // this creates a funded geth
         let clique_geth = Geth::new()
             .chain_id(chain_id)
-            .data_dir(dir_path.to_str().unwrap().into());
+            .p2p_port(unused_port())
+            .data_dir(dir_path.to_str().unwrap());
 
         // build the funded geth
         let (mut clique, provider) = CliqueGethInstance::new(clique_geth, None).await;
@@ -60,13 +61,14 @@ async fn sync_from_clique_geth() {
         clique.prevent_blocking().await;
 
         // get geth to start producing blocks - use a blank password
-        provider.enable_mining(clique.0.clique_private_key(), "".into()).await.unwrap();
+        let clique_private_key = clique.0.clique_private_key().clone().expect("clique should be configured with a private key");
+        provider.enable_mining(clique_private_key, "".into()).await.unwrap();
         tracing::info!("enabled block production");
 
         // === check that we have the same genesis hash ===
 
         // get the chainspec from the genesis we configured for geth
-        let mut chainspec: ChainSpec = clique.0.genesis().clone().into();
+        let mut chainspec: ChainSpec = clique.0.genesis().clone().expect("clique should be configured with a genesis").into();
         let remote_genesis = SealedHeader::from(provider.remote_genesis_block().await.unwrap());
 
         let mut local_genesis_header: Header = chainspec.genesis().clone().into();
@@ -199,7 +201,8 @@ async fn geth_clique_keepalive() {
         // this creates a funded geth
         let clique_geth = Geth::new()
             .chain_id(chain_id)
-            .data_dir(dir_path.to_str().unwrap().into());
+            .p2p_port(unused_port())
+            .data_dir(dir_path.to_str().unwrap());
 
         // build the funded geth
         let (mut clique, provider) = CliqueGethInstance::new(clique_geth, None).await;
@@ -214,12 +217,13 @@ async fn geth_clique_keepalive() {
         clique.prevent_blocking().await;
 
         // get geth to start producing blocks - use a blank password
-        provider.enable_mining(clique.0.clique_private_key(), "".into()).await.unwrap();
+        let clique_private_key = clique.0.clique_private_key().clone().expect("clique should be configured with a private key");
+        provider.enable_mining(clique_private_key, "".into()).await.unwrap();
 
         // === check that we have the same genesis hash ===
 
         // get the chainspec from the genesis we configured for geth
-        let mut chainspec: ChainSpec = clique.0.genesis().clone().into();
+        let mut chainspec: ChainSpec = clique.0.genesis().clone().expect("clique should be configured with a genesis").into();
         let remote_genesis = SealedHeader::from(provider.remote_genesis_block().await.unwrap());
 
         let mut local_genesis_header = Header::from(chainspec.genesis().clone());
@@ -251,7 +255,7 @@ async fn geth_clique_keepalive() {
         tracing::info!("generated transactions for blocks");
 
         // finally send the txs to geth
-        provider.send_requests(txs).await;
+        provider.send_requests(txs).await.unwrap();
 
         let block = provider.get_block_number().await.unwrap();
         assert!(block > U64::zero());

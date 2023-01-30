@@ -51,6 +51,8 @@ impl CliqueGethInstance {
     ) -> (Self, SignerMiddleware<Provider<Ws>, Wallet<SigningKey>>) {
         let signer = signer.unwrap_or_else(|| SigningKey::random(&mut rand::thread_rng()));
 
+        let geth = geth.set_clique_private_key(signer.clone());
+
         // spawn the geth instance
         let instance = geth.spawn();
 
