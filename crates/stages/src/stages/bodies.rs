@@ -711,7 +711,7 @@ mod tests {
                         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
 
                         let mut canonical_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
-                        let walker = canonical_cursor.walk_range(range.start, range.end)?;
+                        let walker = canonical_cursor.walk_range(range.start..range.end)?;
 
                         let mut headers = Vec::default();
                         for entry in walker {

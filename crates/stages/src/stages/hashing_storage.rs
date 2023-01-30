@@ -99,8 +99,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // changed.
             tx.cursor_read::<tables::StorageChangeSet>()?
                 .walk_range(
-                    (from_transition, Address::zero()).into(),
-                    (to_transition, Address::zero()).into(),
+                    (from_transition, Address::zero()).into()..
+                        (to_transition, Address::zero()).into(),
                 )?
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
@@ -173,8 +173,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // Aggregate all transition changesets and make list of accounts that have been changed.
         tx.cursor_read::<tables::StorageChangeSet>()?
             .walk_range(
-                (from_transition_rev, Address::zero()).into(),
-                (to_transition_rev, Address::zero()).into(),
+                (from_transition_rev, Address::zero()).into()..
+                    (to_transition_rev, Address::zero()).into(),
             )?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()

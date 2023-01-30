@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Range};
 
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
@@ -42,8 +42,7 @@ pub trait DbCursorRO<'tx, T: Table> {
     /// less than `end_key`
     fn walk_range<'cursor>(
         &'cursor mut self,
-        start_key: T::Key,
-        end_key: T::Key,
+        range: Range<T::Key>,
     ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;

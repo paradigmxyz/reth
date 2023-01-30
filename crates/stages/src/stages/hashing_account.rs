@@ -92,7 +92,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
             tx.cursor_read::<tables::AccountChangeSet>()?
-                .walk_range(from_transition, to_transition)?
+                .walk_range(from_transition..to_transition)?
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 // fold all account to one set of changed accounts
@@ -135,7 +135,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         // Aggregate all transition changesets and and make list of account that have been changed.
         tx.cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(from_transition_rev, to_transition_rev)?
+            .walk_range(from_transition_rev..to_transition_rev)?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .rev()
