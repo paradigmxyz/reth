@@ -297,7 +297,7 @@ impl NetworkConfigBuilder {
         let status = Status::spec_builder(&chain_spec, &head).build();
 
         // set a fork filter based on the chain spec and head
-        let fork_filter = chain_spec.fork_filter(head.number.into());
+        let fork_filter = chain_spec.fork_filter(head.number);
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =

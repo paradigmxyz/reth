@@ -1,9 +1,8 @@
 //! ALl functions for verification of block
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
-    BlockNumber, ChainSpec, ForkDiscriminant, Hardfork, Header, SealedBlock, SealedHeader,
-    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT,
-    U256,
+    BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, Transaction,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{AccountProvider, HeaderProvider};
 use std::{
@@ -40,21 +39,14 @@ pub fn validate_header_standalone(
     }
 
     // Check if base fee is set.
-    if chain_spec.fork_active(Hardfork::London, header.number.into()) &&
-        header.base_fee_per_gas.is_none()
+    if chain_spec.fork_active(Hardfork::London, header.number) && header.base_fee_per_gas.is_none()
     {
         return Err(Error::BaseFeeMissing)
     }
 
     // EIP-3675: Upgrade consensus to Proof-of-Stake:
     // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if chain_spec.fork_active(
-        Hardfork::Paris,
-        ForkDiscriminant::ttd(
-            chain_spec.terminal_total_difficulty().unwrap_or_default(),
-            Some(header.number),
-        ),
-    ) {
+    if Some(header.number) >= chain_spec.paris_status().block_number() {
         if header.difficulty != U256::ZERO {
             return Err(Error::TheMergeDifficultyIsNotZero)
         }
@@ -86,7 +78,7 @@ pub fn validate_transaction_regarding_header(
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
-            if chain_spec.fork_active(Hardfork::SpuriousDragon, at_block_number.into()) &&
+            if chain_spec.fork_active(Hardfork::SpuriousDragon, at_block_number) &&
                 chain_id.is_some()
             {
                 return Err(Error::TransactionOldLegacyChainId)
@@ -95,7 +87,7 @@ pub fn validate_transaction_regarding_header(
         }
         Transaction::Eip2930(TxEip2930 { chain_id, .. }) => {
             // EIP-2930: Optional access lists: https://eips.ethereum.org/EIPS/eip-2930 (New transaction type)
-            if !chain_spec.fork_active(Hardfork::Berlin, at_block_number.into()) {
+            if !chain_spec.fork_active(Hardfork::Berlin, at_block_number) {
                 return Err(Error::TransactionEip2930Disabled)
             }
             Some(*chain_id)
@@ -107,7 +99,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
-            if !chain_spec.fork_active(Hardfork::Berlin, at_block_number.into()) {
+            if !chain_spec.fork_active(Hardfork::Berlin, at_block_number) {
                 return Err(Error::TransactionEip1559Disabled)
             }
 
@@ -267,13 +259,7 @@ pub fn validate_header_regarding_parent(
     }
 
     // difficulty check is done by consensus.
-    if !chain_spec.fork_active(
-        Hardfork::Paris,
-        ForkDiscriminant::ttd(
-            chain_spec.terminal_total_difficulty().unwrap_or_default(),
-            Some(child.number),
-        ),
-    ) {
+    if chain_spec.paris_status().block_number() > Some(child.number) {
         // TODO how this needs to be checked? As ice age did increment it by some formula
     }
 
@@ -301,7 +287,7 @@ pub fn validate_header_regarding_parent(
     }
 
     // EIP-1559 check base fee
-    if chain_spec.fork_active(Hardfork::London, child.number.into()) {
+    if chain_spec.fork_active(Hardfork::London, child.number) {
         let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
 
         let expected_base_fee = if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
