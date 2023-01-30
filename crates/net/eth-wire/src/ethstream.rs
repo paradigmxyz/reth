@@ -8,6 +8,7 @@ use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::ForkFilter;
 use reth_rlp::{Decodable, Encodable};
+use reth_net_common::bandwidth_meter::MeteredStream;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -250,6 +251,13 @@ where
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_close(cx).map_err(Into::into)
+    }
+}
+
+impl<S, M> AsRef<MeteredStream<M>> for EthStream<S>
+where S: AsRef<MeteredStream<M>> {
+    fn as_ref(&self) -> &MeteredStream<M> {
+        self.inner().as_ref()
     }
 }
 

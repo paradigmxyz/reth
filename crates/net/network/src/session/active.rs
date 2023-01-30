@@ -33,7 +33,7 @@ use std::{
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
-    time::Interval,
+    time::{Interval, interval},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, trace, warn};
@@ -75,6 +75,35 @@ pub(crate) struct ActiveSession {
     pub(crate) request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
     pub(crate) timeout_interval: Interval,
+    /// Tracks ingress/egress throughput (bytes/s)
+    pub(crate) throughput_meter: SessionThroughputMeter,
+}
+
+/// Responsible for tracking ingress/egress throughput for a session,
+/// on the given interval
+pub(crate) struct SessionThroughputMeter {
+    /// Number of bytes received by end of last throughput recording period
+    prev_ingress: AtomicU64,
+
+    ingress_throughput: AtomicU64,
+    /// Number of bytes sent by end of last throughput recording period
+    prev_egress: AtomicU64,
+
+    egress_throughput: AtomicU64,
+    /// Interval over which throughput is evaluated
+    throughput_interval: Interval,
+}
+
+impl SessionThroughputMeter {
+    fn new(period: Duration) -> Self {
+        Self {
+            prev_ingress: AtomicU64::new(0),
+            ingress_throughput: AtomicU64::new(0),
+            prev_egress: AtomicU64::new(0),
+            egress_throughput: AtomicU64::new(0),
+            throughput_interval: interval(period),
+        }
+    }
 }
 
 /// Constants for timeout updating
@@ -362,6 +391,16 @@ impl ActiveSession {
         self.request_timeout.store(request_timeout.as_millis() as u64, Ordering::Relaxed);
         self.timeout_interval = tokio::time::interval(request_timeout);
     }
+
+    /// Returns the current measurement of ingress throughput
+    pub fn ingress_throughput(&self) -> f64 {
+        f64::from_bits(self.throughput_meter.ingress_throughput.load(Ordering::Relaxed))
+    }
+
+    /// Returns the current measurement of ingress throughput
+    pub fn egress_throughput(&self) -> f64 {
+        f64::from_bits(self.throughput_meter.egress_throughput.load(Ordering::Relaxed))
+    }
 }
 
 /// Calculates a new timeout using an updated estimation of the RTT
@@ -499,6 +538,25 @@ impl Future for ActiveSession {
                         }
                     }
                 }
+            }
+
+            if this.throughput_meter.throughput_interval.poll_tick(cx).is_ready() {
+                let session_meter = this.conn.as_ref().get_bandwidth_meter();
+
+                let ingress_count = session_meter.total_inbound();
+                let egress_count = session_meter.total_outbound();
+
+                let ingress_delta = ingress_count - this.throughput_meter.prev_ingress.swap(ingress_count, Ordering::Relaxed);
+                let egress_delta = egress_count - this.throughput_meter.prev_egress.swap(egress_count, Ordering::Relaxed);
+
+                this.throughput_meter.ingress_throughput.store(
+                    f64::to_bits((ingress_delta as f64) / this.throughput_meter.throughput_interval.period().as_secs_f64()),
+                    Ordering::Relaxed,
+                );
+                this.throughput_meter.egress_throughput.store(
+                    f64::to_bits((egress_delta as f64) / this.throughput_meter.throughput_interval.period().as_secs_f64()),
+                    Ordering::Relaxed,
+                );
             }
 
             if !progress {
@@ -688,6 +746,9 @@ mod tests {
                         request_timeout: Arc::new(AtomicU64::new(
                             INITIAL_REQUEST_TIMEOUT.as_millis() as u64,
                         )),
+                        throughput_meter: SessionThroughputMeter::new(
+                            Duration::from_secs(1),
+                        ),
                     }
                 }
                 _ => {

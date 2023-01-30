@@ -10,6 +10,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use metrics::counter;
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
+use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -490,6 +491,13 @@ where
         ready!(self.as_mut().poll_flush(cx))?;
 
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<S, M> AsRef<MeteredStream<M>> for P2PStream<S>
+where S: AsRef<MeteredStream<M>> {
+    fn as_ref(&self) -> &MeteredStream<M> {
+        self.inner.as_ref()
     }
 }
 
