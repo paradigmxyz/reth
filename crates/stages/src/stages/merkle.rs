@@ -49,8 +49,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let stage_progress = input.stage_progress.unwrap_or_default();
         let previous_stage_progress = input.previous_stage_progress();
 
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+        let from_transition = tx.get_block_transition(stage_progress)? + 1;
+        let to_transition = tx.get_block_transition(previous_stage_progress)? + 1;
 
         let block_root = tx.get_header_by_num(previous_stage_progress)?.state_root;
 
@@ -70,7 +70,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             let current_root = tx.get_header_by_num(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
             loader
-                .update_root(tx, current_root, from_transition + 1, to_transition + 1)
+                .update_root(tx, current_root, from_transition, to_transition)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
@@ -159,7 +159,6 @@ mod tests {
 
         // Set up the runner
         let mut runner = MerkleTestRunner::default();
-        // set low threshold so we hash the whole storage
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -229,7 +228,7 @@ mod tests {
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
-            let (mut transition_id, mut tx_id) = (1, 0);
+            let (mut transition_id, mut tx_id) = (0, 0);
 
             let mut storages: BTreeMap<Address, BTreeMap<H256, U256>> = BTreeMap::new();
 
@@ -244,36 +243,39 @@ mod tests {
                     };
 
                     progress.body.iter().try_for_each(|transaction| {
+                        tx_id += 1;
+                        transition_id += 1;
                         tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
                         tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
                         tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
-                        tx_id += 1;
 
                         // seed account changeset
-                        for (addr, prev_acc) in &mut accounts {
-                            let acc_before_tx =
-                                AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
+                        let (addr, prev_acc) = accounts
+                            .iter_mut()
+                            .take(rand::random::<usize>() % n_accounts as usize)
+                            .next()
+                            .unwrap();
+                        let acc_before_tx =
+                            AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
 
-                            tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
+                        tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
 
-                            prev_acc.nonce += 1;
-                            prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
+                        prev_acc.nonce += 1;
+                        prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
 
-                            let new_entry = StorageEntry {
-                                key: keccak256([rand::random::<u8>()]),
-                                value: U256::from(rand::random::<u8>() % 30 + 1),
-                            };
-                            let storage = storages.entry(*addr).or_default();
-                            let old_value = storage.entry(new_entry.key).or_default();
+                        let new_entry = StorageEntry {
+                            key: keccak256([rand::random::<u8>()]),
+                            value: U256::from(rand::random::<u8>() % 30 + 1),
+                        };
+                        let storage = storages.entry(*addr).or_default();
+                        let old_value = storage.entry(new_entry.key).or_default();
 
-                            tx.put::<tables::StorageChangeSet>(
-                                (transition_id, *addr).into(),
-                                StorageEntry { key: new_entry.key, value: *old_value },
-                            )?;
+                        tx.put::<tables::StorageChangeSet>(
+                            (transition_id, *addr).into(),
+                            StorageEntry { key: new_entry.key, value: *old_value },
+                        )?;
 
-                            *old_value = new_entry.value;
-                        }
-                        transition_id += 1;
+                        *old_value = new_entry.value;
                         Ok(())
                     })?;
 

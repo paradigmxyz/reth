@@ -212,7 +212,7 @@ impl DBTrieLoader {
         while let Some((hashed_address, account)) = walker.next().transpose()? {
             let value = EthAccount::from_with_root(
                 account,
-                self.calculate_storage_root(tx, hashed_address)?,
+                dbg!(self.calculate_storage_root(tx, hashed_address)?),
             );
 
             let mut out = Vec::new();
@@ -240,7 +240,10 @@ impl DBTrieLoader {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
         let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
 
-        while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
+        while let Some((_, entry @ StorageEntry { key: storage_key, value })) =
+            walker.next().transpose()?
+        {
+            eprintln!("{:?}", entry);
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(storage_key.as_bytes().to_vec(), out)
@@ -283,7 +286,12 @@ impl DBTrieLoader {
                 if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
                     let value = EthAccount::from_with_root(
                         account,
-                        self.update_storage_root(tx, storage_root, address, changed_storages)?,
+                        dbg!(self.update_storage_root(
+                            tx,
+                            storage_root,
+                            address,
+                            changed_storages
+                        )?),
                     );
 
                     let mut out = Vec::new();
@@ -315,9 +323,10 @@ impl DBTrieLoader {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         for key in changed_storages {
-            if let Some(StorageEntry { value, .. }) =
+            if let Some(entry @ StorageEntry { value, .. }) =
                 storage_cursor.seek_by_key_subkey(address, key)?
             {
+                eprintln!("{:?}", entry);
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
                 trie.insert(key.as_bytes().to_vec(), out)
@@ -363,7 +372,8 @@ impl DBTrieLoader {
             account_changes.entry(keccak256(address)).or_default().insert(keccak256(key));
         }
 
-        account_changes.iter().map(|(_, v)| v.len()).sum::<usize>();
+        dbg!(account_changes.iter().map(|(_, v)| v.len()).sum::<usize>());
+        dbg!(account_changes.len());
         Ok(account_changes)
     }
 }
