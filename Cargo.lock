@@ -1607,7 +1607,7 @@ dependencies = [
 [[package]]
 name = "ethers-contract"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#e9a808e84f0954b6f3639fe717677ff15151571c"
+source = "git+https://github.com/gakonst/ethers-rs#9ebc5b378c672e03cf2cc35cc7a1aa52d326dfae"
 dependencies = [
  "ethers-core",
  "ethers-providers",
@@ -1623,7 +1623,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#e9a808e84f0954b6f3639fe717677ff15151571c"
+source = "git+https://github.com/gakonst/ethers-rs#9ebc5b378c672e03cf2cc35cc7a1aa52d326dfae"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1632,6 +1632,7 @@ dependencies = [
  "elliptic-curve",
  "ethabi",
  "generic-array 0.14.6",
+ "getrandom 0.2.8",
  "hex",
  "k256",
  "num_enum",
@@ -1653,7 +1654,7 @@ dependencies = [
 [[package]]
 name = "ethers-etherscan"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#e9a808e84f0954b6f3639fe717677ff15151571c"
+source = "git+https://github.com/gakonst/ethers-rs#9ebc5b378c672e03cf2cc35cc7a1aa52d326dfae"
 dependencies = [
  "ethers-core",
  "getrandom 0.2.8",
@@ -1669,7 +1670,7 @@ dependencies = [
 [[package]]
 name = "ethers-middleware"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#e9a808e84f0954b6f3639fe717677ff15151571c"
+source = "git+https://github.com/gakonst/ethers-rs#9ebc5b378c672e03cf2cc35cc7a1aa52d326dfae"
 dependencies = [
  "async-trait",
  "auto_impl 0.5.0",
@@ -1694,7 +1695,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#e9a808e84f0954b6f3639fe717677ff15151571c"
+source = "git+https://github.com/gakonst/ethers-rs#9ebc5b378c672e03cf2cc35cc7a1aa52d326dfae"
 dependencies = [
  "async-trait",
  "auto_impl 1.0.1",
@@ -1731,7 +1732,7 @@ dependencies = [
 [[package]]
 name = "ethers-signers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#e9a808e84f0954b6f3639fe717677ff15151571c"
+source = "git+https://github.com/gakonst/ethers-rs#9ebc5b378c672e03cf2cc35cc7a1aa52d326dfae"
 dependencies = [
  "async-trait",
  "coins-bip32",
@@ -3181,18 +3182,18 @@ dependencies = [
 
 [[package]]
 name = "num_enum"
-version = "0.5.7"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf5395665662ef45796a4ff5486c5d41d29e0c09640af4c5f17fd94ee2c119c9"
+checksum = "8d829733185c1ca374f17e52b762f24f535ec625d2cc1f070e34c8a9068f341b"
 dependencies = [
  "num_enum_derive",
 ]
 
 [[package]]
 name = "num_enum_derive"
-version = "0.5.7"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b0498641e53dd6ac1a4f22547548caa6864cc4933784319cd1775271c5a46ce"
+checksum = "2be1598bf1c313dcdd12092e3f1920f463462525a21b7b4e11b4168353d0123e"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2 1.0.50",
@@ -3911,11 +3912,11 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.13"
+version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68cc60575865c7831548863cc02356512e3f1dc2f3f82cb837d7fc4cc8f3c97c"
+checksum = "21eed90ec8570952d53b772ecf8f206aa1ec9a3d76b2521c56c42973f2d91ee9"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.0",
  "bytes",
  "encoding_rs",
  "futures-core",
