@@ -14,7 +14,7 @@ use reth_primitives::{Address, TransitionId, H256};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
-const INDEX_STORAGE_HISTORY: StageId = StageId("IndexStorageHistoryStage");
+const INDEX_STORAGE_HISTORY: StageId = StageId("IndexStorageHistory");
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information

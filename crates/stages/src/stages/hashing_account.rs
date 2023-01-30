@@ -15,7 +15,7 @@ use std::{
 use tracing::*;
 
 /// The [`StageId`] of the account hashing stage.
-pub const ACCOUNT_HASHING: StageId = StageId("AccountHashingStage");
+pub const ACCOUNT_HASHING: StageId = StageId("AccountHashing");
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
