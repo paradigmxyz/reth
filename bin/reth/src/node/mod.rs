@@ -103,7 +103,7 @@ impl Command {
 
         self.start_metrics_endpoint()?;
 
-        let genesis = init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(db.clone(), self.chain.clone())?;
 
         let consensus = self.init_consensus()?;
         info!(target: "reth::cli", "Consensus engine initialized");
