@@ -4124,7 +4124,6 @@ name = "reth-downloaders"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
- "async-trait",
  "futures",
  "futures-util",
  "metrics",

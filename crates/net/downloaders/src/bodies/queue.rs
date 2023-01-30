@@ -17,7 +17,7 @@ use std::{
 /// The wrapper around [FuturesUnordered] that keeps information
 /// about the blocks currently being requested.
 #[derive(Debug)]
-pub(crate) struct BodiesRequestQueue<B> {
+pub(crate) struct BodiesRequestQueue<B: BodiesClient> {
     /// Inner body request queue.
     inner: FuturesUnordered<BodiesRequestFuture<B>>,
     /// The block numbers being requested.

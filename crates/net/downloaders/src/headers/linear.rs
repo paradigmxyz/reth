@@ -44,7 +44,7 @@ pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-pub struct LinearDownloader<H> {
+pub struct LinearDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
     consensus: Arc<dyn Consensus>,
     /// Client used to download headers.
@@ -73,9 +73,9 @@ pub struct LinearDownloader<H> {
     ///
     /// This will give us the block number of the `sync_target`, after which we can send multiple
     /// requests at a time.
-    sync_target_request: Option<HeadersRequestFuture>,
+    sync_target_request: Option<HeadersRequestFuture<H::Output>>,
     /// requests in progress
-    in_progress_queue: FuturesUnordered<HeadersRequestFuture>,
+    in_progress_queue: FuturesUnordered<HeadersRequestFuture<H::Output>>,
     /// Buffered, unvalidated responses
     buffered_responses: BinaryHeap<OrderedHeadersResponse>,
     /// Buffered, _sorted_ and validated headers ready to be returned.
@@ -467,11 +467,15 @@ where
         self.in_progress_queue.push(self.request_fut(request, priority));
     }
 
-    fn request_fut(&self, request: HeadersRequest, priority: Priority) -> HeadersRequestFuture {
+    fn request_fut(
+        &self,
+        request: HeadersRequest,
+        priority: Priority,
+    ) -> HeadersRequestFuture<H::Output> {
         let client = Arc::clone(&self.client);
         HeadersRequestFuture {
             request: Some(request.clone()),
-            fut: Box::pin(async move { client.get_headers_with_priority(request, priority).await }),
+            fut: client.get_headers_with_priority(request, priority),
         }
     }
 
@@ -689,28 +693,23 @@ where
     }
 }
 
-/// SAFETY: we need to ensure `LinearDownloader` is `Sync` because the of the [HeaderDownloader]
-/// trait. While [HeadersClient] is also `Sync`, the [HeadersClient::get_headers] future does not
-/// enforce `Sync` (async_trait). The future itself does not use any interior mutability whatsoever:
-/// All the mutations are performed through an exclusive reference on `LinearDownloader` when
-/// the Stream is polled. This means it suffices that `LinearDownloader` is Sync:
-unsafe impl<H> Sync for LinearDownloader<H> where H: HeadersClient {}
-
-type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
-
 /// A future that returns a list of [`BlockHeaders`] on success.
-struct HeadersRequestFuture {
+struct HeadersRequestFuture<F> {
     request: Option<HeadersRequest>,
-    fut: HeadersFut,
+    fut: F,
 }
 
-impl Future for HeadersRequestFuture {
+impl<F> Future for HeadersRequestFuture<F>
+where
+    F: Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send + Unpin,
+{
     type Output = HeadersRequestOutcome;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         let outcome = ready!(this.fut.poll_unpin(cx));
         let request = this.request.take().unwrap();
+
         Poll::Ready(HeadersRequestOutcome { request, outcome })
     }
 }

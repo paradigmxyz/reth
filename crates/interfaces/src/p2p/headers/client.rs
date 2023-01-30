@@ -1,8 +1,8 @@
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
-use async_trait::async_trait;
+use futures::Future;
 pub use reth_eth_wire::BlockHeaders;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
-use std::fmt::Debug;
+use std::{fmt::Debug, pin::Pin};
 
 /// The header request struct to be sent to connected peers, which
 /// will proceed to ask them to stream the requested headers to us.
@@ -16,23 +16,28 @@ pub struct HeadersRequest {
     pub direction: HeadersDirection,
 }
 
+/// The headers future type
+pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send + Sync>>;
+
 /// The block headers downloader client
-#[async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
+    /// The headers type
+    type Output: Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send + Unpin;
+
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
-    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
-        self.get_headers_with_priority(request, Priority::Normal).await
+    fn get_headers(&self, request: HeadersRequest) -> Self::Output {
+        self.get_headers_with_priority(request, Priority::Normal)
     }
 
     /// Sends the header request to the p2p network with priroity set and returns the header
     /// response received from a peer.
-    async fn get_headers_with_priority(
+    fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
         priority: Priority,
-    ) -> PeerRequestResult<BlockHeaders>;
+    ) -> Self::Output;
 }
 
 /// The status updater for updating the status of the p2p node

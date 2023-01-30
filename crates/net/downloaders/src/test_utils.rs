@@ -1,10 +1,10 @@
 //! Test helper impls
 
-use async_trait::async_trait;
 use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     p2p::{
-        bodies::client::BodiesClient, download::DownloadClient, error::PeerRequestResult,
+        bodies::client::{BodiesClient, BodiesFut},
+        download::DownloadClient,
         priority::Priority,
     },
     test_utils::generators::random_block_range,
@@ -13,7 +13,10 @@ use reth_primitives::{PeerId, SealedHeader, H256};
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 use tokio::sync::Mutex;
@@ -47,7 +50,7 @@ pub(crate) fn generate_bodies(
 /// A [BodiesClient] for testing.
 #[derive(Debug, Default)]
 pub(crate) struct TestBodiesClient {
-    bodies: Mutex<HashMap<H256, BlockBody>>,
+    bodies: Arc<Mutex<HashMap<H256, BlockBody>>>,
     should_delay: bool,
     max_batch_size: Option<usize>,
     times_requested: AtomicU64,
@@ -55,7 +58,7 @@ pub(crate) struct TestBodiesClient {
 
 impl TestBodiesClient {
     pub(crate) fn with_bodies(mut self, bodies: HashMap<H256, BlockBody>) -> Self {
-        self.bodies = Mutex::new(bodies);
+        self.bodies = Arc::new(Mutex::new(bodies));
         self
     }
 
@@ -84,30 +87,39 @@ impl DownloadClient for TestBodiesClient {
     }
 }
 
-#[async_trait]
 impl BodiesClient for TestBodiesClient {
-    async fn get_block_bodies_with_priority(
+    type Output = BodiesFut;
+
+    fn get_block_bodies_with_priority(
         &self,
         hashes: Vec<H256>,
         _priority: Priority,
-    ) -> PeerRequestResult<Vec<BlockBody>> {
-        if self.should_delay {
-            tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100)).await;
-        }
+    ) -> Self::Output {
+        let should_delay = self.should_delay;
+        let bodies = self.bodies.clone();
+        let max_batch_size = self.max_batch_size.clone();
+
         self.times_requested.fetch_add(1, Ordering::Relaxed);
-        let bodies = &mut *self.bodies.lock().await;
-        Ok((
-            PeerId::default(),
-            hashes
-                .into_iter()
-                .take(self.max_batch_size.unwrap_or(usize::MAX))
-                .map(|hash| {
-                    bodies
-                        .remove(&hash)
-                        .expect("Downloader asked for a block it should not ask for")
-                })
-                .collect(),
-        )
-            .into())
+
+        Box::pin(async move {
+            if should_delay {
+                tokio::time::sleep(Duration::from_millis(hashes[0].to_low_u64_be() % 100)).await;
+            }
+
+            let bodies = &mut *bodies.lock().await;
+            Ok((
+                PeerId::default(),
+                hashes
+                    .into_iter()
+                    .take(max_batch_size.unwrap_or(usize::MAX))
+                    .map(|hash| {
+                        bodies
+                            .remove(&hash)
+                            .expect("Downloader asked for a block it should not ask for")
+                    })
+                    .collect(),
+            )
+                .into())
+        })
     }
 }
