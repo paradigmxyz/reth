@@ -1,12 +1,12 @@
 //! A client implementation that can interact with the network and download data.
 
-use crate::{fetch::DownloadRequest, peers::PeersHandle};
-use reth_eth_wire::{BlockBody, BlockHeaders};
+use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse, peers::PeersHandle};
+use futures::{future, FutureExt};
 use reth_interfaces::p2p::{
-    bodies::client::BodiesClient,
+    bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
-    error::PeerRequestResult,
-    headers::client::{HeadersClient, HeadersRequest},
+    error::RequestError,
+    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
@@ -15,7 +15,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::{
+    mpsc::UnboundedSender,
+    oneshot::{self},
+};
 
 /// Front-end API for fetching data from the network.
 ///
@@ -75,30 +78,46 @@ impl DownloadClient for FetchClient {
     }
 }
 
-#[async_trait::async_trait]
 impl HeadersClient for FetchClient {
+    type Output = HeadersFut;
+
     /// Sends a `GetBlockHeaders` request to an available peer.
-    async fn get_headers_with_priority(
+    fn get_headers_with_priority(
         &self,
         request: HeadersRequest,
         priority: Priority,
-    ) -> PeerRequestResult<BlockHeaders> {
+    ) -> Self::Output {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockHeaders { request, response, priority })?;
-        rx.await?.map(WithPeerId::transform)
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockHeaders { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx).map(|r| r.map(WithPeerId::transform)))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
     }
 }
 
-#[async_trait::async_trait]
 impl BodiesClient for FetchClient {
+    type Output = BodiesFut;
+
     /// Sends a `GetBlockBodies` request to an available peer.
-    async fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority(
         &self,
         request: Vec<H256>,
         priority: Priority,
-    ) -> PeerRequestResult<Vec<BlockBody>> {
+    ) -> Self::Output {
         let (response, rx) = oneshot::channel();
-        self.request_tx.send(DownloadRequest::GetBlockBodies { request, response, priority })?;
-        rx.await?
+        if self
+            .request_tx
+            .send(DownloadRequest::GetBlockBodies { request, response, priority })
+            .is_ok()
+        {
+            Box::pin(FlattenedResponse::from(rx))
+        } else {
+            Box::pin(future::err(RequestError::ChannelClosed))
+        }
     }
 }

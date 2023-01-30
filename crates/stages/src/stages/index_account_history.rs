@@ -14,10 +14,11 @@ use reth_primitives::{Address, TransitionId};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
-const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistoryStage");
+const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistory");
 
-/// Account hashing stage hashes plain account.
-/// This is preparation before generating intermediate hashes and calculating Merkle tree root.
+/// Stage is indexing history the account changesets generated in
+/// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
+/// on index sharding take a look at [`tables::AccountHistory`]
 #[derive(Debug)]
 pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control

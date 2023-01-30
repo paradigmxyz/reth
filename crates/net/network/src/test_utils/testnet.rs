@@ -338,8 +338,9 @@ impl NetworkEventStream {
         None
     }
 
-    /// Ensures that the first two events are a [`PeerAdded`] and [`SessionEstablished`],
-    /// returning the [`PeerId`] of the established session.
+    /// Ensures that the first two events are a [`NetworkEvent::PeerAdded`] and
+    /// [`NetworkEvent::SessionEstablished`], returning the [`PeerId`] of the established
+    /// session.
     pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
             Some(NetworkEvent::PeerAdded(peer_id)) => peer_id,

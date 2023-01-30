@@ -14,8 +14,7 @@ use url::{Host, Url};
 
 /// Represents a ENR in discv4.
 ///
-/// Note: this is only an excerpt of the [ENR](enr::Enr) datastructure which is sent in Neighbours
-/// message.
+/// Note: this is only an excerpt of the [`NodeRecord`] data structure.
 #[derive(
     Clone,
     Copy,

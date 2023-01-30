@@ -1,4 +1,4 @@
-use crate::stages::{bodies::BODIES, headers::HEADERS};
+use crate::stages::{BODIES, HEADERS};
 use metrics::absolute_counter;
 use reth_db::{
     tables::SyncStage,
@@ -11,7 +11,7 @@ use std::fmt::Display;
 /// The ID of a stage.
 ///
 /// Each stage ID must be unique.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct StageId(pub &'static str);
 
 impl Display for StageId {

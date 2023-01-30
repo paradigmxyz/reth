@@ -89,7 +89,7 @@ mod best;
 mod events;
 mod listener;
 mod parked;
-mod pending;
+pub(crate) mod pending;
 pub(crate) mod size;
 pub(crate) mod state;
 mod transaction;
@@ -472,7 +472,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 }
 
-/// Contains all state changes after a [`NewBlockEvent`] was processed
+/// Contains all state changes after a [`OnNewBlockEvent`] was processed
 #[derive(Debug)]
 pub(crate) struct OnNewBlockOutcome {
     /// Hash of the block.

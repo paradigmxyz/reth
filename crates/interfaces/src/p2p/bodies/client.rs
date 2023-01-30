@@ -1,21 +1,25 @@
+use std::pin::Pin;
+
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
-use async_trait::async_trait;
+use futures::Future;
 use reth_eth_wire::BlockBody;
 use reth_primitives::H256;
 
+/// The bodies future type
+pub type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send + Sync>>;
+
 /// A client capable of downloading block bodies.
-#[async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: DownloadClient {
+    /// The bodies type
+    type Output: Future<Output = PeerRequestResult<Vec<BlockBody>>> + Sync + Send + Unpin;
+
     /// Fetches the block body for the requested block.
-    async fn get_block_bodies(&self, hashes: Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> {
-        self.get_block_bodies_with_priority(hashes, Priority::Normal).await
+    fn get_block_bodies(&self, hashes: Vec<H256>) -> Self::Output {
+        self.get_block_bodies_with_priority(hashes, Priority::Normal)
     }
 
     /// Fetches the block body for the requested block with priority
-    async fn get_block_bodies_with_priority(
-        &self,
-        hashes: Vec<H256>,
-        priority: Priority,
-    ) -> PeerRequestResult<Vec<BlockBody>>;
+    fn get_block_bodies_with_priority(&self, hashes: Vec<H256>, priority: Priority)
+        -> Self::Output;
 }

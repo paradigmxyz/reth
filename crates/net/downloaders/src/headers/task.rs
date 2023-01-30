@@ -48,8 +48,6 @@ impl TaskDownloader {
     ///    let downloader = LinearDownloader::<H>::builder().build(
     ///        consensus,
     ///        client,
-    ///        Default::default(),
-    ///        Default::default(),
     ///    );
     ///   let downloader = TaskDownloader::spawn(downloader);
     /// # }
@@ -172,9 +170,11 @@ mod tests {
         let downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
 
         let mut downloader = TaskDownloader::spawn(downloader);
+        downloader.update_local_head(p3.clone());
+        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
         client
             .extend(vec![

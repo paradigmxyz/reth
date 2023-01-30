@@ -39,10 +39,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, trace, warn};
 
 /// The type that advances an established session by listening for incoming messages (from local
-/// node or read from connection) and emitting events back to the [`SessionsManager`].
+/// node or read from connection) and emitting events back to the
+/// [`SessionManager`](super::SessionManager).
 ///
 /// It listens for
-///    - incoming commands from the [`SessionsManager`]
+///    - incoming commands from the [`SessionManager`](super::SessionManager)
 ///    - incoming requests via the request channel
 ///    - responses for handled ETH requests received from the remote peer.
 #[allow(unused)]
@@ -61,7 +62,7 @@ pub(crate) struct ActiveSession {
     pub(crate) session_id: SessionId,
     /// Incoming commands from the manager
     pub(crate) commands_rx: ReceiverStream<SessionCommand>,
-    /// Sink to send messages to the [`SessionManager`].
+    /// Sink to send messages to the [`SessionManager`](super::SessionManager).
     pub(crate) to_session: mpsc::Sender<ActiveSessionMessage>,
     /// Incoming request to send to delegate to the remote peer.
     pub(crate) request_tx: Fuse<ReceiverStream<PeerRequest>>,
@@ -80,7 +81,7 @@ pub(crate) struct ActiveSession {
 /// Constants for timeout updating
 
 /// Minimum timeout value
-const MINIMUM_TIMEOUT: Duration = Duration::from_millis(1);
+const MINIMUM_TIMEOUT: Duration = Duration::from_secs(2);
 /// Maximum timeout value
 const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
 /// How much the new measurements affect the current timeout (X percent)
@@ -140,10 +141,9 @@ impl ActiveSession {
                         self.update_request_timeout(req.timestamp, Instant::now())
                     } else {
                         req.request.send_bad_response();
-                        self.on_bad_message();
                     }
                 } else {
-                    self.on_bad_message()
+                    // TODO: this could be a late response to timed out request <https://github.com/paradigmxyz/reth/issues/1067>
                 }
             };
         }
@@ -204,7 +204,7 @@ impl ActiveSession {
         None
     }
 
-    /// Handle an incoming peer request.
+    /// Handle an internal peer request that will be sent to the remote.
     fn on_peer_request(&mut self, request: PeerRequest, deadline: Instant) {
         let request_id = self.next_id();
         let msg = request.create_request_message(request_id);
@@ -258,7 +258,7 @@ impl ActiveSession {
         }
     }
 
-    /// Send a message back to the [`SessionsManager`]
+    /// Send a message back to the [`SessionManager`](super::SessionManager)
     fn emit_message(&self, message: PeerMessage) {
         let _ = self.try_emit_message(message).map_err(|err| {
             warn!(
@@ -269,7 +269,7 @@ impl ActiveSession {
         });
     }
 
-    /// Send a message back to the [`SessionsManager`]
+    /// Send a message back to the [`SessionManager`](super::SessionManager)
     /// covering both broadcasts and incoming requests
     fn safe_emit_message(
         &self,
@@ -281,7 +281,7 @@ impl ActiveSession {
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
     }
 
-    /// Send a message back to the [`SessionsManager`]
+    /// Send a message back to the [`SessionManager`](super::SessionManager)
     fn try_emit_message(
         &self,
         message: PeerMessage,
@@ -291,6 +291,7 @@ impl ActiveSession {
     }
 
     /// Notify the manager that the peer sent a bad message
+    #[allow(unused)]
     fn on_bad_message(&self) {
         let _ = self
             .to_session
@@ -834,7 +835,7 @@ mod tests {
 
     #[test]
     fn timeout_calculation_sanity_tests() {
-        let rtt = Duration::from_millis(200);
+        let rtt = Duration::from_secs(5);
         // timeout for an RTT of `rtt`
         let timeout = rtt * TIMEOUT_SCALING;
 
