@@ -50,8 +50,10 @@ impl From<Genesis> for Status {
         let mut chainspec = ChainSpec::from(genesis);
         let mut header = Header::from(chainspec.genesis().clone());
 
+        let hardforks = chainspec.hardforks();
+
         // set initial base fee depending on eip-1559
-        if Some(0u64) == chainspec.fork_block(Hardfork::London) {
+        if Some(&0u64) == hardforks.get(&Hardfork::London) {
             header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
         }
 
@@ -62,7 +64,7 @@ impl From<Genesis> for Status {
         chainspec.genesis_hash = sealed_header.hash();
 
         // we need to calculate the fork id AFTER re-setting the genesis hash
-        let forkid = chainspec.fork_id(0.into());
+        let forkid = chainspec.fork_id(0);
 
         Status {
             version: EthVersion::Eth67 as u8,
@@ -95,7 +97,7 @@ impl Status {
             .chain(spec.chain)
             .genesis(spec.genesis_hash())
             .blockhash(head.hash)
-            .forkid(spec.fork_id(head.number.into()))
+            .forkid(spec.fork_id(head.number))
     }
 }
 

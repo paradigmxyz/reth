@@ -198,7 +198,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         };
 
         if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
-            if Some(parent_td) <= self.chain_spec.terminal_total_difficulty() {
+            if Some(parent_td) <= self.chain_spec.paris_status().terminal_total_difficulty() {
                 return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: EngineApiError::PayloadPreMerge.to_string(),
                 }))
@@ -281,6 +281,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
 
         let merge_terminal_td = self
             .chain_spec
+            .paris_status()
             .terminal_total_difficulty()
             .ok_or(EngineApiError::UnknownMergeTerminalTotalDifficulty)?;
 
@@ -525,7 +526,8 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
-                b.header.difficulty = chain_spec.terminal_total_difficulty().unwrap();
+                b.header.difficulty =
+                    chain_spec.paris_status().terminal_total_difficulty().unwrap();
                 b
             });
             let block = random_block(101, Some(parent.hash()), None, Some(0));
@@ -563,7 +565,7 @@ mod tests {
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
                 b.header.timestamp = parent_timestamp;
                 b.header.difficulty =
-                    chain_spec.terminal_total_difficulty().unwrap() + U256::from(1);
+                    chain_spec.paris_status().terminal_total_difficulty().unwrap() + U256::from(1);
                 b
             });
             let block =
@@ -641,7 +643,10 @@ mod tests {
             tokio::spawn(engine);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.terminal_total_difficulty().unwrap() +
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
@@ -656,7 +661,7 @@ mod tests {
             assert_matches!(
                 result_rx.await,
                 Ok(Err(EngineApiError::TerminalTD { execution, consensus }))
-                    if execution == chain_spec.terminal_total_difficulty().unwrap()
+                    if execution == chain_spec.paris_status().terminal_total_difficulty().unwrap()
                         && consensus == U256::from(transition_config.terminal_total_difficulty)
             );
         }
@@ -680,7 +685,10 @@ mod tests {
             let execution_terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.terminal_total_difficulty().unwrap(),
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
@@ -739,7 +747,10 @@ mod tests {
             let terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.terminal_total_difficulty().unwrap(),
+                terminal_total_difficulty: chain_spec
+                    .paris_status()
+                    .terminal_total_difficulty()
+                    .unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
