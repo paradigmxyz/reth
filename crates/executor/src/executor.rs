@@ -52,6 +52,7 @@ impl AccountInfoChangeSet {
         tx: &TX,
         address: Address,
         tx_index: u64,
+        has_state_clear_eip: bool,
     ) -> Result<(), DbError> {
         match self {
             AccountInfoChangeSet::Changed { old, new } => {
@@ -64,6 +65,11 @@ impl AccountInfoChangeSet {
                 tx.put::<tables::PlainAccountState>(address, new)?;
             }
             AccountInfoChangeSet::Created { new } => {
+                // Ignore account that are created empty and state clear (SpuriousDragon) hardfork
+                // is activated.
+                if has_state_clear_eip && new.is_empty() {
+                    return Ok(())
+                }
                 tx.put::<tables::AccountChangeSet>(
                     tx_index,
                     AccountBeforeTx { address, info: None },
@@ -829,7 +835,7 @@ mod tests {
 
         // check Changed changeset
         AccountInfoChangeSet::Changed { new: acc1, old: acc2 }
-            .apply_to_db(&tx, address, tx_num)
+            .apply_to_db(&tx, address, tx_num, true)
             .unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
@@ -837,7 +843,9 @@ mod tests {
         );
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
 
-        AccountInfoChangeSet::Created { new: acc1 }.apply_to_db(&tx, address, tx_num).unwrap();
+        AccountInfoChangeSet::Created { new: acc1 }
+            .apply_to_db(&tx, address, tx_num, true)
+            .unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
             Ok(Some(AccountBeforeTx { address, info: None }))
@@ -847,7 +855,9 @@ mod tests {
         // delete old value, as it is dupsorted
         tx.delete::<tables::AccountChangeSet>(tx_num, None).unwrap();
 
-        AccountInfoChangeSet::Destroyed { old: acc2 }.apply_to_db(&tx, address, tx_num).unwrap();
+        AccountInfoChangeSet::Destroyed { old: acc2 }
+            .apply_to_db(&tx, address, tx_num, true)
+            .unwrap();
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(None));
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
