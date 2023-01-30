@@ -335,13 +335,12 @@ mod tests {
 
     impl UnwindStageTestRunner for MerkleTestRunner {
         fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            let tx = TestTransaction::default();
             let target_transition = self
                 .tx
                 .inner()
                 .get_block_transition(input.unwind_to)
                 .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
-            tx.commit(|tx| {
+            self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
                 let mut hash_cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
@@ -401,7 +400,7 @@ mod tests {
             Ok(())
         }
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            // self.unwind_storage(input)?;
+            // self.before_unwind(input)?;
             self.check_root(input.unwind_to)
         }
     }

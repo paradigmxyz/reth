@@ -220,7 +220,6 @@ impl DBTrieLoader {
             trie.insert(hashed_address.as_bytes().to_vec(), out)
                 .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
         }
-
         let root = H256::from_slice(trie.root().unwrap().as_slice());
 
         Ok(root)
