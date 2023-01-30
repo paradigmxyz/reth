@@ -495,7 +495,9 @@ where
 }
 
 impl<S, M> AsRef<MeteredStream<M>> for P2PStream<S>
-where S: AsRef<MeteredStream<M>> {
+where
+    S: AsRef<MeteredStream<M>>,
+{
     fn as_ref(&self) -> &MeteredStream<M> {
         self.inner.as_ref()
     }

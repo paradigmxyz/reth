@@ -33,7 +33,7 @@ use std::{
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
-    time::{Interval, interval},
+    time::{interval, Interval},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info, trace, warn};
@@ -82,20 +82,23 @@ pub(crate) struct ActiveSession {
 /// Responsible for tracking ingress/egress throughput for a session,
 /// on the given interval
 pub(crate) struct SessionThroughputMeter {
-    /// Number of bytes received by end of last throughput recording period
+    /// Number of bytes received by end of last throughput interval
     prev_ingress: AtomicU64,
-
+    /// Throughput of bytes received over last interval
+    /// (to be consumed as an [`f64`] in terms of bytes/s)
     ingress_throughput: AtomicU64,
-    /// Number of bytes sent by end of last throughput recording period
+    /// Number of bytes sent by end of last throughput interval
     prev_egress: AtomicU64,
-
+    /// Throughput of bytes sent over last interval
+    /// (to be consumed as an [`f64`] in terms of bytes/s)
     egress_throughput: AtomicU64,
     /// Interval over which throughput is evaluated
     throughput_interval: Interval,
 }
 
 impl SessionThroughputMeter {
-    fn new(period: Duration) -> Self {
+    /// Creates a new [`SessionThroughputMeter`] w/ the given [`Duration`].
+    pub fn new(period: Duration) -> Self {
         Self {
             prev_ingress: AtomicU64::new(0),
             ingress_throughput: AtomicU64::new(0),
@@ -393,11 +396,13 @@ impl ActiveSession {
     }
 
     /// Returns the current measurement of ingress throughput
+    #[allow(dead_code)]
     pub fn ingress_throughput(&self) -> f64 {
         f64::from_bits(self.throughput_meter.ingress_throughput.load(Ordering::Relaxed))
     }
 
     /// Returns the current measurement of ingress throughput
+    #[allow(dead_code)]
     pub fn egress_throughput(&self) -> f64 {
         f64::from_bits(self.throughput_meter.egress_throughput.load(Ordering::Relaxed))
     }
@@ -546,15 +551,23 @@ impl Future for ActiveSession {
                 let ingress_count = session_meter.total_inbound();
                 let egress_count = session_meter.total_outbound();
 
-                let ingress_delta = ingress_count - this.throughput_meter.prev_ingress.swap(ingress_count, Ordering::Relaxed);
-                let egress_delta = egress_count - this.throughput_meter.prev_egress.swap(egress_count, Ordering::Relaxed);
+                let ingress_delta = ingress_count -
+                    this.throughput_meter.prev_ingress.swap(ingress_count, Ordering::Relaxed);
+                let egress_delta = egress_count -
+                    this.throughput_meter.prev_egress.swap(egress_count, Ordering::Relaxed);
 
                 this.throughput_meter.ingress_throughput.store(
-                    f64::to_bits((ingress_delta as f64) / this.throughput_meter.throughput_interval.period().as_secs_f64()),
+                    f64::to_bits(
+                        (ingress_delta as f64) /
+                            this.throughput_meter.throughput_interval.period().as_secs_f64(),
+                    ),
                     Ordering::Relaxed,
                 );
                 this.throughput_meter.egress_throughput.store(
-                    f64::to_bits((egress_delta as f64) / this.throughput_meter.throughput_interval.period().as_secs_f64()),
+                    f64::to_bits(
+                        (egress_delta as f64) /
+                            this.throughput_meter.throughput_interval.period().as_secs_f64(),
+                    ),
                     Ordering::Relaxed,
                 );
             }
@@ -746,9 +759,7 @@ mod tests {
                         request_timeout: Arc::new(AtomicU64::new(
                             INITIAL_REQUEST_TIMEOUT.as_millis() as u64,
                         )),
-                        throughput_meter: SessionThroughputMeter::new(
-                            Duration::from_secs(1),
-                        ),
+                        throughput_meter: SessionThroughputMeter::new(Duration::from_secs(1)),
                     }
                 }
                 _ => {

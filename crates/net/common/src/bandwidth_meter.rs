@@ -125,10 +125,7 @@ impl<Stream: AsyncRead> AsyncRead for MeteredStream<Stream> {
             ready!(this.inner.poll_read(cx, buf))?;
             u64::try_from(buf.filled().len() - init_num_bytes).unwrap_or(u64::max_value())
         };
-        this.meter
-            .inner
-            .inbound
-            .fetch_add(num_bytes_u64, Ordering::Relaxed);
+        this.meter.inner.inbound.fetch_add(num_bytes_u64, Ordering::Relaxed);
         Poll::Ready(Ok(()))
     }
 }
@@ -142,10 +139,7 @@ impl<Stream: AsyncWrite> AsyncWrite for MeteredStream<Stream> {
         let this = self.project();
         let num_bytes = ready!(this.inner.poll_write(cx, buf))?;
         let num_bytes_u64 = { u64::try_from(num_bytes).unwrap_or(u64::max_value()) };
-        this.meter
-            .inner
-            .outbound
-            .fetch_add(num_bytes_u64, Ordering::Relaxed);
+        this.meter.inner.outbound.fetch_add(num_bytes_u64, Ordering::Relaxed);
         Poll::Ready(Ok(num_bytes))
     }
 

@@ -43,6 +43,8 @@ mod config;
 mod handle;
 pub use config::SessionsConfig;
 
+use self::active::SessionThroughputMeter;
+
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
@@ -388,6 +390,7 @@ impl SessionManager {
                     received_requests: Default::default(),
                     timeout_interval: tokio::time::interval(self.request_timeout),
                     request_timeout: Arc::clone(&timeout),
+                    throughput_meter: SessionThroughputMeter::new(Duration::from_secs(1)),
                 };
 
                 self.spawn(session);

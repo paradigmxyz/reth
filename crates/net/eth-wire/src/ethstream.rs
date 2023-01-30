@@ -6,9 +6,9 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
+use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::ForkFilter;
 use reth_rlp::{Decodable, Encodable};
-use reth_net_common::bandwidth_meter::MeteredStream;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -255,7 +255,9 @@ where
 }
 
 impl<S, M> AsRef<MeteredStream<M>> for EthStream<S>
-where S: AsRef<MeteredStream<M>> {
+where
+    S: AsRef<MeteredStream<M>>,
+{
     fn as_ref(&self) -> &MeteredStream<M> {
         self.inner().as_ref()
     }
