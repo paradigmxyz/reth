@@ -10,13 +10,14 @@ use reth_db::{
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
+
 use reth_primitives::{Address, TransitionId};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
 const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistoryStage");
 
-/// Stage is indexing history the account changesets generated in [`ExecutionStage`]
+/// Stage is indexing history the account changesets generated in [`crate::stages::ExecutionStage`]
 /// For more information on index sharding please look at [`tables::AccountHistory`]
 #[derive(Debug)]
 pub struct IndexAccountHistoryStage {

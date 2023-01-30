@@ -16,7 +16,7 @@ use tracing::*;
 
 const INDEX_STORAGE_HISTORY: StageId = StageId("IndexStorageHistoryStage");
 
-/// Stage is indexing history the account changesets generated in [`ExecutionStage`]
+/// Stage is indexing history the account changesets generated in [`crate::stages::ExecutionStage`]
 /// For more information on index sharding please look at [`tables::StorageHistory`]
 #[derive(Debug)]
 pub struct IndexStorageHistoryStage {
