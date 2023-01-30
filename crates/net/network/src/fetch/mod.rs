@@ -240,7 +240,9 @@ impl StateFetcher {
 
         if is_error {
             // if the response was erroneous we want to report the peer.
-            return Some(BlockResponseOutcome::BadResponse(peer_id, reputation_change))
+            return reputation_change.map(|reputation_change| {
+                BlockResponseOutcome::BadResponse(peer_id, reputation_change)
+            })
         }
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -404,7 +406,7 @@ pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
     Request(PeerId, BlockRequest),
     /// How to handle a bad response and the reputation change to apply, if any.
-    BadResponse(PeerId, Option<ReputationChangeKind>),
+    BadResponse(PeerId, ReputationChangeKind),
 }
 
 #[cfg(test)]
