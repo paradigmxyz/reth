@@ -110,7 +110,7 @@ impl Command {
         info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
         info!(target: "reth::cli", "Initializing consensus");
-        let consensus: Arc<dyn Consensus> = self.init_consensus()?;
+        let consensus = self.init_consensus()?;
         info!(target: "reth::cli", "Consensus initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
