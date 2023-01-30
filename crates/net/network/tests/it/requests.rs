@@ -66,7 +66,7 @@ async fn test_get_body() {
         mock_provider.add_block(block_hash, block.clone());
 
         let res = fetch0.get_block_bodies(vec![block_hash]).await;
-        assert!(res.is_ok());
+        assert!(res.is_ok(), "{res:?}");
 
         let blocks = res.unwrap().1;
         assert_eq!(blocks.len(), 1);
@@ -113,7 +113,7 @@ async fn test_get_header() {
             HeadersRequest { start: hash.into(), limit: 1, direction: HeadersDirection::Falling };
 
         let res = fetch0.get_headers(req).await;
-        assert!(res.is_ok());
+        assert!(res.is_ok(), "{res:?}");
 
         let headers = res.unwrap().1 .0;
         assert_eq!(headers.len(), 1);

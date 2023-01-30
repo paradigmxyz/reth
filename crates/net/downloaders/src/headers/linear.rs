@@ -1,22 +1,21 @@
 //! A headers downloader that can handle multiple requests concurrently.
 
+use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
-        downloader::Downloader,
-        error::{DownloadError, PeerRequestResult},
+        error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
             client::{BlockHeaders, HeadersClient, HeadersRequest},
-            downloader::{HeaderDownloader, SyncTarget},
+            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
     },
 };
-use reth_primitives::{Header, HeadersDirection, PeerId, SealedHeader, H256};
+use reth_primitives::{BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256};
 use std::{
-    borrow::Borrow,
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
     future::Future,
@@ -31,9 +30,12 @@ use tracing::trace;
 /// downloader is yielding a next batch of headers that is being committed to the database.
 const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 
+/// The scope for headers downloader metrics.
+pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
+
 /// Downloads headers concurrently.
 ///
-/// This [Downloader] downloads headers using the configured [HeadersClient].
+/// This [HeaderDownloader] downloads headers using the configured [HeadersClient].
 /// Headers can be requested by hash or block number and take a `limit` parameter. This downloader
 /// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
 /// requests at a time but yielding them in batches on [Stream::poll_next].
@@ -42,15 +44,15 @@ const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-pub struct LinearDownloader<C, H> {
+pub struct LinearDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
-    consensus: Arc<C>,
+    consensus: Arc<dyn Consensus>,
     /// Client used to download headers.
     client: Arc<H>,
     /// The local head of the chain.
-    local_head: SealedHeader,
+    local_head: Option<SealedHeader>,
     /// Block we want to close the gap to.
-    sync_target: SyncTargetBlock,
+    sync_target: Option<SyncTargetBlock>,
     /// The block number to use for requests.
     next_request_block_number: u64,
     /// Keeps track of the block we need to validate next.
@@ -58,7 +60,7 @@ pub struct LinearDownloader<C, H> {
     /// Tip block number to start validating from (in reverse)
     next_chain_tip_block_number: u64,
     /// The batch size per one request
-    request_batch_size: u64,
+    request_limit: u64,
     /// Minimum amount of requests to handle concurrently.
     min_concurrent_requests: usize,
     /// Maximum amount of requests to handle concurrently.
@@ -71,28 +73,54 @@ pub struct LinearDownloader<C, H> {
     ///
     /// This will give us the block number of the `sync_target`, after which we can send multiple
     /// requests at a time.
-    sync_target_request: Option<HeadersRequestFuture>,
+    sync_target_request: Option<HeadersRequestFuture<H::Output>>,
     /// requests in progress
-    in_progress_queue: FuturesUnordered<HeadersRequestFuture>,
+    in_progress_queue: FuturesUnordered<HeadersRequestFuture<H::Output>>,
     /// Buffered, unvalidated responses
     buffered_responses: BinaryHeap<OrderedHeadersResponse>,
     /// Buffered, _sorted_ and validated headers ready to be returned.
     ///
     /// Note: headers are sorted from high to low
     queued_validated_headers: Vec<SealedHeader>,
+    /// Header downloader metrics.
+    metrics: DownloaderMetrics,
 }
 
 // === impl LinearDownloader ===
 
-impl<C, H> LinearDownloader<C, H>
+impl<H> LinearDownloader<H>
 where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
+    /// Convenience method to create a [LinearDownloadBuilder] without importing it
+    pub fn builder() -> LinearDownloadBuilder {
+        LinearDownloadBuilder::default()
+    }
+
     /// Returns the block number the local node is at.
     #[inline]
-    fn local_block_number(&self) -> u64 {
-        self.local_head.number
+    fn local_block_number(&self) -> Option<BlockNumber> {
+        self.local_head.as_ref().map(|h| h.number)
+    }
+
+    /// Returns the existing local head block number
+    ///
+    /// # Panics
+    ///
+    /// If the local head has not been set.
+    #[inline]
+    fn existing_local_block_number(&self) -> BlockNumber {
+        self.local_head.as_ref().expect("is initialized").number
+    }
+
+    /// Returns the existing sync target hash.
+    ///
+    /// # Panics
+    ///
+    /// If the sync target has never been set.
+    #[inline]
+    fn existing_sync_target_hash(&self) -> H256 {
+        self.sync_target.as_ref().expect("is initialized").hash
     }
 
     /// Max requests to handle at the same time
@@ -122,18 +150,19 @@ where
     ///
     /// Returns `None` if no more requests are required.
     fn next_request(&mut self) -> Option<HeadersRequest> {
-        let local_head = self.local_block_number();
-        if self.next_request_block_number > local_head {
-            let request = calc_next_request(
-                local_head,
-                self.next_request_block_number,
-                self.request_batch_size,
-            );
-            // need to shift the tracked request block number based on the number of requested
-            // headers so follow-up requests will use that as start.
-            self.next_request_block_number -= request.limit;
+        if let Some(local_head) = self.local_block_number() {
+            if self.next_request_block_number > local_head {
+                let request = calc_next_request(
+                    local_head,
+                    self.next_request_block_number,
+                    self.request_limit,
+                );
+                // need to shift the tracked request block number based on the number of requested
+                // headers so follow-up requests will use that as start.
+                self.next_request_block_number -= request.limit;
 
-            return Some(request)
+                return Some(request)
+            }
         }
 
         None
@@ -166,6 +195,7 @@ where
         headers: Vec<Header>,
         peer_id: PeerId,
     ) -> Result<(), HeadersResponseError> {
+        let sync_target_hash = self.existing_sync_target_hash();
         let mut validated = Vec::with_capacity(headers.len());
 
         for parent in headers {
@@ -179,13 +209,13 @@ where
                     trace!(target: "downloaders::headers", ?error ,"Failed to validate header");
                     return Err(HeadersResponseError { request, peer_id: Some(peer_id), error })
                 }
-            } else if parent.hash() != self.sync_target.hash {
+            } else if parent.hash() != sync_target_hash {
                 return Err(HeadersResponseError {
                     request,
                     peer_id: Some(peer_id),
                     error: DownloadError::InvalidTip {
                         received: parent.hash(),
-                        expected: self.sync_target.hash,
+                        expected: sync_target_hash,
                     },
                 })
             }
@@ -213,7 +243,9 @@ where
     ///    are _not_ higher than the new `target_block_number`.
     fn on_block_number_update(&mut self, target_block_number: u64, next_block: u64) {
         // Update the trackers
-        if let Some(old_target) = self.sync_target.number.replace(target_block_number) {
+        if let Some(old_target) =
+            self.sync_target.as_mut().and_then(|t| t.number.replace(target_block_number))
+        {
             if target_block_number > old_target {
                 // the new target is higher than the old target we need to update the
                 // request tracker and reset everything
@@ -227,7 +259,7 @@ where
                     .iter()
                     .take_while(|last| last.number > target_block_number)
                     .count();
-                // removes all headers that are higher than then current target
+                // removes all headers that are higher than current target
                 self.queued_validated_headers.drain(..skip);
             }
         } else {
@@ -243,11 +275,15 @@ where
         &mut self,
         response: HeadersRequestOutcome,
     ) -> Result<(), HeadersResponseError> {
+        let sync_target_hash = self.existing_sync_target_hash();
         let HeadersRequestOutcome { request, outcome } = response;
         match outcome {
             Ok(res) => {
                 let (peer_id, headers) = res.split();
                 let mut headers = headers.0;
+
+                // update total downloaded metric
+                self.metrics.total_downloaded.increment(headers.len() as u64);
 
                 // sort headers from highest to lowest block number
                 headers.sort_unstable_by_key(|h| Reverse(h.number));
@@ -262,18 +298,18 @@ where
 
                 let target = headers.remove(0).seal();
 
-                if target.hash() != self.sync_target.hash {
+                if target.hash() != sync_target_hash {
                     return Err(HeadersResponseError {
                         request,
                         peer_id: Some(peer_id),
                         error: DownloadError::InvalidTip {
                             received: target.hash(),
-                            expected: self.sync_target.hash,
+                            expected: sync_target_hash,
                         },
                     })
                 }
 
-                trace!(target: "downloaders::headers", head=%self.local_head.number, hash=?target.hash(), number=%target.number, "Received sync target");
+                trace!(target: "downloaders::headers", head=?self.local_block_number(), hash=?target.hash(), number=%target.number, "Received sync target");
 
                 // This is the next block we need to start issuing requests from
                 let parent_block_number = target.number.saturating_sub(1);
@@ -303,6 +339,9 @@ where
             Ok(res) => {
                 let (peer_id, headers) = res.split();
                 let mut headers = headers.0;
+
+                // update total downloaded metric
+                self.metrics.total_downloaded.increment(headers.len() as u64);
 
                 trace!(target: "downloaders::headers", len=%headers.len(), "Received headers response");
 
@@ -350,7 +389,7 @@ where
                     self.try_validate_buffered()
                         .map(Err::<(), HeadersResponseError>)
                         .transpose()?;
-                } else if highest.number > self.local_head.number {
+                } else if highest.number > self.existing_local_block_number() {
                     // can't validate yet
                     self.buffered_responses.push(OrderedHeadersResponse {
                         headers,
@@ -386,7 +425,10 @@ where
 
         self.penalize_peer(peer_id, &error);
 
-        // re-submit the request
+        // Update error metric
+        self.metrics.increment_errors(&error);
+
+        // Re-submit the request
         self.submit_request(request, Priority::High);
     }
 
@@ -416,12 +458,8 @@ where
     }
 
     /// Returns the request for the `sync_target` header.
-    fn get_sync_target_request(&self) -> HeadersRequest {
-        HeadersRequest {
-            start: self.sync_target.hash.into(),
-            limit: 1,
-            direction: HeadersDirection::Falling,
-        }
+    fn get_sync_target_request(&self, start: H256) -> HeadersRequest {
+        HeadersRequest { start: start.into(), limit: 1, direction: HeadersDirection::Falling }
     }
 
     /// Starts a request future
@@ -429,12 +467,21 @@ where
         self.in_progress_queue.push(self.request_fut(request, priority));
     }
 
-    fn request_fut(&self, request: HeadersRequest, priority: Priority) -> HeadersRequestFuture {
+    fn request_fut(
+        &self,
+        request: HeadersRequest,
+        priority: Priority,
+    ) -> HeadersRequestFuture<H::Output> {
         let client = Arc::clone(&self.client);
         HeadersRequestFuture {
             request: Some(request.clone()),
-            fut: Box::pin(async move { client.get_headers_with_priority(request, priority).await }),
+            fut: client.get_headers_with_priority(request, priority),
         }
+    }
+
+    /// Validate whether the header is valid in relation to it's parent
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)
     }
 
     /// Clears all requests/responses.
@@ -454,49 +501,33 @@ where
     }
 }
 
-impl<C, H> Downloader for LinearDownloader<C, H>
+impl<H> HeaderDownloader for LinearDownloader<H>
 where
-    C: Consensus,
-    H: HeadersClient,
-{
-    type Client = H;
-    type Consensus = C;
-
-    fn client(&self) -> &Self::Client {
-        self.client.borrow()
-    }
-
-    fn consensus(&self) -> &Self::Consensus {
-        self.consensus.borrow()
-    }
-}
-
-impl<C, H> HeaderDownloader for LinearDownloader<C, H>
-where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     fn update_local_head(&mut self, head: SealedHeader) {
-        self.local_head = head;
         // ensure we're only yielding headers that are in range and follow the current local head.
         while self
             .queued_validated_headers
             .last()
-            .map(|last| last.number <= self.local_head.number)
+            .map(|last| last.number <= head.number)
             .unwrap_or_default()
         {
             // headers are sorted high to low
             self.queued_validated_headers.pop();
         }
+        // update the local head
+        self.local_head = Some(head);
     }
 
     /// If the given target is different from the current target, we need to update the sync target
     fn update_sync_target(&mut self, target: SyncTarget) {
+        let current_tip = self.sync_target.as_ref().map(|t| t.hash);
         match target {
             SyncTarget::Tip(tip) => {
-                if tip != self.sync_target.hash {
-                    trace!(target: "downloaders::headers", current=?self.sync_target.hash, new=?tip, "Update sync target");
-                    self.sync_target.hash = tip;
+                if Some(tip) != current_tip {
+                    trace!(target: "downloaders::headers", current=?current_tip, new=?tip, "Update sync target");
+                    let new_sync_target = SyncTargetBlock::from_hash(tip);
 
                     // if the new sync target is the next queued request we don't need to re-start
                     // the target update
@@ -506,27 +537,35 @@ where
                         .filter(|h| h.hash() == tip)
                         .map(|h| h.number)
                     {
-                        self.sync_target.number = Some(target_number);
+                        self.sync_target = Some(new_sync_target.with_number(target_number));
                         return
                     }
 
                     trace!(target: "downloaders::headers", new=?target, "Request new sync target");
+                    self.sync_target = Some(new_sync_target);
                     self.sync_target_request =
-                        Some(self.request_fut(self.get_sync_target_request(), Priority::High));
+                        Some(self.request_fut(self.get_sync_target_request(tip), Priority::High));
                 }
             }
             SyncTarget::Gap(existing) => {
                 let target = existing.parent_hash;
-                if target != self.sync_target.hash {
+                if Some(target) != current_tip {
                     // there could be a sync target request in progress
                     self.sync_target_request.take();
                     // If the target has changed, update the request pointers based on the new
                     // targeted block number
                     let parent_block_number = existing.number.saturating_sub(1);
 
-                    trace!(target: "downloaders::headers", current=?self.sync_target.hash, new=?target, %parent_block_number, "Updated sync target");
+                    trace!(target: "downloaders::headers", current=?current_tip, new=?target, %parent_block_number, "Updated sync target");
 
-                    self.sync_target.hash = target;
+                    // Update the sync target hash
+                    self.sync_target = match self.sync_target.take() {
+                        Some(mut sync_target) => {
+                            sync_target.hash = target;
+                            Some(sync_target)
+                        }
+                        None => Some(SyncTargetBlock::from_hash(target)),
+                    };
                     self.on_block_number_update(parent_block_number, parent_block_number);
                 }
             }
@@ -538,15 +577,26 @@ where
     }
 }
 
-impl<C, H> Stream for LinearDownloader<C, H>
+impl<H> Stream for LinearDownloader<H>
 where
-    C: Consensus + 'static,
     H: HeadersClient + 'static,
 {
     type Item = Vec<SealedHeader>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+
+        // The downloader boundaries (local head and sync target) have to be set in order
+        // to start downloading data.
+        if this.local_head.is_none() || this.sync_target.is_none() {
+            tracing::trace!(
+                target: "downloaders::headers",
+                head=?this.local_block_number(),
+                sync_target=?this.sync_target,
+                "The downloader sync boundaries have not been set"
+            );
+            return Poll::Pending
+        }
 
         // If we have a new tip request we need to complete that first before we send batched
         // requests
@@ -555,6 +605,7 @@ where
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
                         this.penalize_peer(err.peer_id, &err.error);
+                        this.metrics.increment_errors(&err.error);
                         this.sync_target_request =
                             Some(this.request_fut(err.request, Priority::High));
                     } else {
@@ -618,6 +669,7 @@ where
 
                 trace!(target: "downloaders::headers", batch=%next_batch.len(), "Returning validated batch");
 
+                this.metrics.total_flushed.increment(next_batch.len() as u64);
                 return Poll::Ready(Some(next_batch))
             }
 
@@ -633,6 +685,7 @@ where
                 this.clear();
                 return Poll::Ready(None)
             }
+            this.metrics.total_flushed.increment(next_batch.len() as u64);
             return Poll::Ready(Some(next_batch))
         }
 
@@ -640,33 +693,23 @@ where
     }
 }
 
-/// SAFETY: we need to ensure `LinearDownloader` is `Sync` because the of the [Downloader]
-/// trait. While [HeadersClient] is also `Sync`, the [HeadersClient::get_headers] future does not
-/// enforce `Sync` (async_trait). The future itself does not use any interior mutability whatsoever:
-/// All the mutations are performed through an exclusive reference on `LinearDownloader` when
-/// the Stream is polled. This means it suffices that `LinearDownloader` is Sync:
-unsafe impl<C, H> Sync for LinearDownloader<C, H>
-where
-    C: Consensus,
-    H: HeadersClient,
-{
-}
-
-type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
-
 /// A future that returns a list of [`BlockHeaders`] on success.
-struct HeadersRequestFuture {
+struct HeadersRequestFuture<F> {
     request: Option<HeadersRequest>,
-    fut: HeadersFut,
+    fut: F,
 }
 
-impl Future for HeadersRequestFuture {
+impl<F> Future for HeadersRequestFuture<F>
+where
+    F: Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send + Unpin,
+{
     type Output = HeadersRequestOutcome;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         let outcome = ready!(this.fut.poll_unpin(cx));
         let request = this.request.take().unwrap();
+
         Poll::Ready(HeadersRequestOutcome { request, outcome })
     }
 }
@@ -729,7 +772,7 @@ struct HeadersResponseError {
 }
 
 /// The block to which we want to close the gap: (local head...sync target]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct SyncTargetBlock {
     /// Block hash of the targeted block
     hash: H256,
@@ -737,12 +780,25 @@ struct SyncTargetBlock {
     number: Option<u64>,
 }
 
+impl SyncTargetBlock {
+    /// Create new instance from hash.
+    fn from_hash(hash: H256) -> Self {
+        Self { hash, number: None }
+    }
+
+    /// Set a number on the instance.
+    fn with_number(mut self, number: u64) -> Self {
+        self.number = Some(number);
+        self
+    }
+}
+
 /// The builder for [LinearDownloader] with
 /// some default settings
 #[derive(Debug)]
 pub struct LinearDownloadBuilder {
     /// The batch size per one request
-    request_batch_size: u64,
+    request_limit: u64,
     /// Batch size for headers
     stream_batch_size: usize,
     /// Batch size for headers
@@ -756,7 +812,7 @@ pub struct LinearDownloadBuilder {
 impl Default for LinearDownloadBuilder {
     fn default() -> Self {
         Self {
-            request_batch_size: 1_000,
+            request_limit: 1_000,
             stream_batch_size: 10_000,
             max_concurrent_requests: 150,
             min_concurrent_requests: 5,
@@ -771,7 +827,7 @@ impl LinearDownloadBuilder {
     /// This determines the `limit` for a [GetHeaders](reth_eth_wire::GetBlockHeaders) requests, the
     /// number of headers we ask for.
     pub fn request_limit(mut self, limit: u64) -> Self {
-        self.request_batch_size = limit;
+        self.request_limit = limit;
         self
     }
 
@@ -814,35 +870,28 @@ impl LinearDownloadBuilder {
 
     /// Build [LinearDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<C, H>(
-        self,
-        consensus: Arc<C>,
-        client: Arc<H>,
-        local_head: SealedHeader,
-        sync_target_block_hash: H256,
-    ) -> LinearDownloader<C, H>
+    pub fn build<H>(self, consensus: Arc<dyn Consensus>, client: Arc<H>) -> LinearDownloader<H>
     where
-        C: Consensus + 'static,
         H: HeadersClient + 'static,
     {
         let Self {
-            request_batch_size,
+            request_limit,
             stream_batch_size,
             min_concurrent_requests,
             max_concurrent_requests,
             max_buffered_responses,
         } = self;
-        let mut downloader = LinearDownloader {
+        LinearDownloader {
             consensus,
             client,
-            local_head,
-            sync_target: SyncTargetBlock { hash: sync_target_block_hash, number: None },
+            local_head: None,
+            sync_target: None,
             // Note: we set these to `0` first, they'll be updated once the sync target response is
             // handled and only used afterwards
             next_request_block_number: 0,
             next_chain_tip_block_number: 0,
             lowest_validated_header: None,
-            request_batch_size,
+            request_limit,
             min_concurrent_requests,
             max_concurrent_requests,
             stream_batch_size,
@@ -851,30 +900,26 @@ impl LinearDownloadBuilder {
             in_progress_queue: Default::default(),
             buffered_responses: Default::default(),
             queued_validated_headers: Default::default(),
-        };
-
-        downloader.sync_target_request =
-            Some(downloader.request_fut(downloader.get_sync_target_request(), Priority::High));
-
-        downloader
+            metrics: DownloaderMetrics::new(HEADERS_DOWNLOADER_SCOPE),
+        }
     }
 }
 
 /// Configures and returns the next [HeadersRequest] based on the given parameters
 ///
 /// The request wil start at the given `next_request_block_number` block.
-/// The `limit` of the request will either be the targeted `request_batch_size` or the difference of
+/// The `limit` of the request will either be the targeted `request_limit` or the difference of
 /// `next_request_block_number` and the `local_head` in case this is smaller than the targeted
-/// `request_batch_size`.
+/// `request_limit`.
 #[inline]
 fn calc_next_request(
     local_head: u64,
     next_request_block_number: u64,
-    request_batch_size: u64,
+    request_limit: u64,
 ) -> HeadersRequest {
     // downloading is in reverse
     let diff = next_request_block_number - local_head;
-    let limit = diff.min(request_batch_size);
+    let limit = diff.min(request_limit);
     let start = next_request_block_number;
     HeadersRequest { start: start.into(), limit, direction: HeadersDirection::Falling }
 }
@@ -882,19 +927,11 @@ fn calc_next_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
+
+    use crate::headers::test_utils::child_header;
+    use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
-
-    static CONSENSUS: Lazy<Arc<TestConsensus>> = Lazy::new(|| Arc::new(TestConsensus::default()));
-
-    fn child_header(parent: &SealedHeader) -> SealedHeader {
-        let mut child = parent.as_ref().clone();
-        child.number += 1;
-        child.parent_hash = parent.hash_slow();
-        let hash = child.hash_slow();
-        SealedHeader::new(child, hash)
-    }
 
     /// Tests that request calc works
     #[test]
@@ -903,12 +940,10 @@ mod tests {
 
         let genesis = SealedHeader::default();
 
-        let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
-            Arc::clone(&client),
-            genesis,
-            H256::random(),
-        );
+        let mut downloader = LinearDownloadBuilder::default()
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+        downloader.update_local_head(genesis);
+        downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
         downloader.sync_target_request.take();
 
@@ -920,7 +955,10 @@ mod tests {
         let target = SyncTarget::Gap(SealedHeader::new(Default::default(), H256::random()));
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
-        assert!(downloader.sync_target.number.is_some());
+        assert_matches!(
+            downloader.sync_target,
+            Some(target) => target.number.is_some()
+        );
     }
 
     /// Tests that request calc works
@@ -930,12 +968,10 @@ mod tests {
 
         let header = SealedHeader::default();
 
-        let mut downloader = LinearDownloadBuilder::default().build(
-            CONSENSUS.clone(),
-            Arc::clone(&client),
-            header.clone(),
-            H256::random(),
-        );
+        let mut downloader = LinearDownloadBuilder::default()
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+        downloader.update_local_head(header.clone());
+        downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
@@ -972,12 +1008,12 @@ mod tests {
 
         let batch_size = 99;
         let start = 1000;
-        let mut downloader = LinearDownloadBuilder::default().request_limit(batch_size).build(
-            CONSENSUS.clone(),
-            Arc::clone(&client),
-            genesis,
-            H256::random(),
-        );
+        let mut downloader = LinearDownloadBuilder::default()
+            .request_limit(batch_size)
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+        downloader.update_local_head(genesis);
+        downloader.update_sync_target(SyncTarget::Tip(H256::random()));
+
         downloader.next_request_block_number = start;
 
         let mut total = 0;
@@ -986,7 +1022,7 @@ mod tests {
             total += req.limit;
         }
         assert_eq!(total, start);
-        assert_eq!(downloader.next_request_block_number, downloader.local_block_number());
+        assert_eq!(Some(downloader.next_request_block_number), downloader.local_block_number());
     }
 
     #[test]
@@ -1024,7 +1060,9 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+        downloader.update_local_head(p3.clone());
+        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
         client
             .extend(vec![
@@ -1054,7 +1092,9 @@ mod tests {
         let mut downloader = LinearDownloadBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(CONSENSUS.clone(), Arc::clone(&client), p3.clone(), p0.hash());
+            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+        downloader.update_local_head(p3.clone());
+        downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
         client
             .extend(vec![

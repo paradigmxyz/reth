@@ -20,34 +20,35 @@ use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
 use tracing::*;
 
-const EXECUTION: StageId = StageId("Execution");
+/// The [`StageId`] of the execution stage.
+pub const EXECUTION: StageId = StageId("Execution");
 
 /// The execution stage executes all transactions and
 /// update history indexes.
 ///
 /// Input tables:
-/// [tables::CanonicalHeaders] get next block to execute.
-/// [tables::Headers] get for revm environment variables.
-/// [tables::CumulativeTxCount] to get tx number
-/// [tables::Transactions] to execute
+/// - [tables::CanonicalHeaders] get next block to execute.
+/// - [tables::Headers] get for revm environment variables.
+/// - [tables::BlockBodies] to get tx number
+/// - [tables::Transactions] to execute
 ///
-/// For state access [StateProvider] provides us latest state and history state
-/// For latest most recent state [StateProvider] would need (Used for execution Stage):
-/// [tables::PlainAccountState]
-/// [tables::Bytecodes]
-/// [tables::PlainStorageState]
+/// For state access [LatestStateProviderRef] provides us latest state and history state
+/// For latest most recent state [LatestStateProviderRef] would need (Used for execution Stage):
+/// - [tables::PlainAccountState]
+/// - [tables::Bytecodes]
+/// - [tables::PlainStorageState]
 ///
 /// Tables updated after state finishes execution:
-/// [tables::PlainAccountState]
-/// [tables::PlainStorageState]
-/// [tables::Bytecodes]
-/// [tables::AccountChangeSet]
-/// [tables::StorageChangeSet]
+/// - [tables::PlainAccountState]
+/// - [tables::PlainStorageState]
+/// - [tables::Bytecodes]
+/// - [tables::AccountChangeSet]
+/// - [tables::StorageChangeSet]
 ///
 /// For unwinds we are accessing:
-/// [tables::CumulativeTxCount] get tx index to know what needs to be unwinded
-/// [tables::AccountHistory] to remove change set and apply old values to
-/// [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
+/// - [tables::BlockBodies] get tx index to know what needs to be unwinded
+/// - [tables::AccountHistory] to remove change set and apply old values to
+/// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
 #[derive(Debug)]
 pub struct ExecutionStage {
@@ -230,6 +231,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
                     let mut cursor_storage_changeset =
                         tx.cursor_write::<tables::StorageChangeSet>()?;
+                    cursor_storage_changeset.seek_exact(storage_id)?;
 
                     if wipe_storage {
                         // iterate over storage and save them before entry is deleted.
@@ -240,7 +242,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             })
                             .try_for_each(|entry| {
                                 let (_, old_value) = entry?;
-                                cursor_storage_changeset.append(storage_id.clone(), old_value)
+                                cursor_storage_changeset.append(storage_id, old_value)
                             })?;
 
                         // delete all entries
@@ -262,8 +264,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                             let old_entry = StorageEntry { key, value: old_value };
                             let new_entry = StorageEntry { key, value: new_value };
                             // insert into StorageChangeSet
-                            cursor_storage_changeset
-                                .append(storage_id.clone(), old_entry.clone())?;
+                            cursor_storage_changeset.append(storage_id, old_entry)?;
 
                             // Always delete old value as duplicate table, put will not override it
                             tx.delete::<tables::PlainStorageState>(address, Some(old_entry))?;
@@ -361,7 +362,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // revert all changes to PlainStorage
         for (key, storage) in storage_changeset_batch.into_iter().rev() {
             let address = key.address();
-            tx.put::<tables::PlainStorageState>(address, storage.clone())?;
+            tx.put::<tables::PlainStorageState>(address, storage)?;
             if storage.value == U256::ZERO {
                 // delete value that is zero
                 tx.delete::<tables::PlainStorageState>(address, Some(storage))?;

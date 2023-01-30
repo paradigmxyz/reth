@@ -16,12 +16,18 @@ const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
 /// The total difficulty stage.
 ///
 /// This stage walks over inserted headers and computes total difficulty
-/// at each block. The entries are inserted into [`HeaderTD`][reth_interfaces::db::tables::HeaderTD]
+/// at each block. The entries are inserted into [`HeaderTD`][reth_db::tables::HeaderTD]
 /// table.
 #[derive(Debug)]
 pub struct TotalDifficultyStage {
     /// The number of table entries to commit at once
     pub commit_threshold: u64,
+}
+
+impl Default for TotalDifficultyStage {
+    fn default() -> Self {
+        Self { commit_threshold: 100_000 }
+    }
 }
 
 #[async_trait::async_trait]
@@ -237,7 +243,7 @@ mod tests {
 
     impl TotalDifficultyTestRunner {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            self.tx.check_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
+            self.tx.ensure_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
             Ok(())
         }
 

@@ -1,6 +1,5 @@
 use crate::{
-    db::Transaction, error::*, util::opt::MaybeSender, ExecInput, ExecOutput, Stage, StageError,
-    StageId, UnwindInput,
+    db::Transaction, error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
 };
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
@@ -10,15 +9,19 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
-use tokio::sync::mpsc::Sender;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
+mod builder;
 mod ctrl;
 mod event;
+mod set;
 mod state;
 
+pub use builder::*;
 use ctrl::*;
 pub use event::*;
+pub use set::*;
 use state::*;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -74,7 +77,7 @@ use state::*;
 pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     stages: Vec<QueuedStage<DB>>,
     max_block: Option<BlockNumber>,
-    events_sender: MaybeSender<PipelineEvent>,
+    listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
 }
 
@@ -83,7 +86,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
         Self {
             stages: Vec::new(),
             max_block: None,
-            events_sender: MaybeSender::new(None),
+            listeners: PipelineEventListeners::default(),
             sync_state_updater: None,
         }
     }
@@ -91,38 +94,25 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
 
 impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Pipeline").field("max_block", &self.max_block).finish()
+        f.debug_struct("Pipeline")
+            .field(
+                "stages",
+                &self.stages.iter().map(|stage| stage.stage.id()).collect::<Vec<StageId>>(),
+            )
+            .field("max_block", &self.max_block)
+            .finish()
     }
 }
 
 impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
-    /// Add a stage to the pipeline.
-    pub fn push<S>(mut self, stage: S) -> Self
-    where
-        S: Stage<DB> + 'static,
-    {
-        self.stages.push(QueuedStage { stage: Box::new(stage) });
-        self
+    /// Construct a pipeline using a [`PipelineBuilder`].
+    pub fn builder() -> PipelineBuilder<DB, U> {
+        PipelineBuilder::default()
     }
 
-    /// Set the target block.
-    ///
-    /// Once this block is reached, syncing will stop.
-    pub fn with_max_block(mut self, block: Option<BlockNumber>) -> Self {
-        self.max_block = block;
-        self
-    }
-
-    /// Set a channel the pipeline will transmit events over (see [PipelineEvent]).
-    pub fn with_channel(mut self, sender: Sender<PipelineEvent>) -> Self {
-        self.events_sender.set(Some(sender));
-        self
-    }
-
-    /// Set a [SyncStateUpdater].
-    pub fn with_sync_state_updater(mut self, updater: U) -> Self {
-        self.sync_state_updater = Some(updater);
-        self
+    /// Listen for events on the pipeline.
+    pub fn events(&mut self) -> UnboundedReceiverStream<PipelineEvent> {
+        self.listeners.new_listener()
     }
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
@@ -130,10 +120,9 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     pub async fn run(&mut self, db: Arc<DB>) -> Result<(), PipelineError> {
         loop {
             let mut state = PipelineState {
-                events_sender: self.events_sender.clone(),
+                listeners: self.listeners.clone(),
                 max_block: self.max_block,
-                maximum_progress: None,
-                minimum_progress: None,
+                ..Default::default()
             };
             let next_action = self.run_loop(&mut state, db.as_ref()).await?;
 
@@ -224,14 +213,14 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
             let mut stage_progress = stage_id.get_progress(tx.deref())?.unwrap_or_default();
             if stage_progress < to {
                 debug!(from = %stage_progress, %to, "Unwind point too far for stage");
-                self.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
+                self.listeners.notify(PipelineEvent::Skipped { stage_id });
                 return Ok(())
             }
 
             debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
             while stage_progress > to {
                 let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
-                self.events_sender.send(PipelineEvent::Unwinding { stage_id, input }).await?;
+                self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
 
                 let output = stage.unwind(&mut tx, input).await;
                 match output {
@@ -239,12 +228,11 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                         stage_progress = unwind_output.stage_progress;
                         stage_id.save_progress(tx.deref(), stage_progress)?;
 
-                        self.events_sender
-                            .send(PipelineEvent::Unwound { stage_id, result: unwind_output })
-                            .await?;
+                        self.listeners
+                            .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
                     }
                     Err(err) => {
-                        self.events_sender.send(PipelineEvent::Error { stage_id }).await?;
+                        self.listeners.notify(PipelineEvent::Error { stage_id });
                         return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
                     }
                 }
@@ -314,16 +302,15 @@ impl<DB: Database> QueuedStage<DB> {
                     stage = %stage_id,
                     "Stage reached maximum block, skipping."
                 );
-                state.events_sender.send(PipelineEvent::Skipped { stage_id }).await?;
+                state.listeners.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress)
             }
 
             state
-                .events_sender
-                .send(PipelineEvent::Running { stage_id, stage_progress: prev_progress })
-                .await?;
+                .listeners
+                .notify(PipelineEvent::Running { stage_id, stage_progress: prev_progress });
 
             match self
                 .stage
@@ -341,10 +328,7 @@ impl<DB: Database> QueuedStage<DB> {
                     );
                     stage_id.save_progress(tx.deref(), stage_progress)?;
 
-                    state
-                        .events_sender
-                        .send(PipelineEvent::Ran { stage_id, result: out.clone() })
-                        .await?;
+                    state.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
 
                     // TODO: Make the commit interval configurable
                     tx.commit()?;
@@ -360,7 +344,7 @@ impl<DB: Database> QueuedStage<DB> {
                     }
                 }
                 Err(err) => {
-                    state.events_sender.send(PipelineEvent::Error { stage_id }).await?;
+                    state.listeners.notify(PipelineEvent::Error { stage_id });
 
                     return if let StageError::Validation { block, error } = err {
                         warn!(
@@ -405,38 +389,35 @@ mod tests {
     use super::*;
     use crate::{StageId, UnwindOutput};
     use assert_matches::assert_matches;
-    use reth_db::mdbx::{self, test_utils, Env, EnvKind, WriteMap};
+    use reth_db::mdbx::{self, test_utils, EnvKind};
     use reth_interfaces::{consensus, sync::NoopSyncStateUpdate};
-    use tokio::sync::mpsc::channel;
-    use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+    use tokio_stream::StreamExt;
     use utils::TestStage;
 
     /// Runs a simple pipeline.
     #[tokio::test]
     async fn run_pipeline() {
-        let (tx, rx) = channel(2);
-        let db = test_utils::create_test_db(EnvKind::RW);
+        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+
+        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+            .add_stage(
+                TestStage::new(StageId("A"))
+                    .add_exec(Ok(ExecOutput { stage_progress: 20, done: true })),
+            )
+            .add_stage(
+                TestStage::new(StageId("B"))
+                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+            )
+            .with_max_block(10)
+            .build();
+        let events = pipeline.events();
 
         // Run pipeline
-        tokio::spawn(async move {
-            Pipeline::<Env<WriteMap>, NoopSyncStateUpdate>::default()
-                .with_channel(tx)
-                .push(
-                    TestStage::new(StageId("A"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 20, done: true })),
-                )
-                .push(
-                    TestStage::new(StageId("B"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
-                )
-                .with_max_block(Some(10))
-                .run(db)
-                .await
-        });
+        tokio::spawn(async move { pipeline.run(db).await });
 
         // Check that the stages were run in order
         assert_eq!(
-            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
+            events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
                 PipelineEvent::Ran {
@@ -455,44 +436,58 @@ mod tests {
     /// Unwinds a simple pipeline.
     #[tokio::test]
     async fn unwind_pipeline() {
-        let (tx, rx) = channel(2);
-        let db = test_utils::create_test_db(EnvKind::RW);
+        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+
+        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+            .add_stage(
+                TestStage::new(StageId("A"))
+                    .add_exec(Ok(ExecOutput { stage_progress: 100, done: true }))
+                    .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+            )
+            .add_stage(
+                TestStage::new(StageId("B"))
+                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
+                    .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+            )
+            .add_stage(
+                TestStage::new(StageId("C"))
+                    .add_exec(Ok(ExecOutput { stage_progress: 20, done: true }))
+                    .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
+            )
+            .with_max_block(10)
+            .build();
+        let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
-            let mut pipeline = Pipeline::<Env<mdbx::WriteMap>, NoopSyncStateUpdate>::default()
-                .push(
-                    TestStage::new(StageId("A"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 100, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                )
-                .push(
-                    TestStage::new(StageId("B"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                )
-                .push(
-                    TestStage::new(StageId("C"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 20, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 1 })),
-                )
-                .with_max_block(Some(10));
-
             // Sync first
             pipeline.run(db.clone()).await.expect("Could not run pipeline");
 
             // Unwind
-            pipeline
-                .with_channel(tx)
-                .unwind(&db, 1, None)
-                .await
-                .expect("Could not unwind pipeline");
+            pipeline.unwind(&db, 1, None).await.expect("Could not unwind pipeline");
         });
 
         // Check that the stages were unwound in reverse order
         assert_eq!(
-            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
+            events.collect::<Vec<PipelineEvent>>().await,
             vec![
+                // Executing
+                PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("A"),
+                    result: ExecOutput { stage_progress: 100, done: true },
+                },
+                PipelineEvent::Running { stage_id: StageId("B"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("B"),
+                    result: ExecOutput { stage_progress: 10, done: true },
+                },
+                PipelineEvent::Running { stage_id: StageId("C"), stage_progress: None },
+                PipelineEvent::Ran {
+                    stage_id: StageId("C"),
+                    result: ExecOutput { stage_progress: 20, done: true },
+                },
+                // Unwinding
                 PipelineEvent::Unwinding {
                     stage_id: StageId("C"),
                     input: UnwindInput { stage_progress: 20, unwind_to: 1, bad_block: None }
@@ -535,37 +530,36 @@ mod tests {
     /// - The pipeline finishes
     #[tokio::test]
     async fn run_pipeline_with_unwind() {
-        let (tx, rx) = channel(2);
-        let db = test_utils::create_test_db(EnvKind::RW);
+        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+
+        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+            .add_stage(
+                TestStage::new(StageId("A"))
+                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
+                    .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
+                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+            )
+            .add_stage(
+                TestStage::new(StageId("B"))
+                    .add_exec(Err(StageError::Validation {
+                        block: 5,
+                        error: consensus::Error::BaseFeeMissing,
+                    }))
+                    .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
+                    .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
+            )
+            .with_max_block(10)
+            .build();
+        let events = pipeline.events();
 
         // Run pipeline
         tokio::spawn(async move {
-            Pipeline::<Env<mdbx::WriteMap>, NoopSyncStateUpdate>::default()
-                .push(
-                    TestStage::new(StageId("A"))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
-                )
-                .push(
-                    TestStage::new(StageId("B"))
-                        .add_exec(Err(StageError::Validation {
-                            block: 5,
-                            error: consensus::Error::BaseFeeMissing,
-                        }))
-                        .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
-                        .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
-                )
-                .with_max_block(Some(10))
-                .with_channel(tx)
-                .run(db)
-                .await
-                .expect("Could not run pipeline");
+            pipeline.run(db).await.expect("Could not run pipeline");
         });
 
         // Check that the stages were unwound in reverse order
         assert_eq!(
-            ReceiverStream::new(rx).collect::<Vec<PipelineEvent>>().await,
+            events.collect::<Vec<PipelineEvent>>().await,
             vec![
                 PipelineEvent::Running { stage_id: StageId("A"), stage_progress: None },
                 PipelineEvent::Ran {
@@ -600,26 +594,26 @@ mod tests {
     #[tokio::test]
     async fn pipeline_error_handling() {
         // Non-fatal
-        let db = test_utils::create_test_db(EnvKind::RW);
-        let result = Pipeline::<Env<WriteMap>, NoopSyncStateUpdate>::default()
-            .push(
+        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+            .add_stage(
                 TestStage::new(StageId("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),
             )
-            .with_max_block(Some(10))
-            .run(db)
-            .await;
+            .with_max_block(10)
+            .build();
+        let result = pipeline.run(db).await;
         assert_matches!(result, Ok(()));
 
         // Fatal
-        let db = test_utils::create_test_db(EnvKind::RW);
-        let result = Pipeline::<Env<WriteMap>, NoopSyncStateUpdate>::default()
-            .push(TestStage::new(StageId("Fatal")).add_exec(Err(StageError::DatabaseIntegrity(
-                DatabaseIntegrityError::BlockBody { number: 5 },
-            ))))
-            .run(db)
-            .await;
+        let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
+        let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
+            .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
+                StageError::DatabaseIntegrity(DatabaseIntegrityError::BlockBody { number: 5 }),
+            )))
+            .build();
+        let result = pipeline.run(db).await;
         assert_matches!(
             result,
             Err(PipelineError::Stage(StageError::DatabaseIntegrity(

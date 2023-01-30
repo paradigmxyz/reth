@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use reth_primitives::{Address, TxHash, U256};
+use reth_primitives::{Address, TxHash};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -13,7 +13,7 @@ pub enum PoolError {
     ReplacementUnderpriced(TxHash),
     /// Encountered a transaction that was already added into the poll
     #[error("[{0:?}] Transaction feeCap {1} below chain minimum.")]
-    ProtocolFeeCapTooLow(TxHash, U256),
+    ProtocolFeeCapTooLow(TxHash, u128),
     /// Thrown when the number of unique transactions of a sender exceeded the slot capacity.
     #[error("{0:?} identified as spammer. Transaction {1:?} rejected.")]
     SpammerExceededCapacity(Address, TxHash),
@@ -25,6 +25,10 @@ pub enum PoolError {
     /// respect the size limits of the pool.
     #[error("[{0:?}] Transaction's gas limit {1} exceeds block's gas limit {2}.")]
     TxExceedsGasLimit(TxHash, u64, u64),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the max_init_code_size.
+    #[error("[{0:?}] Transaction's size {1} exceeds max_init_code_size {2}.")]
+    TxExceedsMaxInitCodeSize(TxHash, usize, usize),
 }
 
 // === impl PoolError ===
@@ -38,6 +42,7 @@ impl PoolError {
             PoolError::SpammerExceededCapacity(_, hash) => hash,
             PoolError::DiscardedOnInsert(hash) => hash,
             PoolError::TxExceedsGasLimit(hash, _, _) => hash,
+            PoolError::TxExceedsMaxInitCodeSize(hash, _, _) => hash,
         }
     }
 }

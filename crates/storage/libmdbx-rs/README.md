@@ -4,7 +4,7 @@
 Rust bindings for [libmdbx](https://libmdbx.dqdkfa.ru).
 
 Forked from an earlier Apache licenced version of the `libmdbx-rs` crate, before it changed licence to GPL.
-NOTE: Most of the repo came from lmdb-rs bindings: https://github.com/mozilla/lmdb-rs.
+NOTE: Most of the repo came from [lmdb-rs bindings](https://github.com/mozilla/lmdb-rs).
 
 ## Updating the libmdbx Version
 

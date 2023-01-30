@@ -1,5 +1,7 @@
 #![allow(missing_docs)]
-//! Types for trace module: Ref https://openethereum.github.io/JSONRPC-trace-module
+//! Types for trace module.
+//!
+//! See <https://openethereum.github.io/JSONRPC-trace-module>
 
 use reth_primitives::{Address, Bytes, H256, U256, U64};
 use serde::{Deserialize, Serialize};

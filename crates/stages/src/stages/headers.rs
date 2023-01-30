@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, metrics::HeaderMetrics, DatabaseIntegrityError, ExecInput, ExecOutput, Stage,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
 use reth_db::{
@@ -12,16 +12,14 @@ use reth_db::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::headers::{
-        client::StatusUpdater,
-        downloader::{HeaderDownloader, SyncTarget},
-    },
+    p2p::headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_primitives::{BlockNumber, Header, SealedHeader, U256};
-use std::{fmt::Debug, sync::Arc};
+use reth_primitives::{BlockNumber, Header, SealedHeader};
+use std::sync::Arc;
 use tracing::*;
 
-pub(crate) const HEADERS: StageId = StageId("Headers");
+/// The [`StageId`] of the headers downloader stage.
+pub const HEADERS: StageId = StageId("Headers");
 
 /// The headers stage.
 ///
@@ -30,44 +28,29 @@ pub(crate) const HEADERS: StageId = StageId("Headers");
 ///
 /// The headers are processed and data is inserted into these tables:
 ///
-/// - [`HeaderNumbers`][reth_interfaces::db::tables::HeaderNumbers]
-/// - [`Headers`][reth_interfaces::db::tables::Headers]
-/// - [`CanonicalHeaders`][reth_interfaces::db::tables::CanonicalHeaders]
+/// - [`HeaderNumbers`][reth_db::tables::HeaderNumbers]
+/// - [`Headers`][reth_db::tables::Headers]
+/// - [`CanonicalHeaders`][reth_db::tables::CanonicalHeaders]
 ///
 /// NOTE: This stage downloads headers in reverse. Upon returning the control flow to the pipeline,
 /// the stage progress is not updated unless this stage is done.
 #[derive(Debug)]
-pub struct HeaderStage<D: HeaderDownloader, C: Consensus, S: StatusUpdater> {
+pub struct HeaderStage<D: HeaderDownloader> {
     /// Strategy for downloading the headers
-    pub downloader: D,
+    downloader: D,
     /// Consensus client implementation
-    pub consensus: Arc<C>,
-    /// Emits updates about the sync status
-    pub sync_status_updates: S,
-    /// Header metrics
-    pub metrics: HeaderMetrics,
+    consensus: Arc<dyn Consensus>,
 }
 
 // === impl HeaderStage ===
 
-impl<D, C, S> HeaderStage<D, C, S>
+impl<D> HeaderStage<D>
 where
     D: HeaderDownloader,
-    C: Consensus,
-    S: StatusUpdater,
 {
-    fn update_head<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
-        height: BlockNumber,
-    ) -> Result<(), StageError> {
-        let block_key = tx.get_block_numhash(height)?;
-        let td: U256 = *tx
-            .get::<tables::HeaderTD>(block_key)?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: height })?;
-        // TODO: This should happen in the last stage
-        self.sync_status_updates.update_status(height, block_key.hash(), td);
-        Ok(())
+    /// Create a new header stage
+    pub fn new(downloader: D, consensus: Arc<dyn Consensus>) -> Self {
+        Self { downloader, consensus }
     }
 
     fn is_stage_done<DB: Database>(
@@ -178,12 +161,10 @@ where
 }
 
 #[async_trait::async_trait]
-impl<DB, D, C, S> Stage<DB> for HeaderStage<D, C, S>
+impl<DB, D> Stage<DB> for HeaderStage<D>
 where
     DB: Database,
     D: HeaderDownloader,
-    C: Consensus,
-    S: StatusUpdater,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -198,7 +179,6 @@ where
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let current_progress = input.stage_progress.unwrap_or_default();
-        self.update_head::<DB>(tx, current_progress)?;
 
         // Lookup the head and tip of the sync range
         let gap = self.get_sync_gap(tx, current_progress).await?;
@@ -226,7 +206,6 @@ where
         };
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
-        self.metrics.headers_counter.increment(downloaded_headers.len() as u64);
 
         // Write the headers to db
         self.write_headers::<DB>(tx, downloaded_headers)?.unwrap_or_default();
@@ -292,7 +271,6 @@ mod tests {
 
     mod test_runner {
         use crate::{
-            metrics::HeaderMetrics,
             stages::headers::HeaderStage,
             test_utils::{
                 ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
@@ -307,10 +285,11 @@ mod tests {
         };
         use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
         use reth_interfaces::{
+            consensus::{Consensus, ForkchoiceState},
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
-                TestConsensus, TestHeaderDownloader, TestHeadersClient, TestStatusUpdater,
+                TestConsensus, TestHeaderDownloader, TestHeadersClient,
             },
         };
         use reth_primitives::{BlockNumber, SealedHeader, U256};
@@ -320,7 +299,6 @@ mod tests {
             pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
-            network_handle: TestStatusUpdater,
             tx: TestTransaction,
         }
 
@@ -334,14 +312,13 @@ mod tests {
                     downloader_factory: Box::new(move || {
                         TestHeaderDownloader::new(client.clone(), consensus.clone(), 1000, 1000)
                     }),
-                    network_handle: TestStatusUpdater::default(),
                     tx: TestTransaction::default(),
                 }
             }
         }
 
         impl<D: HeaderDownloader + 'static> StageTestRunner for HeadersTestRunner<D> {
-            type S = HeaderStage<D, TestConsensus, TestStatusUpdater>;
+            type S = HeaderStage<D>;
 
             fn tx(&self) -> &TestTransaction {
                 &self.tx
@@ -351,8 +328,6 @@ mod tests {
                 HeaderStage {
                     consensus: self.consensus.clone(),
                     downloader: (*self.downloader_factory)(),
-                    sync_status_updates: self.network_handle.clone(),
-                    metrics: HeaderMetrics::default(),
                 }
             }
         }
@@ -425,7 +400,12 @@ mod tests {
                     self.tx.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
                 };
-                self.consensus.update_tip(tip);
+                self.consensus
+                    .notify_fork_choice_state(ForkchoiceState {
+                        head_block_hash: tip,
+                        ..Default::default()
+                    })
+                    .expect("Setting tip failed");
                 Ok(())
             }
         }
@@ -436,7 +416,7 @@ mod tests {
             }
         }
 
-        impl HeadersTestRunner<LinearDownloader<TestConsensus, TestHeadersClient>> {
+        impl HeadersTestRunner<LinearDownloader<TestHeadersClient>> {
             pub(crate) fn with_linear_downloader() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
                 let consensus = Arc::new(TestConsensus::default());
@@ -444,14 +424,10 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader_factory: Box::new(move || {
-                        LinearDownloadBuilder::default().stream_batch_size(500).build(
-                            consensus.clone(),
-                            client.clone(),
-                            Default::default(),
-                            Default::default(),
-                        )
+                        LinearDownloadBuilder::default()
+                            .stream_batch_size(500)
+                            .build(consensus.clone(), client.clone())
                     }),
-                    network_handle: TestStatusUpdater::default(),
                     tx: TestTransaction::default(),
                 }
             }
@@ -463,9 +439,9 @@ mod tests {
                 block: BlockNumber,
             ) -> Result<(), TestRunnerError> {
                 self.tx
-                    .check_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
-                self.tx.check_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
-                self.tx.check_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
+                    .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
+                self.tx.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
+                self.tx.ensure_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
                 Ok(())
             }
         }
@@ -489,7 +465,13 @@ mod tests {
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
-        runner.consensus.update_tip(tip.hash());
+        runner
+            .consensus
+            .notify_fork_choice_state(ForkchoiceState {
+                head_block_hash: tip.hash(),
+                ..Default::default()
+            })
+            .expect("Setting tip failed");
 
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
@@ -504,7 +486,13 @@ mod tests {
         let stage = runner.stage();
 
         let consensus_tip = H256::random();
-        stage.consensus.update_tip(consensus_tip);
+        stage
+            .consensus
+            .notify_fork_choice_state(ForkchoiceState {
+                head_block_hash: consensus_tip,
+                ..Default::default()
+            })
+            .expect("Setting tip failed");
 
         // Genesis
         let stage_progress = 0;
@@ -568,7 +556,13 @@ mod tests {
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
-        runner.consensus.update_tip(tip.hash());
+        runner
+            .consensus
+            .notify_fork_choice_state(ForkchoiceState {
+                head_block_hash: tip.hash(),
+                ..Default::default()
+            })
+            .expect("Setting tip failed");
 
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: progress }) if progress == stage_progress);

@@ -7,40 +7,61 @@ use reth_interfaces::consensus;
 use std::fmt::Debug;
 use tracing::*;
 
-const MERKLE_EXECUTION: StageId = StageId("MerkleExecuteStage");
-const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
+/// The [`StageId`] of the merkle hashing execution stage.
+pub const MERKLE_EXECUTION: StageId = StageId("MerkleExecute");
 
-/// Merkle stage uses input from [AccountHashingStage] and [StorageHashingStage] stages
-/// and calculated intermediate hashed and state root.
-/// This stage depends on the Account and Storage stages. It will be executed after them during
-/// execution, and before them during unwinding.
-#[derive(Debug)]
-pub struct MerkleStage {
-    /// Flag if true would do `execute` but skip unwind but if it false it would skip execution but
-    /// do unwind.
-    pub stage: StageType,
-    /// The threshold for switching from incremental trie building
-    /// of changes to whole rebuild. Num of transitions.
-    pub clean_threshold: u64,
-}
+/// The [`StageId`] of the merkle hashing unwind stage.
+pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
 
-/// Possible variant of the merkle stage.
+/// The merkle hashing stage uses input from
+/// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
+/// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
+/// and state roots.
+///
+/// This stage should be run with the above two stages, otherwise it is a no-op.
+///
+/// This stage is split in two: one for calculating hashes and one for unwinding.
+///
+/// When run in execution, it's going to be executed AFTER the hashing stages, to generate
+/// the state root. When run in unwind mode, it's going to be executed BEFORE the hashing stages,
+/// so that it unwinds the intermediate hashes based on the unwound hashed state from the hashing
+/// stages. The order of these two variants is important. The unwind variant should be added to the
+/// pipeline before the execution variant.
+///
+/// An example pipeline to only hash state would be:
+///
+/// - [`MerkleStage::Unwind`]
+/// - [`AccountHashingStage`][crate::stages::AccountHashingStage]
+/// - [`StorageHashingStage`][crate::stages::StorageHashingStage]
+/// - [`MerkleStage::Execution`]
 #[derive(Debug)]
-pub enum StageType {
-    /// An execute stage.
-    Execute,
-    /// An unwind stage.
+pub enum MerkleStage {
+    /// The execution portion of the hashing stage.
+    Execution {
+        /// The threshold for switching from incremental trie building
+        /// of changes to whole rebuild. Num of transitions.
+        clean_threshold: u64,
+    },
+    /// The unwind portion of the hasing stage.
     Unwind,
-    /// Stage that has both, for testing.
-    Both,
+
+    #[cfg(test)]
+    Both {
+        /// The threshold for switching from incremental trie building
+        /// of changes to whole rebuild. Num of transitions.
+        clean_threshold: u64,
+    },
 }
+
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
     fn id(&self) -> StageId {
-        match self.stage {
-            StageType::Execute => MERKLE_EXECUTION,
-            _ => MERKLE_UNWIND,
+        match self {
+            MerkleStage::Execution { .. } => MERKLE_EXECUTION,
+            MerkleStage::Unwind => MERKLE_UNWIND,
+            #[cfg(test)]
+            MerkleStage::Both { .. } => unreachable!(),
         }
     }
 
@@ -50,14 +71,18 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if matches!(self.stage, StageType::Unwind) {
-            info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
-        }
-        // if !self.is_execute {
-        //     info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-        //     return Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true
-        // }); }
+        let threshold = match self {
+            MerkleStage::Unwind => {
+                info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
+                return Ok(ExecOutput {
+                    stage_progress: input.previous_stage_progress(),
+                    done: true,
+                })
+            }
+            MerkleStage::Execution { clean_threshold } => *clean_threshold,
+            #[cfg(test)]
+            MerkleStage::Both { clean_threshold } => *clean_threshold,
+        };
 
         let stage_progress = input.stage_progress.unwrap_or_default();
         let previous_stage_progress = input.previous_stage_progress();
@@ -69,7 +94,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let trie_root = if from_transition == to_transition {
             block_root
-        } else if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
+        } else if to_transition - from_transition > threshold || stage_progress == 0 {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
             tx.clear::<tables::AccountsTrie>()?;
@@ -105,7 +130,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        if matches!(self.stage, StageType::Execute) {
+        if matches!(self, MerkleStage::Execution { .. }) {
             info!(target: "sync::stages::merkle::exec", "Stage is always skipped");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
@@ -215,7 +240,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S { clean_threshold: self.clean_threshold, stage: StageType::Both }
+            Self::S::Both { clean_threshold: self.clean_threshold }
         }
     }
 

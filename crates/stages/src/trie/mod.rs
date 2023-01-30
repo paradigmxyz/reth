@@ -373,15 +373,11 @@ impl DBTrieLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{
-        mdbx::{test_utils::create_test_rw_db, WriteMap},
-        tables,
-        transaction::DbTxMut,
-    };
+    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
     use reth_primitives::{
         hex_literal::hex,
         keccak256,
-        proofs::{KeccakHasher, EMPTY_ROOT},
+        proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
         Address, ChainSpec,
     };
     use reth_staged_sync::utils::chainspec::chain_spec_value_parser;
@@ -391,7 +387,7 @@ mod tests {
     #[test]
     fn empty_trie() {
         let trie = DBTrieLoader::default();
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
         assert_eq!(trie.calculate_root(&tx), Ok(EMPTY_ROOT));
     }
@@ -399,7 +395,7 @@ mod tests {
     #[test]
     fn single_account_trie() {
         let trie = DBTrieLoader::default();
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let account = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
@@ -415,7 +411,7 @@ mod tests {
     #[test]
     fn two_accounts_trie() {
         let trie = DBTrieLoader::default();
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
         let accounts = [
@@ -445,7 +441,7 @@ mod tests {
     #[test]
     fn single_storage_trie() {
         let trie = DBTrieLoader::default();
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
@@ -473,7 +469,7 @@ mod tests {
     #[test]
     fn single_account_with_storage_trie() {
         let trie = DBTrieLoader::default();
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
@@ -520,7 +516,7 @@ mod tests {
     #[test]
     fn verify_genesis() {
         let trie = DBTrieLoader::default();
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
         let ChainSpec { genesis, .. } = chain_spec_value_parser("mainnet").unwrap();
 
@@ -538,12 +534,14 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        assert_eq!(trie.calculate_root(&tx), Ok(genesis.state_root));
+        let state_root = genesis_state_root(genesis.alloc);
+
+        assert_eq!(trie.calculate_root(&tx), Ok(state_root));
     }
 
     #[test]
     fn gather_changes() {
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();

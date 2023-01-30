@@ -3,7 +3,7 @@ use reth_codecs::Compact;
 use serde::Serialize;
 
 /// Account storage entry.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize)]
 pub struct StorageEntry {
     /// Storage key.
     pub key: H256,
