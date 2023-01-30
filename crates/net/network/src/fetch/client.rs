@@ -1,6 +1,6 @@
 //! A client implementation that can interact with the network and download data.
 
-use crate::{fetch::DownloadRequest, peers::PeersHandle, receiver::ResolvedOneshotReceiver};
+use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse, peers::PeersHandle};
 use futures::{future, FutureExt};
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
@@ -93,9 +93,9 @@ impl HeadersClient for FetchClient {
             .send(DownloadRequest::GetBlockHeaders { request, response, priority })
             .is_ok()
         {
-            Box::pin(ResolvedOneshotReceiver::from(rx).map(|r| r.map(WithPeerId::transform)))
+            Box::pin(FlattenedResponse::from(rx).map(|r| r.map(WithPeerId::transform)))
         } else {
-            Box::pin(future::ready(Err(RequestError::ChannelClosed)))
+            Box::pin(future::err(RequestError::ChannelClosed))
         }
     }
 }
@@ -115,9 +115,9 @@ impl BodiesClient for FetchClient {
             .send(DownloadRequest::GetBlockBodies { request, response, priority })
             .is_ok()
         {
-            Box::pin(ResolvedOneshotReceiver::from(rx))
+            Box::pin(FlattenedResponse::from(rx))
         } else {
-            Box::pin(future::ready(Err(RequestError::ChannelClosed)))
+            Box::pin(future::err(RequestError::ChannelClosed))
         }
     }
 }
