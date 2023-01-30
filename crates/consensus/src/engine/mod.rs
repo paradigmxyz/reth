@@ -178,7 +178,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
     }
 
     fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus> {
-        let block = match self.try_construct_block(payload) {
+        let sealed = match self.try_construct_block(payload) {
             Ok(b) => b,
             Err(err) => {
                 return Ok(PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
@@ -188,16 +188,16 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         };
 
         // The block already exists in our database
-        if self.client.is_known(&block.hash())? {
-            return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block.hash()))
+        if self.client.is_known(&sealed.hash())? {
+            return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, sealed.hash()))
         }
 
-        let Some(parent) = self.client.block(BlockId::Hash(EthersH256(block.parent_hash.0)))? else {
+        let Some(parent) = self.client.block(BlockId::Hash(EthersH256(sealed.parent_hash.0)))? else {
              // TODO: cache block for storing later
              return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
         };
 
-        if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
+        if let Some(parent_td) = self.client.header_td(&sealed.parent_hash)? {
             if Some(parent_td) <= self.chain_spec.paris_status().terminal_total_difficulty() {
                 return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: EngineApiError::PayloadPreMerge.to_string(),
@@ -205,36 +205,30 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
             }
         }
 
-        if block.timestamp <= parent.timestamp {
+        if sealed.timestamp <= parent.timestamp {
             return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadTimestamp {
-                    invalid: block.timestamp,
+                    invalid: sealed.timestamp,
                     latest: parent.timestamp,
                 }
                 .to_string(),
             }))
         }
 
-        let (header, body, _) = block.split();
-        let transactions = body
-            .into_iter()
-            .map(|tx| {
-                let tx_hash = tx.hash;
-                tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
-            })
-            .collect::<Result<Vec<_>, EngineApiError>>()?;
+        // TODO revise
+        let hash = sealed.hash();
+        let parent_hash = sealed.header.parent_hash;
+
         let mut state_provider = SubState::new(State::new(&*self.client));
         match executor::execute_and_verify_receipt(
-            &header,
-            &transactions,
-            &[],
+            sealed.unseal(),
             &self.chain_spec,
             &mut state_provider,
         ) {
-            Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, header.hash())),
+            Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, hash)),
             Err(err) => Ok(PayloadStatus::new(
                 PayloadStatusEnum::Invalid { validation_error: err.to_string() },
-                header.parent_hash, // The parent hash is already in our database hence it is valid
+                parent_hash, // The parent hash is already in our database hence it is valid
             )),
         }
     }

@@ -6,7 +6,7 @@ use hashbrown::hash_map::Entry;
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
+    bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
     TransactionSignedEcRecovered, H160, H256, U256,
 };
 use reth_provider::StateProvider;
@@ -249,19 +249,31 @@ pub struct TransactionChangeSet {
 
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
-    header: &Header,
-    transactions: &[TransactionSignedEcRecovered],
-    ommers: &[Header],
+    block: Block,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    let transaction_change_set = execute(header, transactions, ommers, chain_spec, db)?;
+    // TODO handle error
+    let transactions: Vec<TransactionSignedEcRecovered> =
+        block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
+
+    // 2
+    // let transactions = body
+    //     .into_iter()
+    //     .map(|tx| {
+    //         let tx_hash = tx.hash;
+    //         tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
+    //     })
+    //     .collect::<Result<Vec<_>, EngineApiError>>()?;
+
+    let transaction_change_set =
+        execute(&block.header, &transactions, &block.ommers, chain_spec, db)?;
 
     let receipts_iter =
         transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
 
-    if Some(header.number) >= chain_spec.fork_block(Hardfork::Byzantium) {
-        verify_receipt(header.receipts_root, header.logs_bloom, receipts_iter)?;
+    if Some(block.header.number) >= chain_spec.fork_block(Hardfork::Byzantium) {
+        verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
     }
     // TODO Before Byzantium, receipts contained state root that would mean that expensive operation
     // as hashing that is needed for state root got calculated in every transaction
@@ -612,12 +624,15 @@ mod tests {
         // Got rlp block from: src/GeneralStateTestsFiller/stChainId/chainIdGasCostFiller.json
 
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        let sealed = SealedBlock::decode(&mut block_rlp).unwrap();
+
         let mut ommer = Header::default();
         let ommer_beneficiary = H160(hex!("3000000000000000000000000000000000000000"));
         ommer.beneficiary = ommer_beneficiary;
-        ommer.number = block.number;
+        ommer.number = sealed.number;
         let ommers = vec![ommer];
+
+        let block = Block { header: sealed.header.unseal(), body: sealed.body, ommers };
 
         let mut db = StateProviderTest::default();
 
@@ -654,13 +669,9 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
 
         let mut db = SubState::new(State::new(db));
-        let transactions: Vec<TransactionSignedEcRecovered> =
-            block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block.header, &transactions, &ommers, &chain_spec, &mut db)
-                .unwrap();
+        let out = execute_and_verify_receipt(block, &chain_spec, &mut db).unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 

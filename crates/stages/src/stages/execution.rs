@@ -14,7 +14,7 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_primitives::{
-    Address, ChainSpec, Hardfork, Header, StorageEntry, TransactionSignedEcRecovered, H256,
+    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, TransactionSignedEcRecovered, H256,
     MAINNET, U256,
 };
 use reth_provider::LatestStateProviderRef;
@@ -134,7 +134,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, body, ommers) in block_batch.iter() {
+        for (header, body, ommers) in block_batch.into_iter() {
             let num = header.number;
             tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
             // iterate over all transactions
@@ -166,16 +166,19 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 }
                 signers.push(tx);
             }
+            // TODO
             // create ecRecovered transaction by matching tx and its signer
-            let recovered_transactions: Vec<_> = transactions
-                .into_iter()
-                .zip(signers.into_iter())
-                .map(|(tx, signer)| {
-                    TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
-                })
-                .collect();
+            // let recovered_transactions: Vec<_> = transactions
+            //     .into_iter()
+            //     .zip(signers.into_iter())
+            //     .map(|(tx, signer)| {
+            //         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
+            //     })
+            //     .collect();
 
-            trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
+            // TODO
+            // trace!(target: "sync::stages::execution", number = header.number, txs =
+            // recovered_transactions.len(), "Executing block");
 
             // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
             // revm can take more then default allocated stack space. For this case we are using
@@ -188,9 +191,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .spawn_scoped(scope, || {
                         // execute and store output to results
                         reth_executor::executor::execute_and_verify_receipt(
-                            header,
-                            &recovered_transactions,
-                            ommers,
+                            Block { header, body: transactions, ommers },
                             &self.chain_spec,
                             &mut state_provider,
                         )
@@ -198,7 +199,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .expect("Expects that thread name is not null");
                 handle.join().expect("Expects for thread to not panic")
             })
-            .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
+            // TODO
+            // .map_err(|error| StageError::ExecutionError { block: number, error })?;
+            .map_err(|error| StageError::ExecutionError { block: 0, error })?;
             block_change_patches.push((changeset, num));
         }
 
