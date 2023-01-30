@@ -214,7 +214,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
 {
     type Item = Result<(T::Key, T::Value), Error>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.is_ended {
+        if self.is_done {
             return None
         }
 
@@ -228,7 +228,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
             if key < self.end_key {
                 Some(Ok((key, value)))
             } else {
-                self.is_ended = true;
+                self.is_done = true;
                 None
             }
         } else {
@@ -240,7 +240,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 'tx, T, CURSOR> {
     /// construct RangeWalker
     pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>, end_key: T::Key) -> Self {
-        Self { cursor, start, end_key, is_ended: false, _tx_phantom: std::marker::PhantomData }
+        Self { cursor, start, end_key, is_done: false, _tx_phantom: std::marker::PhantomData }
     }
 }
 
