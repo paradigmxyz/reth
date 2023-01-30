@@ -134,10 +134,16 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             info!(target: "sync::stages::merkle::exec", "Stage is always skipped");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
-        // We can assume that the Accounts and Storage are already set to its
-        // previous state, so we only build the Trie from scratch.
         let loader = DBTrieLoader::default();
-        loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?;
+        let current_root = tx.get_header_by_num(input.stage_progress)?.state_root;
+
+        let from_transition = tx.get_block_transition(input.unwind_to)? + 1;
+        let to_transition = tx.get_block_transition(input.stage_progress)? + 1;
+
+        loader
+            .update_root(tx, current_root, from_transition, to_transition)
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
         info!(target: "sync::stages::merkle::unwind", "Stage finished");
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
