@@ -92,12 +92,10 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        info!(target: "reth::cli", path = %self.db, "Loading configuration");
         let mut config: Config = self.load_config()?;
         info!(target: "reth::cli", path = %self.db, "Configuration loaded");
 
         self.init_trusted_nodes(&mut config);
-        info!(target: "reth::cli", path = %self.db, "Trusted nodes configured");
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
@@ -105,13 +103,10 @@ impl Command {
 
         self.start_metrics_endpoint()?;
 
-        info!(target: "reth::cli", "Checking genesis block");
         let genesis = init_genesis(db.clone(), self.chain.clone())?;
-        info!(target: "reth::cli", ?genesis, "Inserted genesis");
 
-        info!(target: "reth::cli", "Initializing consensus");
         let consensus = self.init_consensus()?;
-        info!(target: "reth::cli", "Consensus initialized");
+        info!(target: "reth::cli", "Consensus engine initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
         let netconf = self.load_network_config(&config, &db);
@@ -141,6 +136,7 @@ impl Command {
         config.peers.connect_trusted_nodes_only = self.network.trusted_only;
 
         if !self.network.trusted_peers.is_empty() {
+            info!(target: "reth::cli", "Adding trusted nodes");
             self.network.trusted_peers.iter().for_each(|peer| {
                 config.peers.trusted_nodes.insert(*peer);
             });
