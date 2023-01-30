@@ -17,7 +17,7 @@ use std::{
 /// enabling block production and creating transactions.
 ///
 /// # Example
-/// ```
+/// ```no_run
 /// # use ethers_core::utils::Geth;
 /// # use reth_staged_sync::test_utils::CliqueGethInstance;
 /// # tokio_test::block_on(async {
