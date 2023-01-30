@@ -53,7 +53,7 @@ where
     }
 
     fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
-        self.tx.put::<tables::AccountsTrie>(H256::from_slice(key.as_slice()), value.to_vec())?;
+        self.tx.put::<tables::AccountsTrie>(H256::from_slice(key.as_slice()), value)?;
         Ok(())
     }
 
@@ -239,10 +239,7 @@ impl DBTrieLoader {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
         let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
 
-        while let Some((_, entry @ StorageEntry { key: storage_key, value })) =
-            walker.next().transpose()?
-        {
-            eprintln!("{:?}", entry);
+        while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(storage_key.as_bytes().to_vec(), out)
@@ -317,10 +314,9 @@ impl DBTrieLoader {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         for key in changed_storages {
-            if let Some(entry @ StorageEntry { value, .. }) =
+            if let Some(StorageEntry { value, .. }) =
                 storage_cursor.seek_by_key_subkey(address, key)?
             {
-                eprintln!("{:?}", entry);
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
                 trie.insert(key.as_bytes().to_vec(), out)

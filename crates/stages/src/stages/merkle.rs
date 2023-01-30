@@ -427,33 +427,6 @@ mod tests {
 
         fn state_root(&self) -> Result<H256, TestRunnerError> {
             Ok(DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap())
-            // self.tx
-            //     .query(|tx| {
-            //         let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
-            //         let mut storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-            //         // TODO: maybe extract root calculation as a test util?
-            //         let accounts = accounts_cursor.walk(Address::zero())?.map_while(|res| {
-            //             let Ok((address, account)) = res else {
-            //                     return None
-            //                 };
-            //             let mut bytes = Vec::new();
-            //             let storage = storage_cursor
-            //                 .walk_dup(address, H256::zero())
-            //                 .unwrap()
-            //                 .map_while(|res| {
-            //                     let Ok((_, StorageEntry { key, value })) = res else { return None
-            // };                     let mut bytes = Vec::new();
-            //                     value.encode(&mut bytes);
-            //                     Some((key, bytes))
-            //                 });
-            //             let root = sec_trie_root::<KeccakHasher, _, _, _>(storage);
-            //             let eth_account = EthAccount::from_with_root(account, root);
-            //             eth_account.encode(&mut bytes);
-            //             Some((address, bytes))
-            //         });
-            //         Ok(sec_trie_root::<KeccakHasher, _, _, _>(accounts))
-            //     })
-            //     .map_err(|e| e.into())
         }
 
         pub(crate) fn generate_initial_trie(
