@@ -839,7 +839,7 @@ mod tests {
 
     #[test]
     fn timeout_calculation_sanity_tests() {
-        let rtt = Duration::from_millis(200);
+        let rtt = Duration::from_secs(5);
         // timeout for an RTT of `rtt`
         let timeout = rtt * TIMEOUT_SCALING;
 
