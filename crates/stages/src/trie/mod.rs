@@ -237,13 +237,17 @@ impl DBTrieLoader {
         let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
-        let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
 
-        while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
+        // Should be able to use walk_dup, but any call to next() causes an assert fail in mdbx.c
+        // let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
+        let mut current = storage_cursor.seek_by_key_subkey(address, H256::zero())?;
+
+        while let Some(StorageEntry { key: storage_key, value }) = current {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(storage_key.as_bytes().to_vec(), out)
                 .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+            current = storage_cursor.next_dup()?.map(|(_, v)| v);
         }
 
         let root = H256::from_slice(trie.root().unwrap().as_slice());
