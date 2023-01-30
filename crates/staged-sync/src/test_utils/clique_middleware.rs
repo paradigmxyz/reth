@@ -74,7 +74,6 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
         if unlocked_addr != our_address {
             return Err(CliqueError::AddressMismatch { local: our_address, remote: unlocked_addr })
         }
-        assert_eq!(unlocked_addr, our_address);
 
         let unlock_success = self.unlock_account(our_address, password.to_string(), None).await?;
 
