@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use enr::k256::ecdsa::SigningKey;
 use ethers_core::{
-    types::{transaction::eip2718::TypedTransaction, Block, BlockNumber, H256},
+    types::{transaction::eip2718::TypedTransaction, Address, Block, BlockNumber, H256},
     utils::secret_key_to_address,
 };
 use ethers_middleware::SignerMiddleware;
@@ -19,7 +19,7 @@ use tracing::trace;
 pub enum CliqueError<E> {
     /// Error encountered when using the provider
     #[error(transparent)]
-    MiddlewareError(#[from] E),
+    ProviderError(#[from] E),
 
     /// No genesis block returned from the provider
     #[error("no genesis block returned from the provider")]
@@ -28,6 +28,24 @@ pub enum CliqueError<E> {
     /// No tip block returned from the provider
     #[error("no tip block returned from the provider")]
     NoTip,
+
+    /// Account was not successfully unlocked on the provider
+    #[error("account was not successfully unlocked on the provider")]
+    AccountNotUnlocked,
+
+    /// Mining was not successfully enabled on the provider
+    #[error("mining was not successfully enabled on the provider")]
+    MiningNotEnabled,
+
+    /// Mismatch between locally computed address and address returned from the provider
+    #[error("local address {local} does not match remote address {remote}")]
+    AddressMismatch {
+        /// The locally computed address
+        local: Address,
+
+        /// The address returned from the provider
+        remote: Address,
+    },
 }
 
 /// Error type for [`CliqueMiddleware`].
@@ -38,7 +56,11 @@ pub type CliqueMiddlewareError<M> = CliqueError<<M as Middleware>::Error>;
 pub trait CliqueMiddleware: Send + Sync + Middleware {
     /// Enable mining on the clique geth instance by importing and unlocking the signer account
     /// derived from given private key and password.
-    async fn enable_mining(&self, signer: SigningKey, password: String) {
+    async fn enable_mining(
+        &self,
+        signer: SigningKey,
+        password: String,
+    ) -> Result<(), CliqueMiddlewareError<Self>> {
         let our_address = secret_key_to_address(&signer);
 
         // send the private key to geth and unlock it
@@ -48,19 +70,27 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
             "Importing private key"
         );
 
-        let unlocked_addr = self.import_raw_key(key_bytes, password.to_string()).await.unwrap();
+        let unlocked_addr = self.import_raw_key(key_bytes, password.to_string()).await?;
+        if unlocked_addr != our_address {
+            return Err(CliqueError::AddressMismatch { local: our_address, remote: unlocked_addr })
+        }
         assert_eq!(unlocked_addr, our_address);
 
-        let unlock_success =
-            self.unlock_account(our_address, password.to_string(), None).await.unwrap();
-        assert!(unlock_success);
+        let unlock_success = self.unlock_account(our_address, password.to_string(), None).await?;
+
+        if !unlock_success {
+            return Err(CliqueError::AccountNotUnlocked)
+        }
 
         // start mining?
-        self.start_mining(None).await.unwrap();
+        self.start_mining(None).await?;
 
         // check that we are mining
-        let mining = self.mining().await.unwrap();
-        assert!(mining);
+        let mining = self.mining().await?;
+        if !mining {
+            return Err(CliqueError::MiningNotEnabled)
+        }
+        Ok(())
     }
 
     /// Returns the chain tip of the [`Geth`](ethers_core::utils::Geth) instance by calling

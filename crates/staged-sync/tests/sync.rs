@@ -60,7 +60,7 @@ async fn sync_from_clique_geth() {
         clique.prevent_blocking().await;
 
         // get geth to start producing blocks - use a blank password
-        provider.enable_mining(clique.0.clique_private_key(), "".into()).await;
+        provider.enable_mining(clique.0.clique_private_key(), "".into()).await.unwrap();
         tracing::info!("enabled block production");
 
         // === check that we have the same genesis hash ===
@@ -214,7 +214,7 @@ async fn geth_clique_keepalive() {
         clique.prevent_blocking().await;
 
         // get geth to start producing blocks - use a blank password
-        provider.enable_mining(clique.0.clique_private_key(), "".into()).await;
+        provider.enable_mining(clique.0.clique_private_key(), "".into()).await.unwrap();
 
         // === check that we have the same genesis hash ===
 
