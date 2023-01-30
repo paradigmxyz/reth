@@ -240,7 +240,10 @@ impl DBTrieLoader {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
         let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
 
-        while let Some((_, StorageEntry { key: storage_key, value })) = walker.next().transpose()? {
+        while let Some((_, entry @ StorageEntry { key: storage_key, value })) =
+            walker.next().transpose()?
+        {
+            eprintln!("{:?}", entry);
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(storage_key.as_bytes().to_vec(), out)
@@ -315,9 +318,10 @@ impl DBTrieLoader {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         for key in changed_storages {
-            if let Some(StorageEntry { value, .. }) =
+            if let Some(entry @ StorageEntry { value, .. }) =
                 storage_cursor.seek_by_key_subkey(address, key)?
             {
+                eprintln!("{:?}", entry);
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
                 trie.insert(key.as_bytes().to_vec(), out)
@@ -363,7 +367,6 @@ impl DBTrieLoader {
             account_changes.entry(keccak256(address)).or_default().insert(keccak256(key));
         }
 
-        account_changes.iter().map(|(_, v)| v.len()).sum::<usize>();
         Ok(account_changes)
     }
 }
