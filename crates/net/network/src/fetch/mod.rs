@@ -225,6 +225,7 @@ impl StateFetcher {
         peer_id: PeerId,
         res: RequestResult<Vec<Header>>,
     ) -> Option<BlockResponseOutcome> {
+        let is_error = res.is_err();
         let reputation_change = res.reputation_change_err();
 
         let resp = self.inflight_headers_requests.remove(&peer_id);
@@ -237,7 +238,7 @@ impl StateFetcher {
             let _ = resp.response.send(res.map(|h| (peer_id, h).into()));
         }
 
-        if let Some(reputation_change) = reputation_change {
+        if is_error {
             // if the response was erroneous we want to report the peer.
             return Some(BlockResponseOutcome::BadResponse(peer_id, reputation_change))
         }
@@ -402,8 +403,8 @@ pub(crate) enum FetchAction {
 pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
     Request(PeerId, BlockRequest),
-    /// How to handle a bad response and the reputation change to apply.
-    BadResponse(PeerId, ReputationChangeKind),
+    /// How to handle a bad response and the reputation change to apply, if any.
+    BadResponse(PeerId, Option<ReputationChangeKind>),
 }
 
 #[cfg(test)]

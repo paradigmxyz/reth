@@ -42,15 +42,22 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
         }
     }
 
+    /// [RequestError::ChannelClosed] is not possible here since these errors are mapped to
+    /// `ConnectionDropped`, which will be handled when the dropped connection is cleaned up.
+    ///
+    /// [RequestError::ConnectionDropped] should be ignored here because this is already handled
+    /// when the dropped connection is handled.
+    ///
+    /// [RequestError::UnsupportedCapability] is not used yet because we only support active session
+    /// for eth protocol.
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
-                RequestError::ChannelClosed => Some(ReputationChangeKind::Other(0)),
-                RequestError::NotConnected => Some(ReputationChangeKind::Other(0)),
-                RequestError::ConnectionDropped => Some(ReputationChangeKind::Dropped),
-                RequestError::UnsupportedCapability => Some(ReputationChangeKind::Other(0)),
+                RequestError::ChannelClosed => None,
+                RequestError::ConnectionDropped => None,
+                RequestError::UnsupportedCapability => None,
                 RequestError::Timeout => Some(ReputationChangeKind::Timeout),
-                RequestError::BadResponse => Some(ReputationChangeKind::BadMessage),
+                RequestError::BadResponse => None,
             }
         } else {
             None
@@ -64,8 +71,6 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
 pub enum RequestError {
     #[error("Closed channel to the peer.")]
     ChannelClosed,
-    #[error("Not connected to the peer.")]
-    NotConnected,
     #[error("Connection to a peer dropped while handling the request.")]
     ConnectionDropped,
     #[error("Capability Message is not supported by remote peer.")]

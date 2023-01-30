@@ -347,9 +347,10 @@ where
             BlockResponseOutcome::Request(peer, request) => {
                 self.handle_block_request(peer, request);
             }
-            BlockResponseOutcome::BadResponse(peer, reputation_change) => {
+            BlockResponseOutcome::BadResponse(peer, Some(reputation_change)) => {
                 self.peers_manager.apply_reputation_change(&peer, reputation_change);
             }
+            _ => {}
         }
         None
     }
