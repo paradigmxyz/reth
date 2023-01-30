@@ -31,7 +31,6 @@ members = [
     "crates/storage/provider",
     "crates/tracing",
     "crates/tasks",
-    "crates/tests",
     "crates/transaction-pool",
     "crates/metrics/metrics-derive",
     "crates/metrics/common",

@@ -4643,39 +4643,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-tests"
-version = "0.1.0"
-dependencies = [
- "enr 0.7.0",
- "ethers-core",
- "ethers-middleware",
- "ethers-providers",
- "ethers-signers",
- "futures",
- "hex",
- "rand 0.8.5",
- "reth-consensus",
- "reth-db",
- "reth-downloaders",
- "reth-eth-wire",
- "reth-executor",
- "reth-interfaces",
- "reth-network",
- "reth-primitives",
- "reth-provider",
- "reth-staged-sync",
- "reth-stages",
- "reth-tracing",
- "secp256k1 0.24.3",
- "serial_test",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
 name = "reth-tracing"
 version = "0.1.0"
 dependencies = [
