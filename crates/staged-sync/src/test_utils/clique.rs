@@ -13,23 +13,26 @@ use std::{
 /// A [`Geth`](ethers_core::utils::Geth) instance configured with Clique and a custom
 /// [`Genesis`](ethers_core::utils::Genesis).
 ///
-/// This holds a [`SignerMiddleware`](ethers_middleware::signer_middleware::SignerMiddleware) for
+/// This holds a [`SignerMiddleware`](ethers_middleware::SignerMiddleware) for
 /// enabling block production and creating transactions.
 ///
 /// # Example
 /// ```
 /// # use ethers_core::utils::Geth;
 /// # use reth_staged_sync::test_utils::CliqueGethInstance;
+/// # tokio_test::block_on(async {
 ///
 /// // this creates a funded geth
 /// let clique_geth = Geth::new()
-///     .chain_id(chain_id);
+///     .p2p_port(30303)
+///     .chain_id(1337u64);
 ///
 /// // build the funded geth, generating a random signing key and enabling clique
 /// let (mut clique, provider) = CliqueGethInstance::new(clique_geth, None).await;
 ///
 /// // don't print logs, but drain the stderr
 /// clique.prevent_blocking().await;
+/// # });
 /// ```
 pub struct CliqueGethInstance(
     /// The spawned [`GethInstance`](ethers_core::utils::GethInstance).
@@ -37,9 +40,9 @@ pub struct CliqueGethInstance(
 );
 
 impl CliqueGethInstance {
-    /// Sets up a new [`SignerMiddleware`](ethers_middleware::signer_middleware::SignerMiddleware)
+    /// Sets up a new [`SignerMiddleware`](ethers_middleware::SignerMiddleware)
     /// for the [`Geth`](ethers_core::utils::Geth) instance and returns the
-    /// [`CliqueGethInstance`].
+    /// [`CliqueGethInstance`](crate::test_utils::CliqueGethInstance).
     ///
     /// The signer is assumed to be the clique signer and the signer for any transactions sent for
     /// block production.

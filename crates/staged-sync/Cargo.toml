@@ -52,6 +52,7 @@ ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-feature
 # async / futures
 async-trait = { version = "0.1", optional = true }
 tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"], optional = true }
+tokio-test = { version = "0.4", optional = true }
 
 # misc
 tempfile = { version = "3.3", optional = true }
@@ -89,6 +90,7 @@ test-utils = [
     "dep:hex",
     "dep:rand",
     "dep:tokio",
+    "dep:tokio-test",
     "dep:ethers-signers",
     "dep:ethers-providers",
     "dep:ethers-middleware",

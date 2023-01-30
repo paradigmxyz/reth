@@ -14,7 +14,8 @@ use reth_primitives::PeerId;
 use thiserror::Error;
 use tracing::trace;
 
-/// An error that can occur when using the [`CliqueMiddleware`].
+/// An error that can occur when using the
+/// [`CliqueMiddleware`](crate::test_utils::CliqueMiddleware).
 #[derive(Error, Debug)]
 pub enum CliqueError<E> {
     /// Error encountered when using the provider
@@ -48,10 +49,11 @@ pub enum CliqueError<E> {
     },
 }
 
-/// Error type for [`CliqueMiddleware`].
+/// Error type for [`CliqueMiddleware`](crate::test_utils::CliqueMiddleware).
 pub type CliqueMiddlewareError<M> = CliqueError<<M as Middleware>::Error>;
 
-/// Extension trait for [`Middleware`] to provide clique specific functionality.
+/// Extension trait for [`Middleware`](ethers_providers::Middleware) to provide clique specific
+/// functionality.
 #[async_trait(?Send)]
 pub trait CliqueMiddleware: Send + Sync + Middleware {
     /// Enable mining on the clique geth instance by importing and unlocking the signer account
@@ -105,7 +107,7 @@ pub trait CliqueMiddleware: Send + Sync + Middleware {
     }
 
     /// Signs and sends the given unsigned transactions sequentially, signing with the private key
-    /// used to configure the [`CliqueGethInstance`].
+    /// used to configure the [`CliqueGethInstance`](crate::test_utils::CliqueGethInstance).
     async fn send_requests<T: IntoIterator<Item = TypedTransaction>>(
         &self,
         txs: T,
