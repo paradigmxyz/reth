@@ -1,10 +1,10 @@
 use crate::result::rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::{Error, RpcResult as Result};
-use reth_consensus::engine::{EngineApiError, EngineApiResult, EngineMessage};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::H64;
 use reth_rpc_api::EngineApiServer;
+use reth_rpc_engine_api::{EngineApiError, EngineApiResult, EngineMessage};
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, TransitionConfiguration,
 };

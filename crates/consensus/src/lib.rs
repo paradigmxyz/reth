@@ -13,8 +13,5 @@ pub mod consensus;
 pub mod constants;
 pub mod verification;
 
-/// Engine API module.
-pub mod engine;
-
 pub use consensus::BeaconConsensus;
 pub use reth_interfaces::consensus::Error;

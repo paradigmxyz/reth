@@ -1,3 +1,4 @@
+use crate::{EngineApiError, EngineApiResult};
 use futures::StreamExt;
 use reth_executor::{
     executor,
@@ -24,9 +25,6 @@ use std::{
 };
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-mod error;
-pub use error::{EngineApiError, EngineApiResult};
 
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
