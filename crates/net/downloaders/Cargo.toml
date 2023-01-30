@@ -11,7 +11,7 @@ description = "Implementations of various block downloaders"
 # reth
 reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
-reth-eth-wire = { path= "../eth-wire" }
+reth-eth-wire = { path = "../eth-wire" }
 reth-db = { path = "../../storage/db" }
 reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
@@ -31,6 +31,5 @@ reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-tracing = { path = "../../tracing" }
 
-async-trait = "0.1.58"
 assert_matches = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

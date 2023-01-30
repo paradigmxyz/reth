@@ -124,6 +124,7 @@ mod discovery;
 pub mod error;
 pub mod eth_requests;
 mod fetch;
+mod flattened_response;
 mod import;
 mod listener;
 mod manager;
