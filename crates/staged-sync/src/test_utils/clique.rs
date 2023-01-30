@@ -15,6 +15,22 @@ use std::{
 ///
 /// This holds a [`SignerMiddleware`](ethers_middleware::signer_middleware::SignerMiddleware) for
 /// enabling block production and creating transactions.
+///
+/// # Example
+/// ```
+/// # use ethers_core::utils::Geth;
+/// # use reth_staged_sync::test_utils::CliqueGethInstance;
+///
+/// // this creates a funded geth
+/// let clique_geth = Geth::new()
+///     .chain_id(chain_id);
+///
+/// // build the funded geth, generating a random signing key and enabling clique
+/// let (mut clique, provider) = CliqueGethInstance::new(clique_geth, None).await;
+///
+/// // don't print logs, but drain the stderr
+/// clique.prevent_blocking().await;
+/// ```
 pub struct CliqueGethInstance(
     /// The spawned [`GethInstance`](ethers_core::utils::GethInstance).
     pub GethInstance,
