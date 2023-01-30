@@ -24,16 +24,20 @@ reth-provider = { path = "../storage/provider" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
-
+tokio-stream = "0.1.10"
 async-trait = "0.1.57"
-thiserror = "1.0.37"
-tracing = "0.1.36"
-aquamarine = "0.1.12"
-metrics = "0.20.1"
 futures-util = "0.3.25"
+
+# observability
+tracing = "0.1.36"
+metrics = "0.20.1"
+
+# misc
+serde = { version = "1.0", optional = true }
+thiserror = "1.0.37"
+aquamarine = "0.1.12"
 itertools = "0.10.5"
 rayon = "1.6.0"
-
 [dev-dependencies]
 # reth
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
@@ -41,8 +45,11 @@ reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
-tokio-stream = "0.1.10"
 tempfile = "3.3.0"
 assert_matches = "1.5.0"
 rand = "0.8.5"
 paste = "1.0"
+
+[features]
+default = ["serde"]
+serde = ["dep:serde"]

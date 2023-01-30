@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
-//! The [`TransactionRequest`] is a universal representation for a transaction deserialized from the
-//! json input of an RPC call. Depending on what fields are set, it can be converted into the
-//! container type [`TypedTransactionRequest`].
+//! The [`TransactionRequest`][crate::TransactionRequest] is a universal representation for a
+//! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
+//! it can be converted into the container type [`TypedTransactionRequest`].
 
 use reth_primitives::{AccessList, Address, Bytes, U256};
 use reth_rlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};

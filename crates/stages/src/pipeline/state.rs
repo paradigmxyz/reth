@@ -1,12 +1,10 @@
-use crate::{
-    pipeline::event::PipelineEvent,
-    util::{opt, opt::MaybeSender},
-};
+use crate::{pipeline::PipelineEventListeners, util::opt};
 use reth_primitives::BlockNumber;
 
 /// The state of the pipeline during execution.
+#[derive(Default)]
 pub(crate) struct PipelineState {
-    pub(crate) events_sender: MaybeSender<PipelineEvent>,
+    pub(crate) listeners: PipelineEventListeners,
     pub(crate) max_block: Option<BlockNumber>,
     /// The maximum progress achieved by any stage during the execution of the pipeline.
     pub(crate) maximum_progress: Option<BlockNumber>,
@@ -30,12 +28,7 @@ mod tests {
 
     #[test]
     fn record_progress_outliers() {
-        let mut state = PipelineState {
-            events_sender: MaybeSender::new(None),
-            max_block: None,
-            maximum_progress: None,
-            minimum_progress: None,
-        };
+        let mut state = PipelineState::default();
 
         state.record_progress_outliers(10);
         assert_eq!(state.minimum_progress, Some(10));

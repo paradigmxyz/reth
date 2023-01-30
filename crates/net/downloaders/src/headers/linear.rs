@@ -35,7 +35,7 @@ pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
 
 /// Downloads headers concurrently.
 ///
-/// This [Downloader] downloads headers using the configured [HeadersClient].
+/// This [HeaderDownloader] downloads headers using the configured [HeadersClient].
 /// Headers can be requested by hash or block number and take a `limit` parameter. This downloader
 /// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
 /// requests at a time but yielding them in batches on [Stream::poll_next].
@@ -259,7 +259,7 @@ where
                     .iter()
                     .take_while(|last| last.number > target_block_number)
                     .count();
-                // removes all headers that are higher than then current target
+                // removes all headers that are higher than current target
                 self.queued_validated_headers.drain(..skip);
             }
         } else {
@@ -689,7 +689,7 @@ where
     }
 }
 
-/// SAFETY: we need to ensure `LinearDownloader` is `Sync` because the of the [Downloader]
+/// SAFETY: we need to ensure `LinearDownloader` is `Sync` because the of the [HeaderDownloader]
 /// trait. While [HeadersClient] is also `Sync`, the [HeadersClient::get_headers] future does not
 /// enforce `Sync` (async_trait). The future itself does not use any interior mutability whatsoever:
 /// All the mutations are performed through an exclusive reference on `LinearDownloader` when
@@ -773,7 +773,7 @@ struct HeadersResponseError {
 }
 
 /// The block to which we want to close the gap: (local head...sync target]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct SyncTargetBlock {
     /// Block hash of the targeted block
     hash: H256,
@@ -943,7 +943,6 @@ mod tests {
 
         let mut downloader = LinearDownloadBuilder::default()
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
-
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -1015,6 +1014,7 @@ mod tests {
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
+
         downloader.next_request_block_number = start;
 
         let mut total = 0;

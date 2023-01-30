@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRO,
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -14,18 +14,24 @@ use std::{
 };
 use tracing::*;
 
-const ACCOUNT_HASHING: StageId = StageId("AccountHashingStage");
+/// The [`StageId`] of the account hashing stage.
+pub const ACCOUNT_HASHING: StageId = StageId("AccountHashingStage");
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
 #[derive(Debug)]
 pub struct AccountHashingStage {
-    /// The threshold for switching from incremental hashing
-    /// of changes to whole storage hashing. Num of transitions.
+    /// The threshold (in number of state transitions) for switching between incremental
+    /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The size of inserted items after which the control
-    /// flow will be returned to the pipeline for commit.
+    /// The maximum number of blocks to process before committing.
     pub commit_threshold: u64,
+}
+
+impl Default for AccountHashingStage {
+    fn default() -> Self {
+        Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+    }
 }
 
 #[async_trait::async_trait]
@@ -70,9 +76,10 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     // next key of iterator
                     let next_key = accounts.next()?;
 
-                    let mut hashes = tx.cursor_write::<tables::HashedAccount>()?;
-                    // iterate and append presorted hashed accounts
-                    hashed_batch.into_iter().try_for_each(|(k, v)| hashes.append(k, v))?;
+                    // iterate and put presorted hashed accounts
+                    hashed_batch
+                        .into_iter()
+                        .try_for_each(|(k, v)| tx.put::<tables::HashedAccount>(k, v))?;
                     next_key
                 };
                 tx.commit()?;

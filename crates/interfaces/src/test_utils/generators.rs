@@ -59,7 +59,7 @@ pub fn random_tx() -> Transaction {
 
 /// Generates a random legacy [Transaction] that is signed.
 ///
-/// On top of the considerations of [gen_random_tx], these apply as well:
+/// On top of the considerations of [random_tx], these apply as well:
 ///
 /// - There is no guarantee that the nonce is not used twice for the same account
 pub fn random_signed_tx() -> TransactionSigned {

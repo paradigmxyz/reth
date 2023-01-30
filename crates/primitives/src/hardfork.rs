@@ -2,12 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use std::{fmt::Display, str::FromStr};
 
-use crate::{BlockNumber, ChainSpec, ForkFilter, ForkHash, ForkId};
+use crate::{forkkind::ForkDiscriminant, ChainSpec, ForkFilter, ForkId};
 
 #[allow(missing_docs)]
-#[derive(
-    Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Hardfork {
     Frontier,
     Homestead,
@@ -23,10 +21,8 @@ pub enum Hardfork {
     London,
     ArrowGlacier,
     GrayGlacier,
-    MergeNetsplit,
+    Paris,
     Shanghai,
-    #[default]
-    Latest,
 }
 
 impl Hardfork {
@@ -37,24 +33,10 @@ impl Hardfork {
     ///
     /// If the hard fork is not present in the [`ChainSpec`] then `None` is returned.
     pub fn fork_id(&self, chain_spec: &ChainSpec) -> Option<ForkId> {
-        if let Some(fork_block) = chain_spec.fork_block(*self) {
-            let mut curr_forkhash = ForkHash::from(chain_spec.genesis_hash());
-            let mut curr_block_number = 0;
-
-            for (_, b) in chain_spec.forks_iter() {
-                if fork_block >= b {
-                    if b != curr_block_number {
-                        curr_forkhash += b;
-                        curr_block_number = b;
-                    }
-                } else {
-                    return Some(ForkId { hash: curr_forkhash, next: b })
-                }
-            }
-            Some(ForkId { hash: curr_forkhash, next: 0 })
-        } else {
-            None
-        }
+        chain_spec
+            .fork_kind(*self)
+            .map(|k| ForkDiscriminant::from_kind(k, chain_spec))
+            .map(|d| chain_spec.fork_id(d))
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
@@ -64,15 +46,10 @@ impl Hardfork {
     ///
     /// This returns `None` if the hardfork is not present in the given [`ChainSpec`].
     pub fn fork_filter(&self, chain_spec: &ChainSpec) -> Option<ForkFilter> {
-        if let Some(fork_block) = chain_spec.fork_block(*self) {
-            let future_forks: Vec<BlockNumber> =
-                chain_spec.forks_iter().filter(|(_, b)| b > &fork_block).map(|(_, b)| b).collect();
-
-            // pass in the chain spec's genesis hash to initialize the fork filter
-            Some(ForkFilter::new(fork_block, chain_spec.genesis_hash(), future_forks))
-        } else {
-            None
-        }
+        chain_spec
+            .fork_kind(*self)
+            .map(|k| ForkDiscriminant::from_kind(k, chain_spec))
+            .map(|d| chain_spec.fork_filter(d))
     }
 }
 
@@ -95,8 +72,7 @@ impl FromStr for Hardfork {
             "berlin" | "11" => Hardfork::Berlin,
             "london" | "12" => Hardfork::London,
             "arrowglacier" | "13" => Hardfork::ArrowGlacier,
-            "grayglacier" => Hardfork::GrayGlacier,
-            "latest" | "14" => Hardfork::Latest,
+            "grayglacier" | "14" => Hardfork::GrayGlacier,
             _ => return Err(format!("Unknown hardfork {s}")),
         };
         Ok(hardfork)

@@ -9,7 +9,8 @@ use syn::{
 use crate::{metric::Metric, with_attrs::WithAttrs};
 
 /// Metric name regex according to Prometheus data model
-/// https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels
+///
+/// See <https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels>
 static METRIC_NAME_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[a-zA-Z_:.][a-zA-Z0-9_:.]*$").unwrap());
 
@@ -27,7 +28,8 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
     let describe_doc = quote! {
         /// Describe all exposed metrics. Internally calls `describe_*` macros from
         /// the metrics crate according to the metric type.
-        /// Ref: https://docs.rs/metrics/0.20.1/metrics/index.html#macros
+        ///
+        /// See <https://docs.rs/metrics/0.20.1/metrics/index.html#macros>
     };
     let register_and_describe = match &metrics_attr.scope {
         MetricsScope::Static(scope) => {

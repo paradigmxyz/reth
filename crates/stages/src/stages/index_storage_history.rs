@@ -16,8 +16,8 @@ use tracing::*;
 
 const INDEX_STORAGE_HISTORY: StageId = StageId("IndexStorageHistoryStage");
 
-/// Account hashing stage hashes plain account.
-/// This is preparation before generating intermediate hashes and calculating Merkle tree root.
+/// Stage is indexing history the account changesets generated in [`ExecutionStage`]
+/// For more information on index sharding please look at [`tables::StorageHistory`]
 #[derive(Debug)]
 pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control

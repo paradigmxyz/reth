@@ -31,22 +31,31 @@ pub use error::{EngineApiError, EngineApiResult};
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
-/// Consensus engine API trait.
+/// The Consensus Engine API is a trait that grants the Consensus layer access to data and functions
+/// in the Execution layer that are crucial for the consensus process.
 pub trait ConsensusEngine {
-    /// Retrieves payload from local cache.
+    /// Called to retrieve the latest state of the network, validate new blocks, and maintain
+    /// consistency between the Consensus and Execution layers.
     fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload>;
 
-    /// Receives a payload to validate and execute.
+    /// When the Consensus layer receives a new block via the consensus gossip protocol,
+    /// the transactions in the block are sent to the execution layer in the form of a
+    /// `ExecutionPayload`. The Execution layer executes the transactions and validates the
+    /// state in the block header, then passes validation data back to Consensus layer, that
+    /// adds the block to the head of its own blockchain and attests to it. The block is then
+    /// broadcasted over the consensus p2p network in the form of a "Beacon block".
     fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus>;
 
-    /// Updates the fork choice state
+    /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
+    /// valid chain.
     fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated>;
 
-    /// Verifies the transition configuration between execution and consensus clients.
+    /// Called to verify network configuration parameters and ensure that Consensus and Execution
+    /// layers are using the latest configuration.
     fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
@@ -112,7 +121,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EthConsensusEngine<
     /// NOTE: The log bloom is assumed to be validated during serialization.
     /// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
     /// comparing the value with `payload.block_hash`.
-    /// Ref: https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145
+    ///
+    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
     fn try_construct_block(&self, payload: ExecutionPayload) -> EngineApiResult<SealedBlock> {
         if payload.extra_data.len() > 32 {
             return Err(EngineApiError::PayloadExtraData(payload.extra_data))
@@ -188,7 +198,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         };
 
         if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
-            if Some(parent_td) <= self.chain_spec.paris_status().terminal_total_difficulty() {
+            if Some(parent_td) <= self.chain_spec.terminal_total_difficulty() {
                 return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: EngineApiError::PayloadPreMerge.to_string(),
                 }))
@@ -271,7 +281,6 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
 
         let merge_terminal_td = self
             .chain_spec
-            .paris_status()
             .terminal_total_difficulty()
             .ok_or(EngineApiError::UnknownMergeTerminalTotalDifficulty)?;
 
@@ -516,8 +525,7 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
-                b.header.difficulty =
-                    chain_spec.paris_status().terminal_total_difficulty().unwrap();
+                b.header.difficulty = chain_spec.terminal_total_difficulty().unwrap();
                 b
             });
             let block = random_block(101, Some(parent.hash()), None, Some(0));
@@ -555,7 +563,7 @@ mod tests {
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
                 b.header.timestamp = parent_timestamp;
                 b.header.difficulty =
-                    chain_spec.paris_status().terminal_total_difficulty().unwrap() + U256::from(1);
+                    chain_spec.terminal_total_difficulty().unwrap() + U256::from(1);
                 b
             });
             let block =
@@ -633,10 +641,7 @@ mod tests {
             tokio::spawn(engine);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec
-                    .paris_status()
-                    .terminal_total_difficulty()
-                    .unwrap() +
+                terminal_total_difficulty: chain_spec.terminal_total_difficulty().unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
@@ -651,7 +656,7 @@ mod tests {
             assert_matches!(
                 result_rx.await,
                 Ok(Err(EngineApiError::TerminalTD { execution, consensus }))
-                    if execution == chain_spec.paris_status().terminal_total_difficulty().unwrap()
+                    if execution == chain_spec.terminal_total_difficulty().unwrap()
                         && consensus == U256::from(transition_config.terminal_total_difficulty)
             );
         }
@@ -675,10 +680,7 @@ mod tests {
             let execution_terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec
-                    .paris_status()
-                    .terminal_total_difficulty()
-                    .unwrap(),
+                terminal_total_difficulty: chain_spec.terminal_total_difficulty().unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
@@ -737,10 +739,7 @@ mod tests {
             let terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec
-                    .paris_status()
-                    .terminal_total_difficulty()
-                    .unwrap(),
+                terminal_total_difficulty: chain_spec.terminal_total_difficulty().unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
