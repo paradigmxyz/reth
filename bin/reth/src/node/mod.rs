@@ -22,9 +22,14 @@ use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     metrics::HeaderMetrics,
     stages::{
-        bodies::BodyStage, execution::ExecutionStage, hashing_account::AccountHashingStage,
-        hashing_storage::StorageHashingStage, headers::HeaderStage, merkle::{MerkleStage, StageType},
-        sender_recovery::SenderRecoveryStage, total_difficulty::TotalDifficultyStage,
+        bodies::BodyStage,
+        execution::ExecutionStage,
+        hashing_account::AccountHashingStage,
+        hashing_storage::StorageHashingStage,
+        headers::HeaderStage,
+        merkle::{MerkleStage, StageType},
+        sender_recovery::SenderRecoveryStage,
+        total_difficulty::TotalDifficultyStage,
     },
     PipelineEvent, StageId,
 };

@@ -121,12 +121,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        stages::{hashing_account, hashing_storage::StorageHashingStage},
-        test_utils::{
-            stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-            TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
-        },
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -202,12 +199,11 @@ mod tests {
     struct MerkleTestRunner {
         tx: TestTransaction,
         clean_threshold: u64,
-        stage: StageType,
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), clean_threshold: 100000, stage: StageType::Both }
+            Self { tx: TestTransaction::default(), clean_threshold: 100000 }
         }
     }
 
@@ -243,7 +239,7 @@ mod tests {
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
 
-            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..2));
+            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..3));
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -343,13 +339,14 @@ mod tests {
                 .unwrap();
             self.tx
                 .commit(|tx| {
-                    let mut storage_cursor =
-                        tx.cursor_dup_write::<tables::PlainStorageState>().unwrap();
                     let mut changeset_cursor =
                         tx.cursor_dup_read::<tables::StorageChangeSet>().unwrap();
                     let mut hash_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
+
                     let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
-                    let mut trie: BTreeMap<H256, BTreeMap<H256, U256>> = BTreeMap::new();
+
+                    let mut tree: BTreeMap<H256, BTreeMap<H256, U256>> = BTreeMap::new();
+
                     while let Some((tid_address, entry)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
@@ -357,11 +354,11 @@ mod tests {
                             break
                         }
 
-                        trie.entry(keccak256(tid_address.address()))
+                        tree.entry(keccak256(tid_address.address()))
                             .or_default()
                             .insert(keccak256(entry.key), entry.value);
                     }
-                    for (key, val) in trie.into_iter() {
+                    for (key, val) in tree.into_iter() {
                         for (entry_key, entry_val) in val.into_iter() {
                             hash_cursor.seek_by_key_subkey(key, entry_key).unwrap();
                             hash_cursor.delete_current().unwrap();
@@ -377,6 +374,7 @@ mod tests {
                     let mut changeset_cursor =
                         tx.cursor_dup_write::<tables::AccountChangeSet>().unwrap();
                     let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
+
                     while let Some((transition_id, account_before_tx)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {

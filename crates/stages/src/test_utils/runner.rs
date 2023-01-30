@@ -76,7 +76,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         Box::pin(rx).await.unwrap()
     }
 
-    fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+    fn before_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
         Ok(())
     }
 }
