@@ -214,7 +214,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     }
 
     /// Grabs the contents of the table within a certain index range and places the
-    /// entries into a [HashMap].
+    /// entries into a [`HashMap`][std::collections::HashMap].
     fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<BTreeMap<T::Key, T::Value>> {
         let data = self.db.view(|tx| {
             let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");

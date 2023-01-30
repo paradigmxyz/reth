@@ -13,7 +13,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
 /// The [`StageId`] of the storage hashing stage.
-pub const STORAGE_HASHING: StageId = StageId("StorageHashingStage");
+pub const STORAGE_HASHING: StageId = StageId("StorageHashing");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -80,9 +80,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     // next key of iterator
                     let next_key = storage.next()?;
 
-                    let mut hashes = tx.cursor_write::<tables::HashedStorage>()?;
-                    // iterate and append presorted hashed slots
-                    hashed_batch.into_iter().try_for_each(|(k, v)| hashes.append(k, v))?;
+                    // iterate and put presorted hashed slots
+                    hashed_batch
+                        .into_iter()
+                        .try_for_each(|(k, v)| tx.put::<tables::HashedStorage>(k, v))?;
                     next_key
                 };
                 tx.commit()?;

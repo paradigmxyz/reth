@@ -172,7 +172,7 @@ where
     /// Disables the given stage.
     ///
     /// The disabled [`Stage`] keeps its place in the set, so it can be used for ordering with
-    /// [`add_before`] or [`add_after`], or it can be re-enabled.
+    /// [`StageSetBuilder::add_before`] or [`StageSetBuilder::add_after`], or it can be re-enabled.
     ///
     /// All stages within a [`StageSet`] are enabled by default.
     ///

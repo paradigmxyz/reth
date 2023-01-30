@@ -28,7 +28,7 @@ use std::{
 
 /// The minimal value the basefee can decrease to
 ///
-/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` (https://eips.ethereum.org/EIPS/eip-1559) is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
+/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
 pub(crate) const MIN_PROTOCOL_BASE_FEE: u128 = 7;
 
 /// A pool that manages transactions.

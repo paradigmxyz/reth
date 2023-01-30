@@ -20,7 +20,7 @@ const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
-/// in [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
+/// in [`TxSenders`][reth_db::tables::TxSenders] table.
 #[derive(Debug)]
 pub struct SenderRecoveryStage {
     /// The size of the chunk for parallel sender recovery
@@ -57,10 +57,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 
     /// Retrieve the range of transactions to iterate over by querying
-    /// [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount],
+    /// [`BlockBodies`][reth_db::tables::BlockBodies],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
-    /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
+    /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     async fn execute(
         &mut self,
         tx: &mut Transaction<'_, DB>,

@@ -1,4 +1,4 @@
-//! DAO FOrk related constants https://eips.ethereum.org/EIPS/eip-779
+//! DAO FOrk related constants from [EIP-779](https://eips.ethereum.org/EIPS/eip-779).
 //! It happened on Ethereum block 1_920_000
 use reth_primitives::{hex_literal::hex, H160};
 
