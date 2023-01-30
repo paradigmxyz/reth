@@ -5,9 +5,16 @@ use ethers_core::{
 use ethers_providers::Middleware;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{
-    bodies::concurrent::ConcurrentDownloaderBuilder, headers::linear::LinearDownloadBuilder,
+    bodies::{
+        concurrent::ConcurrentDownloaderBuilder, task::TaskDownloader as BodiesTaskDownloader,
+    },
+    headers::{linear::LinearDownloadBuilder, task::TaskDownloader as HeadersTaskDownloader},
 };
-use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
+use reth_interfaces::{
+    consensus::{Consensus, ForkchoiceState},
+    sync::NoopSyncStateUpdate,
+    test_utils::TestConsensus,
+};
 use reth_network::{
     test_utils::{unused_port, unused_tcp_udp, NetworkEventStream, GETH_TIMEOUT},
     NetworkConfig, NetworkManager,
@@ -18,12 +25,11 @@ use reth_primitives::{
 use reth_provider::test_utils::NoopProvider;
 use reth_staged_sync::{
     test_utils::{CliqueGethInstance, CliqueMiddleware},
-    utils::init::init_db,
+    utils::init::{init_db, init_genesis},
 };
 use reth_stages::{sets::DefaultStages, Pipeline};
 use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::fs;
 
 /// Integration tests for the full sync pipeline.
 ///
@@ -35,7 +41,7 @@ async fn sync_from_clique_geth() {
         // first create a signer that we will fund so we can make transactions
         let chain_id = 13338u64;
         let data_dir = tempfile::tempdir().expect("should be able to create temp geth datadir");
-        let dir_path = data_dir.into_path();
+        let dir_path = data_dir.path();
         tracing::info!(
             data_dir=?dir_path,
             "initializing geth instance"
@@ -130,9 +136,10 @@ async fn sync_from_clique_geth() {
         let network = NetworkManager::new(config).await.unwrap();
         let handle = network.handle().clone();
 
-        // initialize db
+        // initialize db and genesis
         let reth_temp_dir = tempfile::tempdir().expect("should be able to create reth data dir");
         let db = Arc::new(init_db(reth_temp_dir.path()).unwrap());
+        init_genesis(db.clone(), chainspec.clone()).unwrap();
 
         // initialize consensus
         let consensus = Arc::new(TestConsensus::default());
@@ -140,15 +147,23 @@ async fn sync_from_clique_geth() {
         // set up downloaders
         let fetch_client = Arc::new(network.fetch_client());
 
-        let bodies_downloader = ConcurrentDownloaderBuilder::default()
-            .build(fetch_client.clone(), consensus.clone(), db.clone());
-        let headers_downloader = LinearDownloadBuilder::default()
-            .build(consensus.clone(), fetch_client);
+        let bodies_downloader = BodiesTaskDownloader::spawn(ConcurrentDownloaderBuilder::default()
+            .build(fetch_client.clone(), consensus.clone(), db.clone()));
+        let headers_downloader = HeadersTaskDownloader::spawn(LinearDownloadBuilder::default()
+            .build(consensus.clone(), fetch_client.clone()));
 
         // initialize pipeline
         let mut reth: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> = Pipeline::builder()
-            .add_stages(DefaultStages::new(consensus, headers_downloader, bodies_downloader))
+            .add_stages(DefaultStages::new(consensus.clone(), headers_downloader, bodies_downloader))
+            .with_max_block(0)
             .build();
+
+        // notify fork choice state with tip hash
+        consensus.notify_fork_choice_state(ForkchoiceState {
+            head_block_hash: tip_hash,
+            safe_block_hash: tip_hash,
+            finalized_block_hash: tip_hash,
+        }).unwrap();
 
         // start reth then manually connect geth
         let pipeline_handle = tokio::task::spawn(async move {
@@ -176,9 +191,6 @@ async fn sync_from_clique_geth() {
         pipeline_handle.await.unwrap();
 
         drop(clique);
-
-        // cleanup (delete the data_dir at dir_path)
-        fs::remove_dir_all(dir_path).await.unwrap();
     })
     .await
     .unwrap();
@@ -191,7 +203,7 @@ async fn geth_clique_keepalive() {
         // first create a signer that we will fund so we can make transactions
         let chain_id = 13337u64;
         let data_dir = tempfile::tempdir().expect("should be able to create temp geth datadir");
-        let dir_path = data_dir.into_path();
+        let dir_path = data_dir.path();
         tracing::info!(
             data_dir=?dir_path,
             "initializing geth instance"
@@ -301,9 +313,6 @@ async fn geth_clique_keepalive() {
             },
             _ = tokio::time::sleep(keepalive_duration) => {}
         );
-
-        // cleanup (delete the data_dir at dir_path)
-        fs::remove_dir_all(dir_path).await.unwrap();
     })
     .await
     .unwrap();
