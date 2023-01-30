@@ -224,7 +224,7 @@ mod tests {
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
 
-            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..3));
+            blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..2));
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
@@ -252,7 +252,7 @@ mod tests {
                         // seed account changeset
                         let (addr, prev_acc) = accounts
                             .iter_mut()
-                            .take(rand::random::<usize>() % n_accounts as usize)
+                            .skip(rand::random::<usize>() % n_accounts as usize)
                             .next()
                             .unwrap();
                         let acc_before_tx =

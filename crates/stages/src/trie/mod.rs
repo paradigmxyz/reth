@@ -212,7 +212,7 @@ impl DBTrieLoader {
         while let Some((hashed_address, account)) = walker.next().transpose()? {
             let value = EthAccount::from_with_root(
                 account,
-                dbg!(self.calculate_storage_root(tx, hashed_address)?),
+                self.calculate_storage_root(tx, hashed_address)?,
             );
 
             let mut out = Vec::new();
@@ -286,12 +286,7 @@ impl DBTrieLoader {
                 if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
                     let value = EthAccount::from_with_root(
                         account,
-                        dbg!(self.update_storage_root(
-                            tx,
-                            storage_root,
-                            address,
-                            changed_storages
-                        )?),
+                        self.update_storage_root(tx, storage_root, address, changed_storages)?,
                     );
 
                     let mut out = Vec::new();
@@ -372,8 +367,6 @@ impl DBTrieLoader {
             account_changes.entry(keccak256(address)).or_default().insert(keccak256(key));
         }
 
-        dbg!(account_changes.iter().map(|(_, v)| v.len()).sum::<usize>());
-        dbg!(account_changes.len());
         Ok(account_changes)
     }
 }
