@@ -121,9 +121,12 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+    use crate::{
+        stages::{hashing_account, hashing_storage::StorageHashingStage},
+        test_utils::{
+            stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+            TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
+        },
     };
     use assert_matches::assert_matches;
     use reth_db::{
@@ -331,8 +334,74 @@ mod tests {
     }
 
     impl UnwindStageTestRunner for MerkleTestRunner {
+        fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
+            let tx = TestTransaction::default();
+            let target_transition = self
+                .tx
+                .inner()
+                .get_block_transition(input.unwind_to)
+                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
+            tx.commit(|tx| {
+                let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+                let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
+                let mut hash_cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
+                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
+
+                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
+                    if tid_address.transition_id() <= target_transition {
+                        break
+                    }
+
+                    storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?;
+                    storage_cursor.delete_current()?;
+                    hash_cursor.seek_by_key_subkey(
+                        keccak256(tid_address.address()),
+                        keccak256(entry.key),
+                    )?;
+                    hash_cursor.delete_current()?;
+                    if entry.value != U256::ZERO {
+                        storage_cursor.append_dup(tid_address.address(), entry.clone())?;
+                        let storage_entry =
+                            StorageEntry { key: keccak256(entry.key), value: entry.value };
+                        hash_cursor.append_dup(keccak256(tid_address.address()), storage_entry)?;
+                    }
+                }
+
+                let mut changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
+                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
+                while let Some((transition_id, account_before_tx)) =
+                    rev_changeset_walker.next().transpose()?
+                {
+                    if transition_id <= target_transition {
+                        break
+                    }
+
+                    match account_before_tx.info {
+                        Some(acc) => {
+                            tx.put::<tables::PlainAccountState>(account_before_tx.address, acc)?;
+                            tx.put::<tables::HashedAccount>(
+                                keccak256(account_before_tx.address),
+                                acc,
+                            )?;
+                        }
+                        None => {
+                            tx.delete::<tables::PlainAccountState>(
+                                account_before_tx.address,
+                                None,
+                            )?;
+                            tx.delete::<tables::HashedAccount>(
+                                keccak256(account_before_tx.address),
+                                None,
+                            )?;
+                        }
+                    }
+                }
+                Ok(())
+            })?;
+            Ok(())
+        }
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            self.unwind_storage(input)?;
+            // self.unwind_storage(input)?;
             self.check_root(input.unwind_to)
         }
     }
@@ -439,35 +508,6 @@ mod tests {
                     Ok(())
                 })
                 .map_err(|e| e.into())
-        }
-
-        fn unwind_storage(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            let target_transition = self
-                .tx
-                .inner()
-                .get_block_transition(input.unwind_to)
-                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
-            self.tx.commit(|tx| {
-                let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-                let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
-
-                let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
-
-                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
-                    if tid_address.transition_id() <= target_transition {
-                        break
-                    }
-
-                    storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)?;
-                    storage_cursor.delete_current()?;
-
-                    if entry.value != U256::ZERO {
-                        storage_cursor.append_dup(tid_address.address(), entry)?;
-                    }
-                }
-                Ok(())
-            })?;
-            Ok(())
         }
 
         fn check_root(&self, previous_stage_progress: u64) -> Result<(), TestRunnerError> {

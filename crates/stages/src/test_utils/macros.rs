@@ -97,12 +97,15 @@ macro_rules! stage_test_suite {
                 );
                 assert!(runner.validate_execution(execute_input, result.ok()).is_ok(), "execution validation");
 
+
                 // Run stage unwind
                 let unwind_input = crate::stage::UnwindInput {
                     unwind_to: stage_progress, stage_progress: previous_stage, bad_block: None,
                 };
-                let rx = runner.unwind(unwind_input).await;
 
+                runner.before_unwind(unwind_input).expect("Failed to unwind state");
+
+                let rx = runner.unwind(unwind_input).await;
                 // Assert the successful unwind result
                 assert_matches::assert_matches!(
                     rx,
