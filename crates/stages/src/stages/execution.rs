@@ -14,7 +14,8 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_primitives::{
-    Address, ChainSpec, Header, StorageEntry, TransactionSignedEcRecovered, H256, MAINNET, U256,
+    Address, ChainSpec, Hardfork, Header, StorageEntry, TransactionSignedEcRecovered, H256,
+    MAINNET, U256,
 };
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
@@ -199,16 +200,19 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push(changeset);
+            block_change_patches.push((changeset, num));
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
         let mut current_transition_id = tx.get_block_transition(last_block)?;
         info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
+        let spurious_dragon_activation =
+            self.chain_spec.fork_block(Hardfork::SpuriousDragon).unwrap_or_default();
+
         // apply changes to plain database.
-        for results in block_change_patches.into_iter() {
-            let spurious_dragon_active = true;
+        for (results, block_number) in block_change_patches.into_iter() {
+            let spurious_dragon_active = block_number >= spurious_dragon_activation;
             // insert state change set
             for result in results.changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {
