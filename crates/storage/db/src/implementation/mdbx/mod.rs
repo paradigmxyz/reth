@@ -217,6 +217,38 @@ mod tests {
     }
 
     #[test]
+    fn db_cursor_walk_range() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT (0, 0), (1, 0), (2, 0), (3, 0)
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 2, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        // [1, 3)
+        let mut walker = cursor.walk_range(1..3).unwrap();
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), None);
+        // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+
+        // [2, 4)
+        let mut walker = cursor.walk_range(2..4).unwrap();
+        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(walker.next(), None);
+        // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+    }
+
+    #[test]
     fn db_walker() {
         let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
 

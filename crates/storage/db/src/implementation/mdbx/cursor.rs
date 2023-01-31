@@ -1,10 +1,11 @@
 //! Cursor wrapper for libmdbx-sys.
 
-use std::{borrow::Cow, marker::PhantomData};
+use std::{borrow::Cow, marker::PhantomData, ops::Range};
 
 use crate::{
     cursor::{
-        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, ReverseWalker, Walker,
+        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
+        ReverseWalker, Walker,
     },
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,
@@ -86,6 +87,22 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             .map(decoder::<T>);
 
         Ok(Walker::new(self, start))
+    }
+
+    fn walk_range<'cursor>(
+        &'cursor mut self,
+        range: Range<T::Key>,
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
+        let start = self
+            .inner
+            .set_range(range.start.encode().as_ref())
+            .map_err(|e| Error::Read(e.into()))?
+            .map(decoder::<T>);
+
+        Ok(RangeWalker::new(self, start, range.end))
     }
 
     fn walk_back<'cursor>(
