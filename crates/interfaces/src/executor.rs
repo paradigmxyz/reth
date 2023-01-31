@@ -7,7 +7,7 @@ use thiserror::Error;
 pub trait BlockExecutor {
     /// Execute block
     /// if `signers` is some, it's length should be equal to block.body's length. Provide `signers`
-    /// if you already have it because recovering singer is too expensive
+    /// if you already have it because recovering singer is too expensive.
     fn execute(&mut self, block: &Block, signers: Option<Vec<Address>>) -> Result<(), Error>;
 }
 
@@ -19,8 +19,8 @@ pub enum Error {
     VerificationFailed,
     #[error("Fatal internal error")]
     ExecutionFatalError,
-    #[error("Failed to recover signer for payload transaction: {hash:?}")]
-    SignerRecoveryError { hash: H256 },
+    #[error("Failed to recover signer for transaction")]
+    SignerRecoveryError,
     #[error("Receipt cumulative gas used {got:?} is different from expected {expected:?}")]
     ReceiptCumulativeGasUsedDiff { got: u64, expected: u64 },
     #[error("Receipt log count {got:?} is different from expected {expected:?}.")]

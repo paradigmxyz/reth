@@ -41,14 +41,14 @@ where
         body: &[TransactionSigned],
         signers: Option<Vec<Address>>,
     ) -> Result<Vec<Address>, Error> {
-        // TODO Error handling
         if let Some(signers) = signers {
-            if body.len() != signers.len() {
-                return Err(Error::ExecutionFatalError) // TODO
+            if body.len() == signers.len() {
+                Ok(signers)
+            } else {
+                Err(Error::SignerRecoveryError)
             }
-            Ok(signers)
         } else {
-            Ok(body.iter().map(|tx| tx.recover_signer().unwrap()).collect())
+            body.iter().map(|tx| tx.recover_signer().ok_or(Error::SignerRecoveryError)).collect()
         }
     }
 
@@ -157,7 +157,7 @@ where
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
         }
 
-        let db = self.evm.db().expect("Db is set at the start of the function");
+        let db = self.evm.db().expect("Db is set when the executor is created");
         let mut block_reward = block_reward_changeset(header, ommers, db, self.chain_spec)?;
 
         if self.chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
@@ -458,8 +458,8 @@ pub fn execute<DB: StateProvider>(
 ) -> Result<ExecutionResult, Error> {
     let mut executor = Executor::new(chain_spec, db);
     executor.execute(block, signers)?;
-    // Error handling
-    Ok(executor.take_result().unwrap())
+    // `take_result()` should return `Some` when `execute()` is return `Ok`
+    executor.take_result().ok_or(Error::ExecutionFatalError)
 }
 
 /// Irregular state change at Ethereum DAO hardfork
