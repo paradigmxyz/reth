@@ -28,7 +28,7 @@ use std::{
 ///     .chain_id(1337u64);
 ///
 /// // build the funded geth, generating a random signing key and enabling clique
-/// let (mut clique, provider) = CliqueGethInstance::new(clique_geth, None).await;
+/// let mut clique = CliqueGethInstance::new(clique_geth, None).await;
 ///
 /// // don't print logs, but drain the stderr
 /// clique.prevent_blocking().await;
