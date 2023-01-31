@@ -253,21 +253,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    // TODO handle error
-    let transactions: Vec<TransactionSignedEcRecovered> =
-        block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
-
-    // 2
-    // let transactions = body
-    //     .into_iter()
-    //     .map(|tx| {
-    //         let tx_hash = tx.hash;
-    //         tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
-    //     })
-    //     .collect::<Result<Vec<_>, EngineApiError>>()?;
-
-    let transaction_change_set =
-        execute(&block.header, &transactions, &block.ommers, chain_spec, db)?;
+    let transaction_change_set = execute(&block, chain_spec, db)?;
 
     let receipts_iter =
         transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
@@ -311,12 +297,24 @@ pub fn verify_receipt<'a>(
 /// NOTE: If block reward is still active (Before Paris/Merge) we would return
 /// additional TransactionStatechangeset for account that receives the reward.
 pub fn execute<DB: StateProvider>(
-    header: &Header,
-    transactions: &[TransactionSignedEcRecovered],
-    ommers: &[Header],
+    block: &Block,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
+    let Block { header, body, ommers } = block;
+    // TODO handle error
+    let transactions: Vec<TransactionSignedEcRecovered> =
+        body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
+
+    // 2
+    // let transactions = body
+    //     .into_iter()
+    //     .map(|tx| {
+    //         let tx_hash = tx.hash;
+    //         tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
+    //     })
+    //     .collect::<Result<Vec<_>, EngineApiError>>()?;
+
     let mut evm = EVM::new();
     evm.database(db);
 
@@ -775,8 +773,7 @@ mod tests {
 
     #[test]
     fn dao_hardfork_irregular_state_change() {
-        let mut header = Header::default();
-        header.number = 1;
+        let header = Header { number: 1, ..Header::default() };
 
         let mut db = StateProviderTest::default();
 
@@ -798,7 +795,12 @@ mod tests {
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(&header, &[], &[], &chain_spec, &mut db).unwrap();
+        let out = execute_and_verify_receipt(
+            Block { header, body: vec![], ommers: vec![] },
+            &chain_spec,
+            &mut db,
+        )
+        .unwrap();
         assert_eq!(out.changesets.len(), 0, "No tx");
 
         // Check if cache is set
@@ -914,20 +916,16 @@ mod tests {
             address_selfdestruct,
             pre_account_selfdestroyed,
             Some(hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00").into()),
-            selfdestroyed_storage.clone().into_iter().collect::<HashMap<_, _>>(),
+            selfdestroyed_storage.into_iter().collect::<HashMap<_, _>>(),
         );
 
         // spec at berlin fork
         let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
 
         let mut db = SubState::new(State::new(db));
-        let transactions: Vec<TransactionSignedEcRecovered> =
-            block.body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block.header, &transactions, &[], &chain_spec, &mut db)
-                .unwrap();
+        let out = execute_and_verify_receipt(block.unseal(), &chain_spec, &mut db).unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
@@ -955,6 +953,6 @@ mod tests {
             "Selfdestroyed account"
         );
 
-        assert_eq!(selfdestroyer_changeset.wipe_storage, true);
+        assert!(selfdestroyer_changeset.wipe_storage);
     }
 }
