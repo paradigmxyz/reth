@@ -52,6 +52,7 @@ impl AccountInfoChangeSet {
         tx: &TX,
         address: Address,
         tx_index: u64,
+        has_state_clear_eip: bool,
     ) -> Result<(), DbError> {
         match self {
             AccountInfoChangeSet::Changed { old, new } => {
@@ -64,6 +65,11 @@ impl AccountInfoChangeSet {
                 tx.put::<tables::PlainAccountState>(address, new)?;
             }
             AccountInfoChangeSet::Created { new } => {
+                // Ignore account that are created empty and state clear (SpuriousDragon) hardfork
+                // is activated.
+                if has_state_clear_eip && new.is_empty() {
+                    return Ok(())
+                }
                 tx.put::<tables::AccountChangeSet>(
                     tx_index,
                     AccountBeforeTx { address, info: None },
@@ -302,7 +308,7 @@ pub fn execute<DB: StateProvider>(
     let mut evm = EVM::new();
     evm.database(db);
 
-    let spec_id = revm_spec(chain_spec, header.into());
+    let spec_id = revm_spec(chain_spec, header.number);
     evm.env.cfg.chain_id = U256::from(chain_spec.chain().id());
     evm.env.cfg.spec_id = spec_id;
     evm.env.cfg.perf_all_precompiles_have_balance = false;
@@ -451,10 +457,10 @@ pub fn block_reward_changeset<DB: StateProvider>(
     // amount. We raise the block’s beneficiary account by Rblock; for each ommer, we raise the
     // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
     // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
-    match header.into() {
-        d if chain_spec.fork_active(Hardfork::Paris, d) => None,
-        d if chain_spec.fork_active(Hardfork::Petersburg, d) => Some(WEI_2ETH),
-        d if chain_spec.fork_active(Hardfork::Byzantium, d) => Some(WEI_3ETH),
+    match header.number {
+        n if Some(n) >= chain_spec.paris_status().block_number() => None,
+        n if Some(n) >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
+        n if Some(n) >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
         _ => Some(WEI_5ETH),
     }
     .map(|reward| -> Result<_, _> {
@@ -538,8 +544,8 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkKind,
-        SealedBlock, StorageKey, H160, H256, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, SealedBlock,
+        StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
@@ -776,7 +782,7 @@ mod tests {
 
         let chain_spec = ChainSpecBuilder::from(&*MAINNET)
             .homestead_activated()
-            .with_fork(Hardfork::Dao, ForkKind::Block(1))
+            .with_fork(Hardfork::Dao, 1)
             .build();
 
         let mut db = SubState::new(State::new(db));
@@ -829,7 +835,7 @@ mod tests {
 
         // check Changed changeset
         AccountInfoChangeSet::Changed { new: acc1, old: acc2 }
-            .apply_to_db(&tx, address, tx_num)
+            .apply_to_db(&tx, address, tx_num, true)
             .unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
@@ -837,7 +843,9 @@ mod tests {
         );
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
 
-        AccountInfoChangeSet::Created { new: acc1 }.apply_to_db(&tx, address, tx_num).unwrap();
+        AccountInfoChangeSet::Created { new: acc1 }
+            .apply_to_db(&tx, address, tx_num, true)
+            .unwrap();
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),
             Ok(Some(AccountBeforeTx { address, info: None }))
@@ -847,7 +855,9 @@ mod tests {
         // delete old value, as it is dupsorted
         tx.delete::<tables::AccountChangeSet>(tx_num, None).unwrap();
 
-        AccountInfoChangeSet::Destroyed { old: acc2 }.apply_to_db(&tx, address, tx_num).unwrap();
+        AccountInfoChangeSet::Destroyed { old: acc2 }
+            .apply_to_db(&tx, address, tx_num, true)
+            .unwrap();
         assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(None));
         assert_eq!(
             tx.get::<tables::AccountChangeSet>(tx_num),

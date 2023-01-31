@@ -3,7 +3,7 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
-use reth_primitives::{AccessList, Address, Bytes, U256};
+use reth_primitives::{AccessList, Address, Bytes, U128, U256};
 use reth_rlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ pub enum TypedTransactionRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyTransactionRequest {
     pub nonce: U256,
-    pub gas_price: U256,
+    pub gas_price: U128,
     pub gas_limit: U256,
     pub kind: TransactionKind,
     pub value: U256,
@@ -37,7 +37,7 @@ pub struct LegacyTransactionRequest {
 pub struct EIP2930TransactionRequest {
     pub chain_id: u64,
     pub nonce: U256,
-    pub gas_price: U256,
+    pub gas_price: U128,
     pub gas_limit: U256,
     pub kind: TransactionKind,
     pub value: U256,
@@ -50,8 +50,8 @@ pub struct EIP2930TransactionRequest {
 pub struct EIP1559TransactionRequest {
     pub chain_id: u64,
     pub nonce: U256,
-    pub max_priority_fee_per_gas: U256,
-    pub max_fee_per_gas: U256,
+    pub max_priority_fee_per_gas: U128,
+    pub max_fee_per_gas: U128,
     pub gas_limit: U256,
     pub kind: TransactionKind,
     pub value: U256,

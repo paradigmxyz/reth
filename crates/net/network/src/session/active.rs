@@ -81,7 +81,7 @@ pub(crate) struct ActiveSession {
 /// Constants for timeout updating
 
 /// Minimum timeout value
-const MINIMUM_TIMEOUT: Duration = Duration::from_millis(1);
+const MINIMUM_TIMEOUT: Duration = Duration::from_secs(2);
 /// Maximum timeout value
 const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
 /// How much the new measurements affect the current timeout (X percent)
@@ -204,7 +204,7 @@ impl ActiveSession {
         None
     }
 
-    /// Handle an incoming peer request.
+    /// Handle an internal peer request that will be sent to the remote.
     fn on_peer_request(&mut self, request: PeerRequest, deadline: Instant) {
         let request_id = self.next_id();
         let msg = request.create_request_message(request_id);
@@ -839,7 +839,7 @@ mod tests {
 
     #[test]
     fn timeout_calculation_sanity_tests() {
-        let rtt = Duration::from_millis(200);
+        let rtt = Duration::from_secs(5);
         // timeout for an RTT of `rtt`
         let timeout = rtt * TIMEOUT_SCALING;
 

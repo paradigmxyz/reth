@@ -63,10 +63,14 @@ arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }
 proptest-derive = "0.3"
 
+serde_json = "1.0"
+
+paste = "1.0"
+
 
 [features]
 default = ["mdbx"]
-test-utils = ["tempfile"]
+test-utils = ["tempfile", "arbitrary"]
 bench-postcard = ["bench"]
 mdbx = ["reth-libmdbx"]
 bench = []
@@ -79,9 +83,9 @@ arbitrary = [
 ]
 
 [[bench]]
-name = "encoding_crit"
+name = "criterion"
 harness = false
 
 [[bench]]
-name = "encoding_iai"
+name = "iai"
 harness = false

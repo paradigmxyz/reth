@@ -12,7 +12,7 @@ use reth_provider::ShareableDatabase;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the reth node.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
@@ -48,7 +48,7 @@ impl Config {
 }
 
 /// Configuration for each stage in the pipeline.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
@@ -63,7 +63,7 @@ pub struct StageConfig {
 }
 
 /// Header stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct HeadersConfig {
     /// The maximum number of headers to download before committing progress to the database.
     pub commit_threshold: u64,
@@ -80,7 +80,7 @@ impl Default for HeadersConfig {
 }
 
 /// Total difficulty stage configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct TotalDifficultyConfig {
     /// The maximum number of total difficulty entries to sum up before committing progress to the
     /// database.
@@ -94,7 +94,7 @@ impl Default for TotalDifficultyConfig {
 }
 
 /// Body stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
     pub downloader_request_limit: u64,
@@ -121,7 +121,7 @@ impl Default for BodiesConfig {
 }
 
 /// Sender recovery stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SenderRecoveryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
     pub commit_threshold: u64,
@@ -136,7 +136,7 @@ impl Default for SenderRecoveryConfig {
 }
 
 /// Execution stage configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct ExecutionConfig {
     /// The maximum number of blocks to execution before committing progress to the database.
     pub commit_threshold: u64,
@@ -151,8 +151,34 @@ impl Default for ExecutionConfig {
 #[cfg(test)]
 mod tests {
     use super::Config;
+
+    const EXTENSION: &str = "toml";
+
+    fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join(filename).with_extension(EXTENSION);
+
+        proc(&config_path);
+
+        temp_dir.close().unwrap()
+    }
+
     #[test]
-    fn can_serde_config() {
-        let _: Config = confy::load("test", None).unwrap();
+    fn test_store_config() {
+        with_tempdir("config-store-test", |config_path| {
+            let config = Config::default();
+            confy::store_path(config_path, config).unwrap();
+        })
+    }
+
+    #[test]
+    fn test_load_config() {
+        with_tempdir("config-load-test", |config_path| {
+            let config = Config::default();
+            confy::store_path(config_path, &config).unwrap();
+
+            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            assert_eq!(config, loaded_config);
+        })
     }
 }

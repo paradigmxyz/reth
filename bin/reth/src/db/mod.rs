@@ -170,6 +170,7 @@ impl Command {
                     BlockBodies,
                     BlockOmmers,
                     TxHashNumber,
+                    PlainStorageState,
                     PlainAccountState,
                     BlockTransitionIndex,
                     TxTransitionIndex,
