@@ -5,4 +5,4 @@ pub mod reverse_headers;
 pub mod task;
 
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;
