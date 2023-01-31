@@ -219,9 +219,10 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         let hash = sealed.hash();
         let parent_hash = sealed.header.parent_hash;
 
-        let mut state_provider = SubState::new(State::new(&*self.client));
+        let state_provider = SubState::new(State::new(&*self.client));
         match executor::execute_and_verify_receipt(
-            sealed.unseal(),
+            &sealed.unseal(),
+            None,
             &self.chain_spec,
             &mut state_provider,
         ) {

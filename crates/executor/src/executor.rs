@@ -4,10 +4,10 @@ use crate::{
 };
 use hashbrown::hash_map::Entry;
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
-use reth_interfaces::executor::Error;
+use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
-    TransactionSignedEcRecovered, H160, H256, U256,
+    TransactionSigned, H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -17,7 +17,160 @@ use revm::{
 use std::collections::BTreeMap;
 
 /// Main block executor
-pub struct Executor {}
+pub struct Executor<'a, DB>
+where
+    DB: StateProvider,
+{
+    chain_spec: &'a ChainSpec,
+    evm: EVM<&'a mut SubState<DB>>,
+    result: Option<ExecutionResult>,
+}
+
+impl<'a, DB> Executor<'a, DB>
+where
+    DB: StateProvider,
+{
+    fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
+        let mut evm = EVM::new();
+        evm.database(db);
+        Executor { chain_spec, evm, result: None }
+    }
+
+    fn recover_signers(
+        &self,
+        body: &[TransactionSigned],
+        signers: Option<Vec<Address>>,
+    ) -> Result<Vec<Address>, Error> {
+        // TODO Error handling
+        if let Some(signers) = signers {
+            if body.len() != signers.len() {
+                return Err(Error::ExecutionFatalError) // TODO
+            }
+            Ok(signers)
+        } else {
+            Ok(body.iter().map(|tx| tx.recover_signer().unwrap()).collect())
+        }
+    }
+
+    fn init_block_env(&mut self, header: &Header) {
+        let spec_id = revm_spec(self.chain_spec, header.number);
+        self.evm.env.cfg.chain_id = U256::from(self.chain_spec.chain().id());
+        self.evm.env.cfg.spec_id = spec_id;
+        self.evm.env.cfg.perf_all_precompiles_have_balance = false;
+        self.evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
+
+        revm_wrap::fill_block_env(&mut self.evm.env.block, header, spec_id >= SpecId::MERGE);
+    }
+
+    fn take_result(&mut self) -> Option<ExecutionResult> {
+        self.result.take()
+    }
+}
+
+impl<'a, DB> BlockExecutor for Executor<'a, DB>
+where
+    DB: StateProvider,
+{
+    fn execute(&mut self, block: &Block, signers: Option<Vec<Address>>) -> Result<(), Error> {
+        let Block { header, body, ommers } = block;
+        let signers = self.recover_signers(body, signers)?;
+
+        self.init_block_env(header);
+
+        let mut cumulative_gas_used = 0;
+        // output of verification
+        let mut changesets = Vec::with_capacity(body.len());
+
+        for (transaction, signer) in body.iter().zip(signers.into_iter()) {
+            // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
+            // must be no greater than the block’s gasLimit.
+            let block_available_gas = header.gas_limit - cumulative_gas_used;
+            if transaction.gas_limit() > block_available_gas {
+                return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
+                    transaction_gas_limit: transaction.gas_limit(),
+                    block_available_gas,
+                })
+            }
+
+            // Fill revm structure.
+            revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, signer);
+
+            // Execute transaction.
+            let out = self.evm.transact();
+
+            // Useful for debugging
+            // let out = evm.inspect(revm::inspectors::CustomPrintTracer::default());
+            // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
+            // \nENV:{:?}",transaction.hash(),transaction,evm.env);
+
+            let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
+
+            // Fatal internal error.
+            if exit_reason == revm::Return::FatalExternalError {
+                return Err(Error::ExecutionFatalError)
+            }
+
+            // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
+            // TODO for verification (exit_reason): some error should return EVM error as the block
+            // with that transaction can have consensus error that would make block
+            // invalid.
+            let is_success = match exit_reason {
+                revm::return_ok!() => true,
+                revm::return_revert!() => false,
+                _ => false,
+                //e => return Err(Error::EVMError { error_code: e as u32 }),
+            };
+
+            // Add spend gas.
+            cumulative_gas_used += gas_used;
+
+            // Transform logs to reth format.
+            let logs: Vec<Log> = logs
+                .into_iter()
+                .map(|l| Log {
+                    address: H160(l.address.0),
+                    topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
+                    data: l.data.into(),
+                })
+                .collect();
+
+            // commit state
+            let (changeset, new_bytecodes) =
+                commit_changes(self.evm.db().expect("Db to not be moved."), state);
+
+            // Push transaction changeset and calculte header bloom filter for receipt.
+            changesets.push(TransactionChangeSet {
+                receipt: Receipt {
+                    tx_type: transaction.tx_type(),
+                    success: is_success,
+                    cumulative_gas_used,
+                    bloom: logs_bloom(logs.iter()),
+                    logs,
+                },
+                changeset,
+                new_bytecodes,
+            })
+        }
+
+        // Check if gas used matches the value set in header.
+        if header.gas_used != cumulative_gas_used {
+            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
+        }
+
+        let db = self.evm.db().expect("Db is set at the start of the function");
+        let mut block_reward = block_reward_changeset(header, ommers, db, self.chain_spec)?;
+
+        if self.chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
+            let mut irregular_state_changeset = dao_fork_changeset(db)?;
+            irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
+            block_reward = Some(irregular_state_changeset);
+        }
+
+        self.result = Some(ExecutionResult { changesets, block_reward });
+
+        Ok(())
+    }
+}
 
 /// Contains old/new account changes
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -249,11 +402,12 @@ pub struct TransactionChangeSet {
 
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
-    block: Block,
+    block: &Block,
+    signers: Option<Vec<Address>>,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    let transaction_change_set = execute(&block, chain_spec, db)?;
+    let transaction_change_set = execute(block, signers, chain_spec, db)?;
 
     let receipts_iter =
         transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
@@ -298,122 +452,14 @@ pub fn verify_receipt<'a>(
 /// additional TransactionStatechangeset for account that receives the reward.
 pub fn execute<DB: StateProvider>(
     block: &Block,
+    signers: Option<Vec<Address>>,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    let Block { header, body, ommers } = block;
-    // TODO handle error
-    let transactions: Vec<TransactionSignedEcRecovered> =
-        body.iter().map(|tx| tx.try_ecrecovered().unwrap()).collect();
-
-    // 2
-    // let transactions = body
-    //     .into_iter()
-    //     .map(|tx| {
-    //         let tx_hash = tx.hash;
-    //         tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
-    //     })
-    //     .collect::<Result<Vec<_>, EngineApiError>>()?;
-
-    let mut evm = EVM::new();
-    evm.database(db);
-
-    let spec_id = revm_spec(chain_spec, header.number);
-    evm.env.cfg.chain_id = U256::from(chain_spec.chain().id());
-    evm.env.cfg.spec_id = spec_id;
-    evm.env.cfg.perf_all_precompiles_have_balance = false;
-    evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
-
-    revm_wrap::fill_block_env(&mut evm.env.block, header, spec_id >= SpecId::MERGE);
-    let mut cumulative_gas_used = 0;
-    // output of verification
-    let mut changesets = Vec::with_capacity(transactions.len());
-
-    for transaction in transactions.iter() {
-        // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
-        // must be no greater than the block’s gasLimit.
-        let block_available_gas = header.gas_limit - cumulative_gas_used;
-        if transaction.gas_limit() > block_available_gas {
-            return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
-                transaction_gas_limit: transaction.gas_limit(),
-                block_available_gas,
-            })
-        }
-
-        // Fill revm structure.
-        revm_wrap::fill_tx_env(&mut evm.env.tx, transaction);
-
-        // Execute transaction.
-        let out = evm.transact();
-
-        // Useful for debugging
-        // let out = evm.inspect(revm::inspectors::CustomPrintTracer::default());
-        // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
-        // \nENV:{:?}",transaction.hash(),transaction,evm.env);
-
-        let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
-
-        // Fatal internal error.
-        if exit_reason == revm::Return::FatalExternalError {
-            return Err(Error::ExecutionFatalError)
-        }
-
-        // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
-        // TODO for verification (exit_reason): some error should return EVM error as the block with
-        // that transaction can have consensus error that would make block invalid.
-        let is_success = match exit_reason {
-            revm::return_ok!() => true,
-            revm::return_revert!() => false,
-            _ => false,
-            //e => return Err(Error::EVMError { error_code: e as u32 }),
-        };
-
-        // Add spend gas.
-        cumulative_gas_used += gas_used;
-
-        // Transform logs to reth format.
-        let logs: Vec<Log> = logs
-            .into_iter()
-            .map(|l| Log {
-                address: H160(l.address.0),
-                topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
-                data: l.data.into(),
-            })
-            .collect();
-
-        // commit state
-        let (changeset, new_bytecodes) =
-            commit_changes(evm.db().expect("Db to not be moved."), state);
-
-        // Push transaction changeset and calculte header bloom filter for receipt.
-        changesets.push(TransactionChangeSet {
-            receipt: Receipt {
-                tx_type: transaction.tx_type(),
-                success: is_success,
-                cumulative_gas_used,
-                bloom: logs_bloom(logs.iter()),
-                logs,
-            },
-            changeset,
-            new_bytecodes,
-        })
-    }
-
-    // Check if gas used matches the value set in header.
-    if header.gas_used != cumulative_gas_used {
-        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
-    }
-
-    let db = evm.db.expect("Db is set at the start of the function");
-    let mut block_reward = block_reward_changeset(header, ommers, db, chain_spec)?;
-
-    if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
-        let mut irregular_state_changeset = dao_fork_changeset(db)?;
-        irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
-        block_reward = Some(irregular_state_changeset);
-    }
-
-    Ok(ExecutionResult { changesets, block_reward })
+    let mut executor = Executor::new(chain_spec, db);
+    executor.execute(block, signers)?;
+    // Error handling
+    Ok(executor.take_result().unwrap())
 }
 
 /// Irregular state change at Ethereum DAO hardfork
@@ -669,7 +715,7 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(block, &chain_spec, &mut db).unwrap();
+        let out = execute_and_verify_receipt(&block, None, &chain_spec, &mut db).unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
@@ -796,7 +842,8 @@ mod tests {
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
         let out = execute_and_verify_receipt(
-            Block { header, body: vec![], ommers: vec![] },
+            &Block { header, body: vec![], ommers: vec![] },
+            None,
             &chain_spec,
             &mut db,
         )
@@ -925,7 +972,7 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(block.unseal(), &chain_spec, &mut db).unwrap();
+        let out = execute_and_verify_receipt(&block.unseal(), None, &chain_spec, &mut db).unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 

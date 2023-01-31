@@ -1,7 +1,7 @@
 use reth_interfaces::Error;
 use reth_primitives::{
-    Account, Header, Transaction, TransactionKind, TransactionSignedEcRecovered, TxEip1559,
-    TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256,
+    Account, Address, Header, Transaction, TransactionKind, TransactionSigned,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -82,9 +82,9 @@ pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bo
 }
 
 /// Fill transaction environment from Transaction.
-pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
-    tx_env.caller = transaction.signer();
-    match transaction.as_ref().as_ref() {
+pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, signer: Address) {
+    tx_env.caller = signer;
+    match transaction.as_ref() {
         Transaction::Legacy(TxLegacy {
             nonce,
             chain_id,

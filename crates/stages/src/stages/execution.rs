@@ -191,7 +191,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .spawn_scoped(scope, || {
                         // execute and store output to results
                         reth_executor::executor::execute_and_verify_receipt(
-                            Block { header, body: transactions, ommers },
+                            &Block { header, body: transactions, ommers },
+                            Some(signers),
                             &self.chain_spec,
                             &mut state_provider,
                         )
