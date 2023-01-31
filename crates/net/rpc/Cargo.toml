@@ -18,7 +18,7 @@ reth-provider = { path = "../../storage/provider" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-network = { path = "../network" }
 reth-network-api = { path = "../network-api" }
-reth-consensus = { path = "../../consensus", features = ["serde"] }
+reth-rpc-engine-api = { path = "../rpc-engine-api" }
 
 # rpc
 jsonrpsee = { version = "0.16" }
