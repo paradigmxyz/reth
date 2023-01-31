@@ -1,4 +1,4 @@
-use reth_primitives::{rpc::Log, Address, Bloom, H256, U256, U64};
+use reth_primitives::{rpc::Log, Address, Bloom, H256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Transaction receipt
@@ -38,7 +38,7 @@ pub struct TransactionReceipt {
     /// The price paid post-execution by the transaction (i.e. base fee + priority fee). Both
     /// fields in 1559-style transactions are maximums (max fee + max priority fee), the amount
     /// that's actually paid by users can only be determined post-execution
-    pub effective_gas_price: U256,
+    pub effective_gas_price: U128,
     /// EIP-2718 Transaction type, Some(1) for AccessList transaction, None for Legacy
     #[serde(rename = "type")]
     pub transaction_type: U256,
