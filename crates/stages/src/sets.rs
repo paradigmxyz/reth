@@ -107,7 +107,6 @@ where
             .add_stage(HeaderStage::new(self.header_downloader, self.consensus.clone()))
             .add_stage(TotalDifficultyStage::default())
             .add_stage(BodyStage { downloader: self.body_downloader, consensus: self.consensus })
-            .add_stage(TransactionLookupStage::default())
     }
 }
 
@@ -180,6 +179,7 @@ pub struct HistoryIndexingStages;
 impl<DB: Database> StageSet<DB> for HistoryIndexingStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
+            .add_stage(TransactionLookupStage::default())
             .add_stage(IndexStorageHistoryStage::default())
             .add_stage(IndexAccountHistoryStage::default())
     }
