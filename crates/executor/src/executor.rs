@@ -668,15 +668,15 @@ mod tests {
         // Got rlp block from: src/GeneralStateTestsFiller/stChainId/chainIdGasCostFiller.json
 
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let sealed = SealedBlock::decode(&mut block_rlp).unwrap();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
 
         let mut ommer = Header::default();
         let ommer_beneficiary = H160(hex!("3000000000000000000000000000000000000000"));
         ommer.beneficiary = ommer_beneficiary;
-        ommer.number = sealed.number;
+        ommer.number = block.number;
         let ommers = vec![ommer];
 
-        let block = Block { header: sealed.header.unseal(), body: sealed.body, ommers };
+        let block = Block { header: block.header.unseal(), body: block.body, ommers };
 
         let mut db = StateProviderTest::default();
 
@@ -963,7 +963,7 @@ mod tests {
             address_selfdestruct,
             pre_account_selfdestroyed,
             Some(hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00").into()),
-            selfdestroyed_storage.into_iter().collect::<HashMap<_, _>>(),
+            selfdestroyed_storage.clone().into_iter().collect::<HashMap<_, _>>(),
         );
 
         // spec at berlin fork
@@ -1000,6 +1000,6 @@ mod tests {
             "Selfdestroyed account"
         );
 
-        assert!(selfdestroyer_changeset.wipe_storage);
+        assert_eq!(selfdestroyer_changeset.wipe_storage, true);
     }
 }
