@@ -316,8 +316,50 @@ struct NodeState {
     current_checkpoint: BlockNumber,
 }
 
+impl NodeState {
+    async fn handle_pipeline_event(&mut self, event: PipelineEvent) {
+        match event {
+            PipelineEvent::Running { stage_id, stage_progress } => {
+                let notable = self.current_stage.is_none();
+                self.current_stage = Some(stage_id);
+                self.current_checkpoint = stage_progress.unwrap_or_default();
+
+                if notable {
+                    info!(target: "reth::cli", stage = %stage_id, from = stage_progress, "Executing stage");
+                }
+            }
+            PipelineEvent::Ran { stage_id, result } => {
+                let notable = result.stage_progress > self.current_checkpoint;
+                self.current_checkpoint = result.stage_progress;
+                if result.done {
+                    self.current_stage = None;
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage finished executing");
+                } else if notable {
+                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage committed progress");
+                }
+            }
+            _ => (),
+        }
+    }
+
+    async fn handle_network_event(&mut self, event: NetworkEvent) {
+        match event {
+            NetworkEvent::SessionEstablished { peer_id, status, .. } => {
+                self.connected_peers += 1;
+                info!(target: "reth::cli", connected_peers = self.connected_peers, peer_id = %peer_id, best_block = %status.blockhash, "Peer connected");
+            }
+            NetworkEvent::SessionClosed { peer_id, reason } => {
+                self.connected_peers -= 1;
+                let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
+                warn!(target: "reth::cli", connected_peers = self.connected_peers, peer_id = %peer_id, %reason, "Peer disconnected.");
+            }
+            _ => (),
+        }
+    }
+}
+
 /// A node event.
-enum NodeEvent {
+pub enum NodeEvent {
     /// A network event.
     Network(NetworkEvent),
     /// A sync pipeline event.
@@ -338,7 +380,7 @@ impl From<PipelineEvent> for NodeEvent {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
+pub async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
     let mut state = NodeState::default();
 
     let mut interval = tokio::time::interval(Duration::from_secs(30));
@@ -347,35 +389,12 @@ async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
         tokio::select! {
             Some(event) = events.next() => {
                 match event {
-                    NodeEvent::Network(NetworkEvent::SessionEstablished { peer_id, status, .. }) => {
-                        state.connected_peers += 1;
-                        info!(target: "reth::cli", connected_peers = state.connected_peers, peer_id = %peer_id, best_block = %status.blockhash, "Peer connected");
+                    NodeEvent::Network(event) => {
+                        state.handle_network_event(event).await;
                     },
-                    NodeEvent::Network(NetworkEvent::SessionClosed { peer_id, reason }) => {
-                        state.connected_peers -= 1;
-                        let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
-                        warn!(target: "reth::cli", connected_peers = state.connected_peers, peer_id = %peer_id, %reason, "Peer disconnected.");
-                    },
-                    NodeEvent::Pipeline(PipelineEvent::Running { stage_id, stage_progress }) => {
-                        let notable = state.current_stage.is_none();
-                        state.current_stage = Some(stage_id);
-                        state.current_checkpoint = stage_progress.unwrap_or_default();
-
-                        if notable {
-                            info!(target: "reth::cli", stage = %stage_id, from = stage_progress, "Executing stage");
-                        }
-                    },
-                    NodeEvent::Pipeline(PipelineEvent::Ran { stage_id, result }) => {
-                        let notable = result.stage_progress > state.current_checkpoint;
-                        state.current_checkpoint = result.stage_progress;
-                        if result.done {
-                            state.current_stage = None;
-                            info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage finished executing");
-                        } else if notable {
-                            info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage committed progress");
-                        }
+                    NodeEvent::Pipeline(event) => {
+                        state.handle_pipeline_event(event).await;
                     }
-                    _ => (),
                 }
             },
             _ = interval.tick() => {
