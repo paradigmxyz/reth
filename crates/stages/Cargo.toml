@@ -40,9 +40,6 @@ itertools = "0.10.5"
 rayon = "1.6.0"
 
 # trie
-trie-db = "0.24.0"
-hash-db = "0.15.2"
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 cita_trie = "4.0.0"
 hasher = "0.1.4"
 
