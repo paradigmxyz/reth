@@ -26,6 +26,8 @@ tokio-stream = "0.1"
 tracing = "0.1.37"
 metrics = "0.20.1"
 
+reth-rlp = { path = "../../common/rlp", optional = true }
+
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
@@ -33,3 +35,8 @@ reth-tracing = { path = "../../tracing" }
 
 assert_matches = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+reth-downloaders = { path = ".", features = ["test-utils"] }
+
+[features]
+test-utils = ["dep:reth-rlp"]
