@@ -15,6 +15,7 @@ use reth_primitives::{
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable, EMPTY_STRING_CODE};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ops::Range,
     sync::Arc,
 };
 use tracing::*;
@@ -203,6 +204,7 @@ impl DBTrieLoader {
     ) -> Result<H256, TrieError> {
         tx.clear::<tables::AccountsTrie>()?;
         tx.clear::<tables::StoragesTrie>()?;
+
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(H256::zero())?;
 
@@ -261,12 +263,11 @@ impl DBTrieLoader {
         &self,
         tx: &Transaction<'_, DB>,
         root: H256,
-        start_tid: TransitionId,
-        end_tid: TransitionId,
+        tid_range: Range<TransitionId>,
     ) -> Result<H256, TrieError> {
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
 
-        let changed_accounts = self.gather_changes(tx, start_tid, end_tid)?;
+        let changed_accounts = self.gather_changes(tx, tid_range)?;
 
         let db = Arc::new(HashDatabase::new_with_root(tx, root)?);
 
@@ -331,16 +332,13 @@ impl DBTrieLoader {
     fn gather_changes<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
-        start_tid: TransitionId,
-        end_tid: TransitionId,
+        tid_range: Range<TransitionId>,
     ) -> Result<BTreeMap<H256, BTreeSet<H256>>, TrieError> {
         let mut account_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
 
         let mut account_changes: BTreeMap<H256, BTreeSet<H256>> = BTreeMap::new();
 
-        let mut walker = account_cursor
-            .walk(start_tid)?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k < end_tid).unwrap_or_default());
+        let mut walker = account_cursor.walk_range(tid_range.clone())?;
 
         while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
             account_changes.insert(keccak256(address), Default::default());
@@ -348,9 +346,9 @@ impl DBTrieLoader {
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
-        let mut walker = storage_cursor
-            .walk((start_tid, Address::zero()).into())?
-            .take_while(|res| res.as_ref().map(|(k, _)| k.0 .0 < end_tid).unwrap_or_default());
+        let start = (tid_range.start, Address::zero()).into();
+        let end = (tid_range.end, Address::zero()).into();
+        let mut walker = storage_cursor.walk_range(start..end)?;
 
         while let Some((TransitionIdAddress((_, address)), StorageEntry { key, .. })) =
             walker.next().transpose()?
@@ -566,7 +564,7 @@ mod tests {
         }
 
         assert_eq!(
-            DBTrieLoader::default().gather_changes(&tx, 32, 33),
+            DBTrieLoader::default().gather_changes(&tx, 32..33),
             Ok(BTreeMap::from([(
                 hashed_address,
                 BTreeSet::from([keccak256(H256::zero()), keccak256(H256::from_low_u64_be(2))])

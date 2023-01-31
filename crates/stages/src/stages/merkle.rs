@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, trie::DBTrieLoader, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
-use reth_db::{database::Database, tables, transaction::DbTxMut};
+use reth_db::database::Database;
 use reth_interfaces::consensus;
 use std::fmt::Debug;
 use tracing::*;
@@ -83,8 +83,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let stage_progress = input.stage_progress.unwrap_or_default();
         let previous_stage_progress = input.previous_stage_progress();
 
-        let from_transition = tx.get_block_transition(stage_progress)? + 1;
-        let to_transition = tx.get_block_transition(previous_stage_progress)? + 1;
+        let from_transition = tx.get_block_transition(stage_progress)?;
+        let to_transition = tx.get_block_transition(previous_stage_progress)?;
 
         let block_root = tx.get_header_by_num(previous_stage_progress)?.state_root;
 
@@ -93,9 +93,6 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else if to_transition - from_transition > threshold || stage_progress == 0 {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
-            tx.clear::<tables::AccountsTrie>()?;
-            tx.clear::<tables::StoragesTrie>()?;
-
             let loader = DBTrieLoader::default();
             loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
@@ -104,7 +101,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             let current_root = tx.get_header_by_num(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
             loader
-                .update_root(tx, current_root, from_transition, to_transition)
+                .update_root(tx, current_root, (from_transition + 1)..(to_transition + 1))
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
@@ -137,7 +134,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let to_transition = tx.get_block_transition(input.stage_progress)? + 1;
 
         loader
-            .update_root(tx, current_root, from_transition, to_transition)
+            .update_root(tx, current_root, from_transition..to_transition)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
         info!(target: "sync::stages::merkle::unwind", "Stage finished");
@@ -156,7 +153,8 @@ mod tests {
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
         models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
-        transaction::DbTx,
+        tables,
+        transaction::{DbTx, DbTxMut},
     };
     use reth_interfaces::test_utils::generators::{
         random_block, random_block_range, random_contract_account_range,
