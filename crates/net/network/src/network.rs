@@ -1,10 +1,6 @@
 use crate::{
-    config::NetworkMode,
-    manager::NetworkEvent,
-    message::PeerRequest,
-    peers::{PeerKind, PeersHandle},
-    session::PeerInfo,
-    FetchClient,
+    config::NetworkMode, manager::NetworkEvent, message::PeerRequest, peers::PeersHandle,
+    session::PeerInfo, FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -14,7 +10,9 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{NetworkError, NetworkInfo, NetworkStatus, PeersInfo, ReputationChangeKind};
+use reth_network_api::{
+    NetworkError, NetworkInfo, NetworkStatus, PeerKind, Peers, PeersInfo, ReputationChangeKind,
+};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
@@ -137,47 +135,6 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
-    /// set
-    pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Basic, addr);
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a trusted peer
-    /// to the known set
-    pub fn add_trusted_peer(&self, peer: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Trusted, addr);
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
-    /// set, with the given kind.
-    pub fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
-        self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to remove a peer from the
-    /// set corresponding to given kind.
-    pub fn remove_peer(&self, peer: PeerId, kind: PeerKind) {
-        self.send_message(NetworkHandleMessage::RemovePeer(peer, kind))
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
-    /// connection to the given peer.
-    pub fn disconnect_peer(&self, peer: PeerId) {
-        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, None))
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
-    /// connection to the given peer using the provided reason
-    pub fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason) {
-        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
-    }
-
-    /// Send a reputation change for the given peer.
-    pub fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
-        self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
-    }
-
     /// Sends a [`PeerRequest`] to the given peer's session.
     pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
@@ -216,6 +173,37 @@ impl PeersInfo for NetworkHandle {
         let id = *self.peer_id();
         let socket_addr = *self.inner.listener_address.lock();
         NodeRecord::new(socket_addr, id)
+    }
+}
+
+impl Peers for NetworkHandle {
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
+    /// set, with the given kind.
+    fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
+        self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to remove a peer from the
+    /// set corresponding to given kind.
+    fn remove_peer(&self, peer: PeerId, kind: PeerKind) {
+        self.send_message(NetworkHandleMessage::RemovePeer(peer, kind))
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer.
+    fn disconnect_peer(&self, peer: PeerId) {
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, None))
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer using the provided reason
+    fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason) {
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
+    }
+
+    /// Send a reputation change for the given peer.
+    fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
     }
 }
 
