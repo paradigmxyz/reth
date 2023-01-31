@@ -336,12 +336,12 @@ impl DBTrieLoader {
     ) -> Result<BTreeMap<H256, BTreeSet<H256>>, TrieError> {
         let mut account_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
 
-        let mut account_changes: BTreeMap<H256, BTreeSet<H256>> = BTreeMap::new();
+        let mut account_changes: BTreeMap<Address, BTreeSet<H256>> = BTreeMap::new();
 
         let mut walker = account_cursor.walk_range(tid_range.clone())?;
 
         while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
-            account_changes.insert(keccak256(address), Default::default());
+            account_changes.insert(address, Default::default());
         }
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
@@ -353,10 +353,17 @@ impl DBTrieLoader {
         while let Some((TransitionIdAddress((_, address)), StorageEntry { key, .. })) =
             walker.next().transpose()?
         {
-            account_changes.entry(keccak256(address)).or_default().insert(keccak256(key));
+            account_changes.entry(address).or_default().insert(key);
         }
 
-        Ok(account_changes)
+        let hashed_changes = account_changes
+            .into_iter()
+            .map(|(address, storage)| {
+                (keccak256(address), storage.into_iter().map(|k| keccak256(k)).collect())
+            })
+            .collect();
+
+        Ok(hashed_changes)
     }
 }
 
