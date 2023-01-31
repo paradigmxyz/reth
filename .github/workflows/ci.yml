@@ -222,3 +222,35 @@ jobs:
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
         run: |
           ./.github/scripts/compare_iai.sh
+
+  miri:
+    name: miri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup override set nightly
+          cargo miri setup
+
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
+
+      - name: Install libclang # Necessary for compiling reth-mdbx-sys
+        run: |
+          sudo apt update
+          sudo apt-get install -y libclang-dev
+
+      - name: Test with Miri via Nextest
+        run: cargo miri nextest run --all --all-features -j 4
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+          # disabling isolation is essential, see miri's README for info.
