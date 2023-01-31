@@ -14,8 +14,7 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_primitives::{
-    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, TransactionSignedEcRecovered, H256,
-    MAINNET, U256,
+    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, H256, MAINNET, U256,
 };
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
