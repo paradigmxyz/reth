@@ -8,7 +8,7 @@ use crate::{
     NetworkOpts,
 };
 use reth_consensus::beacon::BeaconConsensus;
-use reth_downloaders::bodies::concurrent::BodiesDownloaderBuilder;
+use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;

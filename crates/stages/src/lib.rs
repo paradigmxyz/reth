@@ -21,7 +21,7 @@
 //! # use std::sync::Arc;
 //! # use reth_db::mdbx::test_utils::create_test_rw_db;
 //! # use reth_db::mdbx::{Env, WriteMap};
-//! # use reth_downloaders::bodies::concurrent::BodiesDownloaderBuilder;
+//! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::LinearDownloadBuilder;
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;

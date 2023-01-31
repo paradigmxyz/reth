@@ -52,7 +52,7 @@ let mut pipeline = reth_stages::Pipeline::new()
     })
     .push(BodyStage {
         downloader: Arc::new(
-            bodies::concurrent::BodiesDownloader::new(
+            bodies::bodies::BodiesDownloader::new(
                 fetch_client.clone(),
                 consensus.clone(),
             )

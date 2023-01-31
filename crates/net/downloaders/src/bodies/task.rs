@@ -44,7 +44,7 @@ impl TaskDownloader {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use reth_downloaders::bodies::concurrent::BodiesDownloaderBuilder;
+    /// use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
     /// use reth_downloaders::bodies::task::TaskDownloader;
     /// use reth_interfaces::consensus::Consensus;
     /// use reth_interfaces::p2p::bodies::client::BodiesClient;
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::{
-            concurrent::BodiesDownloaderBuilder,
+            bodies::BodiesDownloaderBuilder,
             test_utils::{insert_headers, zip_blocks},
         },
         test_utils::{generate_bodies, TestBodiesClient},

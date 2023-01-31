@@ -1,5 +1,5 @@
 /// A naive concurrent downloader.
-pub mod concurrent;
+pub mod bodies;
 
 /// TODO:
 pub mod task;
