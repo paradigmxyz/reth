@@ -162,8 +162,10 @@ impl NetworkHandle {
     }
 
     /// Send message to gracefully shutdown node.
-    pub fn shutdown(&self) {
-        self.send_message(NetworkHandleMessage::Shutdown);
+    pub async fn shutdown(&self) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.send_message(NetworkHandleMessage::Shutdown(tx));
+        rx.await
     }
 }
 
@@ -308,5 +310,5 @@ pub(crate) enum NetworkHandleMessage {
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
     /// Gracefully shutdown network
-    Shutdown,
+    Shutdown(oneshot::Sender<()>),
 }

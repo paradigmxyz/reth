@@ -281,6 +281,7 @@ where
     }
 
     /// Checks if the node's network connection state is 'ShuttingDown'
+    #[inline]
     fn is_shutting_down(&self) -> bool {
         matches!(self.net_connection_state, NetworkConnectionState::ShuttingDown)
     }

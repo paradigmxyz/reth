@@ -12,7 +12,10 @@ use reth_eth_wire::{
 use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc, oneshot},
+};
 
 /// A handler attached to a peer session that's not authenticated yet, pending Handshake and hello
 /// message which exchanges the `capabilities` of the peer.
@@ -21,7 +24,7 @@ use tokio::{net::TcpStream, sync::mpsc};
 #[derive(Debug)]
 pub(crate) struct PendingSessionHandle {
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
-    pub(crate) disconnect_tx: mpsc::Sender<()>,
+    pub(crate) disconnect_tx: Option<oneshot::Sender<()>>,
     /// The direction of the session
     pub(crate) direction: Direction,
 }
@@ -30,8 +33,10 @@ pub(crate) struct PendingSessionHandle {
 
 impl PendingSessionHandle {
     /// Sends a disconnect command to the pending session.
-    pub(crate) fn disconnect(&self) {
-        let _ = self.disconnect_tx.send(());
+    pub(crate) fn disconnect(&mut self) {
+        if let Some(tx) = self.disconnect_tx.take() {
+            let _ = tx.send(());
+        }
     }
 }
 

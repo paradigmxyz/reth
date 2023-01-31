@@ -513,7 +513,7 @@ where
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
             }
-            NetworkHandleMessage::Shutdown => {
+            NetworkHandleMessage::Shutdown(tx) => {
                 // Set connection status to `Shutdown`. Stops node to accept
                 // new incoming connections as well as sending connection requests to newly
                 // discovered nodes.
@@ -522,6 +522,7 @@ where
                 self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
                 // drop pending connections
                 self.swarm.sessions_mut().disconnect_all_pending();
+                let _ = tx.send(());
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);

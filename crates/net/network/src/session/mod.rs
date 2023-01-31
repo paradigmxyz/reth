@@ -12,7 +12,7 @@ use crate::{
 };
 pub use crate::{message::PeerRequestSender, session::handle::PeerInfo};
 use fnv::FnvHashMap;
-use futures::{future::Either, io, pin_mut, FutureExt, StreamExt};
+use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
@@ -32,7 +32,10 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-use tokio::{net::TcpStream, sync::mpsc};
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc, oneshot},
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{instrument, trace};
 
@@ -204,7 +207,7 @@ impl SessionManager {
             "new pending incoming session"
         );
 
-        let (disconnect_tx, disconnect_rx) = mpsc::channel(1);
+        let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
         self.spawn(start_pending_incoming_session(
@@ -219,7 +222,10 @@ impl SessionManager {
             self.fork_filter.clone(),
         ));
 
-        let handle = PendingSessionHandle { disconnect_tx, direction: Direction::Incoming };
+        let handle = PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Incoming,
+        };
         self.pending_sessions.insert(session_id, handle);
         self.counter.inc_pending_inbound();
         Ok(session_id)
@@ -228,7 +234,7 @@ impl SessionManager {
     /// Starts a new pending session from the local node to the given remote node.
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_peer_id: PeerId) {
         let session_id = self.next_id();
-        let (disconnect_tx, disconnect_rx) = mpsc::channel(1);
+        let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         self.spawn(start_pending_outbound_session(
             disconnect_rx,
@@ -243,8 +249,10 @@ impl SessionManager {
             self.bandwidth_meter.clone(),
         ));
 
-        let handle =
-            PendingSessionHandle { disconnect_tx, direction: Direction::Outgoing(remote_peer_id) };
+        let handle = PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Outgoing(remote_peer_id),
+        };
         self.pending_sessions.insert(session_id, handle);
         self.counter.inc_pending_outbound();
     }
@@ -265,8 +273,8 @@ impl SessionManager {
         }
     }
 
-    pub(crate) fn disconnect_all_pending(&self) {
-        for (_, session) in self.pending_sessions.iter() {
+    pub(crate) fn disconnect_all_pending(&mut self) {
+        for (_, session) in self.pending_sessions.iter_mut() {
             session.disconnect();
         }
     }
@@ -652,7 +660,7 @@ pub struct ExceedsSessionLimit(pub(crate) u32);
 /// This will wait for the _incoming_ handshake request and answer it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_pending_incoming_session(
-    disconnect_rx: mpsc::Receiver<()>,
+    disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
     stream: MeteredStream<TcpStream>,
     events: mpsc::Sender<PendingSessionEvent>,
@@ -681,7 +689,7 @@ pub(crate) async fn start_pending_incoming_session(
 #[instrument(skip_all, fields(%remote_addr, peer_id), target = "net")]
 #[allow(clippy::too_many_arguments)]
 async fn start_pending_outbound_session(
-    disconnect_rx: mpsc::Receiver<()>,
+    disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
     session_id: SessionId,
     remote_addr: SocketAddr,
@@ -724,7 +732,7 @@ async fn start_pending_outbound_session(
 /// Authenticates a session
 #[allow(clippy::too_many_arguments)]
 async fn authenticate(
-    mut disconnect_rx: mpsc::Receiver<()>,
+    disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
     stream: MeteredStream<TcpStream>,
     session_id: SessionId,
@@ -779,9 +787,6 @@ async fn authenticate(
         fork_filter,
     )
     .boxed();
-
-    let disconnect_rx = async { disconnect_rx.recv().await };
-    pin_mut!(disconnect_rx);
 
     match futures::future::select(disconnect_rx, auth).await {
         Either::Left((_, _)) => {
