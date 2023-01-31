@@ -6,6 +6,7 @@ use reth_interfaces::{
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
         error::{DownloadError, DownloadResult},
+        priority::Priority,
     },
 };
 use reth_primitives::{PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
@@ -39,6 +40,7 @@ pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
     metrics: DownloaderMetrics,
+    priority: Priority,
     // Headers to download. The collection is shrinked as responses are buffered.
     headers: VecDeque<SealedHeader>,
     buffer: Vec<BlockResponse>,
@@ -54,12 +56,14 @@ where
     pub(crate) fn new(
         client: Arc<B>,
         consensus: Arc<dyn Consensus>,
+        priority: Priority,
         metrics: DownloaderMetrics,
     ) -> Self {
         Self {
             client,
             consensus,
             metrics,
+            priority,
             headers: Default::default(),
             buffer: Default::default(),
             last_request_len: None,
@@ -102,7 +106,7 @@ where
         tracing::trace!(target: "downloaders::bodies", request_len = req.len(), "Requesting bodies");
         let client = Arc::clone(&self.client);
         self.last_request_len = Some(req.len());
-        self.fut = Some(client.get_block_bodies(req));
+        self.fut = Some(client.get_block_bodies_with_priority(req, self.priority));
     }
 
     /// Process block response.
@@ -246,6 +250,7 @@ mod tests {
         let fut = BodiesRequestFuture::new(
             client.clone(),
             Arc::new(TestConsensus::default()),
+            Priority::Normal,
             DownloaderMetrics::new(TEST_SCOPE),
         )
         .with_headers(headers.clone());
@@ -267,6 +272,7 @@ mod tests {
         let fut = BodiesRequestFuture::new(
             client.clone(),
             Arc::new(TestConsensus::default()),
+            Priority::Normal,
             DownloaderMetrics::new(TEST_SCOPE),
         )
         .with_headers(headers.clone());

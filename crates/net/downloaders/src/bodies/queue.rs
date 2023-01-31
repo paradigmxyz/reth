@@ -4,7 +4,10 @@ use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
 use reth_interfaces::{
     consensus::Consensus,
-    p2p::bodies::{client::BodiesClient, response::BlockResponse},
+    p2p::{
+        bodies::{client::BodiesClient, response::BlockResponse},
+        priority::Priority,
+    },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
@@ -66,6 +69,7 @@ where
         client: Arc<B>,
         consensus: Arc<dyn Consensus>,
         request: Vec<SealedHeader>,
+        priority: Priority,
     ) {
         // Set last max requested block number
         self.last_requested_block_number = request
@@ -81,7 +85,8 @@ where
 
         // Create request and push into the queue.
         self.inner.push(
-            BodiesRequestFuture::new(client, consensus, self.metrics.clone()).with_headers(request),
+            BodiesRequestFuture::new(client, consensus, priority, self.metrics.clone())
+                .with_headers(request),
         )
     }
 
