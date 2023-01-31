@@ -1,31 +1,31 @@
+use crate::result::ToRpcResult;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-
-use reth_network::{peers::PeerKind, NetworkHandle};
-use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_primitives::NodeRecord;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::NodeInfo;
 
-use crate::result::ToRpcResult;
-
 /// `admin` API implementation.
 ///
 /// This type provides the functionality for handling `admin` related requests.
-pub struct AdminApi {
+pub struct AdminApi<N> {
     /// An interface to interact with the network
-    network: NetworkHandle,
+    network: N,
 }
 
-impl AdminApi {
+impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
-    pub fn new(network: NetworkHandle) -> AdminApi {
+    pub fn new(network: N) -> Self {
         AdminApi { network }
     }
 }
 
 #[async_trait]
-impl AdminApiServer for AdminApi {
+impl<N> AdminApiServer for AdminApi<N>
+where
+    N: NetworkInfo + Peers + 'static,
+{
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
         self.network.add_peer(record.id, record.tcp_addr());
         Ok(true)
@@ -61,7 +61,7 @@ impl AdminApiServer for AdminApi {
     }
 }
 
-impl std::fmt::Debug for AdminApi {
+impl<N> std::fmt::Debug for AdminApi<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AdminApi").finish_non_exhaustive()
     }

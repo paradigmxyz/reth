@@ -1,9 +1,7 @@
 //! Connection tests
 
 use ethers_core::utils::Geth;
-
 use ethers_providers::{Http, Middleware, Provider};
-
 use futures::StreamExt;
 use reth_discv4::{bootnodes::mainnet_nodes, Discv4Config};
 use reth_eth_wire::DisconnectReason;
@@ -18,7 +16,7 @@ use reth_network::{
     },
     NetworkConfigBuilder, NetworkEvent, NetworkManager, PeersConfig,
 };
-use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_network_api::{NetworkInfo, Peers, PeersInfo};
 use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;

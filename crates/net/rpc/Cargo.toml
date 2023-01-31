@@ -16,7 +16,6 @@ reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-types = { path = "../rpc-types" }
 reth-provider = { path = "../../storage/provider" }
 reth-transaction-pool = { path = "../../transaction-pool" }
-reth-network = { path = "../network" }
 reth-network-api = { path = "../network-api" }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 
