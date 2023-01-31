@@ -182,3 +182,43 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Check if documentation builds
         run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items
+
+  benchmarks:
+    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
+    # See also <https://github.com/foundry-rs/foundry/issues/3827>
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Install Valgrind
+        run: |
+          sudo apt install valgrind
+
+      - name: Checkout PR sources
+        uses: actions/checkout@v3
+        with:
+          ref: main
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Generate test-vectors
+        uses: actions-rs/cargo@v1
+        with:
+          command: run
+          args: --bin reth -- test-vectors tables
+
+      - name: Set main baseline
+        uses: actions-rs/cargo@v1
+        with:
+          command: bench
+          args: --package reth-db --bench iai
+
+      - name: Checkout main sources
+        uses: actions/checkout@v3
+        with:
+          clean: false
+
+      - name: Compare PR benchmark
+        shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
+        run: |
+          ./.github/scripts/compare_iai.sh

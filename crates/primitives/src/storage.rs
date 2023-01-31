@@ -1,9 +1,10 @@
 use super::{H256, U256};
-use reth_codecs::Compact;
-use serde::Serialize;
+use reth_codecs::{derive_arbitrary, Compact};
+use serde::{Deserialize, Serialize};
 
 /// Account storage entry.
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize)]
+#[derive_arbitrary(compact)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct StorageEntry {
     /// Storage key.
     pub key: H256,

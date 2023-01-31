@@ -2,7 +2,7 @@
 use crate::{
     db,
     dirs::{LogsDir, PlatformPath},
-    node, p2p, stage, test_eth_chain,
+    node, p2p, stage, test_eth_chain, test_vectors,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
@@ -25,6 +25,7 @@ pub async fn run() -> eyre::Result<()> {
         Commands::Db(command) => command.execute().await,
         Commands::Stage(command) => command.execute().await,
         Commands::P2P(command) => command.execute().await,
+        Commands::TestVectors(command) => command.execute().await,
     }
 }
 
@@ -51,6 +52,9 @@ pub enum Commands {
     /// Run Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
+    /// Generate Test Vectors
+    #[command(name = "test-vectors")]
+    TestVectors(test_vectors::Command),
 }
 
 #[derive(Parser)]
