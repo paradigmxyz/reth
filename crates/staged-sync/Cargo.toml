@@ -21,6 +21,7 @@ reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-primitives = { path = "../../crates/primitives" }
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
 reth-net-nat = { path = "../../crates/net/nat" }
+reth-interfaces = { path = "../interfaces", optional = true }
 
 # io
 serde = "1.0"
@@ -32,4 +33,66 @@ walkdir = "2.3.2"
 eyre = "0.6.8"
 shellexpand = "3.0.0"
 tracing = "0.1.37"
-tempfile = "3.3.0"
+
+# crypto
+rand = { version = "0.8", optional = true }
+
+# errors
+thiserror = { version = "1", optional = true }
+
+# enr
+enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"], optional = true }
+
+# ethers
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
+ethers-providers = { git = "https://github.com/gakonst/ethers-rs", features = ["ws"], default-features = false, optional = true }
+ethers-middleware = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
+ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
+
+# async / futures
+async-trait = { version = "0.1", optional = true }
+tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"], optional = true }
+tokio-test = { version = "0.4", optional = true }
+
+# misc
+tempfile = { version = "3.3", optional = true }
+hex = { version = "0.4", optional = true }
+
+[dev-dependencies]
+# reth crates
+reth-tracing = { path = "../tracing" }
+reth-stages = { path = "../stages" }
+reth-downloaders = { path = "../net/downloaders" }
+reth-staged-sync = { path = ".", features = ["test-utils"] }
+
+# async/futures
+futures = "0.3"
+tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
+tokio-stream = "0.1"
+
+# crypto
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
+[features]
+test-utils = [
+    "reth-network/test-utils",
+    "reth-interfaces/test-utils",
+    "reth-network/test-utils",
+    "reth-provider/test-utils",
+    "dep:enr",
+    "dep:ethers-core",
+    "dep:tempfile",
+    "dep:thiserror",
+    "dep:hex",
+    "dep:rand",
+    "dep:tokio",
+    "dep:tokio-test",
+    "dep:ethers-signers",
+    "dep:ethers-providers",
+    "dep:ethers-middleware",
+    "dep:async-trait"
+]
