@@ -32,6 +32,12 @@ pub(crate) enum TrieError {
     DecodeError(#[from] DecodeError),
 }
 
+impl From<cita_trie::TrieError> for TrieError {
+    fn from(value: cita_trie::TrieError) -> Self {
+        TrieError::InternalError(format!("{value:?}"))
+    }
+}
+
 /// Database wrapper implementing HashDB trait.
 struct HashDatabase<'tx, 'itx, DB: Database> {
     tx: &'tx Transaction<'itx, DB>,
@@ -217,8 +223,7 @@ impl DBTrieLoader {
 
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(hashed_address.as_bytes().to_vec(), out)
-                .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+            trie.insert(hashed_address.as_bytes().to_vec(), out)?;
         }
         let root = H256::from_slice(trie.root().unwrap().as_slice());
 
@@ -245,8 +250,7 @@ impl DBTrieLoader {
         while let Some(StorageEntry { key: storage_key, value }) = current {
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
-            trie.insert(storage_key.as_bytes().to_vec(), out)
-                .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+            trie.insert(storage_key.as_bytes().to_vec(), out)?;
             current = storage_cursor.next_dup()?.map(|(_, v)| v);
         }
 
@@ -271,17 +275,12 @@ impl DBTrieLoader {
 
         let hasher = Arc::new(HasherKeccak::new());
 
-        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
-            .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
 
         for (address, changed_storages) in changed_accounts {
-            if let Some(account) = trie
-                .get(address.as_slice())
-                .map_err(|e| TrieError::InternalError(format!("{e:?}")))?
-            {
+            if let Some(account) = trie.get(address.as_slice())? {
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
-                trie.remove(address.as_bytes())
-                    .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+                trie.remove(address.as_bytes())?;
 
                 if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
                     let value = EthAccount::from_with_root(
@@ -291,8 +290,7 @@ impl DBTrieLoader {
 
                     let mut out = Vec::new();
                     Encodable::encode(&value, &mut out);
-                    trie.insert(address.as_bytes().to_vec(), out)
-                        .map_err(|e| TrieError::InternalError(format!("{e:?}",)))?;
+                    trie.insert(address.as_bytes().to_vec(), out)?;
                 }
             }
         }
@@ -313,8 +311,7 @@ impl DBTrieLoader {
 
         let hasher = Arc::new(HasherKeccak::new());
 
-        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())
-            .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         for key in changed_storages {
@@ -323,11 +320,9 @@ impl DBTrieLoader {
             {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(key.as_bytes().to_vec(), out)
-                    .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+                trie.insert(key.as_bytes().to_vec(), out)?;
             } else {
-                trie.remove(key.as_bytes())
-                    .map_err(|e| TrieError::InternalError(format!("{e:?}")))?;
+                trie.remove(key.as_bytes())?;
             }
         }
 

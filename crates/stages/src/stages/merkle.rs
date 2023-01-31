@@ -46,11 +46,7 @@ pub enum MerkleStage {
     Unwind,
 
     #[cfg(test)]
-    Both {
-        /// The threshold for switching from incremental trie building
-        /// of changes to whole rebuild. Num of transitions.
-        clean_threshold: u64,
-    },
+    Both { clean_threshold: u64 },
 }
 
 #[async_trait::async_trait]
