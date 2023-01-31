@@ -1,5 +1,5 @@
 use super::{H256, U256};
-use reth_codecs::Compact;
+use reth_codecs::{derive_arbitrary, Compact};
 use serde::Serialize;
 
 /// Account storage entry.
@@ -32,6 +32,7 @@ impl Compact for StorageEntry {
 }
 
 /// Account storage trie node.
+#[derive_arbitrary(compact)]
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct StorageTrieEntry {
     /// Hashed storage key.
