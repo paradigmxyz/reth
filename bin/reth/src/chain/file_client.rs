@@ -1,10 +1,14 @@
+use std::collections::HashMap;
+
+use reth_eth_wire::BlockBody;
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{PeerId, H256};
+use reth_primitives::{BlockHash, BlockNumber, Header, PeerId, H256};
+use tokio::{fs::File, io::BufReader};
 
 /// Front-end API for fetching chain data from a file.
 ///
@@ -18,8 +22,27 @@ use reth_primitives::{PeerId, H256};
 ///
 /// Likewise, if a block body is requested and is not buffered, it will be read from the file and
 /// the header information will be buffered.
-#[derive(Debug, Clone)]
-pub struct FileClient {}
+#[derive(Debug)]
+pub struct FileClient {
+    /// The open reader for the file.
+    reader: BufReader<File>,
+
+    /// The buffered headers retrieved when fetching new bodies.
+    headers: HashMap<BlockNumber, Header>,
+
+    /// The buffered bodies retrieved when fetching new headers.
+    bodies: HashMap<BlockHash, BlockBody>,
+}
+
+impl FileClient {
+    /// Create a new file client from a file path.
+    pub async fn new(path: &str) -> Result<Self, std::io::Error> {
+        let file = File::open(path).await?;
+        let reader = BufReader::new(file);
+
+        Ok(Self { reader, headers: HashMap::new(), bodies: HashMap::new() })
+    }
+}
 
 impl HeadersClient for FileClient {
     type Output = HeadersFut;
