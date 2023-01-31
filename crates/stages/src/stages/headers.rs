@@ -284,7 +284,7 @@ mod tests {
             transaction::{DbTx, DbTxMut},
         };
         use reth_downloaders::headers::reverse_headers::{
-            LinearDownloadBuilder, ReverseHeadersDownloader,
+            ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_interfaces::{
             consensus::{Consensus, ForkchoiceState},
@@ -426,7 +426,7 @@ mod tests {
                     client: client.clone(),
                     consensus: consensus.clone(),
                     downloader_factory: Box::new(move || {
-                        LinearDownloadBuilder::default()
+                        ReverseHeadersDownloaderBuilder::default()
                             .stream_batch_size(500)
                             .build(consensus.clone(), client.clone())
                     }),

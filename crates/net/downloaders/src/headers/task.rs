@@ -153,7 +153,9 @@ enum DownloaderUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::headers::{reverse_headers::LinearDownloadBuilder, test_utils::child_header};
+    use crate::headers::{
+        reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header,
+    };
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use std::sync::Arc;
 
@@ -167,7 +169,7 @@ mod tests {
         let p0 = child_header(&p1);
 
         let client = Arc::new(TestHeadersClient::default());
-        let downloader = LinearDownloadBuilder::default()
+        let downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));

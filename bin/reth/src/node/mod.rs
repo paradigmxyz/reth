@@ -237,7 +237,7 @@ impl Command {
     ) -> reth_downloaders::headers::task::TaskDownloader {
         let headers_conf = &config.stages.headers;
         headers::task::TaskDownloader::spawn(
-            headers::reverse_headers::LinearDownloadBuilder::default()
+            headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
                 .request_limit(headers_conf.downloader_batch_size)
                 .stream_batch_size(headers_conf.commit_threshold as usize)
                 .build(consensus.clone(), fetch_client.clone()),

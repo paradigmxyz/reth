@@ -92,9 +92,9 @@ impl<H> ReverseHeadersDownloader<H>
 where
     H: HeadersClient + 'static,
 {
-    /// Convenience method to create a [LinearDownloadBuilder] without importing it
-    pub fn builder() -> LinearDownloadBuilder {
-        LinearDownloadBuilder::default()
+    /// Convenience method to create a [ReverseHeadersDownloaderBuilder] without importing it
+    pub fn builder() -> ReverseHeadersDownloaderBuilder {
+        ReverseHeadersDownloaderBuilder::default()
     }
 
     /// Returns the block number the local node is at.
@@ -796,7 +796,7 @@ impl SyncTargetBlock {
 /// The builder for [ReverseHeadersDownloader] with
 /// some default settings
 #[derive(Debug)]
-pub struct LinearDownloadBuilder {
+pub struct ReverseHeadersDownloaderBuilder {
     /// The batch size per one request
     request_limit: u64,
     /// Batch size for headers
@@ -809,7 +809,7 @@ pub struct LinearDownloadBuilder {
     max_buffered_responses: usize,
 }
 
-impl Default for LinearDownloadBuilder {
+impl Default for ReverseHeadersDownloaderBuilder {
     fn default() -> Self {
         Self {
             request_limit: 1_000,
@@ -821,7 +821,7 @@ impl Default for LinearDownloadBuilder {
     }
 }
 
-impl LinearDownloadBuilder {
+impl ReverseHeadersDownloaderBuilder {
     /// Set the request batch size.
     ///
     /// This determines the `limit` for a [GetHeaders](reth_eth_wire::GetBlockHeaders) requests, the
@@ -945,7 +945,7 @@ mod tests {
 
         let genesis = SealedHeader::default();
 
-        let mut downloader = LinearDownloadBuilder::default()
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
@@ -973,7 +973,7 @@ mod tests {
 
         let header = SealedHeader::default();
 
-        let mut downloader = LinearDownloadBuilder::default()
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
         downloader.update_local_head(header.clone());
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
@@ -1013,7 +1013,7 @@ mod tests {
 
         let batch_size = 99;
         let start = 1000;
-        let mut downloader = LinearDownloadBuilder::default()
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .request_limit(batch_size)
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
         downloader.update_local_head(genesis);
@@ -1062,7 +1062,7 @@ mod tests {
         let p1 = child_header(&p2);
         let p0 = child_header(&p1);
 
-        let mut downloader = LinearDownloadBuilder::default()
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
@@ -1094,7 +1094,7 @@ mod tests {
         let p0 = child_header(&p1);
 
         let client = Arc::new(TestHeadersClient::default());
-        let mut downloader = LinearDownloadBuilder::default()
+        let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
             .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
