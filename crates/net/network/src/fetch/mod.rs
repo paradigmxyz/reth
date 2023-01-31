@@ -401,7 +401,7 @@ pub(crate) enum FetchAction {
 /// Outcome of a processed response.
 ///
 /// Returned after processing a response.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
     Request(PeerId, BlockRequest),
