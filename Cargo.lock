@@ -4428,6 +4428,7 @@ name = "reth-network-api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "reth-eth-wire",
  "reth-primitives",
  "serde",
  "thiserror",
@@ -4540,7 +4541,6 @@ dependencies = [
  "hex",
  "jsonrpsee",
  "reth-interfaces",
- "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
@@ -4629,6 +4629,7 @@ dependencies = [
  "reth-interfaces",
  "reth-net-nat",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-staged-sync",

@@ -7,7 +7,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::test_utils::{NetworkEventStream, Testnet};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{
     Block, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
     TransactionSigned, TxEip2930, H256, U256,
