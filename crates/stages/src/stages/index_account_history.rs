@@ -10,6 +10,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
+
 use reth_primitives::{Address, TransitionId};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;

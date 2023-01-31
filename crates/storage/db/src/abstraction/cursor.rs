@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Range};
 
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
@@ -35,6 +35,15 @@ pub trait DbCursorRO<'tx, T: Table> {
         &'cursor mut self,
         start_key: T::Key,
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
+
+    /// Returns an iterator starting at a key greater or equal than `start_key` and ending at a key
+    /// less than `end_key`
+    fn walk_range<'cursor>(
+        &'cursor mut self,
+        range: Range<T::Key>,
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;
 
@@ -182,6 +191,56 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
         }
 
         self.cursor.prev().transpose()
+    }
+}
+
+/// Provides a range iterator to `Cursor` when handling `Table`.
+/// Also check [`Walker`]
+pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
+    /// Cursor to be used to walk through the table.
+    cursor: &'cursor mut CURSOR,
+    /// `(key, value)` where to start the walk.
+    start: IterPairResult<T>,
+    /// exclusive `key` where to stop the walk.
+    end_key: T::Key,
+    /// flag whether is ended
+    is_done: bool,
+    /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
+    _tx_phantom: PhantomData<&'tx T>,
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
+    for RangeWalker<'cursor, 'tx, T, CURSOR>
+{
+    type Item = Result<(T::Key, T::Value), Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_done {
+            return None
+        }
+
+        let start = self.start.take();
+        if start.is_some() {
+            return start
+        }
+
+        let res = self.cursor.next().transpose()?;
+        if let Ok((key, value)) = res {
+            if key < self.end_key {
+                Some(Ok((key, value)))
+            } else {
+                self.is_done = true;
+                None
+            }
+        } else {
+            Some(res)
+        }
+    }
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 'tx, T, CURSOR> {
+    /// construct RangeWalker
+    pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>, end_key: T::Key) -> Self {
+        Self { cursor, start, end_key, is_done: false, _tx_phantom: std::marker::PhantomData }
     }
 }
 
