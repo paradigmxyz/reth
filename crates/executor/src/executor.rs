@@ -819,7 +819,8 @@ mod tests {
 
     #[test]
     fn dao_hardfork_irregular_state_change() {
-        let header = Header { number: 1, ..Header::default() };
+        let mut header = Header::default();
+        header.number = 1;
 
         let mut db = StateProviderTest::default();
 
