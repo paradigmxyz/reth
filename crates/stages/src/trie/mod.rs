@@ -560,7 +560,7 @@ mod tests {
         tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
         tx.put::<tables::AccountChangeSet>(31, AccountBeforeTx { address, info: None }).unwrap();
 
-        for (k, v) in storage.clone() {
+        for (k, v) in storage {
             tx.put::<tables::HashedStorage>(
                 hashed_address,
                 StorageEntry { key: keccak256(k), value: v },
