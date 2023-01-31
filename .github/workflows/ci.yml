@@ -225,7 +225,9 @@ jobs:
 
   miri:
     name: miri
-    runs-on: ubuntu-latest
+    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
+    # See also <https://github.com/foundry-rs/foundry/issues/3827>
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
