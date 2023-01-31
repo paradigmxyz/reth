@@ -40,7 +40,7 @@ let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).
 let fetch_client = Arc::new(network.fetch_client().await?);
 let mut pipeline = reth_stages::Pipeline::new()
     .push(HeaderStage {
-        downloader: headers::linear::LinearDownloadBuilder::default()
+        downloader: headers::reverse_headers::LinearDownloadBuilder::default()
             .batch_size(config.stages.headers.downloader_batch_size)
             .retries(config.stages.headers.downloader_retries)
             .build(consensus.clone(), fetch_client.clone()),

@@ -22,7 +22,7 @@
 //! # use reth_db::mdbx::test_utils::create_test_rw_db;
 //! # use reth_db::mdbx::{Env, WriteMap};
 //! # use reth_downloaders::bodies::concurrent::BodiesDownloaderBuilder;
-//! # use reth_downloaders::headers::linear::LinearDownloadBuilder;
+//! # use reth_downloaders::headers::reverse_headers::LinearDownloadBuilder;
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};

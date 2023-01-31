@@ -283,7 +283,9 @@ mod tests {
             tables,
             transaction::{DbTx, DbTxMut},
         };
-        use reth_downloaders::headers::linear::{LinearDownloadBuilder, ReverseHeadersDownloader};
+        use reth_downloaders::headers::reverse_headers::{
+            LinearDownloadBuilder, ReverseHeadersDownloader,
+        };
         use reth_interfaces::{
             consensus::{Consensus, ForkchoiceState},
             p2p::headers::downloader::HeaderDownloader,

@@ -40,7 +40,7 @@ impl TaskDownloader {
     ///
     /// ```
     /// # use std::sync::Arc;
-    /// # use reth_downloaders::headers::linear::ReverseHeadersDownloader;
+    /// # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloader;
     /// # use reth_downloaders::headers::task::TaskDownloader;
     /// # use reth_interfaces::consensus::Consensus;
     /// # use reth_interfaces::p2p::headers::client::HeadersClient;
@@ -153,7 +153,7 @@ enum DownloaderUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::headers::{linear::LinearDownloadBuilder, test_utils::child_header};
+    use crate::headers::{reverse_headers::LinearDownloadBuilder, test_utils::child_header};
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use std::sync::Arc;
 
