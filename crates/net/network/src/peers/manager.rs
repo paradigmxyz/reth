@@ -658,7 +658,7 @@ impl Default for PeersManager {
 }
 
 /// Tracks stats about connected nodes
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
@@ -917,7 +917,7 @@ pub enum PeerAction {
 }
 
 /// Config type for initiating a [`PeersManager`] instance
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeersConfig {
     /// How often to recheck free slots for outbound connections.
@@ -1003,7 +1003,7 @@ impl PeersConfig {
 /// The durations to use when a backoff should be applied to a peer.
 ///
 /// See also [`BackoffKind`](BackoffKind).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PeerBackoffDurations {
     /// Applies to connection problems where there is a chance that they will be resolved after the

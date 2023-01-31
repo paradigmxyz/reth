@@ -4,7 +4,7 @@ use std::{collections::HashMap, net::IpAddr, time::Instant};
 
 /// Stores peers that should be taken out of circulation either indefinitely or until a certain
 /// timestamp
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BanList {
     /// A set of IPs whose packets get dropped instantly.
     banned_ips: HashMap<IpAddr, Option<Instant>>,
