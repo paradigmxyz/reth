@@ -166,7 +166,7 @@ mod tests {
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
-    /// Execute with low clean threshold so as to merkelize whole state
+    /// Execute from genesis so as to merkelize whole state
     #[tokio::test]
     async fn execute_clean_merkle() {
         let (previous_stage, stage_progress) = (500, 0);
@@ -437,18 +437,13 @@ mod tests {
                 .unwrap();
             Ok(())
         }
+
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            // self.before_unwind(input)?;
             self.check_root(input.unwind_to)
         }
     }
 
     impl MerkleTestRunner {
-        #[allow(dead_code)]
-        fn set_clean_threshold(&mut self, threshold: u64) {
-            self.clean_threshold = threshold;
-        }
-
         fn state_root(&self) -> Result<H256, TestRunnerError> {
             Ok(DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap())
         }

@@ -21,7 +21,6 @@ use tracing::*;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub(crate) enum TrieError {
-    // TODO: decompose into various different errors
     #[error("Some error occurred: {0}")]
     InternalError(String),
     #[error("The root node wasn't found in the DB")]
@@ -43,7 +42,6 @@ struct HashDatabase<'tx, 'itx, DB: Database> {
     tx: &'tx Transaction<'itx, DB>,
 }
 
-// TODO: implement caching and bulk inserting
 impl<'tx, 'itx, DB> cita_trie::DB for HashDatabase<'tx, 'itx, DB>
 where
     DB: Database,
@@ -59,6 +57,7 @@ where
     }
 
     fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
+        // Caching and bulk inserting shouldn't be needed, as the data is ordered
         self.tx.put::<tables::AccountsTrie>(H256::from_slice(key.as_slice()), value)?;
         Ok(())
     }
@@ -97,7 +96,6 @@ struct DupHashDatabase<'tx, 'itx, DB: Database> {
     key: H256,
 }
 
-// TODO: implement caching and bulk inserting
 impl<'tx, 'itx, DB> cita_trie::DB for DupHashDatabase<'tx, 'itx, DB>
 where
     DB: Database,
@@ -114,6 +112,7 @@ where
     }
 
     fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
+        // Caching and bulk inserting shouldn't be needed, as the data is ordered
         self.tx.put::<tables::StoragesTrie>(
             self.key,
             StorageTrieEntry { hash: H256::from_slice(key.as_slice()), node: value },
