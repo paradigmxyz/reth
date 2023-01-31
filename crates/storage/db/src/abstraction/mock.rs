@@ -1,10 +1,11 @@
 //! Mock database
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Range};
 
 use crate::{
     common::{PairResult, ValueOnlyResult},
     cursor::{
-        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, ReverseWalker, Walker,
+        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
+        ReverseWalker, Walker,
     },
     database::{Database, DatabaseGAT},
     table::{DupSort, Table},
@@ -133,6 +134,16 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
         &'cursor mut self,
         _start_key: T::Key,
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+
+    fn walk_range<'cursor>(
+        &'cursor mut self,
+        _range: Range<T::Key>,
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,
     {

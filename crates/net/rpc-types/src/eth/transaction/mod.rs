@@ -7,7 +7,7 @@ pub use request::TransactionRequest;
 pub use typed::*;
 
 use reth_primitives::{
-    rpc::transaction::eip2930::AccessListItem, Address, Bytes, H256, H512, U256, U64,
+    rpc::transaction::eip2930::AccessListItem, Address, Bytes, H256, H512, U128, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,13 +33,13 @@ pub struct Transaction {
     pub value: U256,
     /// Gas Price
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub gas_price: Option<U256>,
+    pub gas_price: Option<U128>,
     /// Max BaseFeePerGas the user is willing to pay.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_fee_per_gas: Option<U256>,
+    pub max_fee_per_gas: Option<U128>,
     /// The miner's tip.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_priority_fee_per_gas: Option<U256>,
+    pub max_priority_fee_per_gas: Option<U128>,
     /// Gas
     pub gas: U256,
     /// Data

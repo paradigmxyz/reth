@@ -99,10 +99,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // Aggregate all transition changesets and and make list of storages that have been
             // changed.
             tx.cursor_read::<tables::StorageChangeSet>()?
-                .walk((from_transition, H160::zero()).into())?
-                .take_while(|res| {
-                    res.as_ref().map(|(k, _)| k.0 .0 < to_transition).unwrap_or_default()
-                })
+                .walk_range(
+                    (from_transition, Address::zero()).into()..
+                        (to_transition, Address::zero()).into(),
+                )?
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 // fold all storages and save its old state so we can remove it from HashedStorage
@@ -173,12 +173,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         // Aggregate all transition changesets and make list of accounts that have been changed.
         tx.cursor_read::<tables::StorageChangeSet>()?
-            .walk((from_transition_rev, H160::zero()).into())?
-            .take_while(|res| {
-                res.as_ref()
-                    .map(|(TransitionIdAddress((k, _)), _)| *k < to_transition_rev)
-                    .unwrap_or_default()
-            })
+            .walk_range(
+                (from_transition_rev, Address::zero()).into()..
+                    (to_transition_rev, Address::zero()).into(),
+            )?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .rev()

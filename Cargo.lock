@@ -146,6 +146,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dad5c83079eae9969be7fadefe640a1c566901f05ff91ab221de4b6f68d9507e"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10f203db73a71dfa2fb6dd22763990fa26f3d2625a6da2da900d23b87d26be27"
+dependencies = [
+ "proc-macro2 1.0.50",
+ "quote 1.0.23",
+ "syn 1.0.107",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1627,7 +1648,7 @@ dependencies = [
 [[package]]
 name = "ethers-contract"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#93e185064601a7f12ad06a107640c5f18c316580"
+source = "git+https://github.com/gakonst/ethers-rs#91d88288a652119c40dc4698a04feef8943ea3f1"
 dependencies = [
  "ethers-core",
  "ethers-providers",
@@ -1643,7 +1664,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#93e185064601a7f12ad06a107640c5f18c316580"
+source = "git+https://github.com/gakonst/ethers-rs#91d88288a652119c40dc4698a04feef8943ea3f1"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1674,7 +1695,7 @@ dependencies = [
 [[package]]
 name = "ethers-etherscan"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#93e185064601a7f12ad06a107640c5f18c316580"
+source = "git+https://github.com/gakonst/ethers-rs#91d88288a652119c40dc4698a04feef8943ea3f1"
 dependencies = [
  "ethers-core",
  "getrandom 0.2.8",
@@ -1690,7 +1711,7 @@ dependencies = [
 [[package]]
 name = "ethers-middleware"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#93e185064601a7f12ad06a107640c5f18c316580"
+source = "git+https://github.com/gakonst/ethers-rs#91d88288a652119c40dc4698a04feef8943ea3f1"
 dependencies = [
  "async-trait",
  "auto_impl 0.5.0",
@@ -1715,13 +1736,14 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#93e185064601a7f12ad06a107640c5f18c316580"
+source = "git+https://github.com/gakonst/ethers-rs#91d88288a652119c40dc4698a04feef8943ea3f1"
 dependencies = [
  "async-trait",
  "auto_impl 1.0.1",
  "base64 0.21.0",
  "enr 0.7.0",
  "ethers-core",
+ "futures-channel",
  "futures-core",
  "futures-timer",
  "futures-util",
@@ -1737,6 +1759,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "tracing-futures",
  "url",
@@ -1750,7 +1773,7 @@ dependencies = [
 [[package]]
 name = "ethers-signers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#93e185064601a7f12ad06a107640c5f18c316580"
+source = "git+https://github.com/gakonst/ethers-rs#91d88288a652119c40dc4698a04feef8943ea3f1"
 dependencies = [
  "async-trait",
  "coins-bip32",
@@ -4010,6 +4033,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
+ "proptest",
  "reth-consensus",
  "reth-db",
  "reth-discv4",
@@ -4092,6 +4116,7 @@ dependencies = [
  "modular-bitfield",
  "page_size",
  "parity-scale-codec",
+ "paste",
  "postcard",
  "proptest",
  "proptest-derive",
@@ -4103,6 +4128,7 @@ dependencies = [
  "reth-primitives",
  "secp256k1 0.24.3",
  "serde",
+ "serde_json",
  "tempfile",
  "test-fuzz",
  "thiserror",
@@ -4605,17 +4631,37 @@ dependencies = [
 name = "reth-staged-sync"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "confy",
+ "enr 0.7.0",
+ "ethers-core",
+ "ethers-middleware",
+ "ethers-providers",
+ "ethers-signers",
  "eyre",
+ "futures",
+ "hex",
+ "rand 0.8.5",
  "reth-db",
  "reth-discv4",
+ "reth-downloaders",
+ "reth-interfaces",
  "reth-net-nat",
  "reth-network",
  "reth-primitives",
  "reth-provider",
+ "reth-staged-sync",
+ "reth-stages",
+ "reth-tracing",
+ "secp256k1 0.24.3",
  "serde",
  "serde_json",
  "shellexpand",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-test",
  "tracing",
  "walkdir",
 ]
@@ -5251,6 +5297,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1"
+version = "0.10.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f04293dc80c3993519f2d7f6f511707ee7094fe0c6d3406feb330cdb3540eba3"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest 0.10.6",
+]
+
+[[package]]
 name = "sha2"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5802,6 +5859,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-test"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53474327ae5e166530d17f2d956afcb4f8a004de581b3cae10f12006bc8163e3"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "futures-core",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "tokio-tungstenite"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54319c93411147bced34cb5609a80e0a8e44c5999c93903a81cd866630ec0bfd"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6161,6 +6243,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "tungstenite"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30ee6ab729cd4cf0fd55218530c4522ed30b7b6081752839b68fcec8d0960788"
+dependencies = [
+ "base64 0.13.1",
+ "byteorder",
+ "bytes",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.8.5",
+ "sha1",
+ "thiserror",
+ "url",
+ "utf-8",
+]
+
+[[package]]
 name = "typenum"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6266,6 +6367,12 @@ dependencies = [
  "idna 0.3.0",
  "percent-encoding",
 ]
+
+[[package]]
+name = "utf-8"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "uuid"

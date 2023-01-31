@@ -23,6 +23,20 @@ macro_rules! impl_fixed_arbitrary {
                 Decode::decode(buffer).map_err(|_| arbitrary::Error::IncorrectFormat)
             }
         }
+
+        #[cfg(any(test, feature = "arbitrary"))]
+        use proptest::strategy::Strategy;
+        #[cfg(any(test, feature = "arbitrary"))]
+        impl proptest::prelude::Arbitrary for $name {
+            type Parameters = ();
+            type Strategy = proptest::prelude::BoxedStrategy<$name>;
+
+            fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+                proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), $size)
+                    .prop_map(move |vec| Decode::decode(vec).unwrap())
+                    .boxed()
+            }
+        }
     };
 }
 

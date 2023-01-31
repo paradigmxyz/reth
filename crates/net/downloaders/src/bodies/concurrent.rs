@@ -13,6 +13,7 @@ use reth_interfaces::{
             response::BlockResponse,
         },
         error::{DownloadError, DownloadResult},
+        priority::Priority,
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -302,7 +303,7 @@ where
                 for range in requests {
                     let headers = self
                         .query_headers(
-                            *range.start()..*range.end() + 1, //
+                            *range.start()..*range.end() + 1,
                             range.clone().count() as u64,
                         )?
                         .ok_or(DownloadError::MissingHeader { block_number: *range.start() })?;
@@ -312,6 +313,7 @@ where
                         Arc::clone(&self.client),
                         Arc::clone(&self.consensus),
                         headers,
+                        Priority::High,
                     );
                 }
             }
@@ -364,6 +366,7 @@ where
                             Arc::clone(&this.client),
                             Arc::clone(&this.consensus),
                             request,
+                            Priority::Normal,
                         );
                         new_request_submitted = true;
                     }
