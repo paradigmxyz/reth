@@ -173,6 +173,9 @@ where
                 Some(SwarmEvent::OutgoingConnectionError { peer_id, remote_addr, error })
             }
             SessionEvent::BadMessage { peer_id } => Some(SwarmEvent::BadMessage { peer_id }),
+            SessionEvent::ProtocolBreach { peer_id } => {
+                Some(SwarmEvent::ProtocolBreach { peer_id })
+            }
         }
     }
 
@@ -328,6 +331,11 @@ pub(crate) enum SwarmEvent {
     },
     /// Received a bad message from the peer.
     BadMessage {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
+    },
+    /// Remote peer is considered in protocol violation
+    ProtocolBreach {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },
