@@ -116,7 +116,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?block_root, expected = ?trie_root, "Block's root state failed verification");
             return Err(StageError::Validation {
                 block: previous_stage_progress,
-                error: consensus::Error::BodyStateRootDiff { got: block_root, expected: trie_root },
+                error: consensus::Error::BodyStateRootDiff { got: trie_root, expected: block_root },
             })
         }
 
