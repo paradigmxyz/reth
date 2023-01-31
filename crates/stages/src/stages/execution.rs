@@ -104,8 +104,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
-            .walk(start_block)?
-            .take_while(|entry| entry.as_ref().map(|e| e.0 <= end_block).unwrap_or_default())
+            .walk_range(start_block..end_block + 1)?
             .map(|i| i.map(BlockNumHash))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -348,10 +347,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
         let account_changeset_batch = account_changeset
-            .walk(from_transition_rev)?
-            .take_while(|item| {
-                item.as_ref().map(|(num, _)| *num < to_transition_rev).unwrap_or_default()
-            })
+            .walk_range(from_transition_rev..to_transition_rev)?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
@@ -365,12 +361,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
-            .walk((from_transition_rev, Address::zero()).into())?
-            .take_while(|item| {
-                item.as_ref()
-                    .map(|(key, _)| key.transition_id() < to_transition_rev)
-                    .unwrap_or_default()
-            })
+            .walk_range(
+                (from_transition_rev, Address::zero()).into()..
+                    (to_transition_rev, Address::zero()).into(),
+            )?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
