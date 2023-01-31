@@ -2,7 +2,7 @@ use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
-    cursor::{DbCursorRO, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
@@ -121,13 +121,11 @@ where
     }
 
     fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
-        let opt_value = <Self as cita_trie::DB>::get(self, key)?;
-        if let Some(value) = opt_value {
-            self.tx.delete::<tables::StoragesTrie>(
-                self.key,
-                Some(StorageTrieEntry { hash: H256::from_slice(key), node: value }),
-            )?;
-        }
+        let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        cursor
+            .seek_by_key_subkey(self.key, H256::from_slice(key))?
+            .map(|_| cursor.delete_current())
+            .transpose()?;
         Ok(())
     }
 
