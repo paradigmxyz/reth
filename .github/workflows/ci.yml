@@ -234,14 +234,13 @@ jobs:
 
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Setup Miri
+        run: cargo miri setup
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Install Miri
-        run: |
-          rustup toolchain install nightly --component miri
-          rustup override set nightly
-          cargo miri setup
 
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
