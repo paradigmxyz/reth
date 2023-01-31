@@ -4,7 +4,7 @@ use thiserror::Error;
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
-/// Error returned by [`EngineApi`][crate::engine::EngineApi]
+/// Error returned by [`EthConsensusEngine`][crate::engine::EthConsensusEngine]
 #[derive(Error, Debug)]
 pub enum EngineApiError {
     /// Invalid payload extra data.

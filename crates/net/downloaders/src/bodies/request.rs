@@ -5,7 +5,7 @@ use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
-        error::{DownloadError, PeerRequestResult},
+        error::DownloadError,
     },
 };
 use reth_primitives::{PeerId, SealedBlock, SealedHeader, H256};
@@ -14,8 +14,6 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-
-type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send>>;
 
 /// Body request implemented as a [Future].
 ///
@@ -26,9 +24,9 @@ type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> 
 /// It then proceeds to verify the downloaded bodies. In case of an validation error,
 /// the future will start over.
 ///
-/// The future will filter out any empty headers (see [SealedHeader::is_empty]) from the request.
-/// If [BodiesRequestFuture] was initialized with all empty headers, no request will be dispatched
-/// and they will be immediately returned upon polling.
+/// The future will filter out any empty headers (see [reth_primitives::Header::is_empty]) from the
+/// request. If [BodiesRequestFuture] was initialized with all empty headers, no request will be
+/// dispatched and they will be immediately returned upon polling.
 ///
 /// NB: This assumes that peers respond with bodies in the order that they were requested.
 /// This is a reasonable assumption to make as that's [what Geth
@@ -36,7 +34,7 @@ type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> 
 /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
 /// that try to give us bodies that do not match the requested order are going to be penalized
 /// and eventually disconnected.
-pub(crate) struct BodiesRequestFuture<B> {
+pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     client: Arc<B>,
     consensus: Arc<dyn Consensus>,
     metrics: DownloaderMetrics,
@@ -45,7 +43,7 @@ pub(crate) struct BodiesRequestFuture<B> {
     // Remaining hashes to download
     hashes_to_download: Vec<H256>,
     buffer: Vec<(PeerId, BlockBody)>,
-    fut: Option<BodiesFut>,
+    fut: Option<B::Output>,
 }
 
 impl<B> BodiesRequestFuture<B>
@@ -93,7 +91,7 @@ where
         let client = Arc::clone(&self.client);
         let request = self.hashes_to_download.clone();
         tracing::trace!(target: "downloaders::bodies", request_len = request.len(), "Requesting bodies");
-        self.fut = Some(Box::pin(async move { client.get_block_bodies(request).await }));
+        self.fut = Some(client.get_block_bodies(request));
     }
 
     fn reset_hashes(&mut self) {

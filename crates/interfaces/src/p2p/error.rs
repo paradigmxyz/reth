@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, oneshot};
 /// Result alias for result of a request.
 pub type RequestResult<T> = Result<T, RequestError>;
 
-/// Result with [PeerId]
+/// Result with [PeerId][reth_primitives::PeerId]
 pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 
 /// Helper trait used to validate responses.

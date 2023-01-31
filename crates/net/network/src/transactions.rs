@@ -534,7 +534,7 @@ struct Peer {
     request_tx: PeerRequestSender,
 }
 
-/// Commands to send to the [`TransactionManager`]
+/// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
 enum TransactionsCommand {
     PropagateHash(H256),
 }

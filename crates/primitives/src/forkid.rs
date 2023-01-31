@@ -1,5 +1,6 @@
 //! EIP-2124 implementation based on <https://eips.ethereum.org/EIPS/eip-2124>.
-//! Previously version of apache licenced: https://crates.io/crates/ethereum-forkid
+//!
+//! Previously version of Apache licenced [`ethereum-forkid`](https://crates.io/crates/ethereum-forkid).
 
 #![deny(missing_docs)]
 

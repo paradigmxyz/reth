@@ -25,6 +25,10 @@ pub enum PoolError {
     /// respect the size limits of the pool.
     #[error("[{0:?}] Transaction's gas limit {1} exceeds block's gas limit {2}.")]
     TxExceedsGasLimit(TxHash, u64, u64),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the max_init_code_size.
+    #[error("[{0:?}] Transaction's size {1} exceeds max_init_code_size {2}.")]
+    TxExceedsMaxInitCodeSize(TxHash, usize, usize),
 }
 
 // === impl PoolError ===
@@ -38,6 +42,7 @@ impl PoolError {
             PoolError::SpammerExceededCapacity(_, hash) => hash,
             PoolError::DiscardedOnInsert(hash) => hash,
             PoolError::TxExceedsGasLimit(hash, _, _) => hash,
+            PoolError::TxExceedsMaxInitCodeSize(hash, _, _) => hash,
         }
     }
 }

@@ -1,11 +1,18 @@
 use crate::p2p::{
-    bodies::client::BodiesClient, download::DownloadClient, error::PeerRequestResult,
+    bodies::client::{BodiesClient, BodiesFut},
+    download::DownloadClient,
+    error::PeerRequestResult,
     priority::Priority,
 };
 use async_trait::async_trait;
+use futures::{future, Future, FutureExt};
 use reth_eth_wire::BlockBody;
-use reth_primitives::H256;
-use std::fmt::{Debug, Formatter};
+use reth_primitives::{WithPeerId, H256};
+use std::{
+    fmt::{Debug, Formatter},
+    pin::Pin,
+};
+use tokio::sync::oneshot::{self, Receiver};
 
 /// A test client for fetching bodies
 pub struct TestBodiesClient<F> {
@@ -29,16 +36,22 @@ impl<F: Sync + Send> DownloadClient for TestBodiesClient<F> {
     }
 }
 
-#[async_trait]
 impl<F> BodiesClient for TestBodiesClient<F>
 where
     F: Fn(Vec<H256>) -> PeerRequestResult<Vec<BlockBody>> + Send + Sync,
 {
-    async fn get_block_bodies_with_priority(
+    type Output = BodiesFut;
+
+    fn get_block_bodies_with_priority(
         &self,
         hashes: Vec<H256>,
         _priority: Priority,
-    ) -> PeerRequestResult<Vec<BlockBody>> {
-        (self.responder)(hashes)
+    ) -> Self::Output {
+        let (tx, rx) = oneshot::channel();
+        tx.send((self.responder)(hashes));
+        Box::pin(rx.map(|x| match x {
+            Ok(value) => value,
+            Err(err) => Err(err.into()),
+        }))
     }
 }

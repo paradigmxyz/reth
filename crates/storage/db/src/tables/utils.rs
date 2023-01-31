@@ -7,7 +7,8 @@ use bytes::Bytes;
 use std::borrow::Cow;
 
 #[macro_export]
-/// Implements the [`arbitrary::Arbitrary`] trait for types with fixed array types.
+/// Implements the `Arbitrary` trait for types with fixed array
+/// types.
 macro_rules! impl_fixed_arbitrary {
     ($name:tt, $size:tt) => {
         #[cfg(any(test, feature = "arbitrary"))]

@@ -36,7 +36,7 @@ pub(crate) trait SessionError: fmt::Debug {
     ///
     /// Note: This does not necessarily mean that either of the peers are in violation of the
     /// protocol but rather that they'll never be able to connect with each other. This check is
-    /// a superset of [`error_merits_discovery_ban`] which checks if the peer should not be part
+    /// a superset of [`Self::merits_discovery_ban`] which checks if the peer should not be part
     /// of the gossip network.
     fn is_fatal_protocol_error(&self) -> bool;
 

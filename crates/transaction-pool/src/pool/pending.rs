@@ -38,7 +38,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
     independent_transactions: BTreeSet<PendingTransactionRef<T>>,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`].
+    /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
     size_of: SizeTracker,
 }
 
