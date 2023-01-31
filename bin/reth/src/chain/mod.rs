@@ -1,53 +1,9 @@
-use clap::Parser;
-use eyre::WrapErr;
-use reth_primitives::Block;
-use std::path::PathBuf;
+//! Command line utilities for initializing and importing a chain.
 
-#[derive(Debug, Parser)]
-pub struct ImportCommand {
-    /// The file to import.
-    path: PathBuf,
-}
+mod file_client;
+mod import;
+mod init;
 
-impl ImportCommand {
-    pub async fn execute(&self) -> eyre::Result<()> {
-        // read file
-        let mut contents = &std::fs::read(&self.path).wrap_err("Could not open file")?[..];
-
-        // open or create db
-        let mut imported = 0;
-        while !contents.is_empty() {
-            match <Block as reth_rlp::Decodable>::decode(&mut contents) {
-                Ok(block) => {
-                    println!("{:?}", block.header.hash_slow());
-                    imported += 1;
-                }
-                Err(err) => {
-                    println!("Error: {:?}", err);
-                    break
-                }
-            }
-            // do what headers does
-            // do what bodies does
-            // 1. check if we have the block
-            // 2. if we do, error out
-            // 3. check if the block connects
-            // 4. if not, error out
-            // 5. otherwise, import the block
-        }
-
-        // execute all stages
-
-        println!("Imported {imported} blocks");
-        Ok(())
-    }
-}
-
-#[derive(Debug, Parser)]
-pub struct InitCommand;
-
-impl InitCommand {
-    pub async fn execute(&self) -> eyre::Result<()> {
-        todo!()
-    }
-}
+pub use file_client::FileClient;
+pub use import::ImportCommand;
+pub use init::InitCommand;
