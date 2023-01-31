@@ -28,6 +28,13 @@ pub fn config_dir() -> Option<PathBuf> {
     dirs_next::config_dir().map(|root| root.join("reth"))
 }
 
+/// Returns the path to the reth import directory.
+///
+/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+pub fn import_dir() -> Option<PathBuf> {
+    dirs_next::cache_dir().map(|root| root.join("reth"))
+}
+
 /// Returns the path to the reth cache directory.
 ///
 /// Refer to [dirs_next::cache_dir] for cross-platform behavior.
@@ -78,6 +85,19 @@ pub struct KnownPeersPath;
 impl XdgPath for KnownPeersPath {
     fn resolve() -> Option<PathBuf> {
         database_path().map(|p| p.join("known-peers.json"))
+    }
+}
+
+/// Returns the path to the default reth import file.
+///
+/// Refer to [dirs_next::import_dir] for cross-platform behavior.
+#[derive(Default, Debug, Clone)]
+#[non_exhaustive]
+pub struct ImportPath;
+
+impl XdgPath for ImportPath {
+    fn resolve() -> Option<PathBuf> {
+        import_dir().map(|p| p.join("reth.toml"))
     }
 }
 
