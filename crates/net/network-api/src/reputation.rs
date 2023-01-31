@@ -2,7 +2,7 @@
 pub type Reputation = i32;
 
 /// Various kinds of reputation changes.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ReputationChangeKind {
     /// Received an unspecific bad message from the peer
     BadMessage,

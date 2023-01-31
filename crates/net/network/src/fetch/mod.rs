@@ -401,7 +401,7 @@ pub(crate) enum FetchAction {
 /// Outcome of a processed response.
 ///
 /// Returned after processing a response.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
     Request(PeerId, BlockRequest),
@@ -482,5 +482,35 @@ mod tests {
         // Then we get peer 2 always (now lowest)
         assert_eq!(fetcher.next_peer(), Some(peer2));
         assert_eq!(fetcher.next_peer(), Some(peer2));
+    }
+
+    #[tokio::test]
+    async fn test_on_block_headers_response() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let peer_id = H512::random();
+
+        assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
+
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)),
+            Some(BlockResponseOutcome::BadResponse(peer_id, ReputationChangeKind::Timeout))
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::BadResponse)),
+            None
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::ChannelClosed)),
+            None
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::ConnectionDropped)),
+            None
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::UnsupportedCapability)),
+            None
+        );
     }
 }
