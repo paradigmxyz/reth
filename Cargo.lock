@@ -4611,6 +4611,7 @@ dependencies = [
  "reth-interfaces",
  "reth-net-nat",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-staged-sync",
