@@ -100,9 +100,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             // Iterate over changeset (similar to Hashing stages) and take new values
             let current_root = tx.get_header_by_num(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
-            loader
-                .update_root(tx, current_root, (from_transition + 1)..(to_transition + 1))
-                .map_err(|e| StageError::Fatal(Box::new(e)))?
+            dbg!(loader
+                .update_root(tx, current_root, from_transition..to_transition)
+                .map_err(|e| StageError::Fatal(Box::new(e))))?
         };
 
         if block_root != trie_root {
@@ -130,8 +130,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let loader = DBTrieLoader::default();
         let current_root = tx.get_header_by_num(input.stage_progress)?.state_root;
 
-        let from_transition = tx.get_block_transition(input.unwind_to)? + 1;
-        let to_transition = tx.get_block_transition(input.stage_progress)? + 1;
+        let from_transition = tx.get_block_transition(input.unwind_to)?;
+        let to_transition = tx.get_block_transition(input.stage_progress)?;
 
         loader
             .update_root(tx, current_root, from_transition..to_transition)
@@ -283,8 +283,6 @@ mod tests {
                     };
 
                     progress.body.iter().try_for_each(|transaction| {
-                        tx_id += 1;
-                        transition_id += 1;
                         tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
                         tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
                         tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
@@ -315,6 +313,10 @@ mod tests {
                         )?;
 
                         *old_value = new_entry.value;
+
+                        tx_id += 1;
+                        transition_id += 1;
+
                         Ok(())
                     })?;
 
@@ -361,6 +363,7 @@ mod tests {
                 .get_block_transition(input.unwind_to)
                 .map_err(|e| TestRunnerError::Internal(Box::new(e)))
                 .unwrap();
+
             self.tx
                 .commit(|tx| {
                     let mut changeset_cursor =
@@ -374,7 +377,7 @@ mod tests {
                     while let Some((tid_address, entry)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if tid_address.transition_id() <= target_transition {
+                        if tid_address.transition_id() < target_transition {
                             break
                         }
 
@@ -402,7 +405,7 @@ mod tests {
                     while let Some((transition_id, account_before_tx)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if transition_id <= target_transition {
+                        if transition_id < target_transition {
                             break
                         }
 
