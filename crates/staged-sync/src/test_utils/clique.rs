@@ -34,10 +34,12 @@ use std::{
 /// clique.prevent_blocking().await;
 /// # });
 /// ```
-pub struct CliqueGethInstance(
+pub struct CliqueGethInstance {
     /// The spawned [`GethInstance`](ethers_core::utils::GethInstance).
-    pub GethInstance,
-);
+    pub instance: GethInstance,
+    /// The provider who can talk to this instance
+    pub provider: SignerMiddleware<Provider<Ws>, Wallet<SigningKey>>,
+}
 
 impl CliqueGethInstance {
     /// Sets up a new [`SignerMiddleware`](ethers_middleware::SignerMiddleware)
@@ -48,10 +50,7 @@ impl CliqueGethInstance {
     /// block production.
     ///
     /// This also spawns the geth instance.
-    pub async fn new(
-        geth: Geth,
-        signer: Option<SigningKey>,
-    ) -> (Self, SignerMiddleware<Provider<Ws>, Wallet<SigningKey>>) {
+    pub async fn new(geth: Geth, signer: Option<SigningKey>) -> Self {
         let signer = signer.unwrap_or_else(|| SigningKey::random(&mut rand::thread_rng()));
 
         let geth = geth.set_clique_private_key(signer.clone());
@@ -68,7 +67,7 @@ impl CliqueGethInstance {
         let provider =
             SignerMiddleware::new_with_provider_chain(provider, wallet.clone()).await.unwrap();
 
-        (Self(instance), provider)
+        Self { instance, provider }
     }
 
     /// Prints the logs of the [`Geth`](ethers_core::utils::Geth) instance in a new
@@ -76,7 +75,7 @@ impl CliqueGethInstance {
     #[allow(dead_code)]
     pub async fn print_logs(&mut self) {
         // take the stderr of the geth instance and print it
-        let stderr = self.0.stderr().unwrap();
+        let stderr = self.instance.stderr().unwrap();
 
         // print logs in a new task
         let mut err_reader = BufReader::new(stderr);
@@ -102,7 +101,7 @@ impl CliqueGethInstance {
     /// filling up.
     pub async fn prevent_blocking(&mut self) {
         // take the stderr of the geth instance and print it
-        let stderr = self.0.stderr().unwrap();
+        let stderr = self.instance.stderr().unwrap();
 
         // print logs in a new task
         let mut err_reader = BufReader::new(stderr);
