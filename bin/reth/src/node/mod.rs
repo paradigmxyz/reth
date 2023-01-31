@@ -253,7 +253,7 @@ impl Command {
     ) -> reth_downloaders::bodies::task::TaskDownloader {
         let bodies_conf = &config.stages.bodies;
         bodies::task::TaskDownloader::spawn(
-            bodies::concurrent::ConcurrentDownloaderBuilder::default()
+            bodies::concurrent::BodiesDownloaderBuilder::default()
                 .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
                 .with_request_limit(bodies_conf.downloader_request_limit)
                 .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)

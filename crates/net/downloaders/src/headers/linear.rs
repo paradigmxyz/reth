@@ -44,7 +44,7 @@ pub const HEADERS_DOWNLOADER_SCOPE: &str = "downloaders.headers";
 /// the batches of headers that this downloader yields will start at the chain tip and move towards
 /// the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
-pub struct LinearDownloader<H: HeadersClient> {
+pub struct ReverseHeadersDownloader<H: HeadersClient> {
     /// Consensus client used to validate headers
     consensus: Arc<dyn Consensus>,
     /// Client used to download headers.
@@ -86,9 +86,9 @@ pub struct LinearDownloader<H: HeadersClient> {
     metrics: DownloaderMetrics,
 }
 
-// === impl LinearDownloader ===
+// === impl ReverseHeadersDownloader ===
 
-impl<H> LinearDownloader<H>
+impl<H> ReverseHeadersDownloader<H>
 where
     H: HeadersClient + 'static,
 {
@@ -501,7 +501,7 @@ where
     }
 }
 
-impl<H> HeaderDownloader for LinearDownloader<H>
+impl<H> HeaderDownloader for ReverseHeadersDownloader<H>
 where
     H: HeadersClient + 'static,
 {
@@ -577,7 +577,7 @@ where
     }
 }
 
-impl<H> Stream for LinearDownloader<H>
+impl<H> Stream for ReverseHeadersDownloader<H>
 where
     H: HeadersClient + 'static,
 {
@@ -793,7 +793,7 @@ impl SyncTargetBlock {
     }
 }
 
-/// The builder for [LinearDownloader] with
+/// The builder for [ReverseHeadersDownloader] with
 /// some default settings
 #[derive(Debug)]
 pub struct LinearDownloadBuilder {
@@ -833,8 +833,9 @@ impl LinearDownloadBuilder {
 
     /// Set the stream batch size
     ///
-    /// This determines the number of headers the [LinearDownloader] will yield on `Stream::next`.
-    /// This will be the amount of headers the headers stage will commit at a time.
+    /// This determines the number of headers the [ReverseHeadersDownloader] will yield on
+    /// `Stream::next`. This will be the amount of headers the headers stage will commit at a
+    /// time.
     pub fn stream_batch_size(mut self, size: usize) -> Self {
         self.stream_batch_size = size;
         self
@@ -842,8 +843,8 @@ impl LinearDownloadBuilder {
 
     /// Set the min amount of concurrent requests.
     ///
-    /// If there's capacity the [LinearDownloader] will keep at least this many requests active at a
-    /// time.
+    /// If there's capacity the [ReverseHeadersDownloader] will keep at least this many requests
+    /// active at a time.
     pub fn min_concurrent_requests(mut self, min_concurrent_requests: usize) -> Self {
         self.min_concurrent_requests = min_concurrent_requests;
         self
@@ -861,16 +862,20 @@ impl LinearDownloadBuilder {
     ///
     /// This essentially determines how much memory the downloader can use for buffering responses
     /// that arrive out of order. The total number of buffered headers is `request_limit *
-    /// max_buffered_responses`. If the [LinearDownloader]'s buffered responses exceeds this
+    /// max_buffered_responses`. If the [ReverseHeadersDownloader]'s buffered responses exceeds this
     /// threshold it waits until there's capacity again before sending new requests.
     pub fn max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
         self.max_buffered_responses = max_buffered_responses;
         self
     }
 
-    /// Build [LinearDownloader] with provided consensus
+    /// Build [ReverseHeadersDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<H>(self, consensus: Arc<dyn Consensus>, client: Arc<H>) -> LinearDownloader<H>
+    pub fn build<H>(
+        self,
+        consensus: Arc<dyn Consensus>,
+        client: Arc<H>,
+    ) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,
     {
@@ -881,7 +886,7 @@ impl LinearDownloadBuilder {
             max_concurrent_requests,
             max_buffered_responses,
         } = self;
-        LinearDownloader {
+        ReverseHeadersDownloader {
             consensus,
             client,
             local_head: None,

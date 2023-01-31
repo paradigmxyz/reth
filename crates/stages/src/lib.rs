@@ -21,7 +21,7 @@
 //! # use std::sync::Arc;
 //! # use reth_db::mdbx::test_utils::create_test_rw_db;
 //! # use reth_db::mdbx::{Env, WriteMap};
-//! # use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
+//! # use reth_downloaders::bodies::concurrent::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::linear::LinearDownloadBuilder;
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
@@ -34,7 +34,7 @@
 //! #    consensus.clone(),
 //! #    Arc::new(TestHeadersClient::default())
 //! # );
-//! # let bodies_downloader = ConcurrentDownloaderBuilder::default().build(
+//! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::zero(), vec![]).into()) }),
 //! #    consensus.clone(),
 //! #    create_test_rw_db()

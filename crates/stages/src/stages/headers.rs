@@ -283,7 +283,7 @@ mod tests {
             tables,
             transaction::{DbTx, DbTxMut},
         };
-        use reth_downloaders::headers::linear::{LinearDownloadBuilder, LinearDownloader};
+        use reth_downloaders::headers::linear::{LinearDownloadBuilder, ReverseHeadersDownloader};
         use reth_interfaces::{
             consensus::{Consensus, ForkchoiceState},
             p2p::headers::downloader::HeaderDownloader,
@@ -416,7 +416,7 @@ mod tests {
             }
         }
 
-        impl HeadersTestRunner<LinearDownloader<TestHeadersClient>> {
+        impl HeadersTestRunner<ReverseHeadersDownloader<TestHeadersClient>> {
             pub(crate) fn with_linear_downloader() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
                 let consensus = Arc::new(TestConsensus::default());
