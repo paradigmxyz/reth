@@ -7,7 +7,7 @@ use crate::{
     utils::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
-use reth_consensus::BeaconConsensus;
+use reth_consensus::beacon::BeaconConsensus;
 use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
 
 use reth_net_nat::NatResolver;

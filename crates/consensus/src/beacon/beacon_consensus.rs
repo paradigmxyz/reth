@@ -1,5 +1,5 @@
 //! Consensus for ethereum network
-use crate::verification;
+use crate::validation;
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
 use reth_primitives::{
     BlockNumber, ChainSpec, ForkDiscriminant, Hardfork, SealedBlock, SealedHeader, H256,
@@ -45,8 +45,8 @@ impl Consensus for BeaconConsensus {
     }
 
     fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {
-        verification::validate_header_standalone(header, &self.chain_spec)?;
-        verification::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
+        validation::validate_header_standalone(header, &self.chain_spec)?;
+        validation::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
 
         if !self.chain_spec.fork_active(
             Hardfork::Paris,
@@ -63,7 +63,7 @@ impl Consensus for BeaconConsensus {
     }
 
     fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error> {
-        verification::validate_block_standalone(block)
+        validation::validate_block_standalone(block)
     }
 
     fn has_block_reward(&self, block_num: BlockNumber) -> bool {

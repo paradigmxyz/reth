@@ -1,4 +1,4 @@
-use crate::{EngineApiError, EngineApiResult};
+use crate::{EngineApiError, EngineApiMessage, EngineApiResult};
 use futures::StreamExt;
 use reth_executor::{
     executor,
@@ -29,85 +29,35 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
-/// The Consensus Engine API is a trait that grants the Consensus layer access to data and functions
-/// in the Execution layer that are crucial for the consensus process.
-pub trait ConsensusEngine {
-    /// Called to retrieve the latest state of the network, validate new blocks, and maintain
-    /// consistency between the Consensus and Execution layers.
-    fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload>;
-
-    /// When the Consensus layer receives a new block via the consensus gossip protocol,
-    /// the transactions in the block are sent to the execution layer in the form of a
-    /// `ExecutionPayload`. The Execution layer executes the transactions and validates the
-    /// state in the block header, then passes validation data back to Consensus layer, that
-    /// adds the block to the head of its own blockchain and attests to it. The block is then
-    /// broadcasted over the consensus p2p network in the form of a "Beacon block".
-    fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus>;
-
-    /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
-    /// valid chain.
-    fn fork_choice_updated(
-        &self,
-        fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<PayloadAttributes>,
-    ) -> EngineApiResult<ForkchoiceUpdated>;
-
-    /// Called to verify network configuration parameters and ensure that Consensus and Execution
-    /// layers are using the latest configuration.
-    fn exchange_transition_configuration(
-        &self,
-        config: TransitionConfiguration,
-    ) -> EngineApiResult<TransitionConfiguration>;
-}
-
-/// Message type for communicating with [EthConsensusEngine]
-#[derive(Debug)]
-pub enum EngineMessage {
-    /// New payload message
-    NewPayload(ExecutionPayload, EngineApiSender<PayloadStatus>),
-    /// Get payload message
-    GetPayload(H64, EngineApiSender<ExecutionPayload>),
-    /// Forkchoice updated message
-    ForkchoiceUpdated(
-        ForkchoiceState,
-        Option<PayloadAttributes>,
-        EngineApiSender<ForkchoiceUpdated>,
-    ),
-    /// Exchange transition configuration message
-    ExchangeTransitionConfiguration(
-        TransitionConfiguration,
-        EngineApiSender<TransitionConfiguration>,
-    ),
-}
-
-/// The consensus engine API implementation
-#[must_use = "EthConsensusEngine does nothing unless polled."]
-pub struct EthConsensusEngine<Client> {
+/// The Engine API implementation that grants the Consensus layer access to data and
+/// functions in the Execution layer that are crucial for the consensus process.
+#[must_use = "EngineApi does nothing unless polled."]
+pub struct EngineApi<Client> {
     client: Arc<Client>,
     /// Consensus configuration
     chain_spec: ChainSpec,
-    rx: UnboundedReceiverStream<EngineMessage>,
+    rx: UnboundedReceiverStream<EngineApiMessage>,
     // TODO: Placeholder for storing future blocks. Make cache bounded.
     // Use [lru](https://crates.io/crates/lru) crate
     local_store: HashMap<H64, ExecutionPayload>,
     // remote_store: HashMap<H64, ExecutionPayload>,
 }
 
-impl<Client: HeaderProvider + BlockProvider + StateProvider> EthConsensusEngine<Client> {
-    fn on_message(&mut self, msg: EngineMessage) {
+impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
+    fn on_message(&mut self, msg: EngineApiMessage) {
         match msg {
-            EngineMessage::GetPayload(payload_id, tx) => {
+            EngineApiMessage::GetPayload(payload_id, tx) => {
                 // NOTE: Will always result in `PayloadUnknown` since we don't support block
                 // building for now.
                 let _ = tx.send(self.get_payload(payload_id).ok_or(EngineApiError::PayloadUnknown));
             }
-            EngineMessage::NewPayload(payload, tx) => {
+            EngineApiMessage::NewPayload(payload, tx) => {
                 let _ = tx.send(self.new_payload(payload));
             }
-            EngineMessage::ForkchoiceUpdated(state, attrs, tx) => {
+            EngineApiMessage::ForkchoiceUpdated(state, attrs, tx) => {
                 let _ = tx.send(self.fork_choice_updated(state, attrs));
             }
-            EngineMessage::ExchangeTransitionConfiguration(config, tx) => {
+            EngineApiMessage::ExchangeTransitionConfiguration(config, tx) => {
                 let _ = tx.send(self.exchange_transition_configuration(config));
             }
         }
@@ -166,16 +116,20 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EthConsensusEngine<
 
         Ok(SealedBlock { header, body: transactions, ommers: Default::default() })
     }
-}
 
-impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
-    for EthConsensusEngine<Client>
-{
-    fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload> {
+    /// Called to retrieve the latest state of the network, validate new blocks, and maintain
+    /// consistency between the Consensus and Execution layers.
+    pub fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload> {
         self.local_store.get(&payload_id).cloned()
     }
 
-    fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus> {
+    /// When the Consensus layer receives a new block via the consensus gossip protocol,
+    /// the transactions in the block are sent to the execution layer in the form of a
+    /// `ExecutionPayload`. The Execution layer executes the transactions and validates the
+    /// state in the block header, then passes validation data back to Consensus layer, that
+    /// adds the block to the head of its own blockchain and attests to it. The block is then
+    /// broadcasted over the consensus p2p network in the form of a "Beacon block".
+    pub fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus> {
         let block = match self.try_construct_block(payload) {
             Ok(b) => b,
             Err(err) => {
@@ -237,7 +191,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
         }
     }
 
-    fn fork_choice_updated(
+    /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
+    /// valid chain.
+    pub fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
         _payload_attributes: Option<PayloadAttributes>,
@@ -267,7 +223,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
             .with_latest_valid_hash(chain_info.best_hash))
     }
 
-    fn exchange_transition_configuration(
+    /// Called to verify network configuration parameters and ensure that Consensus and Execution
+    /// layers are using the latest configuration.
+    pub fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
     ) -> EngineApiResult<TransitionConfiguration> {
@@ -316,7 +274,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> ConsensusEngine
     }
 }
 
-impl<Client> Future for EthConsensusEngine<Client>
+impl<Client> Future for EngineApi<Client>
 where
     Client: HeaderProvider + BlockProvider + StateProvider + Unpin,
 {
@@ -370,7 +328,7 @@ mod tests {
         #[tokio::test]
         async fn payload_validation() {
             let (_tx, rx) = unbounded_channel();
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
@@ -459,7 +417,7 @@ mod tests {
         async fn payload_known() {
             let (tx, rx) = unbounded_channel();
             let client = Arc::new(MockEthProvider::default());
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
@@ -475,7 +433,7 @@ mod tests {
             client.add_header(block_hash, block.header.unseal());
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineMessage::NewPayload(execution_payload, result_tx))
+            tx.send(EngineApiMessage::NewPayload(execution_payload, result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -487,7 +445,7 @@ mod tests {
         #[tokio::test]
         async fn payload_parent_unknown() {
             let (tx, rx) = unbounded_channel();
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
@@ -498,7 +456,7 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             let block = random_block(100, Some(H256::random()), None, Some(0)); // payload must have no ommers
-            tx.send(EngineMessage::NewPayload(block.into(), result_tx))
+            tx.send(EngineApiMessage::NewPayload(block.into(), result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -512,7 +470,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
@@ -530,7 +488,7 @@ mod tests {
 
             client.add_block(parent.hash(), parent.clone().unseal());
 
-            tx.send(EngineMessage::NewPayload(block.clone().into(), result_tx))
+            tx.send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -546,7 +504,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
@@ -572,7 +530,7 @@ mod tests {
 
             client.add_block(parent.hash(), parent.clone().unseal());
 
-            tx.send(EngineMessage::NewPayload(block.clone().into(), result_tx))
+            tx.send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -600,7 +558,7 @@ mod tests {
         #[tokio::test]
         async fn payload_unknown() {
             let (tx, rx) = unbounded_channel();
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
@@ -612,7 +570,7 @@ mod tests {
             let payload_id = H64::random();
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineMessage::GetPayload(payload_id, result_tx))
+            tx.send(EngineApiMessage::GetPayload(payload_id, result_tx))
                 .expect("failed to send engine msg");
 
             assert_matches!(result_rx.await, Ok(Err(EngineApiError::PayloadUnknown)));
@@ -629,7 +587,7 @@ mod tests {
         async fn terminal_td_mismatch() {
             let (tx, rx) = unbounded_channel();
             let chain_spec = MAINNET.clone();
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
@@ -645,7 +603,7 @@ mod tests {
             };
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
                 transition_config.clone(),
                 result_tx,
             ))
@@ -664,7 +622,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let client = Arc::new(MockEthProvider::default());
             let chain_spec = MAINNET.clone();
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
@@ -685,7 +643,7 @@ mod tests {
 
             // Unknown block number
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
                 transition_config.clone(),
                 result_tx,
             ))
@@ -705,7 +663,7 @@ mod tests {
             );
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
                 transition_config.clone(),
                 result_tx,
             ))
@@ -724,7 +682,7 @@ mod tests {
             let (tx, rx) = unbounded_channel();
             let client = Arc::new(MockEthProvider::default());
             let chain_spec = MAINNET.clone();
-            let engine = EthConsensusEngine {
+            let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
@@ -745,7 +703,7 @@ mod tests {
             client.add_block(terminal_block.hash(), terminal_block.clone().unseal());
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineMessage::ExchangeTransitionConfiguration(
+            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
                 transition_config.clone(),
                 result_tx,
             ))

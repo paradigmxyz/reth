@@ -11,12 +11,12 @@
 /// The Engine API implementation.
 pub mod engine_api;
 
-/// TODO:
+/// The Engine API message type.
 pub mod message;
 
 /// Engine API error.
 pub mod error;
 
-pub use engine_api::{ConsensusEngine, EngineApiSender};
+pub use engine_api::{EngineApi, EngineApiSender};
 pub use error::{EngineApiError, EngineApiResult};
-pub use message::EngineMessage;
+pub use message::EngineApiMessage;

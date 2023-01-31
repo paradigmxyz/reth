@@ -5,9 +5,9 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, TransitionConfiguration,
 };
 
-/// Message type for communicating with [EthConsensusEngine]
+/// Message type for communicating with [`EngineApi`][crate::EngineApi].
 #[derive(Debug)]
-pub enum EngineMessage {
+pub enum EngineApiMessage {
     /// New payload message
     NewPayload(ExecutionPayload, EngineApiSender<PayloadStatus>),
     /// Get payload message
