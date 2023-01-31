@@ -4539,13 +4539,13 @@ dependencies = [
  "async-trait",
  "hex",
  "jsonrpsee",
- "reth-consensus",
  "reth-interfaces",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-api",
+ "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-transaction-pool",
  "serde",
@@ -4576,6 +4576,24 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-rpc-engine-api"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "bytes",
+ "futures",
+ "reth-executor",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rlp",
+ "reth-rpc-types",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

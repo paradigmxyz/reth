@@ -9,12 +9,9 @@
 //! # Features
 //!
 //! - `serde`: Enable serde support for configuration types.
-pub mod consensus;
-pub mod constants;
-pub mod verification;
 
-/// Engine API module.
-pub mod engine;
+/// Beacon consensus implementation.
+pub mod beacon;
 
-pub use consensus::BeaconConsensus;
-pub use reth_interfaces::consensus::Error;
+/// Collection of consensus validation methods.
+pub mod validation;
