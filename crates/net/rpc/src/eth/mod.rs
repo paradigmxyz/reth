@@ -1,6 +1,7 @@
 //! `eth` namespace handler implementation.
 
 mod api;
+pub(crate) mod error;
 mod pubsub;
 
 pub use api::{EthApi, EthApiSpec};
