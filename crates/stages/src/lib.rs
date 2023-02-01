@@ -4,6 +4,7 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+#![allow(clippy::result_large_err)]
 //! Staged syncing primitives for reth.
 //!
 //! This crate contains the syncing primitives [`Pipeline`] and [`Stage`], as well as all stages
