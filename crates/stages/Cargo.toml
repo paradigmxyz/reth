@@ -35,7 +35,7 @@ metrics = "0.20.1"
 # misc
 serde = { version = "1.0", optional = true }
 thiserror = "1.0.37"
-aquamarine = "0.1.12"
+aquamarine = "0.2.1"
 itertools = "0.10.5"
 rayon = "1.6.0"
 [dev-dependencies]
