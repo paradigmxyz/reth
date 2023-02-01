@@ -22,9 +22,9 @@ pub mod revm_wrap;
 /// An executor capable of executing a block.
 #[async_trait]
 pub trait BlockExecutor {
-    /// Execute block
-    /// if `signers` is some, it's length should be equal to block.body's length. Provide `signers`
-    /// if you already have it because recovering singer is too expensive.
+    /// Execute a block.
+    ///
+    /// The number of `signers` should be equal to the number of transactions in the block.
     fn execute(
         &mut self,
         block: &Block,
