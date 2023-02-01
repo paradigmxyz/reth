@@ -66,7 +66,7 @@ impl BodiesClient for TestBodiesClient {
     ) -> Self::Output {
         let should_delay = self.should_delay;
         let bodies = self.bodies.clone();
-        let max_batch_size = self.max_batch_size.clone();
+        let max_batch_size = self.max_batch_size;
 
         self.times_requested.fetch_add(1, Ordering::Relaxed);
 

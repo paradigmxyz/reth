@@ -4158,7 +4158,6 @@ dependencies = [
  "metrics",
  "pin-project",
  "reth-db",
- "reth-downloaders",
  "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics-derive",

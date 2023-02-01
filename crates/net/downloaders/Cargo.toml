@@ -35,8 +35,7 @@ reth-tracing = { path = "../../tracing" }
 
 assert_matches = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-
-reth-downloaders = { path = ".", features = ["test-utils"] }
+reth-rlp = { path = "../../common/rlp" }
 
 tempfile = "3.3"
 
