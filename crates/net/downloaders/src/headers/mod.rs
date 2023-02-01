@@ -1,5 +1,5 @@
 /// A Linear downloader implementation.
-pub mod linear;
+pub mod reverse_headers;
 
 /// A downloader implementation that spawns a downloader to a task
 pub mod task;

@@ -13,6 +13,7 @@ use reth_interfaces::{
             response::BlockResponse,
         },
         error::{DownloadError, DownloadResult},
+        priority::Priority,
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
@@ -42,7 +43,7 @@ pub const BODIES_DOWNLOADER_SCOPE: &str = "downloaders.bodies";
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct ConcurrentDownloader<B: BodiesClient, DB> {
+pub struct BodiesDownloader<B: BodiesClient, DB> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
@@ -72,7 +73,7 @@ pub struct ConcurrentDownloader<B: BodiesClient, DB> {
     metrics: DownloaderMetrics,
 }
 
-impl<B, DB> ConcurrentDownloader<B, DB>
+impl<B, DB> BodiesDownloader<B, DB>
 where
     B: BodiesClient + 'static,
     DB: Database,
@@ -240,7 +241,7 @@ where
     }
 }
 
-impl<B, DB> BodyDownloader for ConcurrentDownloader<B, DB>
+impl<B, DB> BodyDownloader for BodiesDownloader<B, DB>
 where
     B: BodiesClient + 'static,
     DB: Database,
@@ -302,7 +303,7 @@ where
                 for range in requests {
                     let headers = self
                         .query_headers(
-                            *range.start()..*range.end() + 1, //
+                            *range.start()..*range.end() + 1,
                             range.clone().count() as u64,
                         )?
                         .ok_or(DownloadError::MissingHeader { block_number: *range.start() })?;
@@ -312,6 +313,7 @@ where
                         Arc::clone(&self.client),
                         Arc::clone(&self.consensus),
                         headers,
+                        Priority::High,
                     );
                 }
             }
@@ -329,7 +331,7 @@ where
     }
 }
 
-impl<B, DB> Stream for ConcurrentDownloader<B, DB>
+impl<B, DB> Stream for BodiesDownloader<B, DB>
 where
     B: BodiesClient + 'static,
     DB: Database,
@@ -364,6 +366,7 @@ where
                             Arc::clone(&this.client),
                             Arc::clone(&this.consensus),
                             request,
+                            Priority::Normal,
                         );
                         new_request_submitted = true;
                     }
@@ -449,8 +452,8 @@ impl Ord for OrderedBodiesResponse {
     }
 }
 
-/// Builder for [ConcurrentDownloader].
-pub struct ConcurrentDownloaderBuilder {
+/// Builder for [BodiesDownloader].
+pub struct BodiesDownloaderBuilder {
     /// The batch size of non-empty blocks per one request
     request_limit: u64,
     /// The maximum number of block bodies returned at once from the stream
@@ -461,7 +464,7 @@ pub struct ConcurrentDownloaderBuilder {
     concurrent_requests_range: RangeInclusive<usize>,
 }
 
-impl Default for ConcurrentDownloaderBuilder {
+impl Default for BodiesDownloaderBuilder {
     fn default() -> Self {
         Self {
             request_limit: 200,
@@ -472,7 +475,7 @@ impl Default for ConcurrentDownloaderBuilder {
     }
 }
 
-impl ConcurrentDownloaderBuilder {
+impl BodiesDownloaderBuilder {
     /// Set request batch size on the downloader.
     pub fn with_request_limit(mut self, request_limit: u64) -> Self {
         self.request_limit = request_limit;
@@ -506,7 +509,7 @@ impl ConcurrentDownloaderBuilder {
         client: Arc<B>,
         consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
-    ) -> ConcurrentDownloader<B, DB>
+    ) -> BodiesDownloader<B, DB>
     where
         B: BodiesClient + 'static,
         DB: Database,
@@ -519,7 +522,7 @@ impl ConcurrentDownloaderBuilder {
         } = self;
         let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
         let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
-        ConcurrentDownloader {
+        BodiesDownloader {
             client,
             consensus,
             db,
@@ -563,7 +566,7 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
-        let mut downloader = ConcurrentDownloaderBuilder::default().build(
+        let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
             db,
@@ -592,7 +595,7 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
-        let mut downloader = ConcurrentDownloaderBuilder::default()
+        let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)
             .with_request_limit(request_limit)
             .build(client.clone(), Arc::new(TestConsensus::default()), db);
@@ -628,9 +631,11 @@ mod tests {
         insert_headers(&db, &headers);
 
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
-        let mut downloader = ConcurrentDownloaderBuilder::default()
-            .with_stream_batch_size(100)
-            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+        let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            db,
+        );
 
         // Set and download the first range
         downloader.set_download_range(0..100).expect("failed to set download range");

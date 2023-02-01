@@ -1,0 +1,30 @@
+[package]
+name = "reth-rpc-engine-api"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+description = "Implementation of Engine API"
+
+[dependencies]
+# reth 
+reth-primitives = { path = "../../primitives" }
+reth-interfaces = { path = "../../interfaces" }
+reth-provider = { path = "../../storage/provider" }
+reth-rlp = { path = "../../common/rlp" }
+reth-executor = { path = "../../executor" }
+reth-rpc-types = { path = "../rpc-types" }
+
+# async
+futures = "0.3"
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
+
+# misc
+thiserror = "1.0.37"
+
+[dev-dependencies]
+reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
+assert_matches = "1.5.0"
+bytes = "1.2"

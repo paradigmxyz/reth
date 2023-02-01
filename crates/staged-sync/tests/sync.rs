@@ -7,6 +7,7 @@ use reth_network::{
     test_utils::{unused_port, unused_tcp_udp, NetworkEventStream},
     NetworkConfig, NetworkManager,
 };
+use reth_network_api::Peers;
 use reth_primitives::{
     constants::EIP1559_INITIAL_BASE_FEE, ChainSpec, Hardfork, Header, PeerId, SealedHeader,
 };
