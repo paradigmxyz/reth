@@ -19,7 +19,7 @@ pub mod executor;
 /// Wrapper around revm database and types
 pub mod revm_wrap;
 
-/// Takes block and executes it, returns result
+/// An executor capable of executing a block.
 #[async_trait]
 pub trait BlockExecutor {
     /// Execute block
