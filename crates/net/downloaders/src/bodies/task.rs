@@ -44,13 +44,13 @@ impl TaskDownloader {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
+    /// use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
     /// use reth_downloaders::bodies::task::TaskDownloader;
     /// use reth_interfaces::consensus::Consensus;
     /// use reth_interfaces::p2p::bodies::client::BodiesClient;
     /// use reth_db::database::Database;
     /// fn t<B: BodiesClient + 'static, DB: Database + 'static>(client: Arc<B>, consensus:Arc<dyn Consensus>, db: Arc<DB>) {
-    ///     let downloader = ConcurrentDownloaderBuilder::default().build(
+    ///     let downloader = BodiesDownloaderBuilder::default().build(
     ///         client,
     ///         consensus,
     ///         db
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::{
-            concurrent::ConcurrentDownloaderBuilder,
+            bodies::BodiesDownloaderBuilder,
             test_utils::{insert_headers, zip_blocks},
         },
         test_utils::{generate_bodies, TestBodiesClient},
@@ -155,7 +155,7 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
-        let downloader = ConcurrentDownloaderBuilder::default().build(
+        let downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
             db,
@@ -184,7 +184,7 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
-        let downloader = ConcurrentDownloaderBuilder::default().build(
+        let downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
             db,

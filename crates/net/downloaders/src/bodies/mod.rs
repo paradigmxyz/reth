@@ -1,5 +1,6 @@
 /// A naive concurrent downloader.
-pub mod concurrent;
+#[allow(clippy::module_inception)]
+pub mod bodies;
 
 /// TODO:
 pub mod task;
