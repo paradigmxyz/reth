@@ -355,7 +355,7 @@ impl DBTrieLoader {
         let hashed_changes = account_changes
             .into_iter()
             .map(|(address, storage)| {
-                (keccak256(address), storage.into_iter().map(|k| keccak256(k)).collect())
+                (keccak256(address), storage.into_iter().map(keccak256).collect())
             })
             .collect();
 

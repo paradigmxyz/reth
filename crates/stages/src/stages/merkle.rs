@@ -289,8 +289,7 @@ mod tests {
 
                         // seed account changeset
                         let (addr, prev_acc) = accounts
-                            .iter_mut()
-                            .nth(rand::random::<usize>() % n_accounts as usize)
+                            .get_mut(rand::random::<usize>() % n_accounts as usize)
                             .unwrap();
                         let acc_before_tx =
                             AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
