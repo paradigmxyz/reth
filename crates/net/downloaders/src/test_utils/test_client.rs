@@ -1,15 +1,10 @@
-//! Test helper impls
-
 use reth_eth_wire::BlockBody;
-use reth_interfaces::{
-    p2p::{
-        bodies::client::{BodiesClient, BodiesFut},
-        download::DownloadClient,
-        priority::Priority,
-    },
-    test_utils::generators::random_block_range,
+use reth_interfaces::p2p::{
+    bodies::client::{BodiesClient, BodiesFut},
+    download::DownloadClient,
+    priority::Priority,
 };
-use reth_primitives::{PeerId, SealedHeader, H256};
+use reth_primitives::{PeerId, H256};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -21,35 +16,9 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-/// Metrics scope used for testing.
-pub(crate) const TEST_SCOPE: &str = "downloaders.test";
-
-/// Generate a set of bodies and their corresponding block hashes
-pub(crate) fn generate_bodies(
-    rng: std::ops::Range<u64>,
-) -> (Vec<SealedHeader>, HashMap<H256, BlockBody>) {
-    let blocks = random_block_range(rng, H256::zero(), 0..2);
-
-    let headers = blocks.iter().map(|block| block.header.clone()).collect();
-    let bodies = blocks
-        .into_iter()
-        .map(|block| {
-            (
-                block.hash(),
-                BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
-                },
-            )
-        })
-        .collect();
-
-    (headers, bodies)
-}
-
 /// A [BodiesClient] for testing.
 #[derive(Debug, Default)]
-pub(crate) struct TestBodiesClient {
+pub struct TestBodiesClient {
     bodies: Arc<Mutex<HashMap<H256, BlockBody>>>,
     should_delay: bool,
     max_batch_size: Option<usize>,
@@ -97,7 +66,7 @@ impl BodiesClient for TestBodiesClient {
     ) -> Self::Output {
         let should_delay = self.should_delay;
         let bodies = self.bodies.clone();
-        let max_batch_size = self.max_batch_size.clone();
+        let max_batch_size = self.max_batch_size;
 
         self.times_requested.fetch_add(1, Ordering::Relaxed);
 
