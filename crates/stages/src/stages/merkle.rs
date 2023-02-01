@@ -100,9 +100,9 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             // Iterate over changeset (similar to Hashing stages) and take new values
             let current_root = tx.get_header_by_num(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
-            dbg!(loader
+            loader
                 .update_root(tx, current_root, from_transition..to_transition)
-                .map_err(|e| StageError::Fatal(Box::new(e))))?
+                .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
         if block_root != trie_root {
