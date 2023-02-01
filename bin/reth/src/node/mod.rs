@@ -237,7 +237,7 @@ impl Command {
     ) -> reth_downloaders::headers::task::TaskDownloader {
         let headers_conf = &config.stages.headers;
         headers::task::TaskDownloader::spawn(
-            headers::linear::LinearDownloadBuilder::default()
+            headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
                 .request_limit(headers_conf.downloader_batch_size)
                 .stream_batch_size(headers_conf.commit_threshold as usize)
                 .build(consensus.clone(), fetch_client.clone()),
@@ -253,7 +253,7 @@ impl Command {
     ) -> reth_downloaders::bodies::task::TaskDownloader {
         let bodies_conf = &config.stages.bodies;
         bodies::task::TaskDownloader::spawn(
-            bodies::concurrent::ConcurrentDownloaderBuilder::default()
+            bodies::bodies::BodiesDownloaderBuilder::default()
                 .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
                 .with_request_limit(bodies_conf.downloader_request_limit)
                 .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
