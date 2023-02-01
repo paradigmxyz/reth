@@ -30,6 +30,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
+use tracing::warn;
 
 use super::file_codec::BlockFileCodec;
 
@@ -187,7 +188,7 @@ impl BodiesClient for FileClient {
 
 impl DownloadClient for FileClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
-        panic!("Reported a bad message on a file client, the file may be corrupted or invalid");
+        warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
         // noop
     }
 
