@@ -588,4 +588,50 @@ mod tests {
             Ok(got) if got == expected
         );
     }
+
+    fn test_with_accounts(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>) {
+        let trie = DBTrieLoader::default();
+        let db = create_test_rw_db();
+        let tx = Transaction::new(db.as_ref()).unwrap();
+
+        let encoded_accounts = accounts
+            .into_iter()
+            .map(|(address, (account, storage))| {
+                let hashed_address = keccak256(address);
+                tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
+                // This is to mimic real data. Only contract accounts have storage.
+                let storage_root = if account.has_bytecode() {
+                    let encoded_storage = storage.into_iter().map(|StorageEntry { key, value }| {
+                        let hashed_key = keccak256(key);
+                        let out = encode_fixed_size_value(&value);
+                        tx.put::<tables::HashedStorage>(
+                            hashed_address,
+                            StorageEntry { key: hashed_key, value },
+                        )
+                        .unwrap();
+                        (key, out)
+                    });
+                    H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0)
+                } else {
+                    EMPTY_ROOT
+                };
+                let mut out = Vec::new();
+                EthAccount::from_with_root(account, storage_root).encode(&mut out);
+                (address, out)
+            })
+            .collect::<Vec<(Address, Vec<u8>)>>();
+
+        let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
+        assert_matches!(
+            trie.calculate_root(&tx),
+            Ok(got) if got == expected
+        , "where expected is {expected:?}");
+    }
+
+    #[test]
+    fn arbitrary() {
+        proptest::proptest!(|(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>)| {
+            test_with_accounts(accounts);
+        });
+    }
 }

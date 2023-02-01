@@ -4671,6 +4671,7 @@ name = "reth-stages"
 version = "0.1.0"
 dependencies = [
  "aquamarine",
+ "arbitrary",
  "assert_matches",
  "async-trait",
  "cita_trie",
@@ -4679,6 +4680,7 @@ dependencies = [
  "itertools 0.10.5",
  "metrics",
  "paste",
+ "proptest",
  "rand 0.8.5",
  "rayon",
  "reth-db",
