@@ -966,29 +966,4 @@ mod tests {
         assert!(calculate_new_timeout(timeout, rtt * 2) > timeout);
         assert!(calculate_new_timeout(timeout, rtt * 2) < timeout * 2);
     }
-
-    // #[tokio::test(flavor = "multi_thread")]
-    // async fn test_disconnect() {
-    //     let mut builder = SessionBuilder::default();
-
-    //     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    //     let local_addr = listener.local_addr().unwrap();
-
-    //     let expected_disconnect = DisconnectReason::UselessPeer;
-
-    //     let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
-    //         let msg = client_stream.next().await.unwrap().unwrap_err();
-    //         assert_eq!(msg.as_disconnected().unwrap(), expected_disconnect);
-    //     });
-
-    //     tokio::task::spawn(async move {
-    //         let (incoming, _) = listener.accept().await.unwrap();
-    //         let mut session = builder.connect_incoming(incoming).await;
-
-    //         session.start_disconnect(expected_disconnect).unwrap();
-    //         session.await
-    //     });
-
-    //     fut.await;
-    // }
 }

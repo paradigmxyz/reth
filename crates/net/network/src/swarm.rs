@@ -114,10 +114,6 @@ where
         &mut self.sessions
     }
 
-    // pub(crate) fn sessions_move(self) -> SessionManager {
-    //     self.sessions
-    // }
-
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
