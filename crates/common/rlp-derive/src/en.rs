@@ -1,6 +1,8 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
+use crate::utils::has_attribute;
+
 pub(crate) fn impl_encodable(ast: &syn::DeriveInput) -> TokenStream {
     let body = if let syn::Data::Struct(s) = &ast.data {
         s
@@ -8,11 +10,14 @@ pub(crate) fn impl_encodable(ast: &syn::DeriveInput) -> TokenStream {
         panic!("#[derive(RlpEncodable)] is only defined for structs.");
     };
 
-    let length_stmts: Vec<_> =
-        body.fields.iter().enumerate().map(|(i, field)| encodable_length(i, field)).collect();
+    let (length_stmts, stmts): (Vec<_>, Vec<_>) = body
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| !has_attribute(field, "skip"))
+        .map(|(i, field)| (encodable_length(i, field), encodable_field(i, field)))
+        .unzip();
 
-    let stmts: Vec<_> =
-        body.fields.iter().enumerate().map(|(i, field)| encodable_field(i, field)).collect();
     let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
@@ -92,13 +97,14 @@ pub(crate) fn impl_max_encoded_len(ast: &syn::DeriveInput) -> TokenStream {
     let body = if let syn::Data::Struct(s) = &ast.data {
         s
     } else {
-        panic!("#[derive(RlpEncodable)] is only defined for structs.");
+        panic!("#[derive(RlpMaxEncodedLen)] is only defined for structs.");
     };
 
     let stmts: Vec<_> = body
         .fields
         .iter()
         .enumerate()
+        .filter(|(_, field)| !has_attribute(field, "skip"))
         .map(|(index, field)| encodable_max_length(index, field))
         .collect();
     let name = &ast.ident;
