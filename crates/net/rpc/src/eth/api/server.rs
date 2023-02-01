@@ -1,11 +1,14 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
 //! Handles RPC requests for the `eth_` namespace.
 
+use super::EthApiSpec;
 use crate::{
     eth::api::EthApi,
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
+use reth_interfaces::sync::SyncStateProvider;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
     Address, BlockNumber, Bytes, H256, H64, U256, U64,
@@ -13,13 +16,11 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
+    CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncInfo, SyncStatus,
     TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
-
-use super::EthApiSpec;
 
 #[async_trait::async_trait]
 impl<Pool, Client, Network> EthApiServer for EthApi<Pool, Client, Network>
@@ -27,14 +28,26 @@ where
     Self: EthApiSpec,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
-    Network: 'static,
+    Network: NetworkInfo + SyncStateProvider + 'static,
 {
     async fn protocol_version(&self) -> Result<U64> {
         EthApiSpec::protocol_version(self).await.to_rpc_result()
     }
 
     fn syncing(&self) -> Result<SyncStatus> {
-        Err(internal_rpc_err("unimplemented"))
+        if self.network().is_syncing() {
+            let info = self.client().chain_info().to_rpc_result()?;
+            let best = U256::from(info.best_number);
+            Ok(SyncStatus::Info(SyncInfo {
+                starting_block: U256::ZERO,
+                current_block: best,
+                highest_block: best,
+                warp_chunks_amount: None,
+                warp_chunks_processed: None,
+            }))
+        } else {
+            Ok(SyncStatus::None)
+        }
     }
 
     async fn author(&self) -> Result<Address> {
