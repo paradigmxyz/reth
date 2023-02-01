@@ -50,7 +50,7 @@ where
 {
     /// Creates a new, shareable instance.
     pub fn new(client: Arc<Client>, pool: Pool, network: Network) -> Self {
-        let inner = EthApiInner { client, pool, network, signers: vec![] };
+        let inner = EthApiInner { client, pool, network, signers: Default::default() };
         Self { inner: Arc::new(inner) }
     }
 

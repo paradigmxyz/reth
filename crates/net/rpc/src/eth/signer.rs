@@ -13,8 +13,8 @@ pub(crate) trait EthSigner: Send + Sync {
     fn accounts(&self) -> Vec<Address>;
 
     /// Returns `true` whether this signer can sign for this address
-    fn is_signer_for(&self, addr: Address) -> bool {
-        self.accounts().contains(&addr)
+    fn is_signer_for(&self, addr: &Address) -> bool {
+        self.accounts().contains(addr)
     }
 
     /// Returns the signature
@@ -40,8 +40,8 @@ impl EthSigner for DevSigner {
         self.addresses.clone()
     }
 
-    fn is_signer_for(&self, addr: Address) -> bool {
-        self.accounts.contains_key(&addr)
+    fn is_signer_for(&self, addr: &Address) -> bool {
+        self.accounts.contains_key(addr)
     }
 
     async fn sign(&self, _address: Address, _message: &[u8]) -> Result<Signature> {
