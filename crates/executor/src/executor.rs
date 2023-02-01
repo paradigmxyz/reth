@@ -157,7 +157,7 @@ where
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
         }
 
-        let db = self.evm.db().expect("Db is set when the executor is created");
+        let db = self.evm.db().expect("Db to not be moved.");
         let mut block_reward = block_reward_changeset(header, ommers, db, self.chain_spec)?;
 
         if self.chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
