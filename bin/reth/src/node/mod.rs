@@ -153,7 +153,6 @@ impl Command {
     }
 
     fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
-        // TODO: This should be in a builder/factory in the consensus crate
         let (consensus, notifier) = BeaconConsensusBuilder::default().build(self.chain.clone());
 
         if let Some(tip) = self.tip {
