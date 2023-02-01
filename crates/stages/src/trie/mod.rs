@@ -245,9 +245,8 @@ impl DBTrieLoader {
         let mut current = storage_cursor.seek_by_key_subkey(address, H256::zero())?;
 
         while let Some(StorageEntry { key: storage_key, value }) = current {
-            let mut out = Vec::new();
-            Encodable::encode(&value, &mut out);
-            trie.insert(storage_key.as_bytes().to_vec(), out)?;
+            let out = encode_fixed_size_value(&value);
+            trie.insert(storage_key.to_vec(), out)?;
             current = storage_cursor.next_dup()?.map(|(_, v)| v);
         }
 
@@ -314,8 +313,7 @@ impl DBTrieLoader {
             if let Some(StorageEntry { value, .. }) =
                 storage_cursor.seek_by_key_subkey(address, key)?
             {
-                let mut out = Vec::new();
-                Encodable::encode(&value, &mut out);
+                let out = encode_fixed_size_value(&value);
                 trie.insert(key.as_bytes().to_vec(), out)?;
             } else {
                 trie.remove(key.as_bytes())?;
@@ -363,6 +361,12 @@ impl DBTrieLoader {
 
         Ok(hashed_changes)
     }
+}
+
+fn encode_fixed_size_value(value: &U256) -> Vec<u8> {
+    let mut out = Vec::new();
+    Encodable::encode(&value.to_be_bytes::<{ U256::BYTES }>(), &mut out);
+    out
 }
 
 #[cfg(test)]
@@ -454,8 +458,7 @@ mod tests {
             .unwrap();
         }
         let encoded_storage = storage.iter().map(|(k, v)| {
-            let mut out = Vec::new();
-            v.encode(&mut out);
+            let out = encode_fixed_size_value(v);
             (k, out)
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
@@ -496,8 +499,7 @@ mod tests {
         let mut out = Vec::new();
 
         let encoded_storage = storage.iter().map(|(k, v)| {
-            let mut out = Vec::new();
-            v.encode(&mut out);
+            let out = encode_fixed_size_value(v);
             (k, out)
         });
 
