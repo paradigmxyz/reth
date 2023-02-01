@@ -2,15 +2,6 @@ use async_trait::async_trait;
 use reth_primitives::{Address, Block, Bloom, H256};
 use thiserror::Error;
 
-/// Takes block and executes it, returns result
-#[async_trait]
-pub trait BlockExecutor {
-    /// Execute block
-    /// if `signers` is some, it's length should be equal to block.body's length. Provide `signers`
-    /// if you already have it because recovering singer is too expensive.
-    fn execute(&mut self, block: &Block, signers: Option<Vec<Address>>) -> Result<(), Error>;
-}
-
 /// BlockExecutor Errors
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]

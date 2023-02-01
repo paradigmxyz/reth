@@ -1,10 +1,11 @@
 use crate::{
     config::{revm_spec, WEI_2ETH, WEI_3ETH, WEI_5ETH},
     revm_wrap::{self, to_reth_acc, SubState},
+    BlockExecutor,
 };
 use hashbrown::hash_map::Entry;
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
-use reth_interfaces::executor::{BlockExecutor, Error};
+use reth_interfaces::executor::Error;
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
     TransactionSigned, H160, H256, U256,
@@ -23,7 +24,6 @@ where
 {
     chain_spec: &'a ChainSpec,
     evm: EVM<&'a mut SubState<DB>>,
-    result: Option<ExecutionResult>,
 }
 
 impl<'a, DB> Executor<'a, DB>
@@ -33,7 +33,7 @@ where
     fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
         let mut evm = EVM::new();
         evm.database(db);
-        Executor { chain_spec, evm, result: None }
+        Executor { chain_spec, evm }
     }
 
     fn recover_signers(
@@ -61,17 +61,17 @@ where
 
         revm_wrap::fill_block_env(&mut self.evm.env.block, header, spec_id >= SpecId::MERGE);
     }
-
-    fn take_result(&mut self) -> Option<ExecutionResult> {
-        self.result.take()
-    }
 }
 
 impl<'a, DB> BlockExecutor for Executor<'a, DB>
 where
     DB: StateProvider,
 {
-    fn execute(&mut self, block: &Block, signers: Option<Vec<Address>>) -> Result<(), Error> {
+    fn execute(
+        &mut self,
+        block: &Block,
+        signers: Option<Vec<Address>>,
+    ) -> Result<ExecutionResult, Error> {
         let Block { header, body, ommers } = block;
         let signers = self.recover_signers(body, signers)?;
 
@@ -166,9 +166,7 @@ where
             block_reward = Some(irregular_state_changeset);
         }
 
-        self.result = Some(ExecutionResult { changesets, block_reward });
-
-        Ok(())
+        Ok(ExecutionResult { changesets, block_reward })
     }
 }
 
@@ -457,9 +455,7 @@ pub fn execute<DB: StateProvider>(
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut executor = Executor::new(chain_spec, db);
-    executor.execute(block, signers)?;
-    // `take_result()` should return `Some` when `execute()` is return `Ok`
-    executor.take_result().ok_or(Error::ExecutionFatalError)
+    executor.execute(block, signers)
 }
 
 /// Irregular state change at Ethereum DAO hardfork
