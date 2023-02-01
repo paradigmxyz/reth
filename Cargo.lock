@@ -4165,6 +4165,7 @@ dependencies = [
  "reth-rlp",
  "reth-tracing",
  "tempfile",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",

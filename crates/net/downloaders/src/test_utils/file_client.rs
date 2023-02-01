@@ -18,6 +18,7 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_primitives::{BlockHash, BlockNumber, Header, PeerId, H256};
+use thiserror::Error;
 use tokio::{fs::File, io::BufReader};
 use tracing::warn;
 
@@ -46,19 +47,21 @@ pub struct FileClient {
 }
 
 /// An error that can occur when constructing and using a [`FileClient`](FileClient).
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum FileClientError {
     /// An error occurred when opening or reading the file.
-    Io(std::io::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 
     /// An error occurred when decoding blocks, headers, or rlp headers from the file.
-    Rlp(reth_rlp::DecodeError),
+    #[error(transparent)]
+    Rlp(#[from] reth_rlp::DecodeError),
 }
 
 impl FileClient {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self, FileClientError> {
-        let file = File::open(path).await.map_err(FileClientError::Io)?;
+        let file = File::open(path).await?;
         FileClient::from_file(file)
     }
 
