@@ -13,6 +13,9 @@ use tokio::sync::{
     oneshot::{self, Receiver},
 };
 
+mod jwt_secret;
+pub use jwt_secret::{JwtError, JwtSecret, JwtValidator};
+
 /// The server implementation of Engine API
 pub struct EngineApi {
     /// Handle to the consensus engine
