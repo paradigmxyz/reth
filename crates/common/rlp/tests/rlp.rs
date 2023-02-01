@@ -89,6 +89,7 @@ fn test_encode_item() {
 
     assert_eq!(encoded(&W(item)), expected);
     assert_eq!(W::decode(&mut &*expected).unwrap().0, decoded);
+    assert_eq!(Test4Numbers::LEN, 79);
 }
 
 #[test]
