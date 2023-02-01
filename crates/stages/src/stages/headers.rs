@@ -287,7 +287,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_interfaces::{
-            consensus::{Consensus, ForkchoiceState},
+            consensus::ForkchoiceState,
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
@@ -488,7 +488,7 @@ mod tests {
         let stage = runner.stage();
 
         let consensus_tip = H256::random();
-        stage
+        runner
             .consensus
             .notify_fork_choice_state(ForkchoiceState {
                 head_block_hash: consensus_tip,

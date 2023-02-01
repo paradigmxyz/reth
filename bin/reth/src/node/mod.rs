@@ -11,7 +11,7 @@ use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
-use reth_consensus::beacon::BeaconConsensus;
+use reth_consensus::beacon::BeaconConsensusBuilder;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
@@ -154,25 +154,21 @@ impl Command {
 
     fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
         // TODO: This should be in a builder/factory in the consensus crate
-        let consensus: Arc<dyn Consensus> = {
-            let beacon_consensus = BeaconConsensus::new(self.chain.clone());
+        let (consensus, notifier) = BeaconConsensusBuilder::default().build(self.chain.clone());
 
-            if let Some(tip) = self.tip {
-                debug!(target: "reth::cli", %tip, "Tip manually set");
-                beacon_consensus.notify_fork_choice_state(ForkchoiceState {
-                    head_block_hash: tip,
-                    safe_block_hash: tip,
-                    finalized_block_hash: tip,
-                })?;
-            } else {
-                let warn_msg = "No tip specified. \
-                reth cannot communicate with consensus clients, \
-                so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
-                warn!(target: "reth::cli", warn_msg);
-            }
-
-            Arc::new(beacon_consensus)
-        };
+        if let Some(tip) = self.tip {
+            debug!(target: "reth::cli", %tip, "Tip manually set");
+            notifier.send(ForkchoiceState {
+                head_block_hash: tip,
+                safe_block_hash: tip,
+                finalized_block_hash: tip,
+            })?;
+        } else {
+            let warn_msg = "No tip specified. \
+            reth cannot communicate with consensus clients, \
+            so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
+            warn!(target: "reth::cli", warn_msg);
+        }
 
         Ok(consensus)
     }

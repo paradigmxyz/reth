@@ -7,7 +7,7 @@ use crate::{
     utils::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
-use reth_consensus::beacon::BeaconConsensus;
+use reth_consensus::beacon::BeaconConsensusBuilder;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 
 use reth_net_nat::NatResolver;
@@ -126,8 +126,7 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let consensus: Arc<BeaconConsensus> =
-                    Arc::new(BeaconConsensus::new(self.chain.clone()));
+                let (consensus, _) = BeaconConsensusBuilder::default().build(self.chain.clone());
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
