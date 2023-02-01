@@ -153,26 +153,21 @@ impl Command {
     }
 
     fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
-        // TODO: This should be in a builder/factory in the consensus crate
-        let consensus: Arc<dyn Consensus> = {
-            let beacon_consensus = BeaconConsensus::new(self.chain.clone());
+        let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
 
-            if let Some(tip) = self.tip {
-                debug!(target: "reth::cli", %tip, "Tip manually set");
-                beacon_consensus.notify_fork_choice_state(ForkchoiceState {
-                    head_block_hash: tip,
-                    safe_block_hash: tip,
-                    finalized_block_hash: tip,
-                })?;
-            } else {
-                let warn_msg = "No tip specified. \
-                reth cannot communicate with consensus clients, \
-                so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
-                warn!(target: "reth::cli", warn_msg);
-            }
-
-            Arc::new(beacon_consensus)
-        };
+        if let Some(tip) = self.tip {
+            debug!(target: "reth::cli", %tip, "Tip manually set");
+            notifier.send(ForkchoiceState {
+                head_block_hash: tip,
+                safe_block_hash: tip,
+                finalized_block_hash: tip,
+            })?;
+        } else {
+            let warn_msg = "No tip specified. \
+            reth cannot communicate with consensus clients, \
+            so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
+            warn!(target: "reth::cli", warn_msg);
+        }
 
         Ok(consensus)
     }
