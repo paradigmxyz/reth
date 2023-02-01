@@ -4,6 +4,8 @@ use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
 use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader};
 use tokio::sync::watch;
 
+use super::BeaconConsensusBuilder;
+
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs,
@@ -23,6 +25,11 @@ impl BeaconConsensus {
         forkchoice_state_rx: watch::Receiver<ForkchoiceState>,
     ) -> Self {
         Self { chain_spec, forkchoice_state_rx }
+    }
+
+    /// Create new [BeaconConsensusBuilder].
+    pub fn builder() -> BeaconConsensusBuilder {
+        BeaconConsensusBuilder::default()
     }
 }
 

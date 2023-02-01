@@ -11,7 +11,7 @@ use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
-use reth_consensus::beacon::BeaconConsensusBuilder;
+use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
@@ -153,7 +153,7 @@ impl Command {
     }
 
     fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
-        let (consensus, notifier) = BeaconConsensusBuilder::default().build(self.chain.clone());
+        let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
 
         if let Some(tip) = self.tip {
             debug!(target: "reth::cli", %tip, "Tip manually set");
