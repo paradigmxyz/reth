@@ -144,7 +144,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::{
-            concurrent::ConcurrentDownloaderBuilder,
+            bodies::BodiesDownloaderBuilder,
             test_utils::{insert_headers, zip_blocks},
         },
         test_utils::generate_bodies,
@@ -168,7 +168,7 @@ mod tests {
 
         let client =
             Arc::new(FileClient::from_file(file.into()).unwrap().with_bodies(bodies.clone()));
-        let mut downloader = ConcurrentDownloaderBuilder::default().build(
+        let mut downloader = BodiesDownloaderBuilder::default().build(
             client.clone(),
             Arc::new(TestConsensus::default()),
             db,
