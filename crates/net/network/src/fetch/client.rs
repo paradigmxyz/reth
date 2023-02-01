@@ -1,16 +1,17 @@
 //! A client implementation that can interact with the network and download data.
 
 use crate::{fetch::DownloadRequest, flattened_response::FlattenedResponse, peers::PeersHandle};
-use futures::{future, FutureExt};
+use futures::{future, future::Either};
+
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
-    error::RequestError,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    error::{PeerRequestResult, RequestError},
+    headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{PeerId, WithPeerId, H256};
+use reth_primitives::{Header, PeerId, H256};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -78,8 +79,12 @@ impl DownloadClient for FetchClient {
     }
 }
 
+// The `Output` future of the [HeadersClient] impl of [FetchClient] that either returns a response
+// or an error.
+type HeadersClientFuture<T> = Either<FlattenedResponse<T>, future::Ready<T>>;
+
 impl HeadersClient for FetchClient {
-    type Output = HeadersFut;
+    type Output = HeadersClientFuture<PeerRequestResult<Vec<Header>>>;
 
     /// Sends a `GetBlockHeaders` request to an available peer.
     fn get_headers_with_priority(
@@ -93,9 +98,9 @@ impl HeadersClient for FetchClient {
             .send(DownloadRequest::GetBlockHeaders { request, response, priority })
             .is_ok()
         {
-            Box::pin(FlattenedResponse::from(rx).map(|r| r.map(WithPeerId::transform)))
+            Either::Left(FlattenedResponse::from(rx))
         } else {
-            Box::pin(future::err(RequestError::ChannelClosed))
+            Either::Right(future::err(RequestError::ChannelClosed))
         }
     }
 }
