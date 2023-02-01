@@ -228,7 +228,7 @@ mod tests {
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { tx: TestTransaction::default(), clean_threshold: 100000 }
+            Self { tx: TestTransaction::default(), clean_threshold: 10000 }
         }
     }
 

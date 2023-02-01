@@ -20,22 +20,16 @@ use std::{
 };
 use tracing::*;
 
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum TrieError {
     #[error("Some error occurred: {0}")]
-    InternalError(String),
+    InternalError(#[from] cita_trie::TrieError),
     #[error("The root node wasn't found in the DB")]
     MissingRoot(H256),
     #[error("{0:?}")]
     DatabaseError(#[from] reth_db::Error),
     #[error("{0:?}")]
     DecodeError(#[from] DecodeError),
-}
-
-impl From<cita_trie::TrieError> for TrieError {
-    fn from(value: cita_trie::TrieError) -> Self {
-        TrieError::InternalError(format!("{value:?}"))
-    }
 }
 
 /// Database wrapper implementing HashDB trait.
@@ -370,6 +364,7 @@ impl DBTrieLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
     use reth_primitives::{
         hex_literal::hex,
@@ -386,7 +381,7 @@ mod tests {
         let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
-        assert_eq!(trie.calculate_root(&tx), Ok(EMPTY_ROOT));
+        assert_matches!(trie.calculate_root(&tx), Ok(got) if got == EMPTY_ROOT);
     }
 
     #[test]
@@ -399,9 +394,10 @@ mod tests {
         tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
         let mut encoded_account = Vec::new();
         EthAccount::from(account).encode(&mut encoded_account);
-        assert_eq!(
+        let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, encoded_account)]).0);
+        assert_matches!(
             trie.calculate_root(&tx),
-            Ok(H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, encoded_account)]).0))
+            Ok(got) if got == expected
         );
     }
 
@@ -429,9 +425,10 @@ mod tests {
             EthAccount::from(*v).encode(&mut out);
             (k, out)
         });
-        assert_eq!(
+        let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
+        assert_matches!(
             trie.calculate_root(&tx),
-            Ok(H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0))
+            Ok(got) if got == expected
         );
     }
 
@@ -457,9 +454,10 @@ mod tests {
             v.encode(&mut out);
             (k, out)
         });
-        assert_eq!(
+        let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
+        assert_matches!(
             trie.calculate_storage_root(&tx, hashed_address),
-            Ok(H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0))
+            Ok(got) if got == expected
         );
     }
 
@@ -504,9 +502,11 @@ mod tests {
             H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0),
         );
         eth_account.encode(&mut out);
-        assert_eq!(
+
+        let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0);
+        assert_matches!(
             trie.calculate_root(&tx),
-            Ok(H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0))
+            Ok(got) if got == expected
         );
     }
 
@@ -533,7 +533,10 @@ mod tests {
 
         let state_root = genesis_state_root(genesis.alloc);
 
-        assert_eq!(trie.calculate_root(&tx), Ok(state_root));
+        assert_matches!(
+            trie.calculate_root(&tx),
+            Ok(got) if got == state_root
+        );
     }
 
     #[test]
@@ -570,12 +573,13 @@ mod tests {
             .unwrap();
         }
 
-        assert_eq!(
+        let expected = BTreeMap::from([(
+            hashed_address,
+            BTreeSet::from([keccak256(H256::zero()), keccak256(H256::from_low_u64_be(2))]),
+        )]);
+        assert_matches!(
             DBTrieLoader::default().gather_changes(&tx, 32..33),
-            Ok(BTreeMap::from([(
-                hashed_address,
-                BTreeSet::from([keccak256(H256::zero()), keccak256(H256::from_low_u64_be(2))])
-            )]))
+            Ok(got) if got == expected
         );
     }
 }

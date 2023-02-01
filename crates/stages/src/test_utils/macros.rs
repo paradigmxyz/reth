@@ -60,6 +60,8 @@ macro_rules! stage_test_suite {
                 // Seed the database
                 runner.seed_execution(crate::stage::ExecInput::default()).expect("failed to seed");
 
+                runner.before_unwind(input).expect("failed to execute before_unwind hook");
+
                 // Run stage unwind
                 let rx = runner.unwind(input).await;
                 assert_matches::assert_matches!(
