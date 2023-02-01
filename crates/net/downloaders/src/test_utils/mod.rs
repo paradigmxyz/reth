@@ -1,3 +1,4 @@
+#![allow(unused)]
 //! Test helper impls
 use reth_eth_wire::BlockBody;
 use reth_interfaces::test_utils::generators::random_block_range;
