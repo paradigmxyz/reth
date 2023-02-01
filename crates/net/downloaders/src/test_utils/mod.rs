@@ -32,6 +32,7 @@ pub(crate) fn generate_bodies(
 }
 
 mod file_client;
+mod file_codec;
 mod test_client;
 
 pub use file_client::{FileClient, FileClientError};

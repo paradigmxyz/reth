@@ -28,6 +28,10 @@ use tokio::{
     fs::File,
     io::{AsyncReadExt, BufReader},
 };
+use tokio_stream::StreamExt;
+use tokio_util::codec::FramedRead;
+
+use super::file_codec::BlockFileCodec;
 
 /// Front-end API for fetching chain data from a file.
 ///
@@ -84,53 +88,12 @@ impl FileClient {
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
-        // TODO: replace with builtin const fn for rlp headers?
-        // max rlp header length is 9
-        let max_header_len = 9;
+        let mut stream = FramedRead::new(reader, BlockFileCodec);
 
         let mut block_num = 0;
-        let mut cursor = 0u64;
-        while cursor < file_len {
-            // need to avoid eof when reading
-            let header_buf_len = std::cmp::min(max_header_len, file_len - cursor);
-            let mut block_buf = vec![0u8; header_buf_len as usize];
-            reader.read_exact(&mut block_buf).await?;
-
-            let block_buf_copy = block_buf.clone();
-
-            // TODO: change rlp header decode? could just read the entire thing into memory and not
-            // use a buffered reader...
-            //
-            // # SAFETY
-            // We know that we are reading a rlp header, but the rlp decoding will check the length
-            // of the buffer after decoding the payload length, to make sure the buffer is large
-            // enough to contain the object being decoded.
-            //
-            // We do not require this check, as it is done again when we decode the RawBlockBody.
-            // This is done to ensure that we can get the exact payload length of the block, so we
-            // can read the correct number of bytes from the file.
-            unsafe { block_buf.set_len(usize::MAX) };
-
-            // decode rlp header
-            let header = RlpHeader::decode(&mut &block_buf[..])?;
-
-            // # SAFETY
-            // We overwrite block_buf with the original bytes and length
-            block_buf = block_buf_copy;
-
-            // need to read the remaining bytes
-            let extra_len = block_buf.len() - header.length();
-            let remaining = header.payload_length - extra_len;
-            let mut remaining_buf = vec![0u8; remaining];
-            reader.read_exact(&mut remaining_buf).await?;
-
-            // append final block bytes to leftover header buf
-            block_buf.append(&mut remaining_buf);
-            let block = RawBlockBody::decode(&mut &block_buf[..])?;
+        while let Some(block_res) = stream.next().await {
+            let block = block_res?;
             let block_hash = block.header.hash_slow();
-
-            // update the cursor, block num
-            cursor += header_buf_len + remaining as u64;
 
             // add to the internal maps
             headers.insert(block_num, block.header.clone());
@@ -259,6 +222,7 @@ mod tests {
         test_utils::generate_bodies,
     };
     use assert_matches::assert_matches;
+    use futures::SinkExt;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
     use reth_interfaces::{
@@ -271,9 +235,11 @@ mod tests {
     use reth_primitives::SealedHeader;
     use reth_rlp::Encodable;
     use std::{
-        io::{BufWriter, Read, Seek, SeekFrom, Write},
+        io::{Read, Seek, SeekFrom, Write},
         sync::Arc,
     };
+    use tokio::io::{AsyncSeekExt, AsyncWriteExt, BufWriter};
+    use tokio_util::codec::FramedWrite;
 
     #[tokio::test]
     async fn streams_bodies_from_buffer() {
@@ -341,24 +307,19 @@ mod tests {
         let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies.clone());
 
         let mut file = tempfile::tempfile().unwrap();
-        let mut writer = BufWriter::new(file);
+        let mut writer = FramedWrite::new(BufWriter::new(file.into()), BlockFileCodec);
 
         // rlp encode one after the other
         for block in raw_block_bodies {
-            let mut encoded = Vec::new();
-            block.encode(&mut encoded);
-            writer.write_all(&encoded).unwrap();
+            writer.send(block).await.unwrap();
         }
 
-        // write remaining bytes
-        writer.flush().unwrap();
-
         // get the file back
-        let mut file = writer.into_inner().unwrap();
-        file.seek(SeekFrom::Start(0)).unwrap();
+        let mut file: File = writer.into_inner().into_inner();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
 
         // now try to read them back
-        let client = Arc::new(FileClient::from_file(file.into()).await.unwrap());
+        let client = Arc::new(FileClient::from_file(file).await.unwrap());
 
         // construct headers downloader and use first header
         let mut header_downloader = ReverseHeadersDownloaderBuilder::default()
@@ -385,24 +346,19 @@ mod tests {
         let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies.clone());
 
         let mut file = tempfile::tempfile().unwrap();
-        let mut writer = BufWriter::new(file);
+        let mut writer = FramedWrite::new(BufWriter::new(file.into()), BlockFileCodec);
 
         // rlp encode one after the other
         for block in raw_block_bodies {
-            let mut encoded = Vec::new();
-            block.encode(&mut encoded);
-            writer.write_all(&encoded).unwrap();
+            writer.send(block).await.unwrap();
         }
 
-        // write remaining bytes
-        writer.flush().unwrap();
-
         // get the file back
-        let mut file = writer.into_inner().unwrap();
-        file.seek(SeekFrom::Start(0)).unwrap();
+        let mut file: File = writer.into_inner().into_inner();
+        file.seek(SeekFrom::Start(0)).await.unwrap();
 
         // now try to read them back
-        let client = Arc::new(FileClient::from_file(file.into()).await.unwrap());
+        let client = Arc::new(FileClient::from_file(file).await.unwrap());
 
         // insert headers in db for the bodies downloader
         insert_headers(&db, &headers);
