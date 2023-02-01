@@ -158,7 +158,7 @@ impl HeadersClient for FileClient {
             }
         }
 
-        Box::pin(async move { Ok((PeerId::default(), headers.into()).into()) })
+        Box::pin(async move { Ok((PeerId::default(), headers).into()) })
     }
 }
 
