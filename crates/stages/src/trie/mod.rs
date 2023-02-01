@@ -68,6 +68,7 @@ where
 }
 
 impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
+    /// Instantiates a new Database for the accounts trie, with an empty root
     fn new(tx: &'tx Transaction<'itx, DB>) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         if tx.get::<tables::AccountsTrie>(root)?.is_none() {
@@ -76,6 +77,7 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
         Ok(Self { tx })
     }
 
+    /// Instantiates a new Database for the accounts trie, with an existing root
     fn new_with_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
             return Self::new(tx)
@@ -130,6 +132,7 @@ where
 }
 
 impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
+    /// Instantiates a new Database for the storage trie, with an empty root
     fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
@@ -142,6 +145,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
         Ok(Self { tx, key })
     }
 
+    /// Instantiates a new Database for the storage trie, with an existing root
     fn new_with_root(
         tx: &'tx Transaction<'itx, DB>,
         key: H256,
@@ -218,7 +222,7 @@ impl DBTrieLoader {
             Encodable::encode(&value, &mut out);
             trie.insert(hashed_address.as_bytes().to_vec(), out)?;
         }
-        let root = H256::from_slice(trie.root().unwrap().as_slice());
+        let root = H256::from_slice(trie.root()?.as_slice());
 
         Ok(root)
     }
@@ -247,7 +251,7 @@ impl DBTrieLoader {
             current = storage_cursor.next_dup()?.map(|(_, v)| v);
         }
 
-        let root = H256::from_slice(trie.root().unwrap().as_slice());
+        let root = H256::from_slice(trie.root()?.as_slice());
 
         Ok(root)
     }
@@ -287,7 +291,7 @@ impl DBTrieLoader {
             }
         }
 
-        let root = H256::from_slice(trie.root().unwrap().as_slice());
+        let root = H256::from_slice(trie.root()?.as_slice());
 
         Ok(root)
     }
@@ -318,7 +322,7 @@ impl DBTrieLoader {
             }
         }
 
-        let root = H256::from_slice(trie.root().unwrap().as_slice());
+        let root = H256::from_slice(trie.root()?.as_slice());
 
         Ok(root)
     }
