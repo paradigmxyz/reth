@@ -4044,21 +4044,10 @@ dependencies = [
 name = "reth-consensus"
 version = "0.1.0"
 dependencies = [
- "assert_matches",
- "async-trait",
- "auto_impl 1.0.1",
- "bytes",
- "futures",
- "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
- "reth-rpc-types",
- "serde",
- "thiserror",
  "tokio",
- "tokio-stream",
 ]
 
 [[package]]

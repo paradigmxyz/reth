@@ -16,7 +16,7 @@ reth-staged-sync = { path = "../../crates/staged-sync" }
 reth-stages = { path = "../../crates/stages"}
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../crates/transaction-pool" }
-reth-consensus = { path = "../../crates/consensus", features = ["serde"] }
+reth-consensus = { path = "../../crates/consensus" }
 reth-executor = { path = "../../crates/executor" }
 # reth-rpc = {path = "../../crates/net/rpc"}
 reth-rlp = { path = "../../crates/common/rlp" }
