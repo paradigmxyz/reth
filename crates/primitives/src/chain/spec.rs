@@ -1,19 +1,17 @@
 use crate::{
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
-    H160, H256, U256,
+    constants::EIP1559_INITIAL_BASE_FEE, proofs::genesis_state_root, BlockNumber, Chain,
+    ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
-use hex_literal::hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
-/// The Etereum mainnet spec
+/// The Ethereum mainnet spec
 pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::mainnet(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
         .expect("Can't deserialize Mainnet genesis json"),
-    genesis_hash: H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, 0),
         (Hardfork::Homestead, 1150000),
@@ -41,7 +39,6 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::goerli(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
         .expect("Can't deserialize Goerli genesis json"),
-    genesis_hash: H256(hex!("bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, 0),
         (Hardfork::Istanbul, 1561651),
@@ -58,7 +55,6 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::sepolia(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
-    genesis_hash: H256(hex!("25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, 0),
         (Hardfork::Homestead, 0),
@@ -88,9 +84,6 @@ pub struct ChainSpec {
     /// The genesis block information
     pub genesis: Genesis,
 
-    /// The genesis block hash
-    pub genesis_hash: H256,
-
     /// The active hard forks and their block numbers
     pub hardforks: BTreeMap<Hardfork, BlockNumber>,
 
@@ -110,14 +103,39 @@ impl ChainSpec {
         self.chain
     }
 
-    /// Return genesis block
+    /// Get the genesis block specification.
+    ///
+    /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
     pub fn genesis(&self) -> &Genesis {
         &self.genesis
     }
 
+    /// Get the header for the genesis block.
+    pub fn genesis_header(&self) -> Header {
+        // If London is activated at genesis, we set the initial base fee as per EIP-1559.
+        let base_fee_per_gas = if self.fork_active(Hardfork::London, 0) {
+            Some(EIP1559_INITIAL_BASE_FEE)
+        } else {
+            None
+        };
+
+        Header {
+            gas_limit: self.genesis.gas_limit,
+            difficulty: self.genesis.difficulty,
+            nonce: self.genesis.nonce,
+            extra_data: self.genesis.extra_data.clone(),
+            state_root: genesis_state_root(&self.genesis.alloc),
+            timestamp: self.genesis.timestamp,
+            mix_hash: self.genesis.mix_hash,
+            beneficiary: self.genesis.coinbase,
+            base_fee_per_gas,
+            ..Default::default()
+        }
+    }
+
     /// Returns the chain genesis hash
     pub fn genesis_hash(&self) -> H256 {
-        self.genesis_hash
+        self.genesis_header().hash_slow()
     }
 
     /// Returns the supported hardforks and their fork block numbers
@@ -206,7 +224,6 @@ impl From<EthersGenesis> for ChainSpec {
             alloc,
         };
 
-        let genesis_hash = Header::from(genesis_block.clone()).seal().hash();
         let paris_ttd = genesis.config.terminal_total_difficulty.map(|ttd| ttd.into());
         let hardfork_opts = vec![
             (Hardfork::Homestead, genesis.config.homestead_block),
@@ -235,7 +252,6 @@ impl From<EthersGenesis> for ChainSpec {
             dao_fork_support: genesis.config.dao_fork_support,
             genesis: genesis_block,
             hardforks: configured_hardforks,
-            genesis_hash,
             paris_ttd,
             // paris block is not used to fork, and is not used in genesis.json
             paris_block: None,
@@ -248,7 +264,6 @@ impl From<EthersGenesis> for ChainSpec {
 pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
-    genesis_hash: Option<H256>,
     hardforks: BTreeMap<Hardfork, BlockNumber>,
     dao_fork_support: bool,
     paris_block: Option<u64>,
@@ -261,7 +276,6 @@ impl ChainSpecBuilder {
         Self {
             chain: Some(MAINNET.chain),
             genesis: Some(MAINNET.genesis.clone()),
-            genesis_hash: Some(MAINNET.genesis_hash),
             hardforks: MAINNET.hardforks.clone(),
             dao_fork_support: MAINNET.dao_fork_support,
             paris_block: MAINNET.paris_block,
@@ -278,12 +292,6 @@ impl ChainSpecBuilder {
     /// Sets the genesis
     pub fn genesis(mut self, genesis: Genesis) -> Self {
         self.genesis = Some(genesis);
-        self
-    }
-
-    /// Sets the genesis hash
-    pub fn genesis_hash(mut self, genesis_hash: H256) -> Self {
-        self.genesis_hash = Some(genesis_hash);
         self
     }
 
@@ -373,7 +381,6 @@ impl ChainSpecBuilder {
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
-            genesis_hash: self.genesis_hash.expect("The genesis hash is required"),
             hardforks: self.hardforks,
             dao_fork_support: self.dao_fork_support,
             paris_block: self.paris_block,
@@ -387,7 +394,6 @@ impl From<&ChainSpec> for ChainSpecBuilder {
         Self {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
-            genesis_hash: Some(value.genesis_hash),
             hardforks: value.hardforks.clone(),
             dao_fork_support: value.dao_fork_support,
             paris_block: value.paris_block,
@@ -434,18 +440,15 @@ impl ParisStatus {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Chain, ChainSpec, ForkHash, Genesis, Hardfork, Header, GOERLI, MAINNET, SEPOLIA};
+    use crate::{Chain, ChainSpec, ForkHash, Genesis, Hardfork, GOERLI, MAINNET, SEPOLIA};
 
     #[test]
     fn test_empty_forkid() {
         // tests that we skip any forks in block 0, that's the genesis ruleset
         let empty_genesis = Genesis::default();
-        let empty_header: Header = empty_genesis.clone().into();
-        let empty_sealed = empty_header.seal();
         let spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis)
-            .genesis_hash(empty_sealed.hash())
             .with_fork(Hardfork::Frontier, 0)
             .with_fork(Hardfork::Homestead, 0)
             .with_fork(Hardfork::Tangerine, 0)
@@ -472,12 +475,9 @@ mod tests {
     fn test_duplicate_fork_blocks() {
         // forks activated at the same block should be deduplicated
         let empty_genesis = Genesis::default();
-        let empty_header: Header = empty_genesis.clone().into();
-        let empty_sealed = empty_header.seal();
         let unique_spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())
-            .genesis_hash(empty_sealed.hash())
             .with_fork(Hardfork::Frontier, 0)
             .with_fork(Hardfork::Homestead, 1)
             .build();
@@ -485,7 +485,6 @@ mod tests {
         let duplicate_spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis)
-            .genesis_hash(empty_sealed.hash())
             .with_fork(Hardfork::Frontier, 0)
             .with_fork(Hardfork::Homestead, 1)
             .with_fork(Hardfork::Tangerine, 1)
