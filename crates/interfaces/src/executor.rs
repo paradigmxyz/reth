@@ -1,5 +1,4 @@
-use async_trait::async_trait;
-use reth_primitives::{Address, Block, Bloom, H256};
+use reth_primitives::{Bloom, H256};
 use thiserror::Error;
 
 /// BlockExecutor Errors
