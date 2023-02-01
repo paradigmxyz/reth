@@ -29,7 +29,6 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::GrayGlacier, 15050000),
         (Hardfork::Latest, 15050000),
     ]),
-    dao_fork_support: true,
     paris_block: Some(15537394),
     paris_ttd: Some(U256::from(58750000000000000000000_u128)),
 });
@@ -45,7 +44,6 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::Berlin, 4460644),
         (Hardfork::London, 5062605),
     ]),
-    dao_fork_support: true,
     paris_block: Some(7382818),
     paris_ttd: Some(U256::from(10790000)),
 });
@@ -70,7 +68,6 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::London, 0),
         (Hardfork::MergeNetsplit, 1735371),
     ]),
-    dao_fork_support: true,
     paris_block: Some(1450408),
     paris_ttd: Some(U256::from(17000000000000000_u64)),
 });
@@ -86,9 +83,6 @@ pub struct ChainSpec {
 
     /// The active hard forks and their block numbers
     pub hardforks: BTreeMap<Hardfork, BlockNumber>,
-
-    /// Whether or not the DAO fork is supported
-    pub dao_fork_support: bool,
 
     /// The block number of the merge
     pub paris_block: Option<u64>,
@@ -151,11 +145,6 @@ impl ChainSpec {
     /// Returns `true` if the given fork is active on the given block
     pub fn fork_active(&self, fork: Hardfork, current_block: BlockNumber) -> bool {
         self.fork_block(fork).map(|target| target <= current_block).unwrap_or_default()
-    }
-
-    /// Returns `true` if the DAO fork is supported
-    pub fn dao_fork_support(&self) -> bool {
-        self.dao_fork_support
     }
 
     /// Get the Paris status
@@ -249,7 +238,6 @@ impl From<EthersGenesis> for ChainSpec {
 
         Self {
             chain: genesis.config.chain_id.into(),
-            dao_fork_support: genesis.config.dao_fork_support,
             genesis: genesis_block,
             hardforks: configured_hardforks,
             paris_ttd,
@@ -265,7 +253,6 @@ pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
     hardforks: BTreeMap<Hardfork, BlockNumber>,
-    dao_fork_support: bool,
     paris_block: Option<u64>,
     paris_ttd: Option<U256>,
 }
@@ -277,7 +264,6 @@ impl ChainSpecBuilder {
             chain: Some(MAINNET.chain),
             genesis: Some(MAINNET.genesis.clone()),
             hardforks: MAINNET.hardforks.clone(),
-            dao_fork_support: MAINNET.dao_fork_support,
             paris_block: MAINNET.paris_block,
             paris_ttd: MAINNET.paris_ttd,
         }
@@ -363,12 +349,6 @@ impl ChainSpecBuilder {
         self
     }
 
-    /// Sets the DAO fork as supported
-    pub fn dao_fork_supported(mut self) -> Self {
-        self.dao_fork_support = true;
-        self
-    }
-
     /// Enables Paris
     pub fn paris_activated(mut self) -> Self {
         self = self.berlin_activated();
@@ -382,7 +362,6 @@ impl ChainSpecBuilder {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             hardforks: self.hardforks,
-            dao_fork_support: self.dao_fork_support,
             paris_block: self.paris_block,
             paris_ttd: self.paris_ttd,
         }
@@ -395,7 +374,6 @@ impl From<&ChainSpec> for ChainSpecBuilder {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
-            dao_fork_support: value.dao_fork_support,
             paris_block: value.paris_block,
             paris_ttd: value.paris_ttd,
         }
