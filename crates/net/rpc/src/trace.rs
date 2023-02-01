@@ -1,3 +1,4 @@
+use crate::result::internal_rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{rpc::BlockId, Bytes, H256};
@@ -22,7 +23,7 @@ impl TraceApiServer for TraceApi {
         _trace_types: HashSet<TraceType>,
         _block_id: Option<BlockId>,
     ) -> Result<TraceResults> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn call_many(
@@ -30,7 +31,7 @@ impl TraceApiServer for TraceApi {
         _calls: Vec<(CallRequest, HashSet<TraceType>)>,
         _block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn raw_transaction(
@@ -39,7 +40,7 @@ impl TraceApiServer for TraceApi {
         _trace_types: HashSet<TraceType>,
         _block_id: Option<BlockId>,
     ) -> Result<TraceResults> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn replay_block_transactions(
@@ -47,7 +48,7 @@ impl TraceApiServer for TraceApi {
         _block_id: BlockId,
         _trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn replay_transaction(
@@ -55,15 +56,15 @@ impl TraceApiServer for TraceApi {
         _transaction: H256,
         _trace_types: HashSet<TraceType>,
     ) -> Result<TraceResults> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn block(&self, _block_id: BlockId) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn filter(&self, _filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     fn trace(
@@ -71,11 +72,11 @@ impl TraceApiServer for TraceApi {
         _hash: H256,
         _indices: Vec<Index>,
     ) -> Result<Option<LocalizedTransactionTrace>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     fn transaction_traces(&self, _hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 }
 
