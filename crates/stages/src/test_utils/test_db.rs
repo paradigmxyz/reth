@@ -20,8 +20,9 @@ use crate::db::Transaction;
 /// stage.execute(&mut tx.container(), input);
 /// ```
 #[derive(Debug)]
-pub(crate) struct TestTransaction {
-    tx: Arc<Env<WriteMap>>,
+pub struct TestTransaction {
+    /// WriteMap DB
+    pub tx: Arc<Env<WriteMap>>,
 }
 
 impl Default for TestTransaction {
@@ -33,17 +34,17 @@ impl Default for TestTransaction {
 
 impl TestTransaction {
     /// Return a database wrapped in [Transaction].
-    pub(crate) fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
+    pub fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
         Transaction::new(self.tx.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
-    pub(crate) fn inner_raw(&self) -> Arc<Env<WriteMap>> {
+    pub fn inner_raw(&self) -> Arc<Env<WriteMap>> {
         self.tx.clone()
     }
 
     /// Invoke a callback with transaction committing it afterwards
-    pub(crate) fn commit<F>(&self, f: F) -> Result<(), DbError>
+    pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
@@ -54,7 +55,7 @@ impl TestTransaction {
     }
 
     /// Invoke a callback with a read transaction
-    pub(crate) fn query<F, R>(&self, f: F) -> Result<R, DbError>
+    pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
         F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
     {
@@ -62,7 +63,7 @@ impl TestTransaction {
     }
 
     /// Check if the table is empty
-    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
+    pub fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
         self.query(|tx| {
             let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
@@ -70,7 +71,7 @@ impl TestTransaction {
     }
 
     /// Return full table as Vec
-    pub(crate) fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
+    pub fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
     where
         T::Key: Default + Ord,
     {
@@ -87,7 +88,7 @@ impl TestTransaction {
     /// tx.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
     #[allow(dead_code)]
-    pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
+    pub fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
     where
         T: Table,
         S: Clone,
@@ -111,11 +112,7 @@ impl TestTransaction {
     /// tx.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
     #[allow(dead_code)]
-    pub(crate) fn transform_append<T, S, F>(
-        &self,
-        values: &[S],
-        mut transform: F,
-    ) -> Result<(), DbError>
+    pub fn transform_append<T, S, F>(&self, values: &[S], mut transform: F) -> Result<(), DbError>
     where
         T: Table,
         <T as Table>::Value: Clone,
@@ -135,11 +132,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Key]
-    pub(crate) fn ensure_no_entry_above<T, F>(
-        &self,
-        num: u64,
-        mut selector: F,
-    ) -> Result<(), DbError>
+    pub fn ensure_no_entry_above<T, F>(&self, num: u64, mut selector: F) -> Result<(), DbError>
     where
         T: Table,
         F: FnMut(T::Key) -> BlockNumber,
@@ -155,7 +148,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Value]
-    pub(crate) fn ensure_no_entry_above_by_value<T, F>(
+    pub fn ensure_no_entry_above_by_value<T, F>(
         &self,
         num: u64,
         mut selector: F,
@@ -176,7 +169,7 @@ impl TestTransaction {
 
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
     /// that are supposed to be populated by the headers stage.
-    pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
+    pub fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
@@ -197,11 +190,7 @@ impl TestTransaction {
 
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
     /// Superset functionality of [TestTransaction::insert_headers].
-    pub(crate) fn insert_blocks<'a, I>(
-        &self,
-        blocks: I,
-        tx_offset: Option<u64>,
-    ) -> Result<(), DbError>
+    pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
