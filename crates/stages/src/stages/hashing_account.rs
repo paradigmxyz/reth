@@ -57,7 +57,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table
-        if to_transition - from_transition > self.clean_threshold {
+        if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
             // clear table, load all accounts and hash it
             tx.clear::<tables::HashedAccount>()?;
             tx.commit()?;
