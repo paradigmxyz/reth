@@ -121,7 +121,7 @@ where
                 //e => return Err(Error::EVMError { error_code: e as u32 }),
             };
 
-            // Add spend gas.
+            // Add spent gas.
             cumulative_gas_used += gas_used;
 
             // Transform logs to reth format.
