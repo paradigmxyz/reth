@@ -1,4 +1,7 @@
 //! Provides everything related to `eth_` namespace
+//!
+//! The entire implementation of the namespace is quite large, hence it is divided across several
+//! files.
 
 use async_trait::async_trait;
 use reth_interfaces::Result;
@@ -10,6 +13,7 @@ use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
 mod server;
+mod transactions;
 
 /// `Eth` API trait.
 ///
@@ -40,12 +44,7 @@ pub struct EthApi<Pool, Client, Network> {
     inner: Arc<EthApiInner<Pool, Client, Network>>,
 }
 
-impl<Pool, Client, Network> EthApi<Pool, Client, Network>
-where
-    Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + 'static,
-    Network: NetworkInfo,
-{
+impl<Pool, Client, Network> EthApi<Pool, Client, Network> {
     /// Creates a new, shareable instance.
     pub fn new(client: Arc<Client>, pool: Pool, network: Network) -> Self {
         let inner = EthApiInner { client, pool, network };
@@ -53,13 +52,18 @@ where
     }
 
     /// Returns the inner `Client`
-    fn client(&self) -> &Arc<Client> {
+    pub(crate) fn client(&self) -> &Arc<Client> {
         &self.inner.client
     }
 
     /// Returns the inner `Network`
-    fn network(&self) -> &Network {
+    pub(crate) fn network(&self) -> &Network {
         &self.inner.network
+    }
+
+    /// Returns the inner `Pool`
+    pub(crate) fn pool(&self) -> &Pool {
+        &self.inner.pool
     }
 }
 

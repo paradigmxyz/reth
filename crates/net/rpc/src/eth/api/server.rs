@@ -215,8 +215,8 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn send_raw_transaction(&self, _bytes: Bytes) -> Result<H256> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
+        EthApi::send_raw_transaction(self, tx).await.to_rpc_result()
     }
 
     async fn sign(&self, _address: Address, _message: Bytes) -> Result<Bytes> {

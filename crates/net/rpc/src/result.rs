@@ -41,11 +41,12 @@ pub(crate) trait ToRpcResult<Ok, Err> {
 }
 
 /// A macro that implements the `ToRpcResult` for a specific error type
+#[macro_export]
 macro_rules! impl_to_rpc_result {
     ($err:ty) => {
         impl<Ok> ToRpcResult<Ok, $err> for Result<Ok, $err> {
             #[inline]
-            fn map_rpc_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
+            fn map_rpc_err<'a, F, M>(self, op: F) -> jsonrpsee::core::RpcResult<Ok>
             where
                 F: FnOnce($err) -> (i32, M, Option<&'a [u8]>),
                 M: Into<String>,
@@ -54,25 +55,25 @@ macro_rules! impl_to_rpc_result {
                     Ok(t) => Ok(t),
                     Err(err) => {
                         let (code, msg, data) = op(err);
-                        Err(rpc_err(code, msg, data))
+                        Err($crate::result::rpc_err(code, msg, data))
                     }
                 }
             }
 
             #[inline]
-            fn map_internal_err<'a, F, M>(self, op: F) -> RpcResult<Ok>
+            fn map_internal_err<'a, F, M>(self, op: F) -> jsonrpsee::core::RpcResult<Ok>
             where
                 F: FnOnce($err) -> M,
                 M: Into<String>,
             {
                 match self {
                     Ok(t) => Ok(t),
-                    Err(err) => Err(internal_rpc_err(op(err))),
+                    Err(err) => Err($crate::result::internal_rpc_err(op(err))),
                 }
             }
 
             #[inline]
-            fn map_internal_err_with_data<'a, F, M>(self, op: F) -> RpcResult<Ok>
+            fn map_internal_err_with_data<'a, F, M>(self, op: F) -> jsonrpsee::core::RpcResult<Ok>
             where
                 F: FnOnce($err) -> (M, &'a [u8]),
                 M: Into<String>,
@@ -81,18 +82,18 @@ macro_rules! impl_to_rpc_result {
                     Ok(t) => Ok(t),
                     Err(err) => {
                         let (msg, data) = op(err);
-                        Err(internal_rpc_err_with_data(msg, data))
+                        Err($crate::result::internal_rpc_err_with_data(msg, data))
                     }
                 }
             }
 
             #[inline]
-            fn with_message(self, msg: &str) -> RpcResult<Ok> {
+            fn with_message(self, msg: &str) -> jsonrpsee::core::RpcResult<Ok> {
                 match self {
                     Ok(t) => Ok(t),
                     Err(err) => {
                         let msg = format!("{msg}: {err:?}");
-                        Err(internal_rpc_err(msg))
+                        Err($crate::result::internal_rpc_err(msg))
                     }
                 }
             }
