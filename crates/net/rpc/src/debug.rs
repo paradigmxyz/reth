@@ -1,3 +1,4 @@
+use crate::result::internal_rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{rpc::BlockId, Bytes, H256};
@@ -14,23 +15,23 @@ pub struct DebugApi {
 #[async_trait]
 impl DebugApiServer for DebugApi {
     async fn raw_header(&self, _block_id: BlockId) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn raw_block(&self, _block_id: BlockId) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn raw_transaction(&self, _hash: H256) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn raw_receipts(&self, _block_id: BlockId) -> Result<Vec<Bytes>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn bad_blocks(&self) -> Result<Vec<RichBlock>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 }
 
