@@ -3,6 +3,7 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
+use crate::eth::signer::EthSigner;
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
@@ -38,7 +39,8 @@ pub trait EthApiSpec: Send + Sync {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct EthApi<Pool, Client, Network> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Pool, Client, Network>>,
@@ -47,7 +49,7 @@ pub struct EthApi<Pool, Client, Network> {
 impl<Pool, Client, Network> EthApi<Pool, Client, Network> {
     /// Creates a new, shareable instance.
     pub fn new(client: Arc<Client>, pool: Pool, network: Network) -> Self {
-        let inner = EthApiInner { client, pool, network };
+        let inner = EthApiInner { client, pool, network, signers: Default::default() };
         Self { inner: Arc::new(inner) }
     }
 
@@ -94,7 +96,6 @@ where
 }
 
 /// Container type `EthApi`
-#[derive(Debug)]
 struct EthApiInner<Pool, Client, Network> {
     /// The transaction pool.
     pool: Pool,
@@ -102,4 +103,6 @@ struct EthApiInner<Pool, Client, Network> {
     client: Arc<Client>,
     /// An interface to interact with the network
     network: Network,
+    /// All configured Signers
+    signers: Vec<Box<dyn EthSigner>>,
 }

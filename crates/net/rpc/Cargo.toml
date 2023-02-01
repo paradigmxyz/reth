@@ -28,6 +28,11 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["sync"] }
 
 # misc
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
