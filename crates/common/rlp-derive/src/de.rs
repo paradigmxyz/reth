@@ -95,8 +95,7 @@ fn decodable_field(index: usize, field: &syn::Field) -> TokenStream {
 
     if has_attribute(field, "default") {
         quote! { #id: Default::default(), }
-    }
-    else {
-    quote! { #id: reth_rlp::Decodable::decode(b)?, }
+    } else {
+        quote! { #id: reth_rlp::Decodable::decode(b)?, }
     }
 }
