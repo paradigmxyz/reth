@@ -4165,6 +4165,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-tracing",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tracing",

@@ -38,5 +38,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 reth-downloaders = { path = ".", features = ["test-utils"] }
 
+tempfile = "3.3"
+
 [features]
 test-utils = ["dep:reth-rlp"]

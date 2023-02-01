@@ -33,5 +33,5 @@ pub(crate) fn generate_bodies(
 mod file_client;
 mod test_client;
 
-pub use file_client::{BlockPosition, FileClient, FileClientError};
+pub use file_client::{FileClient, FileClientError};
 pub use test_client::TestBodiesClient;
