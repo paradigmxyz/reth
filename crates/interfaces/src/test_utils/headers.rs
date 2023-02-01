@@ -279,14 +279,22 @@ impl Default for TestConsensus {
 }
 
 impl TestConsensus {
-    /// Get the failed validation flag
+    /// Get the failed validation flag.
     pub fn fail_validation(&self) -> bool {
         self.fail_validation.load(Ordering::SeqCst)
     }
 
-    /// Update the validation flag
+    /// Update the validation flag.
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst)
+    }
+
+    /// Update the forkchoice state.
+    pub fn notify_fork_choice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), SendError<ForkchoiceState>> {
+        self.channel.0.send(state)
     }
 }
 
@@ -302,13 +310,6 @@ impl StatusUpdater for TestStatusUpdater {
 impl Consensus for TestConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
-    }
-
-    fn notify_fork_choice_state(
-        &self,
-        state: ForkchoiceState,
-    ) -> Result<(), SendError<ForkchoiceState>> {
-        self.channel.0.send(state)
     }
 
     fn validate_header(
