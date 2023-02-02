@@ -1,10 +1,12 @@
 use crate::{
     config::{revm_spec, WEI_2ETH, WEI_3ETH, WEI_5ETH},
+    execution_result::{
+        AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
+    },
     revm_wrap::{self, into_reth_log, to_reth_acc, SubState},
     BlockExecutor,
 };
 use hashbrown::hash_map::Entry;
-use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
@@ -283,117 +285,6 @@ where
     }
 }
 
-/// Contains old/new account changes
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum AccountInfoChangeSet {
-    /// The account is newly created.
-    Created {
-        /// The newly created account.
-        new: Account,
-    },
-    /// An account was deleted (selfdestructed) or we have touched
-    /// an empty account and we need to remove/destroy it.
-    /// (Look at state clearing [EIP-158](https://eips.ethereum.org/EIPS/eip-158))
-    Destroyed {
-        /// The account that was destroyed.
-        old: Account,
-    },
-    /// The account was changed.
-    Changed {
-        /// The account after the change.
-        new: Account,
-        /// The account prior to the change.
-        old: Account,
-    },
-    /// Nothing was changed for the account (nonce/balance).
-    NoChange,
-}
-
-impl AccountInfoChangeSet {
-    /// Apply the changes from the changeset to a database transaction.
-    pub fn apply_to_db<'a, TX: DbTxMut<'a>>(
-        self,
-        tx: &TX,
-        address: Address,
-        tx_index: u64,
-        has_state_clear_eip: bool,
-    ) -> Result<(), DbError> {
-        match self {
-            AccountInfoChangeSet::Changed { old, new } => {
-                // insert old account in AccountChangeSet
-                // check for old != new was already done
-                tx.put::<tables::AccountChangeSet>(
-                    tx_index,
-                    AccountBeforeTx { address, info: Some(old) },
-                )?;
-                tx.put::<tables::PlainAccountState>(address, new)?;
-            }
-            AccountInfoChangeSet::Created { new } => {
-                // Ignore account that are created empty and state clear (SpuriousDragon) hardfork
-                // is activated.
-                if has_state_clear_eip && new.is_empty() {
-                    return Ok(())
-                }
-                tx.put::<tables::AccountChangeSet>(
-                    tx_index,
-                    AccountBeforeTx { address, info: None },
-                )?;
-                tx.put::<tables::PlainAccountState>(address, new)?;
-            }
-            AccountInfoChangeSet::Destroyed { old } => {
-                tx.delete::<tables::PlainAccountState>(address, None)?;
-                tx.put::<tables::AccountChangeSet>(
-                    tx_index,
-                    AccountBeforeTx { address, info: Some(old) },
-                )?;
-            }
-            AccountInfoChangeSet::NoChange => {
-                // do nothing storage account didn't change
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Diff change set that is needed for creating history index and updating current world state.
-#[derive(Debug, Clone)]
-pub struct AccountChangeSet {
-    /// Old and New account account change.
-    pub account: AccountInfoChangeSet,
-    /// Storage containing key -> (OldValue,NewValue). in case that old value is not existing
-    /// we can expect to have U256::ZERO, same with new value.
-    pub storage: BTreeMap<U256, (U256, U256)>,
-    /// Just to make sure that we are taking selfdestruct cleaning we have this field that wipes
-    /// storage. There are instances where storage is changed but account is not touched, so we
-    /// can't take into account that if new account is None that it is selfdestruct.
-    pub wipe_storage: bool,
-}
-
-/// Execution Result containing vector of transaction changesets
-/// and block reward if present
-#[derive(Debug)]
-pub struct ExecutionResult {
-    /// Transaction changeset containing [Receipt], changed [Accounts][Account] and Storages.
-    pub changesets: Vec<TransactionChangeSet>,
-    /// Block reward if present. It represent changeset for block reward slot in
-    /// [tables::AccountChangeSet] .
-    pub block_reward: Option<BTreeMap<Address, AccountInfoChangeSet>>,
-}
-
-/// After transaction is executed this structure contain
-/// transaction [Receipt] every change to state ([Account], Storage, [Bytecode])
-/// that this transaction made and its old values
-/// so that history account table can be updated.
-#[derive(Debug, Clone)]
-pub struct TransactionChangeSet {
-    /// Transaction receipt
-    pub receipt: Receipt,
-    /// State change that this transaction made on state.
-    pub changeset: BTreeMap<Address, AccountChangeSet>,
-    /// new bytecode created as result of transaction execution.
-    pub new_bytecodes: BTreeMap<H256, Bytecode>,
-}
-
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
     block: &Block,
@@ -583,14 +474,9 @@ pub fn block_reward_changeset<DB: StateProvider>(
 #[cfg(test)]
 mod tests {
 
-    use std::{collections::HashMap, sync::Arc};
+    use std::collections::HashMap;
 
     use crate::revm_wrap::State;
-    use reth_db::{
-        database::Database,
-        mdbx::{test_utils, Env, EnvKind, WriteMap},
-        transaction::DbTx,
-    };
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, SealedBlock,
         StorageKey, H160, H256, MAINNET, U256,
@@ -811,8 +697,7 @@ mod tests {
 
     #[test]
     fn dao_hardfork_irregular_state_change() {
-        let mut header = Header::default();
-        header.number = 1;
+        let header = Header { number: 1, ..Header::default() };
 
         let mut db = StateProviderTest::default();
 
@@ -877,48 +762,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_account_info_changeset() {
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
-        let address = H160::zero();
-        let tx_num = 0;
-        let acc1 = Account { balance: U256::from(1), nonce: 2, bytecode_hash: Some(H256::zero()) };
-        let acc2 = Account { balance: U256::from(3), nonce: 4, bytecode_hash: Some(H256::zero()) };
-
-        let tx = db.tx_mut().unwrap();
-
-        // check Changed changeset
-        AccountInfoChangeSet::Changed { new: acc1, old: acc2 }
-            .apply_to_db(&tx, address, tx_num, true)
-            .unwrap();
-        assert_eq!(
-            tx.get::<tables::AccountChangeSet>(tx_num),
-            Ok(Some(AccountBeforeTx { address, info: Some(acc2) }))
-        );
-        assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
-
-        AccountInfoChangeSet::Created { new: acc1 }
-            .apply_to_db(&tx, address, tx_num, true)
-            .unwrap();
-        assert_eq!(
-            tx.get::<tables::AccountChangeSet>(tx_num),
-            Ok(Some(AccountBeforeTx { address, info: None }))
-        );
-        assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(Some(acc1)));
-
-        // delete old value, as it is dupsorted
-        tx.delete::<tables::AccountChangeSet>(tx_num, None).unwrap();
-
-        AccountInfoChangeSet::Destroyed { old: acc2 }
-            .apply_to_db(&tx, address, tx_num, true)
-            .unwrap();
-        assert_eq!(tx.get::<tables::PlainAccountState>(address), Ok(None));
-        assert_eq!(
-            tx.get::<tables::AccountChangeSet>(tx_num),
-            Ok(Some(AccountBeforeTx { address, info: Some(acc2) }))
-        );
-    }
-
-    #[test]
     fn test_selfdestruct() {
         // Modified version of eth test. Storage is added for selfdestructed account to see
         // that changeset is set.
@@ -956,7 +799,7 @@ mod tests {
             address_selfdestruct,
             pre_account_selfdestroyed,
             Some(hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00").into()),
-            selfdestroyed_storage.clone().into_iter().collect::<HashMap<_, _>>(),
+            selfdestroyed_storage.into_iter().collect::<HashMap<_, _>>(),
         );
 
         // spec at berlin fork
@@ -993,6 +836,6 @@ mod tests {
             "Selfdestroyed account"
         );
 
-        assert_eq!(selfdestroyer_changeset.wipe_storage, true);
+        assert!(selfdestroyer_changeset.wipe_storage);
     }
 }
