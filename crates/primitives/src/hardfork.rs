@@ -48,7 +48,7 @@ impl Hardfork {
                         curr_block_number = b;
                     }
                 } else {
-                    return Some(ForkId { hash: curr_forkhash, next: b });
+                    return Some(ForkId { hash: curr_forkhash, next: b })
                 }
             }
             Some(ForkId { hash: curr_forkhash, next: 0 })
