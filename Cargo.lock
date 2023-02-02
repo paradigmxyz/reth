@@ -4556,8 +4556,10 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hex",
+ "http",
  "jsonrpsee",
  "jsonwebtoken",
+ "pin-project",
  "rand 0.8.5",
  "reth-interfaces",
  "reth-network-api",
@@ -4568,7 +4570,7 @@ dependencies = [
  "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-transaction-pool",
- "secp256k1 0.24.3",
+ "secp256k1 0.26.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -5085,6 +5087,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "secp256k1"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4124a35fe33ae14259c490fd70fa199a32b9ce9502f2ee6bc4f81ec06fa65894"
+dependencies = [
+ "rand 0.8.5",
+ "secp256k1-sys 0.8.0",
+]
+
+[[package]]
 name = "secp256k1-sys"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5098,6 +5110,15 @@ name = "secp256k1-sys"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8058e28ae464daf5ac14c5c0f78110b58616e796c4e4e28cfcca38fdb13d8f22"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "secp256k1-sys"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "642a62736682fdd8c71da0eb273e453c8ac74e33b9fb310e22ba5b03ec7651ff"
 dependencies = [
  "cc",
 ]
