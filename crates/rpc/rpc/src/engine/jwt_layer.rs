@@ -66,8 +66,6 @@ where
 impl<S> JwtService<S> {
     // TODO: Add full coverage
     fn get_bearer(&self, headers: &HeaderMap) -> Option<String> {
-        let auth = headers.get("authorization");
-
         headers
             .get("authorization")
             .map(|header| header.to_str())
