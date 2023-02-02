@@ -12,21 +12,24 @@ use proptest::{
     test_runner::TestRunner,
 };
 use reth_db::{
-    cursor::{DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     mdbx::{test_utils::create_test_db_with_path, Env, EnvKind, WriteMap},
+    transaction::DbTxMut,
 };
-use reth_primitives::{Header, SealedBlock, TransactionSigned};
+use reth_primitives::{Header, SealedBlock, TransactionSigned, H256, U256};
 use reth_stages::{
     stages::TransactionLookupStage, test_utils::TestTransaction, ExecInput, Stage, StageId,
     StageSetBuilder, UnwindInput,
 };
 use std::{path::Path, sync::Arc, time::Instant};
-
 criterion_group!(benches, stages);
 criterion_main!(benches);
 
-const NUM_BLOCKS: usize = 2000;
+const VECTORS_FOLDER: &str = "testdata/stages";
+const FILE_PATH: &str = "testdata/stages/blocks";
+const BENCH_DB_PATH: &str = "/tmp/reth-benches-stages";
+const NUM_BLOCKS: usize = 10_000;
 
 pub fn stages(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
@@ -40,6 +43,7 @@ pub fn stages(c: &mut Criterion) {
 
 fn measure_txlookup_stage(group: &mut BenchmarkGroup<WallTime>, tx: TestTransaction) {
     let stage = TransactionLookupStage::new(NUM_BLOCKS as u64);
+
     let mut input = ExecInput::default();
     input.previous_stage = Some((StageId("Another"), NUM_BLOCKS as u64));
 
@@ -50,7 +54,10 @@ fn measure_txlookup_stage(group: &mut BenchmarkGroup<WallTime>, tx: TestTransact
                 tokio::runtime::Runtime::new().unwrap().block_on(async {
                     let mut stage = stage.clone();
                     let mut db_tx = tx.inner();
+
+                    // Clear previous run
                     stage.unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+
                     db_tx.commit().unwrap();
                 });
             },
@@ -65,22 +72,20 @@ fn measure_txlookup_stage(group: &mut BenchmarkGroup<WallTime>, tx: TestTransact
 }
 
 fn prepare_blocks(num_blocks: usize) -> eyre::Result<TestTransaction> {
-    let path = "testdata/stages";
-    let file_path = Path::new("testdata/stages/blocks");
-    let bench_db_path = "/tmp/reth-benches-stages";
+    let file_path = Path::new(FILE_PATH);
 
     let blocks = if file_path.exists() {
-        serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(file_path)?))?
+        bincode::deserialize_from(std::io::BufReader::new(std::fs::File::open(file_path)?))?
     } else {
-        generate_blocks(num_blocks, path, file_path)?
+        generate_blocks(num_blocks, VECTORS_FOLDER, file_path)?
     };
 
     println!("\n## Preparing DB `{}`. \n", file_path.display());
 
     // Reset DB
-    let _ = std::fs::remove_dir_all(bench_db_path);
+    let _ = std::fs::remove_dir_all(BENCH_DB_PATH);
     let tx = TestTransaction {
-        tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, Path::new(bench_db_path))),
+        tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, Path::new(BENCH_DB_PATH))),
     };
 
     tx.insert_blocks(blocks.iter(), None)?;
@@ -105,7 +110,7 @@ fn generate_blocks(
     // many values unnecessarily.
     let block_header_strat = any_with::<Header>(<Header as Arbitrary>::Parameters::default());
     let ommers_strat =
-        proptest_vec(any_with::<Header>(<Header as Arbitrary>::Parameters::default()), 0..10);
+        proptest_vec(any_with::<Header>(<Header as Arbitrary>::Parameters::default()), 0..3);
     let body_strat = proptest_vec(
         any_with::<TransactionSigned>(<TransactionSigned as Arbitrary>::Parameters::default()),
         0..10,
@@ -133,11 +138,8 @@ fn generate_blocks(
         blocks.push(SealedBlock { header: header.seal(), ommers, body });
     }
 
-    serde_json::to_writer_pretty(
-        std::io::BufWriter::new(std::fs::File::create(file_path)?),
-        &blocks,
-    )
-    .unwrap();
+    bincode::serialize_into(std::io::BufWriter::new(std::fs::File::create(file_path)?), &blocks)
+        .unwrap();
 
     Ok(blocks)
 }
