@@ -41,6 +41,8 @@ use tracing::warn;
 ///
 /// Blocks are assumed to have populated transactions, so reading headers will also buffer
 /// transactions in memory for use in the bodies stage.
+///
+/// This reads the entire file into memory, so it is not suitable for large files.
 #[derive(Debug)]
 pub struct FileClient {
     /// The buffered headers retrieved when fetching new bodies.
@@ -89,7 +91,7 @@ impl FileClient {
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
-        // use with_capacity to make sure the buffer contains the entire file
+        // use with_capacity to make sure the internal buffer contains the entire file
         let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
 
         let mut block_num = 0;

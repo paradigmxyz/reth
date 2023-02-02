@@ -6,6 +6,18 @@ use reth_rlp::{Decodable, Encodable};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Codec for reading raw block bodies from a file.
+///
+/// If using with [`FramedRead`](tokio_util::codec::FramedRead), the user should make sure the
+/// framed reader has capacity for the entire block file. Otherwise, the decoder will return
+/// [`InputTooShort`](reth_rlp::DecodeError::InputTooShort), because RLP headers can only be
+/// decoded if the internal buffer is large enough to contain the entire block body.
+///
+/// Without ensuring the framed reader has capacity for the entire file, a block body is likely to
+/// fall across two read buffers, the decoder will not be able to decode the header, which will
+/// cause it to fail.
+///
+/// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
+/// the capacity of the framed reader to the size of the file.
 pub(crate) struct BlockFileCodec;
 
 impl Decoder for BlockFileCodec {
