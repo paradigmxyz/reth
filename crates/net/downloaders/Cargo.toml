@@ -30,6 +30,7 @@ thiserror = { version = "1", optional = true }
 reth-rlp = { path = "../../rlp", optional = true }
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 bytes = { version = "1", optional = true }
+tempfile = { version = "3.3", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
@@ -46,4 +47,4 @@ thiserror = "1"
 tempfile = "3.3"
 
 [features]
-test-utils = ["dep:reth-rlp", "dep:thiserror", "dep:tokio-util"]
+test-utils = ["dep:reth-rlp", "dep:thiserror", "dep:tokio-util", "dep:tempfile"]
