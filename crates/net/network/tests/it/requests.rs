@@ -115,7 +115,7 @@ async fn test_get_header() {
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok(), "{res:?}");
 
-        let headers = res.unwrap().1 .0;
+        let headers = res.unwrap().1;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0], header);
     }

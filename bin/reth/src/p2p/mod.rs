@@ -168,14 +168,14 @@ impl Command {
 
         let (_, response) = client.get_headers(request).await?.split();
 
-        if response.0.len() != 1 {
+        if response.len() != 1 {
             eyre::bail!(
                 "Invalid number of headers received. Expected: 1. Received: {}",
-                response.0.len()
+                response.len()
             )
         }
 
-        let header = response.0.into_iter().next().unwrap().seal();
+        let header = response.into_iter().next().unwrap().seal();
 
         let valid = match id {
             BlockHashOrNumber::Hash(hash) => header.hash() == hash,

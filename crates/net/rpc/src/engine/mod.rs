@@ -1,4 +1,4 @@
-use crate::result::rpc_err;
+use crate::result::{internal_rpc_err, rpc_err};
 use async_trait::async_trait;
 use jsonrpsee::core::{Error, RpcResult as Result};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -54,7 +54,7 @@ impl EngineApiServer for EngineApi {
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
     async fn new_payload_v2(&self, _payload: ExecutionPayload) -> Result<PayloadStatus> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
@@ -79,7 +79,7 @@ impl EngineApiServer for EngineApi {
         _fork_choice_state: ForkchoiceState,
         _payload_attributes: Option<PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
@@ -92,7 +92,7 @@ impl EngineApiServer for EngineApi {
 
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
     async fn get_payload_v2(&self, _payload_id: H64) -> Result<ExecutionPayload> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_exchangeTransitionConfigurationV1>

@@ -104,7 +104,7 @@ impl Stream for TestHeaderDownloader {
     }
 }
 
-type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send>>;
+type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send>>;
 
 struct TestDownload {
     client: Arc<TestHeadersClient>,
@@ -168,7 +168,7 @@ impl Stream for TestDownload {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
-                        resp.1 .0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
+                        resp.1.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
@@ -250,7 +250,7 @@ impl HeadersClient for TestHeadersClient {
             let mut lock = responses.lock().await;
             let len = lock.len().min(request.limit as usize);
             let resp = lock.drain(..len).collect();
-            let with_peer_id = WithPeerId::from((PeerId::default(), BlockHeaders(resp)));
+            let with_peer_id = WithPeerId::from((PeerId::default(), resp));
             Ok(with_peer_id)
         })
     }
@@ -279,14 +279,22 @@ impl Default for TestConsensus {
 }
 
 impl TestConsensus {
-    /// Get the failed validation flag
+    /// Get the failed validation flag.
     pub fn fail_validation(&self) -> bool {
         self.fail_validation.load(Ordering::SeqCst)
     }
 
-    /// Update the validation flag
+    /// Update the validation flag.
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst)
+    }
+
+    /// Update the forkchoice state.
+    pub fn notify_fork_choice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), SendError<ForkchoiceState>> {
+        self.channel.0.send(state)
     }
 }
 
@@ -302,13 +310,6 @@ impl StatusUpdater for TestStatusUpdater {
 impl Consensus for TestConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
-    }
-
-    fn notify_fork_choice_state(
-        &self,
-        state: ForkchoiceState,
-    ) -> Result<(), SendError<ForkchoiceState>> {
-        self.channel.0.send(state)
     }
 
     fn validate_header(
