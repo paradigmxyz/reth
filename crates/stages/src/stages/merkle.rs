@@ -36,13 +36,13 @@ pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
 /// - [`MerkleStage::Execution`]
 #[derive(Debug)]
 pub enum MerkleStage {
-    /// The execution portion of the hashing stage.
+    /// The execution portion of the merkle stage.
     Execution {
         /// The threshold for switching from incremental trie building
         /// of changes to whole rebuild. Num of transitions.
         clean_threshold: u64,
     },
-    /// The unwind portion of the hasing stage.
+    /// The unwind portion of the merkle stage.
     Unwind,
 
     #[cfg(test)]

@@ -54,7 +54,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
-        // AccountHashing table
+        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
+        // genesis accounts are not in changeset, along with their storages.
         if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
             tx.clear::<tables::HashedStorage>()?;
             tx.commit()?;

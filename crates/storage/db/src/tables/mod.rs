@@ -274,12 +274,12 @@ dupsort!(
 );
 
 table!(
-    /// Stores the current state of an [`Account`].
+    /// Stores the current state's Merkle Patricia Tree.
     ( AccountsTrie ) H256 | Vec<u8>
 );
 
 dupsort!(
-    /// Stores the current value of a storage key.
+    /// Stores the Merkle Patricia Trees of each [`Account`]'s storage.
     ( StoragesTrie ) H256 | [H256] StorageTrieEntry
 );
 
