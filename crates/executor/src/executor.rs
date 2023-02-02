@@ -61,6 +61,127 @@ where
 
         revm_wrap::fill_block_env(&mut self.evm.env.block, header, spec_id >= SpecId::MERGE);
     }
+
+    /// Commit change to database and return change diff that is used to update state and create
+    /// history index
+    ///
+    /// ChangeDiff consists of:
+    ///     address->AccountChangeSet (It contains old and new account info,storage wipe flag, and
+    /// old/new storage)     bytecode_hash->bytecodes mapping
+    ///
+    /// BTreeMap is used to have sorted values
+    fn commit_changes(
+        &mut self,
+        changes: hashbrown::HashMap<H160, RevmAccount>,
+    ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
+        let db = self.evm.db().expect("Db to not be moved.");
+
+        let mut change = BTreeMap::new();
+        let mut new_bytecodes = BTreeMap::new();
+        // iterate over all changed accounts
+        for (address, account) in changes {
+            if account.is_destroyed {
+                // get old account that we are destroying.
+                let db_account = match db.accounts.entry(address) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(_entry) => {
+                        panic!("Left panic to critically jumpout if happens, as every account should be hot loaded.");
+                    }
+                };
+                // Insert into `change` a old account and None for new account
+                // and mark storage to be mapped
+                change.insert(
+                    address,
+                    AccountChangeSet {
+                        account: AccountInfoChangeSet::Destroyed {
+                            old: to_reth_acc(&db_account.info),
+                        },
+                        storage: BTreeMap::new(),
+                        wipe_storage: true,
+                    },
+                );
+                // clear cached DB and mark account as not existing
+                db_account.storage.clear();
+                db_account.account_state = AccountState::NotExisting;
+                db_account.info = AccountInfo::default();
+
+                continue
+            } else {
+                // check if account code is new or old.
+                // does it exist inside cached contracts if it doesn't it is new bytecode that
+                // we are inserting inside `change`
+                if let Some(ref code) = account.info.code {
+                    if !code.is_empty() {
+                        match db.contracts.entry(account.info.code_hash) {
+                            Entry::Vacant(entry) => {
+                                entry.insert(code.clone());
+                                new_bytecodes.insert(H256(account.info.code_hash.0), code.clone());
+                            }
+                            Entry::Occupied(mut entry) => {
+                                entry.insert(code.clone());
+                            }
+                        }
+                    }
+                }
+
+                // get old account that is going to be overwritten or none if it does not exist
+                // and get new account that was just inserted. new account mut ref is used for
+                // inserting storage
+                let (account_info_changeset, new_account) = match db.accounts.entry(address) {
+                    Entry::Vacant(entry) => {
+                        let entry = entry.insert(Default::default());
+                        entry.info = account.info.clone();
+                        // account was not existing, so this means new account is created
+                        (AccountInfoChangeSet::Created { new: to_reth_acc(&entry.info) }, entry)
+                    }
+                    Entry::Occupied(entry) => {
+                        let entry = entry.into_mut();
+
+                        // account is present inside cache but is marked as NotExisting.
+                        let account_changeset =
+                            if matches!(entry.account_state, AccountState::NotExisting) {
+                                AccountInfoChangeSet::Created { new: to_reth_acc(&account.info) }
+                            } else if entry.info != account.info {
+                                AccountInfoChangeSet::Changed {
+                                    old: to_reth_acc(&entry.info),
+                                    new: to_reth_acc(&account.info),
+                                }
+                            } else {
+                                AccountInfoChangeSet::NoChange
+                            };
+                        entry.info = account.info.clone();
+                        (account_changeset, entry)
+                    }
+                };
+
+                let mut wipe_storage = false;
+
+                new_account.account_state = if account.storage_cleared {
+                    new_account.storage.clear();
+                    wipe_storage = true;
+                    AccountState::StorageCleared
+                } else {
+                    AccountState::Touched
+                };
+
+                // Insert storage.
+                let mut storage = BTreeMap::new();
+
+                // insert storage into new db account.
+                new_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
+                    storage.insert(key, (value.original_value(), value.present_value()));
+                    (key, value.present_value())
+                }));
+
+                // Insert into change.
+                change.insert(
+                    address,
+                    AccountChangeSet { account: account_info_changeset, storage, wipe_storage },
+                );
+            }
+        }
+        (change, new_bytecodes)
+    }
 }
 
 impl<'a, DB> BlockExecutor for Executor<'a, DB>
@@ -125,8 +246,7 @@ where
             cumulative_gas_used += gas_used;
 
             // commit state
-            let (changeset, new_bytecodes) =
-                commit_changes(self.evm.db().expect("Db to not be moved."), state);
+            let (changeset, new_bytecodes) = self.commit_changes(state);
 
             // Transform logs to reth format.
             let logs: Vec<Log> = logs.into_iter().map(into_reth_log).collect();
@@ -258,123 +378,6 @@ pub struct ExecutionResult {
     /// Block reward if present. It represent changeset for block reward slot in
     /// [tables::AccountChangeSet] .
     pub block_reward: Option<BTreeMap<Address, AccountInfoChangeSet>>,
-}
-
-/// Commit change to database and return change diff that is used to update state and create
-/// history index
-///
-/// ChangeDiff consists of:
-///     address->AccountChangeSet (It contains old and new account info,storage wipe flag, and
-/// old/new storage)     bytecode_hash->bytecodes mapping
-///
-/// BTreeMap is used to have sorted values
-pub fn commit_changes<DB: StateProvider>(
-    db: &mut SubState<DB>,
-    changes: hashbrown::HashMap<H160, RevmAccount>,
-) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
-    let mut change = BTreeMap::new();
-    let mut new_bytecodes = BTreeMap::new();
-    // iterate over all changed accounts
-    for (address, account) in changes {
-        if account.is_destroyed {
-            // get old account that we are destroying.
-            let db_account = match db.accounts.entry(address) {
-                Entry::Occupied(entry) => entry.into_mut(),
-                Entry::Vacant(_entry) => {
-                    panic!("Left panic to critically jumpout if happens, as every account should be hot loaded.");
-                }
-            };
-            // Insert into `change` a old account and None for new account
-            // and mark storage to be mapped
-            change.insert(
-                address,
-                AccountChangeSet {
-                    account: AccountInfoChangeSet::Destroyed { old: to_reth_acc(&db_account.info) },
-                    storage: BTreeMap::new(),
-                    wipe_storage: true,
-                },
-            );
-            // clear cached DB and mark account as not existing
-            db_account.storage.clear();
-            db_account.account_state = AccountState::NotExisting;
-            db_account.info = AccountInfo::default();
-
-            continue
-        } else {
-            // check if account code is new or old.
-            // does it exist inside cached contracts if it doesn't it is new bytecode that
-            // we are inserting inside `change`
-            if let Some(ref code) = account.info.code {
-                if !code.is_empty() {
-                    match db.contracts.entry(account.info.code_hash) {
-                        Entry::Vacant(entry) => {
-                            entry.insert(code.clone());
-                            new_bytecodes.insert(H256(account.info.code_hash.0), code.clone());
-                        }
-                        Entry::Occupied(mut entry) => {
-                            entry.insert(code.clone());
-                        }
-                    }
-                }
-            }
-
-            // get old account that is going to be overwritten or none if it does not exist
-            // and get new account that was just inserted. new account mut ref is used for
-            // inserting storage
-            let (account_info_changeset, new_account) = match db.accounts.entry(address) {
-                Entry::Vacant(entry) => {
-                    let entry = entry.insert(Default::default());
-                    entry.info = account.info.clone();
-                    // account was not existing, so this means new account is created
-                    (AccountInfoChangeSet::Created { new: to_reth_acc(&entry.info) }, entry)
-                }
-                Entry::Occupied(entry) => {
-                    let entry = entry.into_mut();
-
-                    // account is present inside cache but is marked as NotExisting.
-                    let account_changeset =
-                        if matches!(entry.account_state, AccountState::NotExisting) {
-                            AccountInfoChangeSet::Created { new: to_reth_acc(&account.info) }
-                        } else if entry.info != account.info {
-                            AccountInfoChangeSet::Changed {
-                                old: to_reth_acc(&entry.info),
-                                new: to_reth_acc(&account.info),
-                            }
-                        } else {
-                            AccountInfoChangeSet::NoChange
-                        };
-                    entry.info = account.info.clone();
-                    (account_changeset, entry)
-                }
-            };
-
-            let mut wipe_storage = false;
-
-            new_account.account_state = if account.storage_cleared {
-                new_account.storage.clear();
-                wipe_storage = true;
-                AccountState::StorageCleared
-            } else {
-                AccountState::Touched
-            };
-
-            // Insert storage.
-            let mut storage = BTreeMap::new();
-
-            // insert storage into new db account.
-            new_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                storage.insert(key, (value.original_value(), value.present_value()));
-                (key, value.present_value())
-            }));
-
-            // Insert into change.
-            change.insert(
-                address,
-                AccountChangeSet { account: account_info_changeset, storage, wipe_storage },
-            );
-        }
-    }
-    (change, new_bytecodes)
 }
 
 /// After transaction is executed this structure contain
