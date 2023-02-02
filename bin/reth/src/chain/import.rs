@@ -1,5 +1,5 @@
 use crate::{
-    dirs::{ConfigPath, DbPath, ImportPath, PlatformPath},
+    dirs::{ConfigPath, DbPath, PlatformPath},
     node::handle_events,
     utils::chainspec::chain_spec_value_parser,
 };
@@ -58,7 +58,7 @@ pub struct ImportCommand {
 
     /// The file to import.
     #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment, default_value_t)]
-    path: PlatformPath<ImportPath>,
+    path: PlatformPath<ConfigPath>,
 }
 
 impl ImportCommand {
