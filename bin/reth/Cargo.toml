@@ -19,7 +19,7 @@ reth-transaction-pool = { path = "../../crates/transaction-pool" }
 reth-consensus = { path = "../../crates/consensus" }
 reth-executor = { path = "../../crates/executor" }
 # reth-rpc = {path = "../../crates/net/rpc"}
-reth-rlp = { path = "../../crates/common/rlp" }
+reth-rlp = { path = "../../crates/rlp" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-network-api = {path = "../../crates/net/network-api" }
 reth-downloaders = {path = "../../crates/net/downloaders" }

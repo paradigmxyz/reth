@@ -11,7 +11,7 @@ Reth RPC types
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-reth-rlp = { path = "../../common/rlp" }
+reth-rlp = { path = "../../rlp" }
 reth-network-api = { path = "../network-api"}
 
 # misc

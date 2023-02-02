@@ -18,7 +18,7 @@ normal = [
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-executor = { path = "../executor" }
-reth-rlp = { path = "../common/rlp" }
+reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 

@@ -25,8 +25,8 @@ reth-discv4 = { path = "../discv4" }
 reth-dns-discovery = { path = "../dns" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-ecies = { path = "../ecies" }
-reth-rlp = { path = "../../common/rlp" }
-reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-rlp = { path = "../../rlp" }
+reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-provider = { path = "../../storage/provider"}
