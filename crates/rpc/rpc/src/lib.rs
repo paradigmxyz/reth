@@ -21,7 +21,7 @@ mod web3;
 
 pub use admin::AdminApi;
 pub use debug::DebugApi;
-pub use engine::{EngineApi, JwtError, JwtSecret, JwtLayer};
+pub use engine::{EngineApi, JwtError, JwtLayer, JwtSecret};
 pub use eth::{EthApi, EthApiSpec, EthPubSub};
 pub use net::NetApi;
 pub use trace::TraceApi;
