@@ -579,6 +579,7 @@ impl PeersManager {
     fn fill_outbound_slots(&mut self) {
         // as long as there a slots available try to fill them with the best peers
         while self.connection_info.has_out_capacity() {
+            let current = Instant::now()
             let action = {
                 let (peer_id, peer) = match self.best_unconnected() {
                     Some(peer) => peer,
@@ -594,6 +595,7 @@ impl PeersManager {
 
                 peer.state = PeerConnectionState::Out;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr }
+                Peer.connection_time = Peer.connection_time + current.elapsed()
             };
 
             self.connection_info.inc_out();
@@ -734,6 +736,8 @@ pub struct Peer {
     kind: PeerKind,
     /// Counts number of times the peer was backed off   
     backoff_counter: u32,
+    ///total time for the connection in active state in milliseconds
+    connection_time: Duration,
 }
 
 // === impl Peer ===
@@ -756,6 +760,7 @@ impl Peer {
             remove_after_disconnect: false,
             kind: Default::default(),
             backoff_counter: 0,
+            connection_time
         }
     }
 
