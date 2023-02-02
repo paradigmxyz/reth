@@ -6,10 +6,10 @@ use std::fmt::Debug;
 use tracing::*;
 
 /// The [`StageId`] of the merkle hashing execution stage.
-pub const MERKLE_EXECUTION: StageId = StageId("MerkleExecute");
+pub const MERKLE_EXECUTION: StageId = StageId("MerkleExecuteStage");
 
 /// The [`StageId`] of the merkle hashing unwind stage.
-pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
+pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwindStage");
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
