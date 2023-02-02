@@ -49,6 +49,18 @@ pub enum MerkleStage {
     Both { clean_threshold: u64 },
 }
 
+impl MerkleStage {
+    /// Stage default for the Execution variant.
+    pub fn default_execution() -> Self {
+        Self::Execution { clean_threshold: 5_000 }
+    }
+
+    /// Stage default for the Unwind variant.
+    pub fn default_unwind() -> Self {
+        Self::Unwind
+    }
+}
+
 #[async_trait::async_trait]
 impl<DB: Database> Stage<DB> for MerkleStage {
     /// Return the id of the stage
