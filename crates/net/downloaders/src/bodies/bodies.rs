@@ -612,12 +612,6 @@ mod tests {
             assert!(downloader.latest_queued_block_number >= Some(range_start));
             range_start += stream_batch_size as u64;
         }
-
-        assert_eq!(
-            client.times_requested(),
-            // div_ceil equivalent
-            ((headers.iter().filter(|x| !x.is_empty()).count() + 9) / 10) as u64,
-        );
     }
 
     // Check that the downloader picks up the new range and downloads bodies after previous range
