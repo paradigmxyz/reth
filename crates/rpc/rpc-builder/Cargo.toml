@@ -9,7 +9,7 @@ description = "Helpers for configuring RPC"
 [dependencies]
 # reth
 reth-ipc = { path = "../ipc" }
-reth-network-api = { path = "../network-api" }
+reth-network-api = { path = "../../net/network-api" }
 reth-provider = { path = "../../storage/provider" }
 reth-rpc = { path = "../rpc" }
 reth-transaction-pool = { path = "../../transaction-pool" }

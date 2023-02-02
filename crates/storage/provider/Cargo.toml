@@ -12,7 +12,7 @@ description = "Reth storage provider."
 reth-codecs = { path = "../codecs" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
-reth-rpc-types = { path = "../../net/rpc-types" }
+reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-db = { path = "../db" }
 
 # codecs
