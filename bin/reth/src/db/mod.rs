@@ -175,6 +175,7 @@ impl Command {
                     BlockTransitionIndex,
                     TxTransitionIndex,
                     SyncStage,
+                    TxHashNumber,
                     Transactions
                 ]);
             }

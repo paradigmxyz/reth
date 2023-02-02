@@ -13,36 +13,54 @@ use proptest::{
 };
 use reth_db::{
     cursor::{DbDupCursorRO, DbDupCursorRW},
-    mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
+    database::Database,
+    mdbx::{test_utils::create_test_db_with_path, Env, EnvKind, WriteMap},
 };
 use reth_primitives::{Header, SealedBlock, TransactionSigned};
 use reth_stages::{
-    stages::TransactionLookupStage, test_utils::TestTransaction, Stage, StageSetBuilder,
+    stages::TransactionLookupStage, test_utils::TestTransaction, ExecInput, Stage, StageId,
+    StageSetBuilder, UnwindInput,
 };
 use std::{path::Path, sync::Arc, time::Instant};
+
 criterion_group!(benches, stages);
 criterion_main!(benches);
 
+const NUM_BLOCKS: usize = 2000;
+
 pub fn stages(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(200));
-    group.warm_up_time(std::time::Duration::from_millis(200));
+    group.measurement_time(std::time::Duration::from_millis(2000));
+    group.warm_up_time(std::time::Duration::from_millis(2000));
 
-    let tx = prepare_blocks(100).unwrap();
+    let tx = prepare_blocks(NUM_BLOCKS).unwrap();
 
-    measure_stage::<TransactionLookupStage>(&mut group, tx);
+    measure_txlookup_stage(&mut group, tx);
 }
 
-fn measure_stage<T>(group: &mut BenchmarkGroup<WallTime>, tx: TestTransaction) {
-    group.bench_function(format!("TransactionLookup"), move |b| {
-        b.to_async(FuturesExecutor).iter(|| async {
-            {
-                let mut lookup_stage = TransactionLookupStage::new(0);
+fn measure_txlookup_stage(group: &mut BenchmarkGroup<WallTime>, tx: TestTransaction) {
+    let stage = TransactionLookupStage::new(NUM_BLOCKS as u64);
+    let mut input = ExecInput::default();
+    input.previous_stage = Some((StageId("Another"), NUM_BLOCKS as u64));
+
+    group.bench_function(stringify!(TransactionLookupStage), move |b| {
+        b.to_async(FuturesExecutor).iter_with_setup(
+            || {
+                // criterion setup does not support async, so we have to use our own runtime
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    let mut stage = stage.clone();
+                    let mut db_tx = tx.inner();
+                    stage.unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+                    db_tx.commit().unwrap();
+                });
+            },
+            |_| async {
+                let mut stage = stage.clone();
                 let mut db_tx = tx.inner();
-                lookup_stage.execute(&mut db_tx, Default::default()).await.unwrap();
+                stage.execute(&mut db_tx, input.clone()).await.unwrap();
                 db_tx.commit().unwrap();
-            }
-        })
+            },
+        )
     });
 }
 
