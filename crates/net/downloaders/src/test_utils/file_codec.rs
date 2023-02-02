@@ -1,10 +1,9 @@
 //! Codec for reading raw block bodies from a file.
+use super::FileClientError;
 use bytes::{Buf, BytesMut};
 use reth_eth_wire::RawBlockBody;
 use reth_rlp::{Decodable, Encodable};
 use tokio_util::codec::{Decoder, Encoder};
-
-use super::FileClientError;
 
 /// Codec for reading raw block bodies from a file.
 pub(crate) struct BlockFileCodec;

@@ -1,13 +1,4 @@
-use std::{
-    collections::HashMap,
-    iter::zip,
-    path::Path,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
-
+use super::file_codec::BlockFileCodec;
 use reth_eth_wire::{BlockBody, RawBlockBody};
 use reth_interfaces::{
     p2p::{
@@ -23,6 +14,15 @@ use reth_primitives::{
     Block, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, H256,
 };
 use reth_rlp::{Decodable, Header as RlpHeader};
+use std::{
+    collections::HashMap,
+    iter::zip,
+    path::Path,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use thiserror::Error;
 use tokio::{
     fs::File,
@@ -31,8 +31,6 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 use tracing::warn;
-
-use super::file_codec::BlockFileCodec;
 
 /// Front-end API for fetching chain data from a file.
 ///
@@ -78,18 +76,20 @@ impl FileClient {
     }
 
     /// Initialize the [`FileClient`](FileClient) with a file directly.
-    pub(crate) async fn from_file(file: File) -> Result<Self, FileClientError> {
+    pub(crate) async fn from_file(mut file: File) -> Result<Self, FileClientError> {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;
         let file_len = metadata.len();
 
-        let mut reader = BufReader::new(file);
+        // read the entire file into memory
+        let mut reader = vec![];
+        file.read_to_end(&mut reader);
 
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
-        let mut stream = FramedRead::new(reader, BlockFileCodec);
+        let mut stream = FramedRead::new(&reader[..], BlockFileCodec);
 
         let mut block_num = 0;
         while let Some(block_res) = stream.next().await {
