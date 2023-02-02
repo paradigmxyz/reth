@@ -83,13 +83,14 @@ impl FileClient {
 
         // read the entire file into memory
         let mut reader = vec![];
-        file.read_to_end(&mut reader);
+        file.read_to_end(&mut reader).await.unwrap();
 
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
-        let mut stream = FramedRead::new(&reader[..], BlockFileCodec);
+        // use with_capacity to make sure the buffer contains the entire file
+        let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
 
         let mut block_num = 0;
         while let Some(block_res) = stream.next().await {
@@ -307,8 +308,8 @@ mod tests {
         let (headers, mut bodies) = generate_bodies(0..20);
         let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies.clone());
 
-        let mut file = tempfile::tempfile().unwrap();
-        let mut writer = FramedWrite::new(BufWriter::new(file.into()), BlockFileCodec);
+        let mut file: File = tempfile::tempfile().unwrap().into();
+        let mut writer = FramedWrite::new(BufWriter::new(file), BlockFileCodec);
 
         // rlp encode one after the other
         for block in raw_block_bodies {
@@ -346,8 +347,8 @@ mod tests {
         let mut bodies_cloned = bodies.clone();
         let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies.clone());
 
-        let mut file = tempfile::tempfile().unwrap();
-        let mut writer = FramedWrite::new(BufWriter::new(file.into()), BlockFileCodec);
+        let mut file: File = tempfile::tempfile().unwrap().into();
+        let mut writer = FramedWrite::new(file, BlockFileCodec);
 
         // rlp encode one after the other
         for block in raw_block_bodies {
@@ -355,7 +356,7 @@ mod tests {
         }
 
         // get the file back
-        let mut file: File = writer.into_inner().into_inner();
+        let mut file: File = writer.into_inner();
         file.seek(SeekFrom::Start(0)).await.unwrap();
 
         // now try to read them back
