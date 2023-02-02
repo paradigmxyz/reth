@@ -7,11 +7,6 @@
 
 //! Reth executor executes transaction in block of data.
 
-use async_trait::async_trait;
-use execution_result::ExecutionResult;
-use reth_interfaces::executor::Error;
-use reth_primitives::{Address, Block};
-
 pub mod config;
 pub mod eth_dao_fork;
 
@@ -21,16 +16,3 @@ pub mod execution_result;
 pub mod executor;
 /// Wrapper around revm database and types
 pub mod revm_wrap;
-
-/// An executor capable of executing a block.
-#[async_trait]
-pub trait BlockExecutor {
-    /// Execute a block.
-    ///
-    /// The number of `senders` should be equal to the number of transactions in the block.
-    fn execute(
-        &mut self,
-        block: &Block,
-        senders: Option<Vec<Address>>,
-    ) -> Result<ExecutionResult, Error>;
-}

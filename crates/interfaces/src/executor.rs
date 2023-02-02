@@ -1,5 +1,15 @@
-use reth_primitives::{Bloom, H256};
+use async_trait::async_trait;
+use reth_primitives::{Address, Block, Bloom, H256};
 use thiserror::Error;
+
+/// An executor capable of executing a block.
+#[async_trait]
+pub trait BlockExecutor<T> {
+    /// Execute a block.
+    ///
+    /// The number of `senders` should be equal to the number of transactions in the block.
+    fn execute(&mut self, block: &Block, senders: Option<Vec<Address>>) -> Result<T, Error>;
+}
 
 /// BlockExecutor Errors
 #[allow(missing_docs)]

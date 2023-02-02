@@ -4,10 +4,9 @@ use crate::{
         AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
     },
     revm_wrap::{self, into_reth_log, to_reth_acc, SubState},
-    BlockExecutor,
 };
 use hashbrown::hash_map::Entry;
-use reth_interfaces::executor::Error;
+use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
     TransactionSigned, H160, H256, U256,
@@ -319,7 +318,7 @@ where
     }
 }
 
-impl<'a, DB> BlockExecutor for Executor<'a, DB>
+impl<'a, DB> BlockExecutor<ExecutionResult> for Executor<'a, DB>
 where
     DB: StateProvider,
 {
