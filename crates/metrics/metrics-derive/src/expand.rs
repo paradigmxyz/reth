@@ -66,6 +66,8 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
             quote! {
                 impl Default for #ty {
                     fn default() -> Self {
+                        #ty::describe();
+
                         Self {
                             #(#defaults)*
                         }
@@ -127,6 +129,8 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
                 impl #ty {
                     /// Create new instance of metrics with provided scope.
                     #vis fn new(scope: &str) -> Self {
+                        #ty::describe(scope);
+
                         Self {
                             #(#defaults)*
                         }
@@ -147,7 +151,6 @@ pub(crate) fn derive(node: &DeriveInput) -> Result<proc_macro2::TokenStream> {
             }
         }
     };
-
     Ok(quote! {
         #register_and_describe
 
