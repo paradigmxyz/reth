@@ -223,7 +223,7 @@ mod tests {
             test_utils::{create_raw_bodies, insert_headers, zip_blocks},
         },
         headers::{reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::child_header},
-        test_utils::generate_bodies,
+        test_utils::{generate_bodies, generate_bodies_file},
     };
     use assert_matches::assert_matches;
     use futures::SinkExt;
@@ -307,20 +307,7 @@ mod tests {
     async fn test_download_headers_from_file() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
-        let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies.clone());
-
-        let mut file: File = tempfile::tempfile().unwrap().into();
-        let mut writer = FramedWrite::new(BufWriter::new(file), BlockFileCodec);
-
-        // rlp encode one after the other
-        for block in raw_block_bodies {
-            writer.send(block).await.unwrap();
-        }
-
-        // get the file back
-        let mut file: File = writer.into_inner().into_inner();
-        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let (file, headers, mut bodies) = generate_bodies_file(0..20).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
@@ -345,21 +332,7 @@ mod tests {
     async fn test_download_bodies_from_file() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
-        let mut bodies_cloned = bodies.clone();
-        let raw_block_bodies = create_raw_bodies(headers.clone().iter(), &mut bodies.clone());
-
-        let mut file: File = tempfile::tempfile().unwrap().into();
-        let mut writer = FramedWrite::new(file, BlockFileCodec);
-
-        // rlp encode one after the other
-        for block in raw_block_bodies {
-            writer.send(block).await.unwrap();
-        }
-
-        // get the file back
-        let mut file: File = writer.into_inner();
-        file.seek(SeekFrom::Start(0)).await.unwrap();
+        let (file, headers, mut bodies) = generate_bodies_file(0..20).await;
 
         // now try to read them back
         let client = Arc::new(FileClient::from_file(file).await.unwrap());
