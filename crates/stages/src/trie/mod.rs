@@ -12,7 +12,10 @@ use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
     H256, KECCAK_EMPTY, U256,
 };
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable, EMPTY_STRING_CODE};
+use reth_rlp::{
+    encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
+    EMPTY_STRING_CODE,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
@@ -241,7 +244,7 @@ impl DBTrieLoader {
         let mut current = storage_cursor.seek_by_key_subkey(address, H256::zero())?;
 
         while let Some(StorageEntry { key: storage_key, value }) = current {
-            let out = encode_fixed_size_value(&value);
+            let out = encode_fixed_size(&value).to_vec();
             trie.insert(storage_key.to_vec(), out)?;
             current = storage_cursor.next_dup()?.map(|(_, v)| v);
         }
@@ -309,7 +312,7 @@ impl DBTrieLoader {
             if let Some(StorageEntry { value, .. }) =
                 storage_cursor.seek_by_key_subkey(address, key)?
             {
-                let out = encode_fixed_size_value(&value);
+                let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes().to_vec(), out)?;
             } else {
                 trie.remove(key.as_bytes())?;
@@ -357,12 +360,6 @@ impl DBTrieLoader {
 
         Ok(hashed_changes)
     }
-}
-
-fn encode_fixed_size_value(value: &U256) -> Vec<u8> {
-    let mut out = Vec::new();
-    Encodable::encode(&value.to_be_bytes::<{ U256::BYTES }>(), &mut out);
-    out
 }
 
 #[cfg(test)]
@@ -454,7 +451,7 @@ mod tests {
             .unwrap();
         }
         let encoded_storage = storage.iter().map(|(k, v)| {
-            let out = encode_fixed_size_value(v);
+            let out = encode_fixed_size(v).to_vec();
             (k, out)
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
@@ -495,7 +492,7 @@ mod tests {
         let mut out = Vec::new();
 
         let encoded_storage = storage.iter().map(|(k, v)| {
-            let out = encode_fixed_size_value(v);
+            let out = encode_fixed_size(v).to_vec();
             (k, out)
         });
 
@@ -599,7 +596,7 @@ mod tests {
                 let storage_root = if account.has_bytecode() {
                     let encoded_storage = storage.into_iter().map(|StorageEntry { key, value }| {
                         let hashed_key = keccak256(key);
-                        let out = encode_fixed_size_value(&value);
+                        let out = encode_fixed_size(&value).to_vec();
                         tx.put::<tables::HashedStorage>(
                             hashed_address,
                             StorageEntry { key: hashed_key, value },

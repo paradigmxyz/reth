@@ -313,6 +313,7 @@ mod ethereum_types_support {
 
     fixed_revm_uint_impl!(RU128, 16);
     fixed_revm_uint_impl!(RU256, 32);
+    impl_max_encoded_len!(RU256, { length_of_length(32) + 32 });
 }
 
 macro_rules! slice_impl {
