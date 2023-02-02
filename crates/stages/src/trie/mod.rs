@@ -78,7 +78,7 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
     }
 
     /// Instantiates a new Database for the accounts trie, with an existing root
-    fn new_with_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
+    fn from_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
             return Self::new(tx)
         }
@@ -146,11 +146,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
     }
 
     /// Instantiates a new Database for the storage trie, with an existing root
-    fn new_with_root(
-        tx: &'tx Transaction<'itx, DB>,
-        key: H256,
-        root: H256,
-    ) -> Result<Self, TrieError> {
+    fn from_root(tx: &'tx Transaction<'itx, DB>, key: H256, root: H256) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
             return Self::new(tx, key)
         }
@@ -266,7 +262,7 @@ impl DBTrieLoader {
 
         let changed_accounts = self.gather_changes(tx, tid_range)?;
 
-        let db = Arc::new(HashDatabase::new_with_root(tx, root)?);
+        let db = Arc::new(HashDatabase::from_root(tx, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -302,7 +298,7 @@ impl DBTrieLoader {
         address: H256,
         changed_storages: BTreeSet<H256>,
     ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::new_with_root(tx, address, root)?);
+        let db = Arc::new(DupHashDatabase::from_root(tx, address, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
