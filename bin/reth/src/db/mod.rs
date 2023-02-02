@@ -44,6 +44,8 @@ pub enum Subcommands {
     Stats,
     /// Lists the contents of a table
     List(ListArgs),
+    /// Gets the specific content of a table
+    Get(GetArgs),
     /// Seeds the database with random blocks on top of each other
     Seed {
         /// How many blocks to generate
@@ -53,6 +55,17 @@ pub enum Subcommands {
     /// Deletes all database entries
     Drop,
 }
+
+/// The arguments for the `reth db get` command
+#[derive(Parser, Debug)]
+pub struct GetArgs {
+    /// The table name
+    table: String,
+    /// The index of the content
+    #[arg(long, short)]
+    idx: usize,
+}
+
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db list` command
@@ -178,6 +191,31 @@ impl Command {
                     Transactions
                 ]);
             }
+            Subcommands::Get(args) =>  {
+                tool.db.view(|tx| {
+                    let table_db = tx.inner.open_db(Some(&args.table)).wrap_err("Could not open db.")?;
+                    
+                    // Check entries number
+                    let stats = tx.inner.db_stat(&table_db).wrap_err(format!("Could not find table: {}", args.table))?;
+                    let total_entries = stats.entries() - 1;
+                    if args.idx > total_entries {
+                        error!(
+                            target: "ret::cli",
+                            "Index {idx} is greater than last entry index ({last_idx}) for table {table}",
+                            idx = args.idx,
+                            last_idx = total_entries,
+                            table = args.table
+                        );
+                        Ok::<(), eyre::Report>(())
+                    } else {
+                        // Get data
+                        //tool.get(args.idx);
+                        todo!();
+                    }
+                })??;
+
+                todo!();
+            }
             Subcommands::Drop => {
                 tool.drop(&self.db)?;
             }
@@ -230,6 +268,15 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         data.into_iter()
             .collect::<Result<BTreeMap<T::Key, T::Value>, _>>()
             .map_err(|e| eyre::eyre!(e))
+    }
+
+    fn get<T:Table>(&mut self, idx: usize) {
+        let data = self.db.view(|tx| {
+            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
+
+            //cursor.seek_exact()
+        });
+        todo!()
     }
 
     fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
