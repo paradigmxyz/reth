@@ -68,6 +68,8 @@ pub struct Header {
     pub timestamp: U256,
     /// Difficulty
     pub difficulty: U256,
+    /// Mix Hash
+    pub mix_hash: H256,
     /// Nonce
     pub nonce: Option<H64>,
     /// Size in bytes
