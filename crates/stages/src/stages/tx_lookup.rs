@@ -55,7 +55,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
         let mut cursor_bodies = tx.cursor_read::<tables::BlockBodies>()?;
-        let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut cursor_tx = tx.cursor_write::<tables::Transactions>()?;
         let start_key = tx.get_block_numhash(start_block)?;
 
         // Walk over block bodies within a specified range.
@@ -66,14 +66,35 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 .unwrap_or_default()
         });
 
-        // Collect tranasctions for each body and insert the reverse lookup for hash -> tx_id.
+        // Collect transactions for each body
+        let mut tx_list = vec![];
         for body_entry in bodies {
             let (_, body) = body_entry?;
-            let transactions = tx_cursor.walk(body.start_tx_id)?.take(body.tx_count as usize);
+            let transactions = cursor_tx.walk(body.start_tx_id)?.take(body.tx_count as usize);
 
             for tx_entry in transactions {
                 let (id, transaction) = tx_entry?;
-                tx.put::<tables::TxHashNumber>(transaction.hash(), id)?;
+                tx_list.push((transaction.hash(), id));
+            }
+        }
+
+        let mut cursor_txhash = tx.cursor_write::<tables::TxHashNumber>()?;
+
+        // If the last element is smaller than our first, then we can just append into the DB.
+        // This probably only ever happens during sync, on the first table insertion.
+        let last = cursor_txhash.last()?;
+        let mut append = last.is_none();
+        if let (false, Some((last_txhash, _))) = (tx_list.is_empty(), last) {
+            append = last_txhash < tx_list[0].0;
+        }
+
+        // Sort before inserting the reverse lookup for hash -> tx_id.
+        tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
+        for (tx_hash, id) in tx_list {
+            if append {
+                cursor_txhash.append(tx_hash, id)?;
+            } else {
+                cursor_txhash.insert(tx_hash, id)?;
             }
         }
 
