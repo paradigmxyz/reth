@@ -27,7 +27,7 @@ tracing = "0.1.37"
 metrics = "0.20.1"
 
 thiserror = { version = "1", optional = true }
-reth-rlp = { path = "../../common/rlp", optional = true }
+reth-rlp = { path = "../../rlp", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
@@ -36,7 +36,7 @@ reth-tracing = { path = "../../tracing" }
 
 assert_matches = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-reth-rlp = { path = "../../common/rlp" }
+reth-rlp = { path = "../../rlp" }
 
 thiserror = "1"
 tempfile = "3.3"

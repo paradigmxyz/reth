@@ -11,7 +11,7 @@ description = "Support for EIP-1459 Node Discovery via DNS"
 # reth
 reth-primitives = { path = "../../primitives" }
 reth-net-common = { path = "../common" }
-reth-rlp = { path = "../../common/rlp" }
+reth-rlp = { path = "../../rlp" }
 
 # ethereum
 secp256k1 = { version = "0.24", features = [
