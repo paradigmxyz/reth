@@ -38,6 +38,10 @@ where
         Executor { chain_spec, evm }
     }
 
+    fn db(&mut self) -> &mut SubState<DB> {
+        self.evm.db().expect("db to not be moved")
+    }
+
     fn recover_signers(
         &self,
         body: &[TransactionSigned],
@@ -76,7 +80,7 @@ where
         &mut self,
         changes: hashbrown::HashMap<H160, RevmAccount>,
     ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
-        let db = self.evm.db().expect("Db to not be moved.");
+        let db = self.db();
 
         let mut change = BTreeMap::new();
         let mut new_bytecodes = BTreeMap::new();
@@ -225,7 +229,7 @@ where
                 reward + (reward >> 5) * ommers.len() as u128;
 
             //
-            let db = self.evm.db().expect("Db to not be moved.");
+            let db = self.db();
 
             // create changesets for beneficiaries rewards (Main block and ommers);
             reward_beneficiaries
@@ -279,8 +283,10 @@ where
 
     /// Irregular state change at Ethereum DAO hardfork
     pub fn dao_fork_changeset(&mut self) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
-        let db = self.evm.db().expect("Db to not be moved.");
+        let db = self.db();
+
         let mut drained_balance = U256::ZERO;
+
         // drain all accounts ether
         let mut changesets = crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS
             .iter()
@@ -418,10 +424,9 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    let transaction_change_set = execute(block, signers, chain_spec, db)?;
+    let execution_result = execute(block, signers, chain_spec, db)?;
 
-    let receipts_iter =
-        transaction_change_set.changesets.iter().map(|changeset| &changeset.receipt);
+    let receipts_iter = execution_result.changesets.iter().map(|changeset| &changeset.receipt);
 
     if Some(block.header.number) >= chain_spec.fork_block(Hardfork::Byzantium) {
         verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
@@ -431,7 +436,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
     // This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
 
-    Ok(transaction_change_set)
+    Ok(execution_result)
 }
 
 /// Verify receipts
