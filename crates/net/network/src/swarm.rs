@@ -9,7 +9,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    Status,
+    DisconnectReason, Status, UnauthedP2PStream,
 };
 use reth_primitives::PeerId;
 use reth_provider::BlockProvider;
@@ -20,6 +20,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use tokio_util::codec::{Decoder, LengthDelimitedCodec};
 use tracing::{trace, warn};
 
 /// Contains the connectivity related state of the network.
@@ -199,9 +200,16 @@ where
                         }
                         InboundConnectionError::ExceedsLimit(limit) => {
                             // We currently don't have additional capacity to establish a session
-                            // from an incoming connection, so we drop
-                            // the connection.
-                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                            // from an incoming connection, so we send a disconnect message with
+                            // TooManyPeers reason.
+                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
+
+                            tokio::task::spawn(async move {
+                                let sink = LengthDelimitedCodec::default().framed(stream);
+                                let mut stream = UnauthedP2PStream::new(sink);
+                                let _ =
+                                    stream.send_disconnect(DisconnectReason::TooManyPeers).await;
+                            });
                         }
                     }
                     return None
