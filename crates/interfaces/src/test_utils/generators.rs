@@ -182,6 +182,19 @@ pub fn random_eoa_account_range(acc_range: &mut std::ops::Range<u64>) -> Vec<(Ad
     accounts
 }
 
+/// Generate random Contract Accounts
+pub fn random_contract_account_range(
+    acc_range: &mut std::ops::Range<u64>,
+) -> Vec<(Address, Account)> {
+    let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
+    for _ in acc_range {
+        let (address, eoa_account) = random_eoa_account();
+        let account = Account { bytecode_hash: Some(H256::random()), ..eoa_account };
+        accounts.push((address, account))
+    }
+    accounts
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;

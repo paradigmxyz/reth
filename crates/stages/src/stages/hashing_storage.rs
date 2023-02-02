@@ -222,16 +222,16 @@ mod tests {
         mdbx::{tx::Tx, WriteMap, RW},
         models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
     };
-    use reth_interfaces::test_utils::generators::random_block_range;
-    use reth_primitives::{
-        SealedBlock, StorageEntry, Transaction, TransactionKind, TxLegacy, H256, U256,
+    use reth_interfaces::test_utils::generators::{
+        random_block_range, random_contract_account_range,
     };
+    use reth_primitives::{SealedBlock, StorageEntry, H256, U256};
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 
     /// Execute with low clean threshold so as to hash whole storage
     #[tokio::test]
-    async fn execute_clean() {
+    async fn execute_clean_storage_hashing() {
         let (previous_stage, stage_progress) = (500, 100);
 
         // Set up the runner
@@ -294,6 +294,9 @@ mod tests {
             let stage_progress = input.stage_progress.unwrap_or_default();
             let end = input.previous_stage_progress() + 1;
 
+            let n_accounts = 31;
+            let mut accounts = random_contract_account_range(&mut (0..n_accounts));
+
             let blocks = random_block_range(stage_progress..end, H256::zero(), 0..3);
 
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
@@ -317,19 +320,18 @@ mod tests {
                         tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
                         tx_id += 1;
                         transition_id += 1;
-                        let (to, value) = match transaction.transaction {
-                            Transaction::Legacy(TxLegacy {
-                                to: TransactionKind::Call(to),
-                                value,
-                                ..
-                            }) => (to, value),
-                            _ => unreachable!(),
+
+                        let (addr, _) = accounts
+                            .get_mut(rand::random::<usize>() % n_accounts as usize)
+                            .unwrap();
+
+                        let new_entry = StorageEntry {
+                            key: keccak256([rand::random::<u8>()]),
+                            value: U256::from(rand::random::<u8>() % 30 + 1),
                         };
-                        let new_entry =
-                            StorageEntry { key: keccak256("transfers"), value: U256::from(value) };
                         self.insert_storage_entry(
                             tx,
-                            (transition_id, to).into(),
+                            (transition_id, *addr).into(),
                             new_entry,
                             progress.header.number == stage_progress,
                         )
@@ -433,15 +435,21 @@ mod tests {
                 })
                 .unwrap_or(StorageEntry { key: entry.key, value: U256::from(0) });
             if hash {
-                tx.cursor_dup_write::<tables::HashedStorage>()?.append_dup(
-                    keccak256(tid_address.address()),
+                let hashed_address = keccak256(tid_address.address());
+                tx.cursor_dup_write::<tables::HashedStorage>()?
+                    .seek_by_key_subkey(hashed_address, entry.key)?
+                    .map(|e| {
+                        storage_cursor.delete_current().expect("failed to delete entry");
+                        e
+                    });
+                tx.put::<tables::HashedStorage>(
+                    hashed_address,
                     StorageEntry { key: keccak256(entry.key), value: entry.value },
                 )?;
             }
-            storage_cursor.append_dup(tid_address.address(), entry)?;
+            tx.put::<tables::PlainStorageState>(tid_address.address(), entry)?;
 
-            tx.cursor_dup_write::<tables::StorageChangeSet>()?
-                .append_dup(tid_address, prev_entry)?;
+            tx.put::<tables::StorageChangeSet>(tid_address, prev_entry)?;
             Ok(())
         }
 
