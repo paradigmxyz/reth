@@ -1,7 +1,7 @@
 use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
-    TransactionKind, TransactionSigned, TxLegacy, H256, U256,
+    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
+    TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
 
@@ -59,7 +59,7 @@ pub fn random_tx() -> Transaction {
 
 /// Generates a random legacy [Transaction] that is signed.
 ///
-/// On top of the considerations of [gen_random_tx], these apply as well:
+/// On top of the considerations of [random_tx], these apply as well:
 ///
 /// - There is no guarantee that the nonce is not used twice for the same account
 pub fn random_signed_tx() -> TransactionSigned {
@@ -164,8 +164,28 @@ pub fn random_block_range(
     blocks
 }
 
+/// Generate random Externaly Owned Account (EOA account without contract).
+pub fn random_eoa_account() -> (Address, Account) {
+    let nonce: u64 = rand::random();
+    let balance = U256::from(rand::random::<u32>());
+    let addr = H160::from(rand::random::<u64>());
+
+    (addr, Account { nonce, balance, bytecode_hash: None })
+}
+
+/// Docs
+pub fn random_eoa_account_range(acc_range: &mut std::ops::Range<u64>) -> Vec<(Address, Account)> {
+    let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
+    for _ in acc_range {
+        accounts.push(random_eoa_account())
+    }
+    accounts
+}
+
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     use super::*;
     use hex_literal::hex;
     use reth_primitives::{keccak256, AccessList, Address, TransactionKind, TxEip1559};
@@ -203,5 +223,50 @@ mod test {
 
             assert_eq!(recovered, expected);
         }
+    }
+
+    #[test]
+    fn test_sign_eip_155() {
+        // reference: https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md#example
+        let transaction = Transaction::Legacy(TxLegacy {
+            chain_id: Some(1),
+            nonce: 9,
+            gas_price: 20 * 10_u128.pow(9),
+            gas_limit: 21000,
+            to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
+            value: 10_u128.pow(18),
+            input: Bytes::default(),
+        });
+
+        // TODO resolve dependency issue
+        // let mut encoded = BytesMut::new();
+        // transaction.encode(&mut encoded);
+        // let expected =
+        // hex!("ec098504a817c800825208943535353535353535353535353535353535353535880de0b6b3a764000080018080");
+        // assert_eq!(expected, encoded.as_ref());
+
+        let hash = transaction.signature_hash();
+        let expected =
+            H256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
+                .unwrap();
+        assert_eq!(expected, hash);
+
+        let secret =
+            H256::from_str("4646464646464646464646464646464646464646464646464646464646464646")
+                .unwrap();
+        let signature = sign_message(secret, hash).unwrap();
+
+        let expected = Signature {
+            r: U256::from_str(
+                "18515461264373351373200002665853028612451056578545711640558177340181847433846",
+            )
+            .unwrap(),
+            s: U256::from_str(
+                "46948507304638947509940763649030358759909902576025900602547168820602576006531",
+            )
+            .unwrap(),
+            odd_y_parity: false,
+        };
+        assert_eq!(expected, signature);
     }
 }

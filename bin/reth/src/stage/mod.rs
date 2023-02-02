@@ -2,19 +2,19 @@
 //!
 //! Stage debugging tool
 use crate::{
-    config::Config,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
-use reth_consensus::BeaconConsensus;
-use reth_downloaders::bodies::concurrent::ConcurrentDownloader;
+use reth_consensus::beacon::BeaconConsensus;
+use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 
+use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
+use reth_staged_sync::Config;
 use reth_stages::{
-    metrics::HeaderMetrics,
-    stages::{bodies::BodyStage, execution::ExecutionStage, sender_recovery::SenderRecoveryStage},
+    stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
     ExecInput, Stage, StageId, Transaction, UnwindInput,
 };
 
@@ -84,6 +84,9 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkOpts,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
@@ -104,7 +107,6 @@ impl Command {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
             prometheus_exporter::initialize(listen_addr)?;
-            HeaderMetrics::describe();
         }
 
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
@@ -124,8 +126,7 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let consensus: Arc<BeaconConsensus> =
-                    Arc::new(BeaconConsensus::new(self.chain.clone()));
+                let (consensus, _) = BeaconConsensus::builder().build(self.chain.clone());
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
@@ -141,20 +142,25 @@ impl Command {
                         self.chain.clone(),
                         self.network.disable_discovery,
                         None,
+                        self.nat,
                     )
                     .start_network()
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);
 
                 let mut stage = BodyStage {
-                    downloader: Arc::new(
-                        ConcurrentDownloader::new(fetch_client.clone(), consensus.clone())
-                            .with_batch_size(config.stages.bodies.downloader_batch_size)
-                            .with_retries(config.stages.bodies.downloader_retries)
-                            .with_concurrency(config.stages.bodies.downloader_concurrency),
-                    ),
+                    downloader: BodiesDownloaderBuilder::default()
+                        .with_stream_batch_size(num_blocks as usize)
+                        .with_request_limit(config.stages.bodies.downloader_request_limit)
+                        .with_max_buffered_responses(
+                            config.stages.bodies.downloader_max_buffered_responses,
+                        )
+                        .with_concurrent_requests_range(
+                            config.stages.bodies.downloader_min_concurrent_requests..=
+                                config.stages.bodies.downloader_max_concurrent_requests,
+                        )
+                        .build(fetch_client.clone(), consensus.clone(), db.clone()),
                     consensus: consensus.clone(),
-                    commit_threshold: num_blocks,
                 };
 
                 if !self.skip_unwind {

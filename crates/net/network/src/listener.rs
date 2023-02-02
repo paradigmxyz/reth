@@ -57,7 +57,7 @@ impl ConnectionListener {
     }
 }
 
-/// Event type produced by the [`Transport`].
+/// Event type produced by the [`TcpListenerStream`].
 pub enum ListenerEvent {
     /// Received a new incoming.
     Incoming {

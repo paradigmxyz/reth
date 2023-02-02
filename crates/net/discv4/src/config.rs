@@ -1,20 +1,21 @@
 //! A set of configuration parameters to tune the discovery protocol.
 //!
 //! This basis of this file has been taken from the discv5 codebase:
-//! https://github.com/sigp/discv5
+//! <https://github.com/sigp/discv5>
 
 use bytes::{Bytes, BytesMut};
 use reth_net_common::ban_list::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_primitives::NodeRecord;
 use reth_rlp::Encodable;
+use secp256k1::serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
 
 /// Configuration parameters that define the performance of the discovery network.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Discv4Config {
     /// Whether to enable the incoming packet filter. Default: false.
     pub enable_packet_filter: bool,
@@ -38,6 +39,7 @@ pub struct Discv4Config {
     /// The duration we set for neighbours responses
     pub neighbours_expiration: Duration,
     /// Provides a way to ban peers and ips.
+    #[serde(skip)]
     pub ban_list: BanList,
     /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
     /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
@@ -135,7 +137,7 @@ impl Default for Discv4Config {
 }
 
 /// Builder type for [`Discv4Config`]
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Discv4ConfigBuilder {
     config: Discv4Config,
 }

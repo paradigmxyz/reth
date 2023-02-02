@@ -6,7 +6,6 @@ use crate::{
     message::{PeerRequest, PeerRequestSender},
     metrics::TransactionsManagerMetrics,
     network::NetworkHandleMessage,
-    peers::ReputationChangeKind,
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
@@ -14,6 +13,7 @@ use reth_eth_wire::{
     GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
+use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
 };
@@ -534,7 +534,7 @@ struct Peer {
     request_tx: PeerRequestSender,
 }
 
-/// Commands to send to the [`TransactionManager`]
+/// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
 enum TransactionsCommand {
     PropagateHash(H256),
 }
@@ -558,7 +558,7 @@ pub enum NetworkTransactionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NetworkConfig, NetworkManager};
+    use crate::{NetworkConfigBuilder, NetworkManager};
     use reth_interfaces::sync::{SyncState, SyncStateUpdater};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::test_utils::testing_pool;
@@ -572,7 +572,7 @@ mod tests {
 
         let client = Arc::new(NoopProvider::default());
         let pool = testing_pool();
-        let config = NetworkConfig::builder(Arc::clone(&client), secret_key).build();
+        let config = NetworkConfigBuilder::new(secret_key).build(Arc::clone(&client));
         let (handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()

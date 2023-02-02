@@ -1,8 +1,8 @@
 //! A network implementation for testing purposes.
 
 use crate::{
-    error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkEvent,
-    NetworkHandle, NetworkManager,
+    error::NetworkError, eth_requests::EthRequestHandler, NetworkConfig, NetworkConfigBuilder,
+    NetworkEvent, NetworkHandle, NetworkManager,
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
@@ -287,10 +287,10 @@ where
     /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
     /// available IP and port.
     pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
-        let config = NetworkConfig::builder(Arc::clone(&client), secret_key)
+        let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
-            .build();
+            .build(Arc::clone(&client));
         Self { config, client, secret_key }
     }
 }
@@ -338,8 +338,9 @@ impl NetworkEventStream {
         None
     }
 
-    /// Ensures that the first two events are a [`PeerAdded`] and [`SessionEstablished`],
-    /// returning the [`PeerId`] of the established session.
+    /// Ensures that the first two events are a [`NetworkEvent::PeerAdded`] and
+    /// [`NetworkEvent::SessionEstablished`], returning the [`PeerId`] of the established
+    /// session.
     pub async fn peer_added_and_established(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
             Some(NetworkEvent::PeerAdded(peer_id)) => peer_id,

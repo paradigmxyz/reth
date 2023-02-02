@@ -40,7 +40,7 @@ let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).
 let fetch_client = Arc::new(network.fetch_client().await?);
 let mut pipeline = reth_stages::Pipeline::new()
     .push(HeaderStage {
-        downloader: headers::linear::LinearDownloadBuilder::default()
+        downloader: headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
             .batch_size(config.stages.headers.downloader_batch_size)
             .retries(config.stages.headers.downloader_retries)
             .build(consensus.clone(), fetch_client.clone()),
@@ -52,7 +52,7 @@ let mut pipeline = reth_stages::Pipeline::new()
     })
     .push(BodyStage {
         downloader: Arc::new(
-            bodies::concurrent::ConcurrentDownloader::new(
+            bodies::bodies::BodiesDownloader::new(
                 fetch_client.clone(),
                 consensus.clone(),
             )
@@ -345,11 +345,11 @@ impl BodiesClient for FetchClient {
 
 This functionality is used in the `HeaderStage` and `BodyStage`, respectively.
 
-In the pipeline used by the main Reth binary, the `HeaderStage` uses a `LinearDownloader` to stream headers from the network:
+In the pipeline used by the main Reth binary, the `HeaderStage` uses a `ReverseHeadersDownloader` to stream headers from the network:
 
 [File: crates/net/downloaders/src/headers/linear.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/headers/linear.rs)
 ```rust,ignore
-pub struct LinearDownloader<C, H> {
+pub struct ReverseHeadersDownloader<C, H> {
     /// The consensus client
     consensus: Arc<C>,
     /// The headers client
@@ -361,7 +361,7 @@ pub struct LinearDownloader<C, H> {
 }
 ```
 
-A `FetchClient` is passed in to the `client` field, and the `get_headers` method it implements gets used when polling the stream created by the `LinearDownloader` in the `execute` method of the `HeaderStage`.
+A `FetchClient` is passed in to the `client` field, and the `get_headers` method it implements gets used when polling the stream created by the `ReverseHeadersDownloader` in the `execute` method of the `HeaderStage`.
 
 [File: crates/net/downloaders/src/headers/linear.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/headers/linear.rs)
 ```rust,ignore
@@ -387,11 +387,11 @@ fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
 }
 ```
 
-In the `BodyStage` configured by the main binary, a `ConcurrentDownloader` is used:
+In the `BodyStage` configured by the main binary, a `BodiesDownloader` is used:
 
 [File: crates/net/downloaders/src/bodies/concurrent.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/bodies/concurrent.rs)
 ```rust,ignore
-pub struct ConcurrentDownloader<Client, Consensus> {
+pub struct BodiesDownloader<Client, Consensus> {
     /// The bodies client
     client: Arc<Client>,
     /// The consensus client
@@ -405,7 +405,7 @@ pub struct ConcurrentDownloader<Client, Consensus> {
 }
 ```
 
-Here, similarly, a `FetchClient` is passed in to the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `ConcurrentDownloader` in the `execute` method of the `BodyStage`.
+Here, similarly, a `FetchClient` is passed in to the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `BodiesDownloader` in the `execute` method of the `BodyStage`.
 
 [File: crates/net/downloaders/src/bodies/concurrent.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/bodies/concurrent.rs)
 ```rust,ignore
@@ -469,7 +469,7 @@ pub struct EthRequestHandler<C> {
 }
 ```
 
-The `client` field here is a client that's used to fetch data from the database, not to be confused with the `client` field on a downloader like the `LinearDownloader` discussed above, which is a `FetchClient`.
+The `client` field here is a client that's used to fetch data from the database, not to be confused with the `client` field on a downloader like the `ReverseHeadersDownloader` discussed above, which is a `FetchClient`.
 
 ### Input Streams to the ETH Requests Task
 

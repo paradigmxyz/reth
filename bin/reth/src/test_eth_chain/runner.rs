@@ -4,7 +4,7 @@ use eyre::eyre;
 use reth_db::{
     cursor::DbCursorRO,
     database::Database,
-    mdbx::{test_utils::create_test_rw_db, WriteMap},
+    mdbx::test_utils::create_test_rw_db,
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,
@@ -14,7 +14,7 @@ use reth_primitives::{
     StorageEntry, H256, U256,
 };
 use reth_rlp::Decodable;
-use reth_stages::{stages::execution::ExecutionStage, ExecInput, Stage, StageId, Transaction};
+use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId, Transaction};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -128,7 +128,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         let has_block_reward = chain_spec.paris_status().block_number().is_some();
 
         // Create db and acquire transaction
-        let db = create_test_rw_db::<WriteMap>();
+        let db = create_test_rw_db();
         let tx = db.tx_mut()?;
 
         // insert genesis

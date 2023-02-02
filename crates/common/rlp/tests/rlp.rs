@@ -13,6 +13,9 @@ struct Test4Numbers {
     a: u8,
     b: u64,
     c: U256,
+    #[rlp(skip)]
+    #[rlp(default)]
+    s: U256,
     d: U256,
 }
 
@@ -50,6 +53,9 @@ fn test_encode_item() {
         c: U256::from_be_bytes(hex!(
             "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         )),
+        s: U256::from_be_bytes(hex!(
+            "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        )),
         d: U256::from_be_bytes(hex!(
             "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
         )),
@@ -62,8 +68,12 @@ fn test_encode_item() {
     let out = reth_rlp::encode_fixed_size(&item);
     assert_eq!(&*out, expected);
 
-    let decoded = Decodable::decode(&mut &*expected).unwrap();
-    assert_eq!(item, decoded);
+    let decoded: Test4Numbers = Decodable::decode(&mut &*expected).unwrap();
+    assert_eq!(decoded.a, item.a);
+    assert_eq!(decoded.b, item.b);
+    assert_eq!(decoded.c, item.c);
+    assert_eq!(decoded.d, item.d);
+    assert_eq!(decoded.s, U256::ZERO);
 
     let mut rlp_view = Rlp::new(&expected).unwrap();
     assert_eq!(rlp_view.get_next().unwrap(), Some(item.a));
@@ -79,6 +89,7 @@ fn test_encode_item() {
 
     assert_eq!(encoded(&W(item)), expected);
     assert_eq!(W::decode(&mut &*expected).unwrap().0, decoded);
+    assert_eq!(Test4Numbers::LEN, 79);
 }
 
 #[test]

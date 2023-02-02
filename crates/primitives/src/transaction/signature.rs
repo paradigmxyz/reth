@@ -16,43 +16,41 @@ pub struct Signature {
     pub odd_y_parity: bool,
 }
 
-#[allow(dead_code)]
 impl Signature {
-    /// Encode the `v`, `r`, `s` values without a RLP header.
-    /// Encodes the `v` value using the legacy scheme without EIP-155.
-    pub(crate) fn encode_inner_legacy(&self, out: &mut dyn reth_rlp::BufMut) {
-        (self.odd_y_parity as u8 + 27).encode(out);
-        self.r.encode(out);
-        self.s.encode(out);
-    }
-
     /// Output the length of the signature without the length of the RLP header, using the legacy
-    /// scheme without EIP-155.
-    pub(crate) fn payload_len_legacy(&self) -> usize {
-        (self.odd_y_parity as u8 + 27).length() + self.r.length() + self.s.length()
+    /// scheme with EIP-155 support depends on chain_id.
+    pub(crate) fn payload_len_with_eip155_chain_id(&self, chain_id: Option<u64>) -> usize {
+        self.v(chain_id).length() + self.r.length() + self.s.length()
     }
 
     /// Encode the `v`, `r`, `s` values without a RLP header.
-    /// Encodes the `v` value with EIP-155 support, using the specified chain ID.
-    pub(crate) fn encode_eip155_inner(&self, out: &mut dyn reth_rlp::BufMut, chain_id: u64) {
-        // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-        let v = chain_id * 2 + 35 + self.odd_y_parity as u64;
-        v.encode(out);
+    /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on chain_id.
+    pub(crate) fn encode_with_eip155_chain_id(
+        &self,
+        out: &mut dyn reth_rlp::BufMut,
+        chain_id: Option<u64>,
+    ) {
+        self.v(chain_id).encode(out);
         self.r.encode(out);
         self.s.encode(out);
     }
 
-    /// Output the length of the signature without the length of the RLP header, with EIP-155
-    /// support.
-    pub(crate) fn eip155_payload_len(&self, chain_id: u64) -> usize {
-        // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
-        let v = chain_id * 2 + 35 + self.odd_y_parity as u64;
-        v.length() + self.r.length() + self.s.length()
+    /// Output the `v` of the signature depends on chain_id
+    #[inline]
+    fn v(&self, chain_id: Option<u64>) -> u64 {
+        if let Some(chain_id) = chain_id {
+            // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
+            self.odd_y_parity as u64 + chain_id * 2 + 35
+        } else {
+            self.odd_y_parity as u64 + 27
+        }
     }
 
     /// Decodes the `v`, `r`, `s` values without a RLP header.
     /// This will return a chain ID if the `v` value is EIP-155 compatible.
-    pub(crate) fn decode_eip155_inner(buf: &mut &[u8]) -> Result<(Self, Option<u64>), DecodeError> {
+    pub(crate) fn decode_with_eip155_chain_id(
+        buf: &mut &[u8],
+    ) -> Result<(Self, Option<u64>), DecodeError> {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
@@ -68,6 +66,27 @@ impl Signature {
         }
     }
 
+    /// Output the length of the signature without the length of the RLP header
+    pub(crate) fn payload_len(&self) -> usize {
+        self.odd_y_parity.length() + self.r.length() + self.s.length()
+    }
+
+    /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
+    pub(crate) fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+        self.odd_y_parity.encode(out);
+        self.r.encode(out);
+        self.s.encode(out);
+    }
+
+    /// Decodes the `odd_y_parity`, `r`, `s` values without a RLP header.
+    pub(crate) fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        Ok(Signature {
+            odd_y_parity: Decodable::decode(buf)?,
+            r: Decodable::decode(buf)?,
+            s: Decodable::decode(buf)?,
+        })
+    }
+
     /// Recover signature from hash.
     pub(crate) fn recover_signer(&self, hash: H256) -> Option<Address> {
         let mut sig: [u8; 65] = [0; 65];
@@ -79,5 +98,91 @@ impl Signature {
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
         secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use bytes::BytesMut;
+
+    use crate::{Address, Signature, H256, U256};
+
+    #[test]
+    fn test_payload_len_with_eip155_chain_id() {
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+
+        assert_eq!(3, signature.payload_len_with_eip155_chain_id(None));
+        assert_eq!(3, signature.payload_len_with_eip155_chain_id(Some(1)));
+        assert_eq!(4, signature.payload_len_with_eip155_chain_id(Some(47)));
+    }
+
+    #[test]
+    fn test_v() {
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        assert_eq!(27, signature.v(None));
+        assert_eq!(37, signature.v(Some(1)));
+
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: true };
+        assert_eq!(28, signature.v(None));
+        assert_eq!(38, signature.v(Some(1)));
+    }
+
+    #[test]
+    fn test_encode_and_decode_with_eip155_chain_id() {
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+
+        let mut encoded = BytesMut::new();
+        signature.encode_with_eip155_chain_id(&mut encoded, None);
+        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(None));
+        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
+        assert_eq!(signature, decoded);
+        assert_eq!(None, chain_id);
+
+        let mut encoded = BytesMut::new();
+        signature.encode_with_eip155_chain_id(&mut encoded, Some(1));
+        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(Some(1)));
+        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
+        assert_eq!(signature, decoded);
+        assert_eq!(Some(1), chain_id);
+    }
+
+    #[test]
+    fn test_payload_len() {
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+        assert_eq!(3, signature.payload_len());
+    }
+
+    #[test]
+    fn test_encode_and_decode() {
+        let signature = Signature { r: U256::default(), s: U256::default(), odd_y_parity: false };
+
+        let mut encoded = BytesMut::new();
+        signature.encode(&mut encoded);
+        assert_eq!(encoded.len(), signature.payload_len());
+        let decoded = Signature::decode(&mut &*encoded).unwrap();
+        assert_eq!(signature, decoded);
+    }
+
+    #[test]
+    fn test_recover_signer() {
+        let signature = Signature {
+            r: U256::from_str(
+                "18515461264373351373200002665853028612451056578545711640558177340181847433846",
+            )
+            .unwrap(),
+            s: U256::from_str(
+                "46948507304638947509940763649030358759909902576025900602547168820602576006531",
+            )
+            .unwrap(),
+            odd_y_parity: false,
+        };
+        let hash =
+            H256::from_str("daf5a779ae972f972197303d7b574746c7ef83eadac0f2791ad23db92e4c8e53")
+                .unwrap();
+        let signer = signature.recover_signer(hash).unwrap();
+        let expected = Address::from_str("0x9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f").unwrap();
+        assert_eq!(expected, signer);
     }
 }

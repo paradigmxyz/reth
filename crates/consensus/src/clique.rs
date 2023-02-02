@@ -3,6 +3,7 @@ use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
 use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
 use tokio::sync::watch;
 
+#[derive(Debug)]
 pub struct CliqueConsensus {}
 
 impl Consensus for CliqueConsensus {

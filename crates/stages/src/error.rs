@@ -1,6 +1,6 @@
 use crate::pipeline::PipelineEvent;
-use reth_interfaces::{consensus, db::Error as DbError, executor};
-use reth_primitives::{BlockHash, BlockNumber, TxNumber, H256};
+use reth_interfaces::{consensus, db::Error as DbError, executor, p2p::error::DownloadError};
+use reth_primitives::{BlockNumber, TxNumber, H256};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -35,13 +35,14 @@ pub enum StageError {
     /// Invalid download response. Applicable for stages which
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
-    Download(String),
+    Download(#[from] DownloadError),
     /// Invalid checkpoint passed to the stage
     #[error("Invalid stage progress: {0}")]
     StageProgress(u64),
     /// The stage encountered a recoverable error.
     ///
-    /// These types of errors are caught by the [Pipeline] and trigger a restart of the stage.
+    /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
+    /// of the stage.
     #[error(transparent)]
     Recoverable(Box<dyn std::error::Error + Send + Sync>),
     /// The stage encountered a fatal error.
@@ -57,6 +58,7 @@ impl StageError {
         matches!(
             self,
             StageError::Database(_) |
+                StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageProgress(_) |
                 StageError::Fatal(_)
@@ -101,8 +103,8 @@ pub enum DatabaseIntegrityError {
         /// The transaction id
         id: TxNumber,
     },
-    #[error("Block transition not found for block #{number} ({hash:?})")]
-    BlockTransition { number: BlockNumber, hash: BlockHash },
+    #[error("Block transition not found for block #{number}")]
+    BlockTransition { number: BlockNumber },
     #[error("Gap in transaction table. Missing tx number #{missing}.")]
     TransactionsGap { missing: TxNumber },
     #[error("Gap in transaction signer table. Missing tx number #{missing}.")]

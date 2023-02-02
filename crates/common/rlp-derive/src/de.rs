@@ -1,7 +1,9 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
-pub fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
+use crate::utils::has_attribute;
+
+pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
     let body = if let syn::Data::Struct(s) = &ast.data {
         s
     } else {
@@ -51,7 +53,7 @@ pub fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
     }
 }
 
-pub fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
+pub(crate) fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
     let body = if let syn::Data::Struct(s) = &ast.data {
         s
     } else {
@@ -91,5 +93,9 @@ fn decodable_field(index: usize, field: &syn::Field) -> TokenStream {
         quote! { #index }
     };
 
-    quote! { #id: reth_rlp::Decodable::decode(b)?, }
+    if has_attribute(field, "default") {
+        quote! { #id: Default::default(), }
+    } else {
+        quote! { #id: reth_rlp::Decodable::decode(b)?, }
+    }
 }

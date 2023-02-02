@@ -33,7 +33,7 @@ pub struct NetworkMetrics {
     pub(crate) invalid_messages_received: Counter,
 }
 
-/// Metrics for the TransactionManager
+/// Metrics for the TransactionsManager
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct TransactionsManagerMetrics {

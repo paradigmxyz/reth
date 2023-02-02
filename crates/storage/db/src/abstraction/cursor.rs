@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Range};
 
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
@@ -13,6 +13,9 @@ pub trait DbCursorRO<'tx, T: Table> {
 
     /// Seeks for the exact `(key, value)` pair with `key`.
     fn seek_exact(&mut self, key: T::Key) -> PairResult<T>;
+
+    /// Seeks for a `(key, value)` pair greater or equal than `key`.
+    fn seek(&mut self, key: T::Key) -> PairResult<T>;
 
     /// Returns the next `(key, value)` pair.
     #[allow(clippy::should_implement_trait)]
@@ -34,13 +37,29 @@ pub trait DbCursorRO<'tx, T: Table> {
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;
+
+    /// Returns an iterator starting at a key greater or equal than `start_key` and ending at a key
+    /// less than `end_key`
+    fn walk_range<'cursor>(
+        &'cursor mut self,
+        range: Range<T::Key>,
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
+
+    /// Returns an iterator that walks backwards through the table. If `start_key`
+    /// is None, starts from the last entry of the table. If it not, starts at a key
+    /// greater or equal than the key value wrapped inside Some().
+    fn walk_back<'cursor>(
+        &'cursor mut self,
+        start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized;
 }
 
 /// Read only cursor over DupSort table.
 pub trait DbDupCursorRO<'tx, T: DupSort> {
-    /// Seeks for a `(key, value)` pair greater or equal than `key`.
-    fn seek(&mut self, key: T::SubKey) -> PairResult<T>;
-
     /// Returns the next `(key, value)` pair of a DupSort table.
     fn next_dup(&mut self) -> PairResult<T>;
 
@@ -51,7 +70,7 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
     fn next_dup_val(&mut self) -> ValueOnlyResult<T>;
 
     /// Seek by key and subkey
-    fn seek_by_key_subkey(&mut self, key: T::Key, value: T::SubKey) -> ValueOnlyResult<T>;
+    fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T>;
 
     /// Returns an iterator starting at a key greater or equal than `start_key` of a DupSort
     /// table.
@@ -76,7 +95,8 @@ pub trait DbCursorRW<'tx, T: Table> {
 
     /// Append value to next cursor item.
     ///
-    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use [`insert`].
+    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use
+    /// [`DbCursorRW::insert`].
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 
     /// Delete current value that cursor points to
@@ -90,7 +110,7 @@ pub trait DbDupCursorRW<'tx, T: DupSort> {
 
     /// Append duplicate value.
     ///
-    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use [`insert`].
+    /// This is efficient for pre-sorted data. If the data is not pre-sorted, use `insert`.
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error>;
 }
 
@@ -171,6 +191,56 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
         }
 
         self.cursor.prev().transpose()
+    }
+}
+
+/// Provides a range iterator to `Cursor` when handling `Table`.
+/// Also check [`Walker`]
+pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
+    /// Cursor to be used to walk through the table.
+    cursor: &'cursor mut CURSOR,
+    /// `(key, value)` where to start the walk.
+    start: IterPairResult<T>,
+    /// exclusive `key` where to stop the walk.
+    end_key: T::Key,
+    /// flag whether is ended
+    is_done: bool,
+    /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
+    _tx_phantom: PhantomData<&'tx T>,
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
+    for RangeWalker<'cursor, 'tx, T, CURSOR>
+{
+    type Item = Result<(T::Key, T::Value), Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_done {
+            return None
+        }
+
+        let start = self.start.take();
+        if start.is_some() {
+            return start
+        }
+
+        let res = self.cursor.next().transpose()?;
+        if let Ok((key, value)) = res {
+            if key < self.end_key {
+                Some(Ok((key, value)))
+            } else {
+                self.is_done = true;
+                None
+            }
+        } else {
+            Some(res)
+        }
+    }
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 'tx, T, CURSOR> {
+    /// construct RangeWalker
+    pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>, end_key: T::Key) -> Self {
+        Self { cursor, start, end_key, is_done: false, _tx_phantom: std::marker::PhantomData }
     }
 }
 

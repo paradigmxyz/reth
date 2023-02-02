@@ -1,7 +1,6 @@
 //! Peer reputation management
 
-/// The type that tracks the reputation score.
-pub(crate) type Reputation = i32;
+use reth_network_api::{Reputation, ReputationChangeKind};
 
 /// The default reputation of a peer
 pub(crate) const DEFAULT_REPUTATION: Reputation = 0;
@@ -10,19 +9,19 @@ pub(crate) const DEFAULT_REPUTATION: Reputation = 0;
 const REPUTATION_UNIT: i32 = -1024;
 
 /// The reputation value below which new connection from/to peers are rejected.
-pub(crate) const BANNED_REPUTATION: i32 = 100 * REPUTATION_UNIT;
+pub(crate) const BANNED_REPUTATION: i32 = 50 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that dropped the connection.
 const REMOTE_DISCONNECT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that we failed to connect to.
-const FAILED_TO_CONNECT_REPUTATION_CHANGE: i32 = 24 * REPUTATION_UNIT;
+const FAILED_TO_CONNECT_REPUTATION_CHANGE: i32 = 25 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that failed to respond in time.
-const TIMEOUT_REPUTATION_CHANGE: i32 = REPUTATION_UNIT;
+const TIMEOUT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that sent a bad message.
-const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 8 * REPUTATION_UNIT;
+const BAD_MESSAGE_REPUTATION_CHANGE: i32 = 16 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer which violates protocol rules: minimal reputation
 const BAD_PROTOCOL_REPUTATION_CHANGE: i32 = i32::MIN;
@@ -37,31 +36,8 @@ pub(crate) fn is_banned_reputation(reputation: i32) -> bool {
     reputation < BANNED_REPUTATION
 }
 
-/// Various kinds of reputation changes.
-#[derive(Debug, Copy, Clone)]
-pub enum ReputationChangeKind {
-    /// Received an unspecific bad message from the peer
-    BadMessage,
-    /// Peer sent a bad block.
-    ///
-    /// Note: this will we only used in pre-merge, pow consensus, since after no more block announcements are sent via devp2p: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
-    BadBlock,
-    /// Peer sent a bad transaction messages. E.g. Transactions which weren't recoverable.
-    BadTransactions,
-    /// Peer failed to respond in time.
-    Timeout,
-    /// Peer does not adhere to network protocol rules.
-    BadProtocol,
-    /// Failed to establish a connection to the peer.
-    FailedToConnect,
-    /// Connection dropped by peer.
-    Dropped,
-    /// Apply a reputation change by value
-    Other(Reputation),
-}
-
 /// How the [`ReputationChangeKind`] are weighted.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReputationChangeWeights {
     /// Weight for [`ReputationChangeKind::BadMessage`]

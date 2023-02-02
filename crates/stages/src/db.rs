@@ -5,7 +5,7 @@ use std::{
 };
 
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
     models::{BlockNumHash, StoredBlockBody},
     table::Table,
@@ -135,24 +135,15 @@ where
         self.get_block_body(key)
     }
 
-    /// Query the last transition of the block by [BlockNumHash] key
+    /// Query the last transition of the block by [BlockNumber] key
     pub(crate) fn get_block_transition(
         &self,
-        key: BlockNumHash,
+        key: BlockNumber,
     ) -> Result<TransitionId, StageError> {
-        let last_transition_id = self.get::<tables::BlockTransitionIndex>(key)?.ok_or(
-            DatabaseIntegrityError::BlockTransition { number: key.number(), hash: key.hash() },
-        )?;
+        let last_transition_id = self
+            .get::<tables::BlockTransitionIndex>(key)?
+            .ok_or(DatabaseIntegrityError::BlockTransition { number: key })?;
         Ok(last_transition_id)
-    }
-
-    /// Query the last transition of the block by number
-    pub(crate) fn get_block_transition_by_num(
-        &self,
-        number: BlockNumber,
-    ) -> Result<TransitionId, StageError> {
-        let key = self.get_block_numhash(number)?;
-        self.get_block_transition(key)
     }
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous
@@ -167,13 +158,10 @@ where
 
         let prev_key = self.get_block_numhash(block - 1)?;
         let prev_body = self.get_block_body(prev_key)?;
-        let last_transition = self.get::<tables::BlockTransitionIndex>(prev_key)?.ok_or(
-            DatabaseIntegrityError::BlockTransition {
-                number: prev_key.number(),
-                hash: prev_key.hash(),
-            },
-        )?;
-        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition + 1))
+        let last_transition = self
+            .get::<tables::BlockTransitionIndex>(prev_key.number())?
+            .ok_or(DatabaseIntegrityError::BlockTransition { number: prev_key.number() })?;
+        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
     }
 
     /// Unwind table by some number key
@@ -208,18 +196,18 @@ where
         F: FnMut(T::Key) -> BlockNumber,
     {
         let mut cursor = self.cursor_write::<T>()?;
-        let mut entry = cursor.last()?;
-        while let Some((key, _)) = entry {
-            if selector(key) <= block {
+        let mut reverse_walker = cursor.walk_back(None)?;
+
+        while let Some(Ok((key, _))) = reverse_walker.next() {
+            if selector(key.clone()) <= block {
                 break
             }
-            cursor.delete_current()?;
-            entry = cursor.prev()?;
+            self.delete::<T>(key, None)?;
         }
         Ok(())
     }
 
-    /// Unwind a table forward by a [Walker] on another table
+    /// Unwind a table forward by a [Walker][reth_db::abstraction::cursor::Walker] on another table
     pub(crate) fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), Error>
     where
         DB: Database,

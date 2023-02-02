@@ -20,7 +20,7 @@ const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
-/// in [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
+/// in [`TxSenders`][reth_db::tables::TxSenders] table.
 #[derive(Debug)]
 pub struct SenderRecoveryStage {
     /// The size of the chunk for parallel sender recovery
@@ -28,6 +28,12 @@ pub struct SenderRecoveryStage {
     /// The size of inserted items after which the control
     /// flow will be returned to the pipeline for commit
     pub commit_threshold: u64,
+}
+
+impl Default for SenderRecoveryStage {
+    fn default() -> Self {
+        Self { batch_size: 1000, commit_threshold: 5000 }
+    }
 }
 
 // TODO(onbjerg): Should unwind
@@ -51,10 +57,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 
     /// Retrieve the range of transactions to iterate over by querying
-    /// [`CumulativeTxCount`][reth_interfaces::db::tables::CumulativeTxCount],
+    /// [`BlockBodies`][reth_db::tables::BlockBodies],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
-    /// the [`TxSenders`][reth_interfaces::db::tables::TxSenders] table.
+    /// the [`TxSenders`][reth_db::tables::TxSenders] table.
     async fn execute(
         &mut self,
         tx: &mut Transaction<'_, DB>,
@@ -81,9 +87,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor over the transactions
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Walk the transactions from start to end index (inclusive)
-        let entries = tx_cursor
-            .walk(start_tx_index)?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k <= end_tx_index).unwrap_or_default());
+        let entries = tx_cursor.walk_range(start_tx_index..end_tx_index + 1)?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
@@ -127,7 +131,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::models::StoredBlockBody;
     use reth_interfaces::test_utils::generators::{random_block, random_block_range};
     use reth_primitives::{BlockNumber, SealedBlock, H256};
 
@@ -137,7 +140,7 @@ mod tests {
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
 
-    stage_test_suite_ext!(SenderRecoveryTestRunner);
+    stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
 
     /// Execute a block range with a single transaction
     #[tokio::test]
@@ -151,18 +154,14 @@ mod tests {
             stage_progress: Some(stage_progress),
         };
 
-        let mut current_tx_id = 0;
-        let stage_progress = input.stage_progress.unwrap_or_default();
         // Insert blocks with a single transaction at block `stage_progress + 10`
-        (stage_progress..input.previous_stage_progress() + 1)
-            .map(|number| -> Result<SealedBlock, TestRunnerError> {
-                let tx_count = Some((number == stage_progress + 10) as u8);
-                let block = random_block(number, None, tx_count, None);
-                current_tx_id = runner.insert_block(current_tx_id, &block, false)?;
-                Ok(block)
+        let non_empty_block_number = stage_progress + 10;
+        let blocks = (stage_progress..input.previous_stage_progress() + 1)
+            .map(|number| {
+                random_block(number, None, Some((number == non_empty_block_number) as u8), None)
             })
-            .collect::<Result<Vec<_>, _>>()
-            .expect("failed to insert blocks");
+            .collect::<Vec<_>>();
+        runner.tx.insert_blocks(blocks.iter(), None).expect("failed to insert blocks");
 
         let rx = runner.execute(input);
 
@@ -232,6 +231,29 @@ mod tests {
         fn set_threshold(&mut self, threshold: u64) {
             self.threshold = threshold;
         }
+
+        /// # Panics
+        ///
+        /// 1. If there are any entries in the [tables::TxSenders] table above
+        ///    a given block number.
+        ///
+        /// 2. If the is no requested block entry in the bodies table,
+        ///    but [tables::TxSenders] is not empty.
+        fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
+            let body_result = self.tx.inner().get_block_body_by_num(block);
+            match body_result {
+                Ok(body) => self
+                    .tx
+                    .ensure_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
+                        key
+                    })?,
+                Err(_) => {
+                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
+                }
+            };
+
+            Ok(())
+        }
     }
 
     impl StageTestRunner for SenderRecoveryTestRunner {
@@ -254,12 +276,7 @@ mod tests {
             let end = input.previous_stage_progress() + 1;
 
             let blocks = random_block_range(stage_progress..end, H256::zero(), 0..2);
-
-            let mut current_tx_id = 0;
-            blocks.iter().try_for_each(|b| -> Result<(), TestRunnerError> {
-                current_tx_id = self.insert_block(current_tx_id, b, b.number == stage_progress)?;
-                Ok(())
-            })?;
+            self.tx.insert_blocks(blocks.iter(), None)?;
             Ok(blocks)
         }
 
@@ -268,8 +285,8 @@ mod tests {
             input: ExecInput,
             output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
-            if let Some(output) = output {
-                self.tx.query(|tx| {
+            match output {
+                Some(output) => self.tx.query(|tx| {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
 
@@ -293,10 +310,11 @@ mod tests {
                     }
 
                     Ok(())
-                })?;
-            } else {
-                self.check_no_senders_by_block(input.stage_progress.unwrap_or_default())?;
-            }
+                })?,
+                None => {
+                    self.ensure_no_senders_by_block(input.stage_progress.unwrap_or_default())?
+                }
+            };
 
             Ok(())
         }
@@ -304,59 +322,7 @@ mod tests {
 
     impl UnwindStageTestRunner for SenderRecoveryTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            self.check_no_senders_by_block(input.unwind_to)
-        }
-    }
-
-    impl SenderRecoveryTestRunner {
-        fn check_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body_by_num(block);
-            match body_result {
-                Ok(body) => self
-                    .tx
-                    .check_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
-                        key
-                    })?,
-                Err(_) => {
-                    assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
-                }
-            };
-
-            Ok(())
-        }
-
-        fn insert_block(
-            &self,
-            tx_offset: u64,
-            block: &SealedBlock,
-            insert_senders: bool,
-        ) -> Result<u64, TestRunnerError> {
-            let mut current_tx_id = tx_offset;
-            let txs = block.body.clone();
-
-            self.tx.commit(|tx| {
-                let numhash = block.header.num_hash().into();
-                tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
-                tx.put::<tables::BlockBodies>(
-                    numhash,
-                    StoredBlockBody { start_tx_id: current_tx_id, tx_count: txs.len() as u64 },
-                )?;
-
-                for body_tx in txs {
-                    // Insert senders for previous stage progress
-                    if insert_senders {
-                        tx.put::<tables::TxSenders>(
-                            current_tx_id,
-                            body_tx.recover_signer().expect("failed to recover sender"),
-                        )?;
-                    }
-                    tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
-                    current_tx_id += 1;
-                }
-                Ok(())
-            })?;
-
-            Ok(current_tx_id)
+            self.ensure_no_senders_by_block(input.unwind_to)
         }
     }
 }

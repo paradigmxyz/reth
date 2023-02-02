@@ -1,11 +1,8 @@
 use crate::{
-    config::NetworkMode,
-    manager::NetworkEvent,
-    message::PeerRequest,
-    peers::{PeerKind, PeersHandle, ReputationChangeKind},
-    session::PeerInfo,
-    FetchClient,
+    config::NetworkMode, manager::NetworkEvent, message::PeerRequest, peers::PeersHandle,
+    session::PeerInfo, FetchClient,
 };
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
 use reth_interfaces::{
@@ -13,12 +10,14 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{NetworkInfo, PeersInfo};
+use reth_network_api::{
+    NetworkError, NetworkInfo, NetworkStatus, PeerKind, Peers, PeersInfo, ReputationChangeKind,
+};
 use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -38,6 +37,7 @@ pub struct NetworkHandle {
 
 impl NetworkHandle {
     /// Creates a single new instance.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_active_peers: Arc<AtomicUsize>,
         listener_address: Arc<Mutex<SocketAddr>>,
@@ -46,6 +46,7 @@ impl NetworkHandle {
         peers: PeersHandle,
         network_mode: NetworkMode,
         bandwidth_meter: BandwidthMeter,
+        chain_id: Arc<AtomicU64>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -56,6 +57,7 @@ impl NetworkHandle {
             network_mode,
             bandwidth_meter,
             is_syncing: Arc::new(Default::default()),
+            chain_id,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -133,47 +135,6 @@ impl NetworkHandle {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
-    /// set
-    pub fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Basic, addr);
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a trusted peer
-    /// to the known set
-    pub fn add_trusted_peer(&self, peer: PeerId, addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Trusted, addr);
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
-    /// set, with the given kind.
-    pub fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
-        self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to remove a peer from the
-    /// set corresponding to given kind.
-    pub fn remove_peer(&self, peer: PeerId, kind: PeerKind) {
-        self.send_message(NetworkHandleMessage::RemovePeer(peer, kind))
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
-    /// connection to the given peer.
-    pub fn disconnect_peer(&self, peer: PeerId) {
-        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, None))
-    }
-
-    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
-    /// connection to the given peer using the provided reason
-    pub fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason) {
-        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
-    }
-
-    /// Send a reputation change for the given peer.
-    pub fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
-        self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
-    }
-
     /// Sends a [`PeerRequest`] to the given peer's session.
     pub fn send_request(&self, peer_id: PeerId, request: PeerRequest) {
         self.send_message(NetworkHandleMessage::EthRequest { peer_id, request })
@@ -215,9 +176,51 @@ impl PeersInfo for NetworkHandle {
     }
 }
 
+impl Peers for NetworkHandle {
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to add a peer to the known
+    /// set, with the given kind.
+    fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr) {
+        self.send_message(NetworkHandleMessage::AddPeerAddress(peer, kind, addr));
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to remove a peer from the
+    /// set corresponding to given kind.
+    fn remove_peer(&self, peer: PeerId, kind: PeerKind) {
+        self.send_message(NetworkHandleMessage::RemovePeer(peer, kind))
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer.
+    fn disconnect_peer(&self, peer: PeerId) {
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, None))
+    }
+
+    /// Sends a message to the [`NetworkManager`](crate::NetworkManager)  to disconnect an existing
+    /// connection to the given peer using the provided reason
+    fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason) {
+        self.send_message(NetworkHandleMessage::DisconnectPeer(peer, Some(reason)))
+    }
+
+    /// Send a reputation change for the given peer.
+    fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        self.send_message(NetworkHandleMessage::ReputationChange(peer_id, kind));
+    }
+}
+
+#[async_trait]
 impl NetworkInfo for NetworkHandle {
     fn local_addr(&self) -> SocketAddr {
         *self.inner.listener_address.lock()
+    }
+
+    async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.manager().send(NetworkHandleMessage::GetStatus(tx));
+        rx.await.map_err(Into::into)
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.inner.chain_id.load(Ordering::Relaxed)
     }
 }
 
@@ -245,13 +248,13 @@ impl SyncStateUpdater for NetworkHandle {
 struct NetworkInner {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
-    /// Sender half of the message channel to the [`NetworkManager`].
+    /// Sender half of the message channel to the [`crate::NetworkManager`].
     to_manager_tx: UnboundedSender<NetworkHandleMessage>,
     /// The local address that accepts incoming connections.
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
     local_peer_id: PeerId,
-    /// Access to the all the nodes
+    /// Access to the all the nodes.
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
@@ -259,6 +262,8 @@ struct NetworkInner {
     bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
+    /// The chain id
+    chain_id: Arc<AtomicU64>,
 }
 
 /// Internal messages that can be passed to the  [`NetworkManager`](crate::NetworkManager).
@@ -291,6 +296,8 @@ pub(crate) enum NetworkHandleMessage {
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
     StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
+    /// Get the currenet status
+    GetStatus(oneshot::Sender<NetworkStatus>),
     /// Get PeerInfo from all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer

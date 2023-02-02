@@ -1,13 +1,13 @@
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind, WriteMap, RW},
-    models::BlockNumHash,
+    models::{BlockNumHash, StoredBlockBody},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{BlockNumber, SealedHeader};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
 use std::{borrow::Borrow, sync::Arc};
 
 use crate::db::Transaction;
@@ -19,6 +19,7 @@ use crate::db::Transaction;
 /// let tx = TestTransaction::default();
 /// stage.execute(&mut tx.container(), input);
 /// ```
+#[derive(Debug)]
 pub(crate) struct TestTransaction {
     tx: Arc<Env<WriteMap>>,
 }
@@ -65,6 +66,16 @@ impl TestTransaction {
         self.query(|tx| {
             let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
+        })
+    }
+
+    /// Return full table as Vec
+    pub(crate) fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
+    where
+        T::Key: Default + Ord,
+    {
+        self.query(|tx| {
+            tx.cursor_read::<T>()?.walk(T::Key::default())?.collect::<Result<Vec<_>, DbError>>()
         })
     }
 
@@ -124,7 +135,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Key]
-    pub(crate) fn check_no_entry_above<T, F>(
+    pub(crate) fn ensure_no_entry_above<T, F>(
         &self,
         num: u64,
         mut selector: F,
@@ -144,7 +155,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Value]
-    pub(crate) fn check_no_entry_above_by_value<T, F>(
+    pub(crate) fn ensure_no_entry_above_by_value<T, F>(
         &self,
         num: u64,
         mut selector: F,
@@ -155,10 +166,9 @@ impl TestTransaction {
     {
         self.query(|tx| {
             let mut cursor = tx.cursor_read::<T>()?;
-            let mut entry = cursor.last()?;
-            while let Some((_, value)) = entry {
+            let mut rev_walker = cursor.walk_back(None)?;
+            while let Some((_, value)) = rev_walker.next().transpose()? {
                 assert!(selector(value) <= num);
-                entry = cursor.prev()?;
             }
             Ok(())
         })
@@ -174,11 +184,50 @@ impl TestTransaction {
             let headers = headers.collect::<Vec<_>>();
 
             for header in headers {
-                let key: BlockNumHash = (header.number, header.hash()).into();
+                let key: BlockNumHash = header.num_hash().into();
 
                 tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
                 tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
                 tx.put::<tables::Headers>(key, header.clone().unseal())?;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Insert ordered collection of [SealedBlock] into corresponding tables.
+    /// Superset functionality of [TestTransaction::insert_headers].
+    pub(crate) fn insert_blocks<'a, I>(
+        &self,
+        blocks: I,
+        tx_offset: Option<u64>,
+    ) -> Result<(), DbError>
+    where
+        I: Iterator<Item = &'a SealedBlock>,
+    {
+        self.commit(|tx| {
+            let mut current_tx_id = tx_offset.unwrap_or_default();
+
+            for block in blocks {
+                let key: BlockNumHash = block.num_hash().into();
+
+                // Insert into header tables.
+                tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
+                tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
+                tx.put::<tables::Headers>(key, block.header.clone().unseal())?;
+
+                // Insert into body tables.
+                tx.put::<tables::BlockBodies>(
+                    key,
+                    StoredBlockBody {
+                        start_tx_id: current_tx_id,
+                        tx_count: block.body.len() as u64,
+                    },
+                )?;
+                for body_tx in block.body.clone() {
+                    tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
+                    current_tx_id += 1;
+                }
             }
 
             Ok(())

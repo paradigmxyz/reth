@@ -36,7 +36,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{instrument, trace, warn};
+use tracing::{instrument, trace};
 
 mod active;
 mod config;
@@ -49,13 +49,18 @@ pub struct SessionId(usize);
 
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
+#[derive(Debug)]
 pub(crate) struct SessionManager {
     /// Tracks the identifier for the next session.
     next_id: usize,
     /// Keeps track of all sessions
     counter: SessionCounter,
-    /// The maximum time we wait for a response from a peer.
-    request_timeout: Duration,
+    ///  The maximum initial time an [ActiveSession] waits for a response from the peer before it
+    /// responds to an _internal_ request with a `TimeoutError`
+    initial_internal_request_timeout: Duration,
+    /// If an [ActiveSession] does not receive a response at all within this duration then it is
+    /// considered a protocol violation and the session will initiate a drop.
+    protocol_breach_request_timeout: Duration,
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
@@ -82,12 +87,12 @@ pub(crate) struct SessionManager {
     pending_sessions_tx: mpsc::Sender<PendingSessionEvent>,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
     pending_session_rx: ReceiverStream<PendingSessionEvent>,
-    /// The original Sender half of the [`ActiveSessionEvent`] channel.
+    /// The original Sender half of the [`ActiveSessionMessage`] channel.
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
     active_session_tx: mpsc::Sender<ActiveSessionMessage>,
-    /// Receiver half that listens for [`ActiveSessionEvent`] produced by pending sessions.
+    /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
     bandwidth_meter: BandwidthMeter,
@@ -112,7 +117,8 @@ impl SessionManager {
         Self {
             next_id: 0,
             counter: SessionCounter::new(config.limits),
-            request_timeout: config.request_timeout,
+            initial_internal_request_timeout: config.initial_internal_request_timeout,
+            protocol_breach_request_timeout: config.protocol_breach_request_timeout,
             secret_key,
             status,
             hello_message,
@@ -142,7 +148,18 @@ impl SessionManager {
         SessionId(id)
     }
 
-    /// Spawns the given future onto a new task that is tracked in the `spawned_tasks` [`JoinSet`].
+    /// Returns the current status of the session.
+    pub(crate) fn status(&self) -> Status {
+        self.status
+    }
+
+    /// Returns the session hello message.
+    pub(crate) fn hello_message(&self) -> HelloMessage {
+        self.hello_message.clone()
+    }
+
+    /// Spawns the given future onto a new task that is tracked in the `spawned_tasks`
+    /// [`JoinSet`](tokio::task::JoinSet).
     fn spawn<F>(&self, f: F)
     where
         F: Future<Output = ()> + Send + 'static,
@@ -157,7 +174,7 @@ impl SessionManager {
     /// Invoked on a received status update.
     ///
     /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
-    /// active [`ForkId`](reth_primitives::ForkId). See also [`ForkFilter::set_head`].
+    /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
     pub(crate) fn on_status_update(
         &mut self,
         height: u64,
@@ -311,6 +328,9 @@ impl SessionManager {
                     ActiveSessionMessage::BadMessage { peer_id } => {
                         Poll::Ready(SessionEvent::BadMessage { peer_id })
                     }
+                    ActiveSessionMessage::ProtocolBreach { peer_id } => {
+                        Poll::Ready(SessionEvent::ProtocolBreach { peer_id })
+                    }
                 }
             }
         }
@@ -365,7 +385,9 @@ impl SessionManager {
 
                 let messages = PeerRequestSender::new(peer_id, to_session_tx);
 
-                let timeout = Arc::new(AtomicU64::new(self.request_timeout.as_millis() as u64));
+                let timeout = Arc::new(AtomicU64::new(
+                    self.initial_internal_request_timeout.as_millis() as u64,
+                ));
 
                 let session = ActiveSession {
                     next_id: 0,
@@ -380,8 +402,11 @@ impl SessionManager {
                     conn,
                     queued_outgoing: Default::default(),
                     received_requests: Default::default(),
-                    timeout_interval: tokio::time::interval(self.request_timeout),
-                    request_timeout: Arc::clone(&timeout),
+                    internal_request_timeout_interval: tokio::time::interval(
+                        self.initial_internal_request_timeout,
+                    ),
+                    internal_request_timeout: Arc::clone(&timeout),
+                    protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                 };
 
                 self.spawn(session);
@@ -454,7 +479,7 @@ impl SessionManager {
             }
             PendingSessionEvent::EciesAuthError { remote_addr, session_id, error, direction } => {
                 self.remove_pending_session(&session_id);
-                warn!(
+                trace!(
                     target : "net::session",
                     ?error,
                     ?session_id,
@@ -548,6 +573,11 @@ pub(crate) enum SessionEvent {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },
+    /// Remote peer is considered in protocol violation
+    ProtocolBreach {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
+    },
     /// Closed an incoming pending session during handshaking.
     IncomingPendingSessionClosed {
         remote_addr: SocketAddr,
@@ -589,8 +619,8 @@ pub(crate) enum PendingSessionHandshakeError {
 }
 
 /// The direction of the connection.
-#[derive(Debug, Copy, Clone)]
-pub(crate) enum Direction {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Direction {
     /// Incoming connection.
     Incoming,
     /// Outgoing connection to a specific node.

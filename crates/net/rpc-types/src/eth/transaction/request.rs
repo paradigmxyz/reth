@@ -2,7 +2,7 @@ use crate::eth::transaction::typed::{
     EIP1559TransactionRequest, EIP2930TransactionRequest, LegacyTransactionRequest,
     TransactionKind, TypedTransactionRequest,
 };
-use reth_primitives::{AccessList, Address, Bytes, U256};
+use reth_primitives::{AccessList, Address, Bytes, U128, U256};
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC
@@ -16,13 +16,13 @@ pub struct TransactionRequest {
     pub to: Option<Address>,
     /// legacy, gas Price
     #[serde(default)]
-    pub gas_price: Option<U256>,
+    pub gas_price: Option<U128>,
     /// max base fee per gas sender is willing to pay
     #[serde(default)]
-    pub max_fee_per_gas: Option<U256>,
+    pub max_fee_per_gas: Option<U128>,
     /// miner tip
     #[serde(default)]
-    pub max_priority_fee_per_gas: Option<U256>,
+    pub max_priority_fee_per_gas: Option<U128>,
     /// gas
     pub gas: Option<U256>,
     /// value of th tx in wei
@@ -97,7 +97,7 @@ impl TransactionRequest {
                 Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
                     nonce: nonce.unwrap_or(U256::ZERO),
                     max_fee_per_gas: max_fee_per_gas.unwrap_or_default(),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(U256::ZERO),
+                    max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(U128::ZERO),
                     gas_limit: gas.unwrap_or_default(),
                     value: value.unwrap_or(U256::ZERO),
                     input: data.unwrap_or_default(),

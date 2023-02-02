@@ -27,7 +27,7 @@ mod __reexport {
 pub use __reexport::*;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
-use reth_eth_wire::{HelloMessage, Status};
+use reth_eth_wire::{BlockHashNumber, HelloMessage, Status};
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
@@ -80,12 +80,12 @@ pub struct NetworkConfig<C> {
 impl<C> NetworkConfig<C> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
     pub fn new(client: Arc<C>, secret_key: SecretKey) -> Self {
-        Self::builder(client, secret_key).build()
+        Self::builder(secret_key).build(client)
     }
 
     /// Convenience method for creating the corresponding builder type
-    pub fn builder(client: Arc<C>, secret_key: SecretKey) -> NetworkConfigBuilder<C> {
-        NetworkConfigBuilder::new(client, secret_key)
+    pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder {
+        NetworkConfigBuilder::new(secret_key)
     }
 
     /// Sets the config to use for the discovery v4 protocol.
@@ -119,10 +119,10 @@ where
 }
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[allow(missing_docs)]
-pub struct NetworkConfigBuilder<C> {
-    /// The client type that can interact with the chain.
-    client: Arc<C>,
+pub struct NetworkConfigBuilder {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
@@ -141,29 +141,23 @@ pub struct NetworkConfigBuilder<C> {
     sessions_config: Option<SessionsConfig>,
     /// The network's chain spec
     chain_spec: ChainSpec,
-    /// The block importer type.
-    block_import: Box<dyn BlockImport>,
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
+    #[serde(skip)]
     executor: Option<TaskExecutor>,
-    /// The `Status` message to send to peers at the beginning.
-    status: Option<Status>,
     /// Sets the hello message for the p2p handshake in RLPx
     hello_message: Option<HelloMessage>,
-    /// The [`ForkFilter`] to use at launch for authenticating sessions.
-    fork_filter: Option<ForkFilter>,
-    /// Head used to start set for the fork filter
-    head: Option<u64>,
+    /// Head used to start set for the fork filter and status.
+    head: Option<BlockHashNumber>,
 }
 
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
-impl<C> NetworkConfigBuilder<C> {
-    pub fn new(client: Arc<C>, secret_key: SecretKey) -> Self {
+impl NetworkConfigBuilder {
+    pub fn new(secret_key: SecretKey) -> Self {
         Self {
-            client,
             secret_key,
             dns_discovery_config: Some(Default::default()),
             discovery_v4_builder: Some(Default::default()),
@@ -173,12 +167,9 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config: None,
             sessions_config: None,
             chain_spec: MAINNET.clone(),
-            block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode: Default::default(),
             executor: None,
-            status: None,
             hello_message: None,
-            fork_filter: None,
             head: None,
         }
     }
@@ -186,22 +177,6 @@ impl<C> NetworkConfigBuilder<C> {
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
         pk2id(&self.secret_key.public_key(SECP256K1))
-    }
-
-    /// Sets the `Status` message to send when connecting to peers.
-    ///
-    /// ```
-    /// # use reth_eth_wire::Status;
-    /// # use reth_network::NetworkConfigBuilder;
-    /// # fn builder<C>(builder: NetworkConfigBuilder<C>) {
-    ///     builder.status(
-    ///         Status::builder().build()
-    /// );
-    /// # }
-    /// ```
-    pub fn status(mut self, status: Status) -> Self {
-        self.status = Some(status);
-        self
     }
 
     /// Sets the chain spec.
@@ -215,7 +190,7 @@ impl<C> NetworkConfigBuilder<C> {
     /// ```
     /// # use reth_eth_wire::HelloMessage;
     /// # use reth_network::NetworkConfigBuilder;
-    /// # fn builder<C>(builder: NetworkConfigBuilder<C>) {
+    /// # fn builder(builder: NetworkConfigBuilder) {
     ///    let peer_id = builder.get_peer_id();
     ///     builder.hello_message(
     ///         HelloMessage::builder(peer_id).build()
@@ -242,12 +217,6 @@ impl<C> NetworkConfigBuilder<C> {
     /// Sets a custom config for how sessions are handled.
     pub fn sessions_config(mut self, config: SessionsConfig) -> Self {
         self.sessions_config = Some(config);
-        self
-    }
-
-    /// Sets the [`BlockImport`] type to configure.
-    pub fn block_import<T: BlockImport + 'static>(mut self, block_import: T) -> Self {
-        self.block_import = Box::new(block_import);
         self
     }
 
@@ -295,10 +264,10 @@ impl<C> NetworkConfigBuilder<C> {
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
-    pub fn build(self) -> NetworkConfig<C> {
+    /// for the given client type that can interact with the chain.
+    pub fn build<C>(self, client: Arc<C>) -> NetworkConfig<C> {
         let peer_id = self.get_peer_id();
         let Self {
-            client,
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
@@ -308,12 +277,9 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config,
             sessions_config,
             chain_spec,
-            block_import,
             network_mode,
             executor,
-            status,
             hello_message,
-            fork_filter,
             head,
         } = self;
 
@@ -325,11 +291,13 @@ impl<C> NetworkConfigBuilder<C> {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
-        // get the fork filter
-        let fork_filter = fork_filter.unwrap_or_else(|| {
-            let head = head.unwrap_or_default();
-            chain_spec.fork_filter(head)
-        });
+        let head = head.unwrap_or(BlockHashNumber { hash: chain_spec.genesis_hash(), number: 0 });
+
+        // set the status
+        let status = Status::spec_builder(&chain_spec, &head).build();
+
+        // set a fork filter based on the chain spec and head
+        let fork_filter = chain_spec.fork_filter(head.number);
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
@@ -355,10 +323,10 @@ impl<C> NetworkConfigBuilder<C> {
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
             chain_spec,
-            block_import,
+            block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode,
             executor,
-            status: status.unwrap_or_default(),
+            status,
             hello_message,
             fork_filter,
         }
@@ -371,6 +339,7 @@ impl<C> NetworkConfigBuilder<C> {
 ///
 /// In POS `NewBlockHashes` and `NewBlock` messages become invalid.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NetworkMode {
     /// Network is in proof-of-work mode.
     Work,
@@ -393,17 +362,18 @@ mod tests {
     use super::*;
     use rand::thread_rng;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::Chain;
+    use reth_primitives::{Chain, ForkHash};
     use reth_provider::test_utils::NoopProvider;
+    use std::collections::BTreeMap;
 
-    fn builder() -> NetworkConfigBuilder<NoopProvider> {
+    fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut thread_rng());
-        NetworkConfig::builder(Arc::new(NoopProvider::default()), secret_key)
+        NetworkConfigBuilder::new(secret_key)
     }
 
     #[test]
     fn test_network_dns_defaults() {
-        let config = builder().build();
+        let config = builder().build(Arc::new(NoopProvider::default()));
 
         let dns = config.dns_discovery_config.unwrap();
         let bootstrap_nodes = dns.bootstrap_dns_networks.unwrap();
@@ -411,5 +381,32 @@ mod tests {
             Chain::mainnet().public_dns_network_protocol().unwrap().parse().unwrap();
         assert!(bootstrap_nodes.contains(&mainnet_dns));
         assert_eq!(bootstrap_nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_network_fork_filter_default() {
+        let mut chain_spec = MAINNET.clone();
+
+        // remove any `next` fields we would have by removing all hardforks
+        chain_spec.hardforks = BTreeMap::new();
+
+        // check that the forkid is initialized with the genesis and no other forks
+        let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
+
+        // enforce that the fork_id set in the status is consistent with the generated fork filter
+        let config = builder().chain_spec(chain_spec).build(Arc::new(NoopProvider::default()));
+
+        let status = config.status;
+        let fork_filter = config.fork_filter;
+
+        // assert that there are no other forks
+        assert_eq!(status.forkid.next, 0);
+
+        // assert the same thing for the fork_filter
+        assert_eq!(fork_filter.current().next, 0);
+
+        // check status and fork_filter forkhash
+        assert_eq!(status.forkid.hash, genesis_fork_hash);
+        assert_eq!(fork_filter.current().hash, genesis_fork_hash);
     }
 }

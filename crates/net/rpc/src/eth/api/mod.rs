@@ -1,20 +1,28 @@
 //! Provides everything related to `eth_` namespace
+//!
+//! The entire implementation of the namespace is quite large, hence it is divided across several
+//! files.
 
+use crate::eth::signer::EthSigner;
+use async_trait::async_trait;
 use reth_interfaces::Result;
-use reth_primitives::U64;
-use reth_provider::{BlockProvider, ChainInfo, StateProviderFactory};
+use reth_network_api::NetworkInfo;
+use reth_primitives::{ChainInfo, U64};
+use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
 mod server;
+mod transactions;
 
 /// `Eth` API trait.
 ///
 /// Defines core functionality of the `eth` API implementation.
+#[async_trait]
 pub trait EthApiSpec: Send + Sync {
     /// Returns the current ethereum protocol version.
-    fn protocol_version(&self) -> U64;
+    async fn protocol_version(&self) -> Result<U64>;
 
     /// Returns the chain id
     fn chain_id(&self) -> U64;
@@ -31,44 +39,54 @@ pub trait EthApiSpec: Send + Sync {
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
-#[derive(Debug, Clone)]
-pub struct EthApi<Pool, Client> {
+#[derive(Clone)]
+#[allow(missing_debug_implementations)]
+pub struct EthApi<Pool, Client, Network> {
     /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Pool, Client>>,
+    inner: Arc<EthApiInner<Pool, Client, Network>>,
 }
 
-impl<Pool, Client> EthApi<Pool, Client>
-where
-    Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + 'static,
-{
+impl<Pool, Client, Network> EthApi<Pool, Client, Network> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Arc<Client>, pool: Pool) -> Self {
-        let inner = EthApiInner { client, pool };
+    pub fn new(client: Arc<Client>, pool: Pool, network: Network) -> Self {
+        let inner = EthApiInner { client, pool, network, signers: Default::default() };
         Self { inner: Arc::new(inner) }
     }
 
     /// Returns the inner `Client`
-    fn client(&self) -> &Arc<Client> {
+    pub(crate) fn client(&self) -> &Arc<Client> {
         &self.inner.client
+    }
+
+    /// Returns the inner `Network`
+    pub(crate) fn network(&self) -> &Network {
+        &self.inner.network
+    }
+
+    /// Returns the inner `Pool`
+    pub(crate) fn pool(&self) -> &Pool {
+        &self.inner.pool
     }
 }
 
-impl<Pool, Client> EthApiSpec for EthApi<Pool, Client>
+#[async_trait]
+impl<Pool, Client, Network> EthApiSpec for EthApi<Pool, Client, Network>
 where
     Pool: TransactionPool<Transaction = Transaction> + Clone + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
+    Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.
     ///
     /// Note: This returns an `U64`, since this should return as hex string.
-    fn protocol_version(&self) -> U64 {
-        1u64.into()
+    async fn protocol_version(&self) -> Result<U64> {
+        let status = self.network().network_status().await?;
+        Ok(U64::from(status.protocol_version))
     }
 
     /// Returns the chain id
     fn chain_id(&self) -> U64 {
-        todo!()
+        U64::from(self.network().chain_id())
     }
 
     /// Returns the current info for the chain
@@ -78,11 +96,13 @@ where
 }
 
 /// Container type `EthApi`
-#[derive(Debug)]
-struct EthApiInner<Pool, Client> {
+struct EthApiInner<Pool, Client, Network> {
     /// The transaction pool.
     pool: Pool,
     /// The client that can interact with the chain.
     client: Arc<Client>,
-    // TODO needs network access to handle things like `eth_syncing`
+    /// An interface to interact with the network
+    network: Network,
+    /// All configured Signers
+    signers: Vec<Box<dyn EthSigner>>,
 }

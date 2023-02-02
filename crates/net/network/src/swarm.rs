@@ -101,6 +101,11 @@ where
         &self.incoming
     }
 
+    /// Access to the [`SessionManager`].
+    pub(crate) fn sessions(&self) -> &SessionManager {
+        &self.sessions
+    }
+
     /// Mutable access to the [`SessionManager`].
     pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
         &mut self.sessions
@@ -168,6 +173,9 @@ where
                 Some(SwarmEvent::OutgoingConnectionError { peer_id, remote_addr, error })
             }
             SessionEvent::BadMessage { peer_id } => Some(SwarmEvent::BadMessage { peer_id }),
+            SessionEvent::ProtocolBreach { peer_id } => {
+                Some(SwarmEvent::ProtocolBreach { peer_id })
+            }
         }
     }
 
@@ -261,9 +269,10 @@ where
 
     /// This advances all components.
     ///
-    /// Processes, delegates (internal) commands received from the [`NetworkManager`], then polls
-    /// the [`SessionManager`] which yields messages produced by individual peer sessions that are
-    /// then handled. Least priority are incoming connections that are handled and delegated to
+    /// Processes, delegates (internal) commands received from the
+    /// [`NetworkManager`](crate::NetworkManager), then polls the [`SessionManager`] which
+    /// yields messages produced by individual peer sessions that are then handled. Least
+    /// priority are incoming connections that are handled and delegated to
     /// the [`SessionManager`] to turn them into a session.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -322,6 +331,11 @@ pub(crate) enum SwarmEvent {
     },
     /// Received a bad message from the peer.
     BadMessage {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
+    },
+    /// Remote peer is considered in protocol violation
+    ProtocolBreach {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },

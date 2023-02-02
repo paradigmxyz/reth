@@ -2,21 +2,24 @@
 use crate::{
     consensus::{self, Consensus},
     p2p::{
-        downloader::{DownloadClient, DownloadStream, Downloader},
+        download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
         headers::{
             client::{HeadersClient, HeadersRequest, StatusUpdater},
-            downloader::HeaderDownloader,
+            downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
+        priority::Priority,
     },
 };
-use futures::{Future, FutureExt, Stream};
+use futures::{future, Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader, H256,
+    BlockHash, BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
+    WithPeerId, H256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
+    fmt,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -24,7 +27,12 @@ use std::{
     },
     task::{ready, Context, Poll},
 };
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{
+    oneshot::{error::RecvError, Receiver},
+    watch,
+    watch::error::SendError,
+    Mutex,
+};
 
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]
@@ -32,12 +40,20 @@ pub struct TestHeaderDownloader {
     client: Arc<TestHeadersClient>,
     consensus: Arc<TestConsensus>,
     limit: u64,
+    download: Option<TestDownload>,
+    queued_headers: Vec<SealedHeader>,
+    batch_size: usize,
 }
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(client: Arc<TestHeadersClient>, consensus: Arc<TestConsensus>, limit: u64) -> Self {
-        Self { client, consensus, limit }
+    pub fn new(
+        client: Arc<TestHeadersClient>,
+        consensus: Arc<TestConsensus>,
+        limit: u64,
+        batch_size: usize,
+    ) -> Self {
+        Self { client, consensus, limit, download: None, batch_size, queued_headers: Vec::new() }
     }
 
     fn create_download(&self) -> TestDownload {
@@ -50,29 +66,45 @@ impl TestHeaderDownloader {
             done: false,
         }
     }
-}
 
-impl Downloader for TestHeaderDownloader {
-    type Consensus = TestConsensus;
-    type Client = TestHeadersClient;
-
-    fn consensus(&self) -> &Self::Consensus {
-        &self.consensus
-    }
-
-    fn client(&self) -> &Self::Client {
-        &self.client
+    /// Validate whether the header is valid in relation to it's parent
+    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
+        validate_header_download(&self.consensus, header, parent)
     }
 }
 
-#[async_trait::async_trait]
 impl HeaderDownloader for TestHeaderDownloader {
-    fn stream(&self, _head: SealedHeader, _tip: H256) -> DownloadStream<'_, SealedHeader> {
-        Box::pin(self.create_download())
+    fn update_local_head(&mut self, _head: SealedHeader) {}
+
+    fn update_sync_target(&mut self, _target: SyncTarget) {}
+
+    fn set_batch_size(&mut self, limit: usize) {
+        self.batch_size = limit;
     }
 }
 
-type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send>>;
+impl Stream for TestHeaderDownloader {
+    type Item = Vec<SealedHeader>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            if this.queued_headers.len() == this.batch_size {
+                return Poll::Ready(Some(std::mem::take(&mut this.queued_headers)))
+            }
+            if this.download.is_none() {
+                this.download.insert(this.create_download());
+            }
+
+            match ready!(this.download.as_mut().unwrap().poll_next_unpin(cx)) {
+                None => return Poll::Ready(Some(std::mem::take(&mut this.queued_headers))),
+                Some(header) => this.queued_headers.push(header.unwrap()),
+            }
+        }
+    }
+}
+
+type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send>>;
 
 struct TestDownload {
     client: Arc<TestHeadersClient>,
@@ -92,9 +124,21 @@ impl TestDownload {
                 start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
             };
             let client = Arc::clone(&self.client);
-            self.fut = Some(Box::pin(async move { client.get_headers(request).await }));
+            self.fut = Some(Box::pin(client.get_headers(request)));
         }
         self.fut.as_mut().unwrap()
+    }
+}
+
+impl fmt::Debug for TestDownload {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TestDownload")
+            .field("client", &self.client)
+            .field("consensus", &self.consensus)
+            .field("limit", &self.limit)
+            .field("buffer", &self.buffer)
+            .field("done", &self.done)
+            .finish_non_exhaustive()
     }
 }
 
@@ -124,7 +168,7 @@ impl Stream for TestDownload {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
-                        resp.1 .0.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
+                        resp.1.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
@@ -185,18 +229,30 @@ impl DownloadClient for TestHeadersClient {
     }
 }
 
-#[async_trait::async_trait]
 impl HeadersClient for TestHeadersClient {
-    async fn get_headers(&self, request: HeadersRequest) -> PeerRequestResult<BlockHeaders> {
-        self.request_attempts.fetch_add(1, Ordering::SeqCst);
-        if let Some(err) = &mut *self.error.lock().await {
-            return Err(err.clone())
-        }
+    type Output = TestHeadersFut;
 
-        let mut lock = self.responses.lock().await;
-        let len = lock.len().min(request.limit as usize);
-        let resp = lock.drain(..len).collect();
-        return Ok((PeerId::default(), BlockHeaders(resp)).into())
+    fn get_headers_with_priority(
+        &self,
+        request: HeadersRequest,
+        _priority: Priority,
+    ) -> Self::Output {
+        let responses = self.responses.clone();
+        let error = self.error.clone();
+
+        self.request_attempts.fetch_add(1, Ordering::SeqCst);
+
+        Box::pin(async move {
+            if let Some(err) = &mut *error.lock().await {
+                return Err(err.clone())
+            }
+
+            let mut lock = responses.lock().await;
+            let len = lock.len().min(request.limit as usize);
+            let resp = lock.drain(..len).collect();
+            let with_peer_id = WithPeerId::from((PeerId::default(), resp));
+            Ok(with_peer_id)
+        })
     }
 }
 
@@ -223,24 +279,22 @@ impl Default for TestConsensus {
 }
 
 impl TestConsensus {
-    /// Update the fork choice state
-    pub fn update_tip(&self, tip: H256) {
-        let state = ForkchoiceState {
-            head_block_hash: tip,
-            finalized_block_hash: H256::zero(),
-            safe_block_hash: H256::zero(),
-        };
-        self.channel.0.send(state).expect("updating fork choice state failed");
-    }
-
-    /// Get the failed validation flag
+    /// Get the failed validation flag.
     pub fn fail_validation(&self) -> bool {
         self.fail_validation.load(Ordering::SeqCst)
     }
 
-    /// Update the validation flag
+    /// Update the validation flag.
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst)
+    }
+
+    /// Update the forkchoice state.
+    pub fn notify_fork_choice_state(
+        &self,
+        state: ForkchoiceState,
+    ) -> Result<(), SendError<ForkchoiceState>> {
+        self.channel.0.send(state)
     }
 }
 

@@ -1,10 +1,11 @@
 //! EIP-2124 implementation based on <https://eips.ethereum.org/EIPS/eip-2124>.
-//! Previously version of apache licenced: https://crates.io/crates/ethereum-forkid
+//!
+//! Previously version of Apache licenced [`ethereum-forkid`](https://crates.io/crates/ethereum-forkid).
 
 #![deny(missing_docs)]
 
 use crate::{BlockNumber, H256};
-use crc::crc32;
+use crc::*;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::*;
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,8 @@ use std::{
     ops::{Add, AddAssign},
 };
 use thiserror::Error;
+
+const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 
 /// `CRC32` hash of all previous forks starting from genesis block.
 #[derive_arbitrary(rlp)]
@@ -39,14 +42,18 @@ impl fmt::Debug for ForkHash {
 
 impl From<H256> for ForkHash {
     fn from(genesis: H256) -> Self {
-        Self(crc32::checksum_ieee(&genesis[..]).to_be_bytes())
+        Self(CRC_32_IEEE.checksum(&genesis[..]).to_be_bytes())
     }
 }
 
 impl AddAssign<BlockNumber> for ForkHash {
     fn add_assign(&mut self, block: BlockNumber) {
         let blob = block.to_be_bytes();
-        self.0 = crc32::update(u32::from_be_bytes(self.0), &crc32::IEEE_TABLE, &blob).to_be_bytes();
+        let digest = CRC_32_IEEE.digest_with_initial(u32::from_be_bytes(self.0));
+        let value = digest.finalize();
+        let mut digest = CRC_32_IEEE.digest_with_initial(value);
+        digest.update(&blob);
+        self.0 = digest.finalize().to_be_bytes();
     }
 }
 
@@ -106,7 +113,7 @@ pub enum ValidationError {
 
 /// Filter that describes the state of blockchain and can be used to check incoming `ForkId`s for
 /// compatibility.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkFilter {
     forks: BTreeMap<BlockNumber, ForkHash>,
 
@@ -256,7 +263,7 @@ pub struct ForkTransition {
     pub past: ForkId,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct Cache {
     // An epoch is a period between forks.
     // When we progress from one fork to the next one we move to the next epoch.

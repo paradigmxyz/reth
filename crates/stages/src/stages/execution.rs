@@ -3,7 +3,7 @@ use crate::{
     Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
     tables,
@@ -14,40 +14,42 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_primitives::{
-    Address, ChainSpec, Header, StorageEntry, TransactionSignedEcRecovered, H256, MAINNET, U256,
+    Address, ChainSpec, Hardfork, Header, StorageEntry, TransactionSignedEcRecovered, H256,
+    MAINNET, U256,
 };
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
 use tracing::*;
 
-const EXECUTION: StageId = StageId("Execution");
+/// The [`StageId`] of the execution stage.
+pub const EXECUTION: StageId = StageId("Execution");
 
 /// The execution stage executes all transactions and
 /// update history indexes.
 ///
 /// Input tables:
-/// [tables::CanonicalHeaders] get next block to execute.
-/// [tables::Headers] get for revm environment variables.
-/// [tables::CumulativeTxCount] to get tx number
-/// [tables::Transactions] to execute
+/// - [tables::CanonicalHeaders] get next block to execute.
+/// - [tables::Headers] get for revm environment variables.
+/// - [tables::BlockBodies] to get tx number
+/// - [tables::Transactions] to execute
 ///
-/// For state access [StateProvider] provides us latest state and history state
-/// For latest most recent state [StateProvider] would need (Used for execution Stage):
-/// [tables::PlainAccountState]
-/// [tables::Bytecodes]
-/// [tables::PlainStorageState]
+/// For state access [LatestStateProviderRef] provides us latest state and history state
+/// For latest most recent state [LatestStateProviderRef] would need (Used for execution Stage):
+/// - [tables::PlainAccountState]
+/// - [tables::Bytecodes]
+/// - [tables::PlainStorageState]
 ///
 /// Tables updated after state finishes execution:
-/// [tables::PlainAccountState]
-/// [tables::PlainStorageState]
-/// [tables::Bytecodes]
-/// [tables::AccountChangeSet]
-/// [tables::StorageChangeSet]
+/// - [tables::PlainAccountState]
+/// - [tables::PlainStorageState]
+/// - [tables::Bytecodes]
+/// - [tables::AccountChangeSet]
+/// - [tables::StorageChangeSet]
 ///
 /// For unwinds we are accessing:
-/// [tables::CumulativeTxCount] get tx index to know what needs to be unwinded
-/// [tables::AccountHistory] to remove change set and apply old values to
-/// [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
+/// - [tables::BlockBodies] get tx index to know what needs to be unwinded
+/// - [tables::AccountHistory] to remove change set and apply old values to
+/// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
 #[derive(Debug)]
 pub struct ExecutionStage {
@@ -102,8 +104,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get canonical blocks (num,hash)
         let canonical_batch = canonicals
-            .walk(start_block)?
-            .take_while(|entry| entry.as_ref().map(|e| e.0 <= end_block).unwrap_or_default())
+            .walk_range(start_block..end_block + 1)?
             .map(|i| i.map(BlockNumHash))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -198,60 +199,89 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 handle.join().expect("Expects for thread to not panic")
             })
             .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push(changeset);
+            block_change_patches.push((changeset, num));
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
-        let mut current_transition_id = tx.get_block_transition_by_num(last_block)? + 1;
+        let mut current_transition_id = tx.get_block_transition(last_block)?;
         info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
+        let spurious_dragon_activation =
+            self.chain_spec.fork_block(Hardfork::SpuriousDragon).unwrap_or_default();
+
         // apply changes to plain database.
-        for results in block_change_patches.into_iter() {
+        for (results, block_number) in block_change_patches.into_iter() {
+            let spurious_dragon_active = block_number >= spurious_dragon_activation;
             // insert state change set
             for result in results.changesets.into_iter() {
-                // TODO insert to transitionId to tx_index
                 for (address, account_change_set) in result.changeset.into_iter() {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
                     // tables.
                     trace!(target: "sync::stages::execution", ?address, current_transition_id, ?account, wipe_storage, "Applying account changeset");
-                    account.apply_to_db(&**tx, address, current_transition_id)?;
+                    account.apply_to_db(
+                        &**tx,
+                        address,
+                        current_transition_id,
+                        spurious_dragon_active,
+                    )?;
 
-                    // wipe storage
-                    if wipe_storage {
-                        // TODO insert all changes to StorageChangeSet
-                        tx.delete::<tables::PlainStorageState>(address, None)?;
-                    }
-                    // insert storage changeset
                     let storage_id = TransitionIdAddress((current_transition_id, address));
-                    for (key, (old_value, new_value)) in storage {
-                        let hkey = H256(key.to_be_bytes());
 
-                        trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
+                    // cast key to H256 and trace the change
+                    let storage = storage
+                        .into_iter()
+                        .map(|(key, (old_value,new_value))| {
+                            let hkey = H256(key.to_be_bytes());
+                            trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
+                            (hkey, old_value,new_value)
+                        })
+                        .collect::<Vec<_>>();
 
-                        // insert into StorageChangeSet
-                        tx.put::<tables::StorageChangeSet>(
-                            storage_id.clone(),
-                            StorageEntry { key: hkey, value: old_value },
-                        )?;
-                        tracing::debug!(
-                            target = "sync::stages::execution",
-                            "{address} setting storage:{key} ({old_value} -> {new_value})"
-                        );
+                    let mut cursor_storage_changeset =
+                        tx.cursor_write::<tables::StorageChangeSet>()?;
+                    cursor_storage_changeset.seek_exact(storage_id)?;
 
-                        // Always delete old value as duplicate table, put will not override it
-                        tx.delete::<tables::PlainStorageState>(
-                            address,
-                            Some(StorageEntry { key: hkey, value: old_value }),
-                        )?;
-                        if new_value != U256::ZERO {
-                            tx.put::<tables::PlainStorageState>(
-                                address,
-                                StorageEntry { key: hkey, value: new_value },
-                            )?;
+                    if wipe_storage {
+                        // iterate over storage and save them before entry is deleted.
+                        tx.cursor_read::<tables::PlainStorageState>()?
+                            .walk(address)?
+                            .take_while(|res| {
+                                res.as_ref().map(|(k, _)| *k == address).unwrap_or_default()
+                            })
+                            .try_for_each(|entry| {
+                                let (_, old_value) = entry?;
+                                cursor_storage_changeset.append(storage_id, old_value)
+                            })?;
+
+                        // delete all entries
+                        tx.delete::<tables::PlainStorageState>(address, None)?;
+
+                        // insert storage changeset
+                        for (key, _, new_value) in storage {
+                            // old values are already cleared.
+                            if new_value != U256::ZERO {
+                                tx.put::<tables::PlainStorageState>(
+                                    address,
+                                    StorageEntry { key, value: new_value },
+                                )?;
+                            }
+                        }
+                    } else {
+                        // insert storage changeset
+                        for (key, old_value, new_value) in storage {
+                            let old_entry = StorageEntry { key, value: old_value };
+                            let new_entry = StorageEntry { key, value: new_value };
+                            // insert into StorageChangeSet
+                            cursor_storage_changeset.append(storage_id, old_entry)?;
+
+                            // Always delete old value as duplicate table, put will not override it
+                            tx.delete::<tables::PlainStorageState>(address, Some(old_entry))?;
+                            if new_value != U256::ZERO {
+                                tx.put::<tables::PlainStorageState>(address, new_entry)?;
+                            }
                         }
                     }
-                    current_transition_id += 1;
                 }
                 // insert bytecode
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
@@ -264,6 +294,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     // NOTE: bytecode bytes are not inserted in change set and can be found in
                     // separate table
                 }
+                current_transition_id += 1;
             }
 
             // If there is block reward we will add account changeset to db
@@ -271,7 +302,12 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 // we are sure that block reward index is present.
                 for (address, changeset) in block_reward_changeset.into_iter() {
                     trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
-                    changeset.apply_to_db(&**tx, address, current_transition_id)?;
+                    changeset.apply_to_db(
+                        &**tx,
+                        address,
+                        current_transition_id,
+                        spurious_dragon_active,
+                    )?;
                 }
                 current_transition_id += 1;
             }
@@ -294,8 +330,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let from_transition_rev = tx.get_block_transition_by_num(input.unwind_to)? + 1;
-        let to_transition_rev = tx.get_block_transition_by_num(input.stage_progress)? + 1;
+        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
+        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
 
         if from_transition_rev > to_transition_rev {
             panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", from_transition_rev, input.stage_progress, to_transition_rev, input.unwind_to);
@@ -311,15 +347,11 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
         let account_changeset_batch = account_changeset
-            .walk(from_transition_rev)?
-            .take_while(|item| {
-                item.as_ref().map(|(num, _)| *num < to_transition_rev).unwrap_or_default()
-            })
+            .walk_range(from_transition_rev..to_transition_rev)?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
-            // TODO refactor in db fn called tx.aplly_account_changeset
             if let Some(account_info) = changeset.info {
                 tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
             } else {
@@ -329,41 +361,42 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
-            .walk((from_transition_rev, Address::zero()).into())?
-            .take_while(|item| {
-                item.as_ref()
-                    .map(|(key, _)| key.transition_id() < to_transition_rev)
-                    .unwrap_or_default()
-            })
+            .walk_range(
+                (from_transition_rev, Address::zero()).into()..
+                    (to_transition_rev, Address::zero()).into(),
+            )?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage
+        let mut plain_storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
         for (key, storage) in storage_changeset_batch.into_iter().rev() {
             let address = key.address();
-            tx.put::<tables::PlainStorageState>(address, storage.clone())?;
-            if storage.value == U256::ZERO {
-                // delete value that is zero
-                tx.delete::<tables::PlainStorageState>(address, Some(storage))?;
+            if plain_storage_cursor.seek_by_key_subkey(address, storage.key)?.is_some() {
+                plain_storage_cursor.delete_current()?;
+            }
+            if storage.value != U256::ZERO {
+                plain_storage_cursor.upsert(address, storage)?;
             }
         }
 
         // Discard unwinded changesets
-        let mut entry = account_changeset.last()?;
-        while let Some((transition_id, _)) = entry {
+        let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
+        while let Some((transition_id, _)) = rev_acc_changeset_walker.next().transpose()? {
             if transition_id < from_transition_rev {
                 break
             }
-            account_changeset.delete_current()?;
-            entry = account_changeset.prev()?;
+            // delete all changesets
+            tx.delete::<tables::AccountChangeSet>(transition_id, None)?;
         }
 
-        let mut entry = storage_changeset.last()?;
-        while let Some((key, _)) = entry {
+        let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
+        while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.transition_id() < from_transition_rev {
                 break
             }
-            storage_changeset.delete_current()?;
-            entry = storage_changeset.prev()?;
+            // delete all changesets
+            tx.delete::<tables::StorageChangeSet>(key, None)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -374,10 +407,13 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 mod tests {
     use std::ops::{Deref, DerefMut};
 
-    use crate::test_utils::PREV_STAGE_ID;
+    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
 
     use super::*;
-    use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_db::{
+        mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
+        models::AccountBeforeTx,
+    };
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, U256,
     };
@@ -484,7 +520,7 @@ mod tests {
         let state_db = create_test_db::<WriteMap>(EnvKind::RW);
         let mut tx = Transaction::new(state_db.as_ref()).unwrap();
         let input = ExecInput {
-            previous_stage: None,
+            previous_stage: Some((PREV_STAGE_ID, 1)),
             /// The progress of this stage the last time it was executed.
             stage_progress: None,
         };
@@ -513,7 +549,6 @@ mod tests {
         tx.commit().unwrap();
 
         // execute
-
         let mut execution_stage = ExecutionStage {
             chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
             ..Default::default()
@@ -546,6 +581,144 @@ mod tests {
             db_tx.get::<tables::PlainAccountState>(miner_acc),
             Ok(None),
             "Third account should be unwinded"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_selfdestruct() {
+        let test_tx = TestTransaction::default();
+        let mut tx = test_tx.inner();
+        let input = ExecInput {
+            previous_stage: Some((PREV_STAGE_ID, 1)),
+            /// The progress of this stage the last time it was executed.
+            stage_progress: None,
+        };
+        let mut genesis_rlp = hex!("f901f8f901f3a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0c9ceb8372c88cb461724d8d3d87e8b933f6fc5f679d4841800e662f4428ffd0da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080830f4240808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
+        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
+        let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
+        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        insert_canonical_block(tx.deref_mut(), &genesis, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), &block, true).unwrap();
+        tx.commit().unwrap();
+
+        // variables
+        let caller_address = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+        let destroyed_address = H160(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87"));
+        let beneficiary_address = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
+
+        let code = hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00");
+        let balance = U256::from(0x0de0b6b3a7640000u64);
+        let code_hash = keccak256(code);
+
+        // pre state
+        let db_tx = tx.deref_mut();
+        let caller_info = Account { nonce: 0, balance, bytecode_hash: None };
+        let destroyed_info =
+            Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
+
+        // set account
+        db_tx.put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
+        db_tx.put::<tables::PlainAccountState>(destroyed_address, destroyed_info).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
+        // set storage to check when account gets destroyed.
+        db_tx
+            .put::<tables::PlainStorageState>(
+                destroyed_address,
+                StorageEntry { key: H256::zero(), value: U256::ZERO },
+            )
+            .unwrap();
+        db_tx
+            .put::<tables::PlainStorageState>(
+                destroyed_address,
+                StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1u64) },
+            )
+            .unwrap();
+
+        tx.commit().unwrap();
+
+        // execute
+        let mut execution_stage = ExecutionStage {
+            chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
+            ..Default::default()
+        };
+        let _ = execution_stage.execute(&mut tx, input).await.unwrap();
+        tx.commit().unwrap();
+
+        // assert unwind stage
+        assert_eq!(
+            tx.deref().get::<tables::PlainAccountState>(destroyed_address),
+            Ok(None),
+            "Account was destroyed"
+        );
+
+        assert_eq!(
+            tx.deref().get::<tables::PlainStorageState>(destroyed_address),
+            Ok(None),
+            "There is storage for destroyed account"
+        );
+        // drops tx so that it returns write privilege to test_tx
+        drop(tx);
+        let plain_accounts = test_tx.table::<tables::PlainAccountState>().unwrap();
+        let plain_storage = test_tx.table::<tables::PlainStorageState>().unwrap();
+
+        assert_eq!(
+            plain_accounts,
+            vec![
+                (
+                    beneficiary_address,
+                    Account {
+                        nonce: 0,
+                        balance: U256::from(0x1bc16d674eca30a0u64),
+                        bytecode_hash: None
+                    }
+                ),
+                (
+                    caller_address,
+                    Account {
+                        nonce: 1,
+                        balance: U256::from(0xde0b6b3a761cf60u64),
+                        bytecode_hash: None
+                    }
+                )
+            ]
+        );
+        assert!(plain_storage.is_empty());
+
+        let account_changesets = test_tx.table::<tables::AccountChangeSet>().unwrap();
+        let storage_changesets = test_tx.table::<tables::StorageChangeSet>().unwrap();
+
+        assert_eq!(
+            account_changesets,
+            vec![
+                (1, AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) }),
+                (1, AccountBeforeTx { address: beneficiary_address, info: None }),
+                (1, AccountBeforeTx { address: caller_address, info: Some(caller_info) }),
+                (
+                    2,
+                    AccountBeforeTx {
+                        address: beneficiary_address,
+                        info: Some(Account {
+                            nonce: 0,
+                            balance: U256::from(0x230a0),
+                            bytecode_hash: None
+                        })
+                    }
+                )
+            ]
+        );
+
+        assert_eq!(
+            storage_changesets,
+            vec![
+                (
+                    (1, destroyed_address).into(),
+                    StorageEntry { key: H256::zero(), value: U256::ZERO }
+                ),
+                (
+                    (1, destroyed_address).into(),
+                    StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1u64) }
+                )
+            ]
         );
     }
 }

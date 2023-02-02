@@ -69,6 +69,25 @@ impl<S> UnauthedP2PStream<S> {
 
 impl<S> UnauthedP2PStream<S>
 where
+    S: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Send a disconnect message during the handshake. This is sent without snappy compression.
+    pub async fn send_disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Result<(), P2PStreamError> {
+        let mut buf = BytesMut::new();
+        P2PMessage::Disconnect(reason).encode(&mut buf);
+        tracing::trace!(
+            %reason,
+            "Sending disconnect message during the handshake",
+        );
+        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
+    }
+}
+
+impl<S> UnauthedP2PStream<S>
+where
     S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
 {
     /// Consumes the `UnauthedP2PStream` and returns a `P2PStream` after the `Hello` handshake is
@@ -77,14 +96,14 @@ where
         mut self,
         hello: HelloMessage,
     ) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
-        tracing::trace!("sending p2p hello ...");
+        tracing::trace!(?hello, "sending p2p hello to peer");
 
         // send our hello message with the Sink
         let mut raw_hello_bytes = BytesMut::new();
         P2PMessage::Hello(hello.clone()).encode(&mut raw_hello_bytes);
         self.inner.send(raw_hello_bytes.into()).await?;
 
-        tracing::trace!("waiting for p2p hello from peer ...");
+        tracing::trace!("waiting for p2p hello from peer");
 
         let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
             .await
@@ -123,20 +142,34 @@ where
             }
         }?;
 
-        // TODO: explicitly document that we only support v5.
-        if their_hello.protocol_version != ProtocolVersion::V5 {
-            // TODO: do we want to send a `Disconnect` message here?
+        tracing::trace!(
+            hello=?their_hello,
+            "validating incoming p2p hello from peer"
+        );
+
+        if (hello.protocol_version as u8) != their_hello.protocol_version as u8 {
+            // send a disconnect message notifying the peer of the protocol version mismatch
+            self.send_disconnect(DisconnectReason::IncompatibleP2PProtocolVersion).await?;
             return Err(P2PStreamError::MismatchedProtocolVersion {
-                expected: ProtocolVersion::V5 as u8,
+                expected: hello.protocol_version as u8,
                 got: their_hello.protocol_version as u8,
             })
         }
 
         // determine shared capabilities (currently returns only one capability)
-        let capability =
-            set_capability_offsets(hello.capabilities, their_hello.capabilities.clone())?;
+        let capability_res =
+            set_capability_offsets(hello.capabilities, their_hello.capabilities.clone());
 
-        let stream = P2PStream::new(self.inner, capability);
+        let shared_capability = match capability_res {
+            Err(err) => {
+                // we don't share any capabilities, send a disconnect message
+                self.send_disconnect(DisconnectReason::UselessPeer).await?;
+                Err(err)
+            }
+            Ok(cap) => Ok(cap),
+        }?;
+
+        let stream = P2PStream::new(self.inner, shared_capability);
 
         Ok((stream, their_hello))
     }
@@ -219,14 +252,16 @@ impl<S> P2PStream<S> {
         let mut buf = BytesMut::with_capacity(disconnect.length());
         disconnect.encode(&mut buf);
 
-        tracing::trace!(
-            fromlen=%buf.len(),
-            msg=%hex::encode(&buf),
-            "Compressing disconnect message",
-        );
-
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(buf.len() - 1));
-        let compressed_size = self.encoder.compress(&buf[1..], &mut compressed[1..])?;
+        let compressed_size =
+            self.encoder.compress(&buf[1..], &mut compressed[1..]).map_err(|err| {
+                tracing::debug!(
+                    ?err,
+                    msg=%hex::encode(&buf[1..]),
+                    "error compressing disconnect"
+                );
+                err
+            })?;
 
         // truncate the compressed buffer to the actual compressed size (plus one for the message
         // id)
@@ -235,12 +270,6 @@ impl<S> P2PStream<S> {
         // we do not add the capability offset because the disconnect message is a `p2p` reserved
         // message
         compressed[0] = buf[0];
-
-        tracing::trace!(
-            tolen=%compressed.len(),
-            compressed=%hex::encode(&compressed),
-            "Compressed disconnect message",
-        );
 
         self.outgoing_messages.push_back(compressed.freeze());
         self.disconnecting = true;
@@ -278,31 +307,6 @@ where
             return Poll::Ready(None)
         }
 
-        // poll the pinger to determine if we should send a ping
-        match this.pinger.poll_ping(cx) {
-            Poll::Pending => {}
-            Poll::Ready(Ok(PingerEvent::Ping)) => {
-                // encode the ping message
-                let mut ping_bytes = BytesMut::new();
-                P2PMessage::Ping.encode(&mut ping_bytes);
-
-                // check if the buffer is full
-                if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                    return Poll::Ready(Some(Err(P2PStreamError::SendBufferFull)))
-                }
-
-                // if the sink is not ready, buffer the message
-                this.outgoing_messages.push_back(ping_bytes.into());
-            }
-            _ => {
-                // encode the disconnect message
-                this.start_disconnect(DisconnectReason::PingTimeout)?;
-
-                // End the stream after ping related error
-                return Poll::Ready(None)
-            }
-        }
-
         // we should loop here to ensure we don't return Poll::Pending if we have a message to
         // return behind any pings we need to respond to
         while let Poll::Ready(res) = this.inner.poll_next_unpin(cx) {
@@ -326,16 +330,16 @@ where
             // the message ID byte, which is the first byte in this buffer
             let mut decompress_buf = BytesMut::zeroed(decompressed_len + 1);
 
-            tracing::trace!(
-                fromlen=%bytes.len(),
-                tolen=%decompress_buf.len(),
-                msg=%hex::encode(&bytes),
-                "Decompressing message",
-            );
-
             // each message following a successful handshake is compressed with snappy, so we need
             // to decompress the message before we can decode it.
-            this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..])?;
+            this.decoder.decompress(&bytes[1..], &mut decompress_buf[1..]).map_err(|err| {
+                tracing::debug!(
+                    ?err,
+                    msg=%hex::encode(&bytes[1..]),
+                    "error decompressing p2p message"
+                );
+                err
+            })?;
 
             let id = *bytes.first().ok_or(P2PStreamError::EmptyProtocolMessage)?;
             match id {
@@ -415,6 +419,31 @@ where
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.as_mut();
 
+        // poll the pinger to determine if we should send a ping
+        match this.pinger.poll_ping(cx) {
+            Poll::Pending => {}
+            Poll::Ready(Ok(PingerEvent::Ping)) => {
+                // encode the ping message
+                let mut ping_bytes = BytesMut::new();
+                P2PMessage::Ping.encode(&mut ping_bytes);
+
+                // check if the buffer is full
+                if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
+                    return Poll::Ready(Err(P2PStreamError::SendBufferFull))
+                }
+
+                // if the sink is not ready, buffer the message
+                this.outgoing_messages.push_back(ping_bytes.into());
+            }
+            _ => {
+                // encode the disconnect message
+                this.start_disconnect(DisconnectReason::PingTimeout)?;
+
+                // End the stream after ping related error
+                return Poll::Ready(Ok(()))
+            }
+        }
+
         match this.inner.poll_ready_unpin(cx) {
             Poll::Pending => {}
             Poll::Ready(Err(err)) => return Poll::Ready(Err(P2PStreamError::Io(err))),
@@ -442,14 +471,16 @@ where
             return Err(P2PStreamError::SendBufferFull)
         }
 
-        tracing::trace!(
-            fromlen=%item.len(),
-            msg=%hex::encode(&item),
-            "Compressing message",
-        );
-
         let mut compressed = BytesMut::zeroed(1 + snap::raw::max_compress_len(item.len() - 1));
-        let compressed_size = this.encoder.compress(&item[1..], &mut compressed[1..])?;
+        let compressed_size =
+            this.encoder.compress(&item[1..], &mut compressed[1..]).map_err(|err| {
+                tracing::debug!(
+                    ?err,
+                    msg=%hex::encode(&item[1..]),
+                    "error compressing p2p message"
+                );
+                err
+            })?;
 
         // truncate the compressed buffer to the actual compressed size (plus one for the message
         // id)
@@ -539,8 +570,6 @@ pub fn set_capability_offsets(
 
     // disconnect if we don't share any capabilities
     if shared_capabilities.is_empty() {
-        // TODO: send a disconnect message? if we want to do this, this will need to be a member
-        // method of `UnauthedP2PStream` so it can access the inner stream
         return Err(P2PStreamError::HandshakeError(P2PHandshakeError::NoSharedCapabilities))
     }
 
@@ -595,10 +624,10 @@ pub enum P2PMessage {
     /// immediately.
     Disconnect(DisconnectReason),
 
-    /// Requests an immediate reply of [`Pong`] from the peer.
+    /// Requests an immediate reply of [`P2PMessage::Pong`] from the peer.
     Ping,
 
-    /// Reply to the peer's [`Ping`] packet.
+    /// Reply to the peer's [`P2PMessage::Ping`] packet.
     Pong,
 }
 
@@ -849,6 +878,62 @@ mod tests {
                 offset: MAX_RESERVED_MESSAGE_ID + 1
             }
         );
+
+        // make sure the server receives the message and asserts before ending the test
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_handshake_disconnect() {
+        // create a p2p stream and server, then confirm that the two are authed
+        // create tcpstream
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            // roughly based off of the design of tokio::net::TcpListener
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+
+            let (server_hello, _) = eth_hello();
+
+            let unauthed_stream = UnauthedP2PStream::new(stream);
+            match unauthed_stream.handshake(server_hello.clone()).await {
+                Ok((_, hello)) => panic!(
+                    "expected handshake to fail, instead got a successful Hello: {:?}",
+                    hello
+                ),
+                Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
+                    assert_eq!(expected, server_hello.protocol_version as u8);
+                    assert_ne!(expected, got);
+                }
+                Err(other_err) => {
+                    panic!("expected mismatched protocol version error, got {:?}", other_err)
+                }
+            }
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = crate::PassthroughCodec::default().framed(outgoing);
+
+        let (mut client_hello, _) = eth_hello();
+
+        // modify the hello to include an incompatible p2p protocol version
+        client_hello.protocol_version = ProtocolVersion::V4;
+
+        let unauthed_stream = UnauthedP2PStream::new(sink);
+        match unauthed_stream.handshake(client_hello.clone()).await {
+            Ok((_, hello)) => {
+                panic!("expected handshake to fail, instead got a successful Hello: {:?}", hello)
+            }
+            Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
+                assert_eq!(expected, client_hello.protocol_version as u8);
+                assert_ne!(expected, got);
+            }
+            Err(other_err) => {
+                panic!("expected mismatched protocol version error, got {:?}", other_err)
+            }
+        }
 
         // make sure the server receives the message and asserts before ending the test
         handle.await.unwrap();

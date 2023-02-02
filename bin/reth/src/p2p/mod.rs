@@ -1,18 +1,19 @@
 //! P2P Debugging tool
 use crate::{
-    config::Config,
     dirs::{ConfigPath, PlatformPath},
     utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
 };
 use backon::{ConstantBackoff, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
+use reth_discv4::NatResolver;
 use reth_interfaces::p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::FetchClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
+use reth_staged_sync::Config;
 use std::sync::Arc;
 
 /// `reth p2p` command
@@ -57,6 +58,9 @@ pub struct Command {
 
     #[clap(subcommand)]
     command: Subcommands,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
 }
 
 #[derive(Subcommand, Debug)]
@@ -94,11 +98,11 @@ impl Command {
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
         let network = config
-            .network_config(noop_db, self.chain.clone(), self.disable_discovery, None)
+            .network_config(noop_db, self.chain.clone(), self.disable_discovery, None, self.nat)
             .start_network()
             .await?;
 
-        let fetch_client = Arc::new(network.fetch_client().await?);
+        let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);
         let backoff = ConstantBackoff::default().with_max_times(retries);
 
@@ -153,7 +157,7 @@ impl Command {
     /// Get a single header from network
     pub async fn get_single_header(
         &self,
-        client: Arc<FetchClient>,
+        client: FetchClient,
         id: BlockHashOrNumber,
     ) -> eyre::Result<SealedHeader> {
         let request = HeadersRequest {
@@ -164,14 +168,14 @@ impl Command {
 
         let (_, response) = client.get_headers(request).await?.split();
 
-        if response.0.len() != 1 {
+        if response.len() != 1 {
             eyre::bail!(
                 "Invalid number of headers received. Expected: 1. Received: {}",
-                response.0.len()
+                response.len()
             )
         }
 
-        let header = response.0.into_iter().next().unwrap().seal();
+        let header = response.into_iter().next().unwrap().seal();
 
         let valid = match id {
             BlockHashOrNumber::Hash(hash) => header.hash() == hash,

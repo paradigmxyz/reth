@@ -1,5 +1,6 @@
 use crate::Error;
 use bytes::Bytes;
+use serde::Serialize;
 use std::{
     fmt::Debug,
     marker::{Send, Sync},
@@ -36,23 +37,23 @@ pub trait Decode: Send + Sync + Sized + Debug {
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
-pub trait Key: Encode + Decode {}
+pub trait Key: Encode + Decode + Ord + Clone {}
 
-impl<T> Key for T where T: Encode + Decode {}
+impl<T> Key for T where T: Encode + Decode + Ord + Clone {}
 
 /// Generic trait that enforces the database value to implement [`Compress`] and [`Decompress`].
-pub trait Value: Compress + Decompress {}
+pub trait Value: Compress + Decompress + Serialize {}
 
-impl<T> Value for T where T: Compress + Decompress {}
+impl<T> Value for T where T: Compress + Decompress + Serialize {}
 
 /// Generic trait that a database table should follow.
 ///
-/// [`Table::Key`], [`Table::Value`], [`Table::SeekKey`] types should implement [`Encode`] and
+/// The [`Table::Key`] and [`Table::Value`] types should implement [`Encode`] and
 /// [`Decode`] when appropriate. These traits define how the data is stored and read from the
 /// database.
 ///
-/// It allows for the use of codecs. See [`crate::kv::models::blocks::BlockNumHash`] for a custom
-/// implementation, and [`crate::kv::codecs::scale`] for the use of an external codec.
+/// It allows for the use of codecs. See [`crate::models::BlockNumHash`] for a custom
+/// implementation.
 pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.
     const NAME: &'static str;
@@ -64,11 +65,14 @@ pub trait Table: Send + Sync + Debug + 'static {
     type Value: Value;
 }
 
-/// DupSort allows for keys not to be repeated in the database,
-/// for more check: https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
+/// DupSort allows for keys to be repeated in the database.
+///
+/// Upstream docs: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
 pub trait DupSort: Table {
-    /// Subkey type. For more check https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48
+    /// The table subkey. This type must implement [`Encode`] and [`Decode`].
     ///
     /// Sorting should be taken into account when encoding this.
+    ///
+    /// Upstream docs: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
     type SubKey: Key;
 }

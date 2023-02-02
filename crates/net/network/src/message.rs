@@ -59,7 +59,7 @@ pub enum PeerMessage {
 }
 
 /// Request Variants that only target block related data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
 #[allow(clippy::enum_variant_names)]
 pub enum BlockRequest {

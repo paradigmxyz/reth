@@ -1,7 +1,10 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use crate::{eth::api::EthApi, result::ToRpcResult};
+use crate::{
+    eth::api::EthApi,
+    result::{internal_rpc_err, ToRpcResult},
+};
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
@@ -19,26 +22,27 @@ use serde_json::Value;
 use super::EthApiSpec;
 
 #[async_trait::async_trait]
-impl<Pool, Client> EthApiServer for EthApi<Pool, Client>
+impl<Pool, Client, Network> EthApiServer for EthApi<Pool, Client, Network>
 where
     Self: EthApiSpec,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
+    Network: 'static,
 {
-    fn protocol_version(&self) -> Result<U64> {
-        Ok(EthApiSpec::protocol_version(self))
+    async fn protocol_version(&self) -> Result<U64> {
+        EthApiSpec::protocol_version(self).await.to_rpc_result()
     }
 
     fn syncing(&self) -> Result<SyncStatus> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn author(&self) -> Result<Address> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn accounts(&self) -> Result<Vec<Address>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     fn block_number(&self) -> Result<U256> {
@@ -52,7 +56,7 @@ where
     }
 
     async fn block_by_hash(&self, _hash: H256, _full: bool) -> Result<Option<RichBlock>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn block_by_number(
@@ -60,26 +64,26 @@ where
         _number: BlockNumber,
         _full: bool,
     ) -> Result<Option<RichBlock>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn block_transaction_count_by_hash(&self, _hash: H256) -> Result<Option<U256>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn block_transaction_count_by_number(
         &self,
         _number: BlockNumber,
     ) -> Result<Option<U256>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn block_uncles_count_by_hash(&self, _hash: H256) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn block_uncles_count_by_number(&self, _number: BlockNumber) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn uncle_by_block_hash_and_index(
@@ -87,7 +91,7 @@ where
         _hash: H256,
         _index: Index,
     ) -> Result<Option<RichBlock>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn uncle_by_block_number_and_index(
@@ -95,14 +99,14 @@ where
         _number: BlockNumber,
         _index: Index,
     ) -> Result<Option<RichBlock>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn transaction_by_hash(
         &self,
         _hash: H256,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn transaction_by_block_hash_and_index(
@@ -110,7 +114,7 @@ where
         _hash: H256,
         _index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn transaction_by_block_number_and_index(
@@ -118,15 +122,15 @@ where
         _number: BlockNumber,
         _index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn transaction_receipt(&self, _hash: H256) -> Result<Option<TransactionReceipt>> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn balance(&self, _address: Address, _block_number: Option<BlockId>) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn storage_at(
@@ -135,7 +139,7 @@ where
         _index: U256,
         _block_number: Option<BlockId>,
     ) -> Result<H256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn transaction_count(
@@ -143,15 +147,15 @@ where
         _address: Address,
         _block_number: Option<BlockId>,
     ) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn get_code(&self, _address: Address, _block_number: Option<BlockId>) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn call(&self, _request: CallRequest, _block_number: Option<BlockId>) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn create_access_list(
@@ -159,7 +163,7 @@ where
         _request: CallRequest,
         _block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn estimate_gas(
@@ -167,11 +171,11 @@ where
         _request: CallRequest,
         _block_number: Option<BlockId>,
     ) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn gas_price(&self) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn fee_history(
@@ -180,51 +184,51 @@ where
         _newest_block: BlockNumber,
         _reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn is_mining(&self) -> Result<bool> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn hashrate(&self) -> Result<U256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn get_work(&self) -> Result<Work> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn submit_hashrate(&self, _hashrate: U256, _id: H256) -> Result<bool> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn submit_work(&self, _nonce: H64, _pow_hash: H256, _mix_digest: H256) -> Result<bool> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn send_transaction(&self, _request: TransactionRequest) -> Result<H256> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn send_raw_transaction(&self, _bytes: Bytes) -> Result<H256> {
-        todo!()
+    async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
+        EthApi::send_raw_transaction(self, tx).await.to_rpc_result()
     }
 
     async fn sign(&self, _address: Address, _message: Bytes) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn sign_transaction(&self, _transaction: CallRequest) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn sign_typed_data(&self, _address: Address, _data: Value) -> Result<Bytes> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn get_proof(
@@ -233,6 +237,6 @@ where
         _keys: Vec<H256>,
         _block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        todo!()
+        Err(internal_rpc_err("unimplemented"))
     }
 }

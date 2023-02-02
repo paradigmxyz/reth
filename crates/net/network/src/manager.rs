@@ -25,7 +25,7 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::NetworkMetrics,
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeersHandle, PeersManager, ReputationChangeKind},
+    peers::{PeersHandle, PeersManager},
     session::SessionManager,
     state::NetworkState,
     swarm::{Swarm, SwarmEvent},
@@ -39,13 +39,14 @@ use reth_eth_wire::{
     DisconnectReason, Status,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
+use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
 use reth_primitives::{PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -129,7 +130,7 @@ impl<C> NetworkManager<C> {
         &self.handle
     }
 
-    /// Returns a shareable reference to the [`BandwidthMeter`] stored on the [`NetworkInner`]
+    /// Returns a shareable reference to the [`BandwidthMeter`] stored
     /// inside of the [`NetworkHandle`]
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         self.handle.bandwidth_meter()
@@ -217,6 +218,7 @@ where
             peers_handle,
             network_mode,
             bandwidth_meter,
+            Arc::new(AtomicU64::new(chain_spec.chain.id())),
         );
 
         Ok(Self {
@@ -250,7 +252,7 @@ where
     ///     let local_key = rng_secret_key();
     ///
     ///     let config =
-    ///         NetworkConfig::builder(Arc::clone(&client), local_key).boot_nodes(mainnet_nodes()).build();
+    ///         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(Arc::clone(&client));
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
@@ -305,6 +307,24 @@ where
     /// The [`FetchClient`] is the entrypoint for sending requests to the network.
     pub fn fetch_client(&self) -> FetchClient {
         self.swarm.state().fetch_client()
+    }
+
+    /// Returns the current [`NetworkStatus`] for the local node.
+    pub fn status(&self) -> NetworkStatus {
+        let sessions = self.swarm.sessions();
+        let status = sessions.status();
+        let hello_message = sessions.hello_message();
+
+        NetworkStatus {
+            client_version: hello_message.client_version,
+            protocol_version: hello_message.protocol_version as u64,
+            eth_protocol_info: EthProtocolInfo {
+                difficulty: status.total_difficulty,
+                head: status.blockhash,
+                network: status.chain.id(),
+                genesis: status.genesis,
+            },
+        }
     }
 
     /// Event hook for an unexpected message from the peer.
@@ -499,6 +519,9 @@ where
             NetworkHandleMessage::FetchClient(tx) => {
                 let _ = tx.send(self.fetch_client());
             }
+            NetworkHandleMessage::GetStatus(tx) => {
+                let _ = tx.send(self.status());
+            }
             NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
                 if let Some(transition) =
                     self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty)
@@ -681,7 +704,7 @@ where
                         .set(this.swarm.state().peers().num_inbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
-                    warn!(
+                    trace!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,
@@ -708,7 +731,7 @@ where
                         .set(this.swarm.state().peers().num_outbound_connections() as f64);
                 }
                 SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
-                    warn!(
+                    trace!(
                         target : "net",
                         ?remote_addr,
                         ?peer_id,
@@ -732,6 +755,12 @@ where
                         .peers_mut()
                         .apply_reputation_change(&peer_id, ReputationChangeKind::BadMessage);
                     this.metrics.invalid_messages_received.increment(1);
+                }
+                SwarmEvent::ProtocolBreach { peer_id } => {
+                    this.swarm
+                        .state_mut()
+                        .peers_mut()
+                        .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
                 }
             }
         }

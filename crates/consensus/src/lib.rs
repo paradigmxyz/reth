@@ -1,22 +1,16 @@
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 //! Consensus algorithms for Ethereum.
-//!
-//! # Features
-//!
-//! - `serde`: Enable serde support for configuration types.
+
+/// Beacon consensus implementation.
+pub mod beacon;
+
+/// Clique consensus implementation.
 pub mod clique;
-pub mod consensus;
-pub mod constants;
-pub mod verification;
 
-/// Engine API module.
-pub mod engine;
-
-pub use clique::CliqueConsensus;
-pub use consensus::BeaconConsensus;
-pub use reth_interfaces::consensus::Error;
+/// Collection of consensus validation methods.
+pub mod validation;

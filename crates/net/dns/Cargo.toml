@@ -37,7 +37,8 @@ lru = "0.9"
 thiserror = "1.0"
 tracing = "0.1"
 parking_lot = "0.12"
-
+serde = "1.0"
+serde_with = "2.1.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }

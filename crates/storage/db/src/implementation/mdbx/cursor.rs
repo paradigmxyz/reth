@@ -1,9 +1,12 @@
 //! Cursor wrapper for libmdbx-sys.
 
-use std::{borrow::Cow, marker::PhantomData};
+use std::{borrow::Cow, marker::PhantomData, ops::Range};
 
 use crate::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, Walker},
+    cursor::{
+        DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
+        ReverseWalker, Walker,
+    },
     table::{Compress, DupSort, Encode, Table},
     tables::utils::*,
     Error,
@@ -50,6 +53,10 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         decode!(self.inner.set_key(key.encode().as_ref()))
     }
 
+    fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
+        decode!(self.inner.set_range(key.encode().as_ref()))
+    }
+
     fn next(&mut self) -> PairResult<T> {
         decode!(self.inner.next())
     }
@@ -81,13 +88,46 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
 
         Ok(Walker::new(self, start))
     }
+
+    fn walk_range<'cursor>(
+        &'cursor mut self,
+        range: Range<T::Key>,
+    ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
+        let start = self
+            .inner
+            .set_range(range.start.encode().as_ref())
+            .map_err(|e| Error::Read(e.into()))?
+            .map(decoder::<T>);
+
+        Ok(RangeWalker::new(self, start, range.end))
+    }
+
+    fn walk_back<'cursor>(
+        &'cursor mut self,
+        start_key: Option<T::Key>,
+    ) -> Result<ReverseWalker<'cursor, 'tx, T, Self>, Error>
+    where
+        Self: Sized,
+    {
+        if let Some(start_key) = start_key {
+            let start = self
+                .inner
+                .set_range(start_key.encode().as_ref())
+                .map_err(|e| Error::Read(e.into()))?
+                .map(decoder::<T>);
+
+            return Ok(ReverseWalker::new(self, start))
+        }
+
+        let start = self.last().transpose();
+        Ok(ReverseWalker::new(self, start))
+    }
 }
 
 impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, K, T> {
-    fn seek(&mut self, key: <T as DupSort>::SubKey) -> PairResult<T> {
-        decode!(self.inner.set_range(key.encode().as_ref()))
-    }
-
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
         decode!(self.inner.next_dup())

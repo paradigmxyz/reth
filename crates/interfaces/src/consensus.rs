@@ -1,14 +1,15 @@
 use async_trait::async_trait;
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedHeader, H256};
+use std::fmt::Debug;
 use tokio::sync::watch::Receiver;
 
-/// Re-export forkchoice state
+/// Re-export fork choice state
 pub use reth_rpc_types::engine::ForkchoiceState;
 
 /// Consensus is a protocol that chooses canonical chain.
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus: Send + Sync {
+pub trait Consensus: Debug + Send + Sync {
     /// Get a receiver for the fork choice state
     fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
 
@@ -27,10 +28,10 @@ pub trait Consensus: Send + Sync {
     fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error>;
 
     /// After the Merge (aka Paris) block rewards became obsolete.
-    /// This flag is needed as reth change set is indexed of transaction granularity
-    /// (change set is indexed per transaction) we are introducing one additional index for block
-    /// reward This in essence would introduce gaps in [Transaction] table
-    /// More on it [here](https://github.com/paradigmxyz/reth/issues/237)
+    ///
+    /// This flag is needed as reth's changeset is indexed on transaction level granularity.
+    ///
+    /// More info [here](https://github.com/paradigmxyz/reth/issues/237)
     fn has_block_reward(&self, block_num: BlockNumber) -> bool;
 }
 
@@ -38,7 +39,7 @@ pub trait Consensus: Send + Sync {
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum Error {
-    #[error("Block used gas ({gas_used:?}) is greater then gas limit ({gas_limit:?}).")]
+    #[error("Block used gas ({gas_used:?}) is greater than gas limit ({gas_limit:?}).")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
     #[error("Block ommer hash ({got:?}) is different then expected: ({expected:?})")]
     BodyOmmersHashDiff { got: H256, expected: H256 },

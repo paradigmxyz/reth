@@ -76,7 +76,7 @@ pub struct PeerProtocolsInfo {
 }
 
 /// Peer Ethereum protocol information
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EthProtocolInfo {
     /// Negotiated ethereum protocol version
     pub version: u32,

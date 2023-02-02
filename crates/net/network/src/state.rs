@@ -8,12 +8,13 @@ use crate::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
     },
-    peers::{PeerAction, PeerKind, PeersManager},
+    peers::{PeerAction, PeersManager},
     FetchClient,
 };
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
+use reth_network_api::PeerKind;
 use reth_primitives::{ForkId, PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
@@ -355,6 +356,10 @@ where
     }
 
     /// Invoked when received a response from a connected peer.
+    ///
+    /// Delegates the response result to the fetcher which may return an outcome specific
+    /// instruction that needs to be handled in [Self::on_block_response_outcome]. This could be
+    /// a follow-up request or an instruction to slash the peer's reputation.
     fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
             PeerResponseResult::BlockHeaders(res) => {
@@ -461,7 +466,7 @@ pub(crate) struct ActivePeer {
     pub(crate) blocks: LruCache<H256>,
 }
 
-/// Message variants triggered by the [`State`]
+/// Message variants triggered by the [`NetworkState`]
 pub(crate) enum StateAction {
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
