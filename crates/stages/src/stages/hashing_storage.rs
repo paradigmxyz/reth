@@ -83,14 +83,14 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
                         tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
                     })?;
-                    next_key
+                    next_key.map(|(key, _)| key)
                 };
                 tx.commit()?;
-                if let Some((next_key, _)) = next_key {
-                    first_key = next_key;
-                    continue
-                }
-                break
+
+                first_key = match next_key {
+                    Some(key) => key,
+                    None => break,
+                };
             }
         } else {
             let mut plain_storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
@@ -127,27 +127,25 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         .map(|(key, val)| {
                             plain_storage
                                 .seek_by_key_subkey(address, key)
-                                .map(|ret| (key, (val, ret.map(|e| e.value))))
+                                .map(|ret| (keccak256(key), (val, ret.map(|e| e.value))))
                         })
                         .collect::<Result<BTreeMap<_, _>, _>>()
-                        .map(|storage| (address, storage))
+                        .map(|storage| (keccak256(address), storage))
                 })
-                .collect::<Result<Vec<_>, _>>()?
+                .collect::<Result<BTreeMap<_, _>, _>>()?
                 .into_iter()
                 // Hash the address and key and apply them to HashedStorage (if Storage is None
                 // just remove it);
                 .try_for_each(|(address, storage)| {
-                    let hashed_address = keccak256(address);
                     storage.into_iter().try_for_each(
                         |(key, (old_val, new_val))| -> Result<(), StageError> {
-                            let key = keccak256(key);
                             tx.delete::<tables::HashedStorage>(
-                                hashed_address,
+                                address,
                                 Some(StorageEntry { key, value: old_val }),
                             )?;
                             if let Some(value) = new_val {
                                 let val = StorageEntry { key, value };
-                                tx.put::<tables::HashedStorage>(hashed_address, val)?
+                                tx.put::<tables::HashedStorage>(address, val)?
                             }
                             Ok(())
                         },
@@ -408,10 +406,8 @@ mod tests {
                         );
                         expected += 1;
                     }
-                    let count = tx
-                        .cursor_dup_read::<tables::HashedStorage>()?
-                        .walk([0; 32].into())?
-                        .count();
+                    let count =
+                        tx.cursor_dup_read::<tables::HashedStorage>()?.walk(H256::zero())?.count();
 
                     assert_eq!(count, expected);
                     Ok(())
@@ -427,27 +423,32 @@ mod tests {
             hash: bool,
         ) -> Result<(), reth_db::Error> {
             let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-            let prev_entry = storage_cursor
-                .seek_by_key_subkey(tid_address.address(), entry.key)?
-                .map(|e| {
-                    storage_cursor.delete_current().expect("failed to delete entry");
-                    e
-                })
-                .unwrap_or(StorageEntry { key: entry.key, value: U256::from(0) });
+            let prev_entry =
+                match storage_cursor.seek_by_key_subkey(tid_address.address(), entry.key)? {
+                    Some(e) if e.key == entry.key => {
+                        tx.delete::<tables::PlainStorageState>(tid_address.address(), Some(e))
+                            .expect("failed to delete entry");
+                        e
+                    }
+                    _ => StorageEntry { key: entry.key, value: U256::from(0) },
+                };
+            tx.put::<tables::PlainStorageState>(tid_address.address(), entry)?;
+
             if hash {
                 let hashed_address = keccak256(tid_address.address());
-                tx.cursor_dup_write::<tables::HashedStorage>()?
-                    .seek_by_key_subkey(hashed_address, entry.key)?
-                    .map(|e| {
-                        storage_cursor.delete_current().expect("failed to delete entry");
-                        e
-                    });
-                tx.put::<tables::HashedStorage>(
-                    hashed_address,
-                    StorageEntry { key: keccak256(entry.key), value: entry.value },
-                )?;
+                let hashed_entry = StorageEntry { key: keccak256(entry.key), value: entry.value };
+
+                if let Some(e) = tx
+                    .cursor_dup_write::<tables::HashedStorage>()?
+                    .seek_by_key_subkey(hashed_address, hashed_entry.key)?
+                    .and_then(|e| if e.key == hashed_entry.key { Some(e) } else { None })
+                {
+                    tx.delete::<tables::HashedStorage>(hashed_address, Some(e))
+                        .expect("failed to delete entry");
+                }
+
+                tx.put::<tables::HashedStorage>(hashed_address, hashed_entry)?;
             }
-            tx.put::<tables::PlainStorageState>(tid_address.address(), entry)?;
 
             tx.put::<tables::StorageChangeSet>(tid_address, prev_entry)?;
             Ok(())
@@ -460,6 +461,7 @@ mod tests {
                 .inner()
                 .get_block_transition(input.unwind_to)
                 .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
+
             self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
@@ -475,7 +477,7 @@ mod tests {
                     storage_cursor.delete_current()?;
 
                     if entry.value != U256::ZERO {
-                        storage_cursor.append_dup(tid_address.address(), entry)?;
+                        tx.put::<tables::PlainStorageState>(tid_address.address(), entry)?;
                     }
                 }
                 Ok(())
