@@ -7,7 +7,7 @@ use crate::eth::signer::EthSigner;
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{ChainInfo, U64};
+use reth_primitives::{Address, ChainInfo, U64};
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
@@ -29,6 +29,9 @@ pub trait EthApiSpec: Send + Sync {
 
     /// Returns client chain info
     fn chain_info(&self) -> Result<ChainInfo>;
+
+    /// Returns a list of addresses owned by client.
+    fn accounts(&self) -> Vec<Address>;
 }
 
 /// `Eth` API implementation.
@@ -92,6 +95,10 @@ where
     /// Returns the current info for the chain
     fn chain_info(&self) -> Result<ChainInfo> {
         self.client().chain_info()
+    }
+
+    fn accounts(&self) -> Vec<Address> {
+        self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
     }
 }
 
