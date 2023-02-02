@@ -1,5 +1,4 @@
 use crate::{
-    chain::FileClient,
     dirs::{ConfigPath, DbPath, ImportPath, PlatformPath},
     node::handle_events,
     utils::chainspec::chain_spec_value_parser,
@@ -7,9 +6,9 @@ use crate::{
 use clap::Parser;
 use eyre::Context;
 use futures::StreamExt;
-use reth_consensus::BeaconConsensus;
+use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
-use reth_downloaders::{bodies, headers};
+use reth_downloaders::{bodies, headers, test_utils::FileClient};
 use reth_interfaces::consensus::Consensus;
 use reth_primitives::ChainSpec;
 use reth_staged_sync::{
@@ -135,7 +134,7 @@ impl ImportCommand {
     }
 
     fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
-        let beacon_consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        let beacon_consensus = Arc::new(BeaconConsensus::builder().build(self.chain.clone()));
 
         // TODO: the node command requires a tip update, so we need to figure out how to do that
         // with only a file
@@ -153,7 +152,7 @@ impl ImportCommand {
         // do we need a forward downloader?
         let headers_conf = &config.stages.headers;
         headers::task::TaskDownloader::spawn(
-            headers::linear::LinearDownloadBuilder::default()
+            headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
                 .request_limit(headers_conf.downloader_batch_size)
                 .stream_batch_size(headers_conf.commit_threshold as usize)
                 .build(consensus.clone(), file_client.clone()),
@@ -169,7 +168,7 @@ impl ImportCommand {
     ) -> reth_downloaders::bodies::task::TaskDownloader {
         let bodies_conf = &config.stages.bodies;
         bodies::task::TaskDownloader::spawn(
-            bodies::concurrent::ConcurrentDownloaderBuilder::default()
+            bodies::bodies::BodiesDownloaderBuilder::default()
                 .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
                 .with_request_limit(bodies_conf.downloader_request_limit)
                 .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
