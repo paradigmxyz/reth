@@ -550,8 +550,10 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_interfaces::test_utils::TestConsensus;
-    use std::sync::Arc;
+    use reth_eth_wire::BlockBody;
+    use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
+    use reth_primitives::H256;
+    use std::{collections::HashMap, sync::Arc};
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded
@@ -578,6 +580,41 @@ mod tests {
             Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
         );
         assert_eq!(client.times_requested(), 1);
+    }
+
+    // Check that the number of times requested equals to the number of headers divided by request
+    // limit.
+    #[tokio::test]
+    async fn requests_correct_number_of_times() {
+        // Generate some random blocks
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let blocks = random_block_range(0..200, H256::zero(), 1..2);
+
+        let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
+        let bodies = blocks
+            .into_iter()
+            .map(|block| {
+                (
+                    block.hash(),
+                    BlockBody {
+                        transactions: block.body,
+                        ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        insert_headers(&db, &headers);
+
+        let request_limit = 10;
+        let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_request_limit(request_limit)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+        downloader.set_download_range(0..200).expect("failed to set download range");
+
+        let _ = downloader.collect::<Vec<_>>().await;
+        assert_eq!(client.times_requested(), 20);
     }
 
     // Check that bodies are returned in correct order
@@ -612,12 +649,6 @@ mod tests {
             assert!(downloader.latest_queued_block_number >= Some(range_start));
             range_start += stream_batch_size as u64;
         }
-
-        assert_eq!(
-            client.times_requested(),
-            // div_ceil equivalent
-            ((headers.iter().filter(|x| !x.is_empty()).count() + 9) / 10) as u64,
-        );
     }
 
     // Check that the downloader picks up the new range and downloads bodies after previous range
