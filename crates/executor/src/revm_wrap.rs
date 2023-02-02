@@ -1,6 +1,6 @@
 use reth_interfaces::Error;
 use reth_primitives::{
-    Account, Address, Header, Transaction, TransactionKind, TransactionSigned, TxEip1559,
+    Account, Address, Header, Log, Transaction, TransactionKind, TransactionSigned, TxEip1559,
     TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256,
 };
 use reth_provider::StateProvider;
@@ -190,6 +190,15 @@ pub fn is_log_equal(revm_log: &revm::Log, reth_log: &reth_primitives::Log) -> bo
             .iter()
             .zip(reth_log.topics.iter())
             .any(|(revm_topic, reth_topic)| revm_topic.0 != reth_topic.0)
+}
+
+/// Into reth primitive [Log] from [revm::Log].
+pub fn into_reth_log(log: revm::Log) -> Log {
+    Log {
+        address: H160(log.address.0),
+        topics: log.topics.into_iter().map(|h| H256(h.0)).collect(),
+        data: log.data.into(),
+    }
 }
 
 /// Create reth primitive [Account] from [revm::AccountInfo].

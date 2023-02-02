@@ -1,6 +1,6 @@
 use crate::{
     config::{revm_spec, WEI_2ETH, WEI_3ETH, WEI_5ETH},
-    revm_wrap::{self, to_reth_acc, SubState},
+    revm_wrap::{self, into_reth_log, to_reth_acc, SubState},
     BlockExecutor,
 };
 use hashbrown::hash_map::Entry;
@@ -124,19 +124,12 @@ where
             // Add spent gas.
             cumulative_gas_used += gas_used;
 
-            // Transform logs to reth format.
-            let logs: Vec<Log> = logs
-                .into_iter()
-                .map(|l| Log {
-                    address: H160(l.address.0),
-                    topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
-                    data: l.data.into(),
-                })
-                .collect();
-
             // commit state
             let (changeset, new_bytecodes) =
                 commit_changes(self.evm.db().expect("Db to not be moved."), state);
+
+            // Transform logs to reth format.
+            let logs: Vec<Log> = logs.into_iter().map(into_reth_log).collect();
 
             // Push transaction changeset and calculte header bloom filter for receipt.
             changesets.push(TransactionChangeSet {
