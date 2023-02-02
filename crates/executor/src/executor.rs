@@ -420,11 +420,11 @@ where
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
     block: &Block,
-    signers: Option<Vec<Address>>,
+    senders: Option<Vec<Address>>,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    let execution_result = execute(block, signers, chain_spec, db)?;
+    let execution_result = execute(block, senders, chain_spec, db)?;
 
     let receipts_iter = execution_result.changesets.iter().map(|changeset| &changeset.receipt);
 
@@ -468,12 +468,12 @@ pub fn verify_receipt<'a>(
 /// additional TransactionStatechangeset for account that receives the reward.
 pub fn execute<DB: StateProvider>(
     block: &Block,
-    signers: Option<Vec<Address>>,
+    senders: Option<Vec<Address>>,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut executor = Executor::new(chain_spec, db);
-    executor.execute(block, signers)
+    executor.execute(block, senders)
 }
 
 #[cfg(test)]
