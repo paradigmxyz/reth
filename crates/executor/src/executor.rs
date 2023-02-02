@@ -184,6 +184,133 @@ where
         }
         (change, new_bytecodes)
     }
+
+    /// Calculate Block reward changeset
+    pub fn block_reward_changeset(
+        &mut self,
+        header: &Header,
+        ommers: &[Header],
+    ) -> Result<Option<BTreeMap<H160, AccountInfoChangeSet>>, Error> {
+        // NOTE: Related to Ethereum reward change, for other network this is probably going to be
+        // moved to config.
+
+        // From yellowpapper Page 15:
+        // 11.3. Reward Application. The application of rewards to a block involves raising the
+        // balance of the accounts of the beneficiary address of the block and each ommer by
+        // a certain amount. We raise the block’s beneficiary account by Rblock; for each
+        // ommer, we raise the block’s beneficiary by an additional 1/32 of the block reward
+        // and the beneficiary of the ommer gets rewarded depending on the blocknumber.
+        // Formally we define the function Ω:
+        match header.number {
+            n if Some(n) >= self.chain_spec.paris_status().block_number() => None,
+            n if Some(n) >= self.chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
+            n if Some(n) >= self.chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
+            _ => Some(WEI_5ETH),
+        }
+        .map(|reward| -> Result<_, _> {
+            let mut reward_beneficiaries: BTreeMap<H160, u128> = BTreeMap::new();
+            // Calculate Uncle reward
+            // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
+            for ommer in ommers {
+                let ommer_reward = ((8 + ommer.number - header.number) as u128 * reward) >> 3;
+                // From yellowpaper Page 15:
+                // If there are collisions of the beneficiary addresses between ommers and the block
+                // (i.e. two ommers with the same beneficiary address or an ommer with the
+                // same beneficiary address as the present block), additions are applied
+                // cumulatively
+                *reward_beneficiaries.entry(ommer.beneficiary).or_default() += ommer_reward;
+            }
+            // insert main block reward
+            *reward_beneficiaries.entry(header.beneficiary).or_default() +=
+                reward + (reward >> 5) * ommers.len() as u128;
+
+            //
+            let db = self.evm.db().expect("Db to not be moved.");
+
+            // create changesets for beneficiaries rewards (Main block and ommers);
+            reward_beneficiaries
+                .into_iter()
+                .map(|(beneficiary, reward)| -> Result<_, _> {
+                    let changeset = db
+                        .load_account(beneficiary)
+                        .map_err(|_| Error::ProviderError)
+                        // if account is present append `Changed` changeset for block reward
+                        .map(|db_acc| {
+                            let old = to_reth_acc(&db_acc.info);
+                            let mut new = old;
+                            new.balance += U256::from(reward);
+                            db_acc.info.balance = new.balance;
+                            match db_acc.account_state {
+                                AccountState::NotExisting => {
+                                    // if account was not existing that means that storage is not
+                                    // present.
+                                    db_acc.account_state = AccountState::StorageCleared;
+
+                                    // if account was not present append `Created` changeset
+                                    AccountInfoChangeSet::Created {
+                                        new: Account {
+                                            nonce: 0,
+                                            balance: new.balance,
+                                            bytecode_hash: None,
+                                        },
+                                    }
+                                }
+
+                                AccountState::StorageCleared |
+                                AccountState::Touched |
+                                AccountState::None => {
+                                    // If account is None that means that EVM didn't touch it.
+                                    // we are changing the state to Touched as account can have
+                                    // storage in db.
+                                    if db_acc.account_state == AccountState::None {
+                                        db_acc.account_state = AccountState::Touched;
+                                    }
+                                    // if account was present, append changed changeset.
+                                    AccountInfoChangeSet::Changed { new, old }
+                                }
+                            }
+                        })?;
+                    Ok((beneficiary, changeset))
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+        })
+        .transpose()
+    }
+
+    /// Irregular state change at Ethereum DAO hardfork
+    pub fn dao_fork_changeset(&mut self) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
+        let db = self.evm.db().expect("Db to not be moved.");
+        let mut drained_balance = U256::ZERO;
+        // drain all accounts ether
+        let mut changesets = crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS
+            .iter()
+            .map(|&address| {
+                let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
+                let old = to_reth_acc(&db_account.info);
+                // drain balance
+                drained_balance += core::mem::take(&mut db_account.info.balance);
+                let new = to_reth_acc(&db_account.info);
+                // assume it is changeset as it is irregular state change
+                Ok((address, AccountInfoChangeSet::Changed { new, old }))
+            })
+            .collect::<Result<BTreeMap<H160, AccountInfoChangeSet>, _>>()?;
+
+        // add drained ether to beneficiary.
+        let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
+
+        let beneficiary_db_account =
+            db.load_account(beneficiary).map_err(|_| Error::ProviderError)?;
+        let old = to_reth_acc(&beneficiary_db_account.info);
+        beneficiary_db_account.info.balance += drained_balance;
+        let new = to_reth_acc(&beneficiary_db_account.info);
+
+        let beneficiary_changeset = AccountInfoChangeSet::Changed { new, old };
+
+        // insert changeset
+        changesets.insert(beneficiary, beneficiary_changeset);
+
+        Ok(changesets)
+    }
 }
 
 impl<'a, DB> BlockExecutor for Executor<'a, DB>
@@ -272,11 +399,10 @@ where
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
         }
 
-        let db = self.evm.db().expect("Db to not be moved.");
-        let mut block_reward = block_reward_changeset(header, ommers, db, self.chain_spec)?;
+        let mut block_reward = self.block_reward_changeset(header, ommers)?;
 
         if self.chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
-            let mut irregular_state_changeset = dao_fork_changeset(db)?;
+            let mut irregular_state_changeset = self.dao_fork_changeset()?;
             irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
             block_reward = Some(irregular_state_changeset);
         }
@@ -343,132 +469,6 @@ pub fn execute<DB: StateProvider>(
 ) -> Result<ExecutionResult, Error> {
     let mut executor = Executor::new(chain_spec, db);
     executor.execute(block, signers)
-}
-
-/// Irregular state change at Ethereum DAO hardfork
-pub fn dao_fork_changeset<DB: StateProvider>(
-    db: &mut SubState<DB>,
-) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
-    let mut drained_balance = U256::ZERO;
-    // drain all accounts ether
-    let mut changesets = crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS
-        .iter()
-        .map(|&address| {
-            let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
-            let old = to_reth_acc(&db_account.info);
-            // drain balance
-            drained_balance += core::mem::take(&mut db_account.info.balance);
-            let new = to_reth_acc(&db_account.info);
-            // assume it is changeset as it is irregular state change
-            Ok((address, AccountInfoChangeSet::Changed { new, old }))
-        })
-        .collect::<Result<BTreeMap<H160, AccountInfoChangeSet>, _>>()?;
-
-    // add drained ether to beneficiary.
-    let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
-
-    let beneficiary_db_account = db.load_account(beneficiary).map_err(|_| Error::ProviderError)?;
-    let old = to_reth_acc(&beneficiary_db_account.info);
-    beneficiary_db_account.info.balance += drained_balance;
-    let new = to_reth_acc(&beneficiary_db_account.info);
-
-    let beneficiary_changeset = AccountInfoChangeSet::Changed { new, old };
-
-    // insert changeset
-    changesets.insert(beneficiary, beneficiary_changeset);
-
-    Ok(changesets)
-}
-
-/// Calculate Block reward changeset
-pub fn block_reward_changeset<DB: StateProvider>(
-    header: &Header,
-    ommers: &[Header],
-    db: &mut SubState<DB>,
-    chain_spec: &ChainSpec,
-) -> Result<Option<BTreeMap<H160, AccountInfoChangeSet>>, Error> {
-    // NOTE: Related to Ethereum reward change, for other network this is probably going to be moved
-    // to config.
-
-    // From yellowpapper Page 15:
-    // 11.3. Reward Application. The application of rewards to a block involves raising the balance
-    // of the accounts of the beneficiary address of the block and each ommer by a certain
-    // amount. We raise the block’s beneficiary account by Rblock; for each ommer, we raise the
-    // block’s beneficiary by an additional 1/32 of the block reward and the beneficiary of the
-    // ommer gets rewarded depending on the blocknumber. Formally we define the function Ω:
-    match header.number {
-        n if Some(n) >= chain_spec.paris_status().block_number() => None,
-        n if Some(n) >= chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
-        n if Some(n) >= chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
-        _ => Some(WEI_5ETH),
-    }
-    .map(|reward| -> Result<_, _> {
-        let mut reward_beneficiaries: BTreeMap<H160, u128> = BTreeMap::new();
-        // Calculate Uncle reward
-        // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
-        for ommer in ommers {
-            let ommer_reward = ((8 + ommer.number - header.number) as u128 * reward) >> 3;
-            // From yellowpaper Page 15:
-            // If there are collisions of the beneficiary addresses between ommers and the block
-            // (i.e. two ommers with the same beneficiary address or an ommer with the
-            // same beneficiary address as the present block), additions are applied
-            // cumulatively
-            *reward_beneficiaries.entry(ommer.beneficiary).or_default() += ommer_reward;
-        }
-        // insert main block reward
-        *reward_beneficiaries.entry(header.beneficiary).or_default() +=
-            reward + (reward >> 5) * ommers.len() as u128;
-
-        //
-
-        // create changesets for beneficiaries rewards (Main block and ommers);
-        reward_beneficiaries
-            .into_iter()
-            .map(|(beneficiary, reward)| -> Result<_, _> {
-                let changeset = db
-                    .load_account(beneficiary)
-                    .map_err(|_| Error::ProviderError)
-                    // if account is present append `Changed` changeset for block reward
-                    .map(|db_acc| {
-                        let old = to_reth_acc(&db_acc.info);
-                        let mut new = old;
-                        new.balance += U256::from(reward);
-                        db_acc.info.balance = new.balance;
-                        match db_acc.account_state {
-                            AccountState::NotExisting => {
-                                // if account was not existing that means that storage is not
-                                // present.
-                                db_acc.account_state = AccountState::StorageCleared;
-
-                                // if account was not present append `Created` changeset
-                                AccountInfoChangeSet::Created {
-                                    new: Account {
-                                        nonce: 0,
-                                        balance: new.balance,
-                                        bytecode_hash: None,
-                                    },
-                                }
-                            }
-
-                            AccountState::StorageCleared |
-                            AccountState::Touched |
-                            AccountState::None => {
-                                // If account is None that means that EVM didn't touch it.
-                                // we are changing the state to Touched as account can have storage
-                                // in db.
-                                if db_acc.account_state == AccountState::None {
-                                    db_acc.account_state = AccountState::Touched;
-                                }
-                                // if account was present, append changed changeset.
-                                AccountInfoChangeSet::Changed { new, old }
-                            }
-                        }
-                    })?;
-                Ok((beneficiary, changeset))
-            })
-            .collect::<Result<BTreeMap<_, _>, _>>()
-    })
-    .transpose()
 }
 
 #[cfg(test)]
