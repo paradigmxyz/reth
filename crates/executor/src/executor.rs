@@ -42,19 +42,19 @@ where
         self.evm.db().expect("db to not be moved")
     }
 
-    fn recover_signers(
+    fn recover_senders(
         &self,
         body: &[TransactionSigned],
-        signers: Option<Vec<Address>>,
+        senders: Option<Vec<Address>>,
     ) -> Result<Vec<Address>, Error> {
-        if let Some(signers) = signers {
-            if body.len() == signers.len() {
-                Ok(signers)
+        if let Some(senders) = senders {
+            if body.len() == senders.len() {
+                Ok(senders)
             } else {
-                Err(Error::SignerRecoveryError)
+                Err(Error::SenderRecoveryError)
             }
         } else {
-            body.iter().map(|tx| tx.recover_signer().ok_or(Error::SignerRecoveryError)).collect()
+            body.iter().map(|tx| tx.recover_signer().ok_or(Error::SenderRecoveryError)).collect()
         }
     }
 
@@ -326,10 +326,10 @@ where
     fn execute(
         &mut self,
         block: &Block,
-        signers: Option<Vec<Address>>,
+        senders: Option<Vec<Address>>,
     ) -> Result<ExecutionResult, Error> {
         let Block { header, body, ommers } = block;
-        let signers = self.recover_signers(body, signers)?;
+        let senders = self.recover_senders(body, senders)?;
 
         self.init_block_env(header);
 
@@ -337,7 +337,7 @@ where
         // output of verification
         let mut changesets = Vec::with_capacity(body.len());
 
-        for (transaction, signer) in body.iter().zip(signers.into_iter()) {
+        for (transaction, sender) in body.iter().zip(senders.into_iter()) {
             // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = header.gas_limit - cumulative_gas_used;
@@ -349,7 +349,7 @@ where
             }
 
             // Fill revm structure.
-            revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, signer);
+            revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
             // Execute transaction.
             let out = self.evm.transact();

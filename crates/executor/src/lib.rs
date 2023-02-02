@@ -27,10 +27,10 @@ pub mod revm_wrap;
 pub trait BlockExecutor {
     /// Execute a block.
     ///
-    /// The number of `signers` should be equal to the number of transactions in the block.
+    /// The number of `senders` should be equal to the number of transactions in the block.
     fn execute(
         &mut self,
         block: &Block,
-        signers: Option<Vec<Address>>,
+        senders: Option<Vec<Address>>,
     ) -> Result<ExecutionResult, Error>;
 }

@@ -82,8 +82,8 @@ pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bo
 }
 
 /// Fill transaction environment from Transaction.
-pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, signer: Address) {
-    tx_env.caller = signer;
+pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+    tx_env.caller = sender;
     match transaction.as_ref() {
         Transaction::Legacy(TxLegacy {
             nonce,

@@ -9,8 +9,8 @@ pub enum Error {
     VerificationFailed,
     #[error("Fatal internal error")]
     ExecutionFatalError,
-    #[error("Failed to recover signer for transaction")]
-    SignerRecoveryError,
+    #[error("Failed to recover sender for transaction")]
+    SenderRecoveryError,
     #[error("Receipt cumulative gas used {got:?} is different from expected {expected:?}")]
     ReceiptCumulativeGasUsedDiff { got: u64, expected: u64 },
     #[error("Receipt log count {got:?} is different from expected {expected:?}.")]
