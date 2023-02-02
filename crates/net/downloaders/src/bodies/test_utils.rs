@@ -1,3 +1,5 @@
+#![allow(unused)]
+//! Test helper impls for generating bodies
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
