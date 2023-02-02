@@ -1,10 +1,14 @@
 //! Consensus for Clique PoA networks.
+use super::config::CliqueConfig;
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
 use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
 use tokio::sync::watch;
 
+/// TODO:
 #[derive(Debug)]
-pub struct CliqueConsensus {}
+pub struct CliqueConsensus {
+    config: CliqueConfig,
+}
 
 impl Consensus for CliqueConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {

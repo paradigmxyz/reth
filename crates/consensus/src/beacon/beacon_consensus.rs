@@ -1,8 +1,9 @@
 //! Consensus for ethereum network
-use crate::validation;
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
 use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader};
 use tokio::sync::watch;
+
+use crate::validation;
 
 use super::BeaconConsensusBuilder;
 

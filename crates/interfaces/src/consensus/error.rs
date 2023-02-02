@@ -1,39 +1,5 @@
-use async_trait::async_trait;
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedHeader, H256};
+use reth_primitives::{Address, BlockHash, BlockNumber, Bytes, H256, U256};
 use std::fmt::Debug;
-use tokio::sync::watch::Receiver;
-
-/// Re-export fork choice state
-pub use reth_rpc_types::engine::ForkchoiceState;
-
-/// Consensus is a protocol that chooses canonical chain.
-#[async_trait]
-#[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus: Debug + Send + Sync {
-    /// Get a receiver for the fork choice state
-    fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
-
-    /// Validate if header is correct and follows consensus specification.
-    ///
-    /// **This should not be called for the genesis block**.
-    fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error>;
-
-    /// Validate a block disregarding world state, i.e. things that can be checked before sender
-    /// recovery and execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
-    /// 11.1 "Ommer Validation".
-    ///
-    /// **This should not be called for the genesis block**.
-    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error>;
-
-    /// After the Merge (aka Paris) block rewards became obsolete.
-    ///
-    /// This flag is needed as reth's changeset is indexed on transaction level granularity.
-    ///
-    /// More info [here](https://github.com/paradigmxyz/reth/issues/237)
-    fn has_block_reward(&self, block_num: BlockNumber) -> bool;
-}
 
 /// Consensus Errors
 #[allow(missing_docs)]
@@ -105,4 +71,33 @@ pub enum Error {
     TheMergeOmmerRootIsNotEmpty,
     #[error("Mix hash after merge is not zero")]
     TheMergeMixHashIsNotZero,
+    #[error(transparent)]
+    Clique(#[from] CliqueError),
+}
+
+/// Clique consensus error.
+/// https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/clique.go#L72-L140
+#[allow(missing_docs)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+pub enum CliqueError {
+    #[error("Beneficiary in checkpoint block non-zero: {beneficiary}")]
+    CheckpointBeneficiary { beneficiary: Address },
+    #[error("Vote nonce in checkpoint block non-zero: {nonce}")]
+    CheckpointVote { nonce: u64 },
+    #[error("Vote nonce not 0x00..0 or 0xff..f: {nonce}")]
+    InvalidVote { nonce: u64 },
+    #[error("Vanity prefix missing from extra data: {extra_data}")]
+    MissingVanity { extra_data: Bytes },
+    #[error("Signature prefix missing from extra data: {extra_data}")]
+    MissingSignature { extra_data: Bytes },
+    #[error("Non-checkpoint block contains extra signer list: {extra_data}")]
+    ExtraSignerList { extra_data: Bytes },
+    #[error("Invalid signer list on checkpoint block: {extra_data}")]
+    CheckpointSigners { extra_data: Bytes },
+    #[error("Non-zero mix hash: {mix_hash}")]
+    NonZeroMixHash { mix_hash: H256 },
+    #[error("Invalid difficulty: {difficulty}")]
+    Difficulty { difficulty: U256 },
+    #[error("Invalid child header timestamp. Expected at least: {expected_at_least}. Received: {received}")]
+    Timestamp { expected_at_least: u64, received: u64 },
 }
