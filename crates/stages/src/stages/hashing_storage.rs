@@ -68,11 +68,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                         .walk(first_key)?
                         .take(self.commit_threshold as usize)
                         .map(|res| {
-                            res.map(|(address, mut slot)| {
+                            res.map(|(address, slot)| {
                                 // both account address and storage slot key are hashed for merkle
                                 // tree.
-                                slot.key = keccak256(slot.key);
-                                (keccak256(address), slot)
+                                ((keccak256(address), keccak256(slot.key)), slot.value)
                             })
                         })
                         .collect::<Result<BTreeMap<_, _>, _>>()?;
@@ -81,9 +80,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     let next_key = storage.next()?;
 
                     // iterate and put presorted hashed slots
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| tx.put::<tables::HashedStorage>(k, v))?;
+                    hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
+                        tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
+                    })?;
                     next_key
                 };
                 tx.commit()?;
