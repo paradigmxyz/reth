@@ -209,12 +209,14 @@ impl Command {
                         Ok::<(), eyre::Report>(())
                     } else {
                         // Get data
-                        //tool.get(args.idx);
-                        todo!();
+                        // if let Some(_) = tool.get(args.idx)? {
+                        //     todo!();
+                        // } else {
+                        //     println!("Nothing found for index {idx} on table {table}", idx = args.idx, table = args.table);
+                        // }
+                        Ok(())
                     }
-                })??;
-
-                todo!();
+                })??
             }
             Subcommands::Drop => {
                 tool.drop(&self.db)?;
@@ -270,13 +272,8 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             .map_err(|e| eyre::eyre!(e))
     }
 
-    fn get<T:Table>(&mut self, idx: usize) {
-        let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
-
-            //cursor.seek_exact()
-        });
-        todo!()
+    fn get<T:Table>(&mut self, idx: T::Key) -> Result<Option<T::Value>> {
+        self.db.view(|tx| tx.get::<T>(idx.clone()))?.map_err(Into::into)
     }
 
     fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
