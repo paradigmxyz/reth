@@ -18,7 +18,7 @@ pub(crate) enum EthApiError {
     #[error("Invalid transaction signature")]
     InvalidTransactionSignature,
     #[error(transparent)]
-    PoolError(PoolError),
+    PoolError(GethTxPoolError),
 }
 
 impl_to_rpc_result!(EthApiError);
@@ -40,10 +40,10 @@ pub(crate) enum GethTxPoolError {
     #[error("negative value")]
     NegativeValue,
     #[error("oversized data")]
-    OversizedData,
+    OversizedData
 }
 
-impl GethTxPoolError {
+impl From<PoolError> for GethTxPoolError {
 
     fn from(err: PoolError) -> GethTxPoolError {
         match err {
@@ -59,6 +59,6 @@ impl GethTxPoolError {
 
 impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
-        EthApiError::PoolError(err)
-    }
+        EthApiError::PoolError(GethTxPoolError::from(err))
+        }   
 }
