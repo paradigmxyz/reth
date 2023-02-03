@@ -263,8 +263,8 @@ jobs:
           sudo apt update
           sudo apt-get install -y libclang-dev
 
-      - name: Test with Miri via Nextest
-        run: cargo miri nextest run --all --all-features -j 4
-        env:
-          MIRIFLAGS: -Zmiri-disable-isolation
-          # disabling isolation is essential, see miri's README for info.
+      - name: Run tests with miri
+        uses: xqft/miri-ignore-unsupported@v0.1
+        with:
+          cargoflags: --all --all-features
+          miriflags: -Zmiri-disable-isolation
