@@ -26,7 +26,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{io::ErrorKind, net::SocketAddr, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -274,7 +274,11 @@ impl Command {
     }
 
     async fn load_peers(&self, network: &NetworkHandle) -> Result<(), eyre::Error> {
-        let reader = std::io::BufReader::new(std::fs::File::open(&self.known)?);
+        let reader = match std::fs::File::open(&self.known) {
+            Ok(file) => std::io::BufReader::new(file),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(e) => Err(e)?,
+        };
         info!(target: "reth::cli", file = ?self.known, "Loading saved peers");
         let known_peers: Vec<NodeRecord> = serde_json::from_reader(reader)?;
         known_peers.into_iter().for_each(|record| network.add_peer(record.id, record.udp_addr()));
