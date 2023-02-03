@@ -20,11 +20,11 @@ use crate::JwtSecret;
 /// # How to integrate
 /// ```rust
 /// async fn spawn_jwt_server() {
-///  use crate::EngineApi;
+///  use reth_rpc::{JwtLayer, JwtSecret};
+///  use reth_rpc_engine_api::EngineApi;
 ///  use jsonrpsee::server::ServerBuilder;
 ///  use reth_primitives::MAINNET;
 ///  use reth_provider::test_utils::MockEthProvider;
-///  use reth_rpc_api::EngineApiServer;
 ///  use std::{net::SocketAddr, sync::Arc};
 ///  use tokio::sync::mpsc::unbounded_channel;
 ///  
