@@ -1,5 +1,4 @@
 use http::{HeaderMap, Request, Response, StatusCode};
-
 use pin_project::pin_project;
 use std::{
     future::Future,
@@ -20,46 +19,24 @@ use crate::JwtSecret;
 /// # How to integrate
 /// ```rust
 /// async fn spawn_jwt_server() {
-///  use reth_rpc::{JwtLayer, JwtSecret};
-///  use reth_rpc_engine_api::EngineApi;
-///  use jsonrpsee::server::ServerBuilder;
-///  use reth_primitives::MAINNET;
-///  use reth_provider::test_utils::MockEthProvider;
-///  use std::{net::SocketAddr, sync::Arc};
-///  use tokio::sync::mpsc::unbounded_channel;
-///  
-///  const AUTH_PORT: u32 = 8551;
-///  const AUTH_ADDR: &str = "0.0.0.0";
-///  const AUTH_SECRET: &str = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
-///  
-///  let (tx, _rx) = unbounded_channel();
-///  let _chain_spec = MAINNET.clone();
-///  let _client = Arc::new(MockEthProvider::default());
-///  
-///  // rx side of the channel should be provided
-///  // to a consensus engine implementation.
-///  // example pseudocode:
-///  //
-///  // tokio::spawn(EthConsensusEngine::new(
-///  //     Arc::clone(&client),
-///  //     chain_spec.clone(),
-///  //     UnboundedReceiverStream::new(_rx),
-///  //     Default::default(),
-///  // ));
-///  
-///  let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");
-///  let secret = JwtSecret::from_hex(AUTH_SECRET).unwrap();
-///  let layer = JwtLayer::new(secret);
-///  let middleware = tower::ServiceBuilder::default().layer(layer);
-///  
-///  let server = ServerBuilder::default()
-///      .set_middleware(middleware)
-///      .build(addr.parse::<SocketAddr>().unwrap())
-///      .await
-///      .unwrap();
-///  
-///  let rpc = EngineApi { engine_tx: tx }.into_rpc();
-///  server.start(rpc).unwrap();
+///    use jsonrpsee::server::ServerBuilder;
+///    use reth_rpc::{JwtLayer, JwtSecret};
+///    use std::net::SocketAddr;
+///
+///    const AUTH_PORT: u32 = 8551;
+///    const AUTH_ADDR: &str = "0.0.0.0";
+///    const AUTH_SECRET: &str = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
+///
+///    let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");
+///    let secret = JwtSecret::from_hex(AUTH_SECRET).unwrap();
+///    let layer = JwtLayer::new(secret);
+///    let middleware = tower::ServiceBuilder::default().layer(layer);
+///
+///    let _server = ServerBuilder::default()
+///        .set_middleware(middleware)
+///        .build(addr.parse::<SocketAddr>().unwrap())
+///        .await
+///        .unwrap();
 /// }
 /// ```
 #[allow(missing_debug_implementations)]
