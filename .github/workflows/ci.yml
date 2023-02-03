@@ -263,5 +263,5 @@ jobs:
       - name: Run tests with miri
         uses: xqft/miri-ignore-unsupported@v0.1
         with:
-          cargoflags: --all --all-features
+          cargoflags: --workspace --all-features
           miriflags: -Zmiri-disable-isolation
