@@ -1,6 +1,7 @@
-// TODO:
+//! Implementation of clique consensus.
 mod clique_consensus;
-mod config;
-mod constants;
+pub use clique_consensus::CliqueConsensus;
 
-pub mod validation;
+pub mod constants;
+
+pub mod snapshot;

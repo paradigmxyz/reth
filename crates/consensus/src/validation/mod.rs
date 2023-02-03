@@ -1,17 +1,48 @@
+use reth_interfaces::{consensus::Error, Result as RethResult};
+use reth_primitives::{ChainSpec, SealedBlock};
+use reth_provider::{AccountProvider, HeaderProvider};
+
 mod block;
 mod header;
 mod transaction;
 
 pub use block::{
-    calculate_next_block_base_fee, full_validation, validate_block_regarding_chain,
-    validate_block_standalone,
+    calculate_next_block_base_fee, validate_block_regarding_chain, validate_block_standalone,
 };
 pub use header::{
-    validate_gas_limit_difference, validate_header_regarding_parent, validate_header_standalone,
+    clique, validate_eip_1559_base_fee, validate_gas_limit_difference, validate_header_consistency,
+    validate_header_regarding_parent, validate_header_standalone,
 };
 pub use transaction::{
     validate_all_transaction_regarding_block_and_nonces, validate_transaction_regarding_header,
 };
+
+/// Full validation of block before execution.
+pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
+    block: &SealedBlock,
+    provider: Provider,
+    chain_spec: &ChainSpec,
+) -> RethResult<()> {
+    validate_header_standalone(&block.header, chain_spec)?;
+    validate_block_standalone(block)?;
+    let parent = validate_block_regarding_chain(block, &provider)?;
+    validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
+
+    // NOTE: depending on the need of the stages, recovery could be done in different place.
+    let transactions = block
+        .body
+        .iter()
+        .map(|tx| tx.try_ecrecovered().ok_or(Error::TransactionSignerRecoveryError))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    validate_all_transaction_regarding_block_and_nonces(
+        transactions.iter(),
+        &block.header,
+        provider,
+        chain_spec,
+    )?;
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -24,33 +55,6 @@ mod tests {
     use reth_provider::{AccountProvider, HeaderProvider};
 
     use super::*;
-
-    #[test]
-    fn calculate_base_fee_success() {
-        let base_fee = [
-            1000000000, 1000000000, 1000000000, 1072671875, 1059263476, 1049238967, 1049238967, 0,
-            1, 2,
-        ];
-        let gas_used = [
-            10000000, 10000000, 10000000, 9000000, 10001000, 0, 10000000, 10000000, 10000000,
-            10000000,
-        ];
-        let gas_limit = [
-            10000000, 12000000, 14000000, 10000000, 14000000, 2000000, 18000000, 18000000,
-            18000000, 18000000,
-        ];
-        let next_base_fee = [
-            1125000000, 1083333333, 1053571428, 1179939062, 1116028649, 918084097, 1063811730, 1,
-            2, 3,
-        ];
-
-        for i in 0..base_fee.len() {
-            assert_eq!(
-                next_base_fee[i],
-                calculate_next_block_base_fee(gas_used[i], gas_limit[i], base_fee[i])
-            );
-        }
-    }
 
     struct Provider {
         is_known: bool,

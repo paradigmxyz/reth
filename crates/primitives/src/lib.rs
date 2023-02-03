@@ -33,6 +33,9 @@ mod transaction;
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
 
+/// Helper function for signer recover
+pub mod recovery;
+
 pub use account::Account;
 pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
@@ -86,6 +89,7 @@ pub type TransitionId = u64;
 pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, H128, H64, U64},
+    utils::CliqueConfig,
 };
 pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
 

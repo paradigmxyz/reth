@@ -10,7 +10,6 @@ pub use tx_type::TxType;
 mod access_list;
 mod signature;
 mod tx_type;
-mod util;
 
 /// Legacy transaction.
 #[main_codec]

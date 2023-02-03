@@ -1,4 +1,4 @@
-//! Collection of methods for block validation.
+//! Collection of methods for transaction validation.
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
     BlockNumber, ChainSpec, Hardfork, Header, Transaction, TransactionSignedEcRecovered, TxEip1559,

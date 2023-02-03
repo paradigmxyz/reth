@@ -1,6 +1,7 @@
 use crate::{keccak256, Address};
 
-pub(crate) mod secp256k1 {
+/// General purpose secp256k1 signer recovery.
+pub mod secp256k1 {
     use super::*;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
@@ -8,7 +9,7 @@ pub(crate) mod secp256k1 {
     };
 
     /// secp256k1 signer recovery
-    pub(crate) fn recover(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
+    pub fn recover(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
         let sig =
             RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
 

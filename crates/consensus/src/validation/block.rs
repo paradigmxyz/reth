@@ -2,14 +2,9 @@
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
     constants::{EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_ELASTICITY_MULTIPLIER},
-    proofs, ChainSpec, SealedBlock, SealedHeader,
+    proofs, SealedBlock, SealedHeader,
 };
-use reth_provider::{AccountProvider, HeaderProvider};
-
-use super::{
-    validate_all_transaction_regarding_block_and_nonces, validate_header_regarding_parent,
-    validate_header_standalone,
-};
+use reth_provider::HeaderProvider;
 
 /// Validate a block without regard for state:
 ///
@@ -74,9 +69,9 @@ pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u6
 ///  If parent is known
 ///
 /// Returns parent block header  
-pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
+pub fn validate_block_regarding_chain<P: HeaderProvider>(
     block: &SealedBlock,
-    provider: &PROV,
+    provider: &P,
 ) -> RethResult<SealedHeader> {
     let hash = block.header.hash();
 
@@ -94,29 +89,34 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
     Ok(parent.seal())
 }
 
-/// Full validation of block before execution.
-pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
-    block: &SealedBlock,
-    provider: Provider,
-    chain_spec: &ChainSpec,
-) -> RethResult<()> {
-    validate_header_standalone(&block.header, chain_spec)?;
-    validate_block_standalone(block)?;
-    let parent = validate_block_regarding_chain(block, &provider)?;
-    validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // NOTE: depending on the need of the stages, recovery could be done in different place.
-    let transactions = block
-        .body
-        .iter()
-        .map(|tx| tx.try_ecrecovered().ok_or(Error::TransactionSignerRecoveryError))
-        .collect::<Result<Vec<_>, _>>()?;
+    #[test]
+    fn calculate_base_fee_success() {
+        let base_fee = [
+            1000000000, 1000000000, 1000000000, 1072671875, 1059263476, 1049238967, 1049238967, 0,
+            1, 2,
+        ];
+        let gas_used = [
+            10000000, 10000000, 10000000, 9000000, 10001000, 0, 10000000, 10000000, 10000000,
+            10000000,
+        ];
+        let gas_limit = [
+            10000000, 12000000, 14000000, 10000000, 14000000, 2000000, 18000000, 18000000,
+            18000000, 18000000,
+        ];
+        let next_base_fee = [
+            1125000000, 1083333333, 1053571428, 1179939062, 1116028649, 918084097, 1063811730, 1,
+            2, 3,
+        ];
 
-    validate_all_transaction_regarding_block_and_nonces(
-        transactions.iter(),
-        &block.header,
-        provider,
-        chain_spec,
-    )?;
-    Ok(())
+        for i in 0..base_fee.len() {
+            assert_eq!(
+                next_base_fee[i],
+                calculate_next_block_base_fee(gas_used[i], gas_limit[i], base_fee[i])
+            );
+        }
+    }
 }

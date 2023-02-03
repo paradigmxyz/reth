@@ -2,7 +2,7 @@ use crate::{
     BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
     H160, H256, U256,
 };
-use ethers_core::utils::Genesis as EthersGenesis;
+use ethers_core::utils::{CliqueConfig, Genesis as EthersGenesis};
 use hex_literal::hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     dao_fork_support: true,
     paris_block: Some(15537394),
     paris_ttd: Some(U256::from(58750000000000000000000_u128)),
+    clique: None,
 });
 
 /// The Goerli spec
@@ -51,6 +52,7 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     dao_fork_support: true,
     paris_block: Some(7382818),
     paris_ttd: Some(U256::from(10790000)),
+    clique: None,
 });
 
 /// The Sepolia spec
@@ -77,6 +79,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     dao_fork_support: true,
     paris_block: Some(1450408),
     paris_ttd: Some(U256::from(17000000000000000_u64)),
+    clique: None,
 });
 
 /// The Ethereum chain spec
@@ -102,6 +105,9 @@ pub struct ChainSpec {
 
     /// The merge terminal total difficulty
     pub paris_ttd: Option<U256>,
+
+    /// The clique consesus configuration.
+    pub clique: Option<CliqueConfig>,
 }
 
 impl ChainSpec {
@@ -239,6 +245,7 @@ impl From<EthersGenesis> for ChainSpec {
             paris_ttd,
             // paris block is not used to fork, and is not used in genesis.json
             paris_block: None,
+            clique: None,
         }
     }
 }
@@ -253,6 +260,7 @@ pub struct ChainSpecBuilder {
     dao_fork_support: bool,
     paris_block: Option<u64>,
     paris_ttd: Option<U256>,
+    clique: Option<CliqueConfig>,
 }
 
 impl ChainSpecBuilder {
@@ -266,6 +274,7 @@ impl ChainSpecBuilder {
             dao_fork_support: MAINNET.dao_fork_support,
             paris_block: MAINNET.paris_block,
             paris_ttd: MAINNET.paris_ttd,
+            clique: None,
         }
     }
 
@@ -368,6 +377,12 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Specify clique consensus.
+    pub fn clique(mut self, config: CliqueConfig) -> Self {
+        self.clique = Some(config);
+        self
+    }
+
     /// Build a [ChainSpec]
     pub fn build(self) -> ChainSpec {
         ChainSpec {
@@ -378,6 +393,7 @@ impl ChainSpecBuilder {
             dao_fork_support: self.dao_fork_support,
             paris_block: self.paris_block,
             paris_ttd: self.paris_ttd,
+            clique: self.clique,
         }
     }
 }
@@ -392,6 +408,7 @@ impl From<&ChainSpec> for ChainSpecBuilder {
             dao_fork_support: value.dao_fork_support,
             paris_block: value.paris_block,
             paris_ttd: value.paris_ttd,
+            clique: value.clique.clone(),
         }
     }
 }

@@ -13,12 +13,16 @@ pub enum Error {
     BodyTransactionRootDiff { got: H256, expected: H256 },
     #[error("Block receipts root ({got:?}) is different then expected: ({expected:?}).")]
     BodyReceiptsRootDiff { got: H256, expected: H256 },
-    #[error("Block with [hash:{hash:?},number: {number:}] is already known.")]
+    #[error("Block #{number} ({hash:?}) is already known.")]
     BlockKnown { hash: BlockHash, number: BlockNumber },
-    #[error("Block parent [hash:{hash:?}] is not known.")]
+    #[error("Block parent {hash:?} is not known.")]
     ParentUnknown { hash: BlockHash },
-    #[error("Block number {block_number:?} is mismatch with parent block number {parent_block_number:?}")]
+    #[error("Block number #{block_number:?} is not consistent with parent block number #{parent_block_number:?}")]
     ParentBlockNumberMismatch { parent_block_number: BlockNumber, block_number: BlockNumber },
+    #[error(
+        "Parent hash mismatch for block #{block_number}. Expected: {expected:?}. Received: {received:?}"
+    )]
+    ParentHashMismatch { block_number: BlockNumber, expected: H256, received: H256 },
     #[error(
         "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}."
     )]
@@ -29,8 +33,10 @@ pub enum Error {
     GasLimitInvalidIncrease { parent_gas_limit: u64, child_gas_limit: u64 },
     #[error("Child gas_limit {child_gas_limit:?} max decrease is {parent_gas_limit:?}/1024.")]
     GasLimitInvalidDecrease { parent_gas_limit: u64, child_gas_limit: u64 },
-    #[error("Base fee missing.")]
+    #[error("Base fee missing for block.")]
     BaseFeeMissing,
+    #[error("Encountered unexpected base fee.")]
+    UnexpectedBaseFee,
     #[error("Block base fee ({got:?}) is different then expected: ({expected:?}).")]
     BaseFeeDiff { expected: u64, got: u64 },
     #[error("Transaction eip1559 priority fee is more then max fee.")]
@@ -100,4 +106,6 @@ pub enum CliqueError {
     Difficulty { difficulty: U256 },
     #[error("Invalid child header timestamp. Expected at least: {expected_at_least}. Received: {received}")]
     Timestamp { expected_at_least: u64, received: u64 },
+    #[error("Failed to recover header signer. Signature: {signature:?}. Hash: {hash:?}")]
+    HeaderSignerRecovery { signature: [u8; 65], hash: H256 },
 }

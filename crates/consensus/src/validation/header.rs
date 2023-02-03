@@ -1,12 +1,11 @@
-//! Collection of methods for block validation.
+//! Collection of methods for header validation.
+use super::calculate_next_block_base_fee;
 use reth_interfaces::consensus::Error;
 use reth_primitives::{
     constants::{EIP1559_ELASTICITY_MULTIPLIER, EIP1559_INITIAL_BASE_FEE, GAS_LIMIT_BOUND_DIVISOR},
     ChainSpec, Hardfork, SealedHeader, EMPTY_OMMER_ROOT, U256,
 };
 use std::time::SystemTime;
-
-use super::calculate_next_block_base_fee;
 
 /// Validate header standalone
 pub fn validate_header_standalone(
@@ -68,7 +67,7 @@ pub fn validate_header_regarding_parent(
     child: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), Error> {
-    // Parent number is consistent.
+    // Check that the parent number is consistent.
     if parent.number + 1 != child.number {
         return Err(Error::ParentBlockNumberMismatch {
             parent_block_number: parent.number,
@@ -76,7 +75,16 @@ pub fn validate_header_regarding_parent(
         })
     }
 
-    // timestamp in past check
+    // Check that the parent hash is consistent.
+    if parent.hash() != child.parent_hash {
+        return Err(Error::ParentHashMismatch {
+            block_number: child.number,
+            expected: child.parent_hash,
+            received: parent.hash(),
+        })
+    }
+
+    // Check that the child timestamp is not in the past
     if child.timestamp < parent.timestamp {
         return Err(Error::TimestampIsInPast {
             parent_timestamp: parent.timestamp,
@@ -93,22 +101,40 @@ pub fn validate_header_regarding_parent(
     validate_gas_limit_difference(child, parent, chain_spec)?;
 
     // EIP-1559 check base fee
-    if chain_spec.fork_active(Hardfork::London, child.number) {
-        let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
+    validate_eip_1559_base_fee(child, parent, chain_spec)?;
 
-        let expected_base_fee = if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
-            EIP1559_INITIAL_BASE_FEE
-        } else {
-            // This BaseFeeMissing will not happen as previous blocks are checked to have them.
-            calculate_next_block_base_fee(
-                parent.gas_used,
-                parent.gas_limit,
-                parent.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?,
-            )
-        };
-        if expected_base_fee != base_fee {
-            return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
-        }
+    Ok(())
+}
+
+/// Validate that the number, parent hash and timestamp fields are consistent
+/// regarding the parent header.
+pub fn validate_header_consistency(
+    parent: &SealedHeader,
+    child: &SealedHeader,
+) -> Result<(), Error> {
+    // Check that the parent number is consistent.
+    if parent.number + 1 != child.number {
+        return Err(Error::ParentBlockNumberMismatch {
+            parent_block_number: parent.number,
+            block_number: child.number,
+        })
+    }
+
+    // Check that the parent hash is consistent.
+    if parent.hash() != child.parent_hash {
+        return Err(Error::ParentHashMismatch {
+            block_number: child.number,
+            expected: child.parent_hash,
+            received: parent.hash(),
+        })
+    }
+
+    // Check that the child timestamp is not in the past
+    if child.timestamp < parent.timestamp {
+        return Err(Error::TimestampIsInPast {
+            parent_timestamp: parent.timestamp,
+            timestamp: child.timestamp,
+        })
     }
 
     Ok(())
@@ -146,4 +172,161 @@ pub fn validate_gas_limit_difference(
     }
 
     Ok(())
+}
+
+/// Validate EIP-1559 base fee increase/decrease.
+pub fn validate_eip_1559_base_fee(
+    child: &SealedHeader,
+    parent: &SealedHeader,
+    chain_spec: &ChainSpec,
+) -> Result<(), Error> {
+    if !chain_spec.fork_active(Hardfork::London, child.number) {
+        return match child.base_fee_per_gas {
+            Some(_) => Err(Error::UnexpectedBaseFee),
+            None => Ok(()),
+        }
+    }
+
+    if chain_spec.fork_active(Hardfork::London, child.number) {
+        let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
+
+        let expected_base_fee = if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
+            EIP1559_INITIAL_BASE_FEE
+        } else {
+            // This BaseFeeMissing will not happen as previous blocks are checked to have them.
+            calculate_next_block_base_fee(
+                parent.gas_used,
+                parent.gas_limit,
+                parent.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?,
+            )
+        };
+        if expected_base_fee != base_fee {
+            return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
+        }
+    }
+
+    Ok(())
+}
+
+/// Methods for validating clique headers
+pub mod clique {
+    use super::*;
+    use crate::clique::constants::*;
+    use reth_interfaces::consensus::{CliqueError, Error};
+    use reth_primitives::{Address, ChainSpec, SealedHeader, EMPTY_OMMER_ROOT, H64, U256};
+    use std::time::SystemTime;
+
+    /// Validate header according to clique consensus rules.
+    pub fn validate_header_standalone(
+        header: &SealedHeader,
+        chain_spec: &ChainSpec,
+    ) -> Result<(), Error> {
+        let config = chain_spec.clique.as_ref().expect("cannot validate without clique config");
+
+        // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
+        if header.gas_used > header.gas_limit {
+            return Err(Error::HeaderGasUsedExceedsGasLimit {
+                gas_used: header.gas_used,
+                gas_limit: header.gas_limit,
+            })
+        }
+
+        // Check if timestamp is in future.
+        let present_timestamp =
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        if header.timestamp > present_timestamp {
+            return Err(Error::TimestampIsInFuture {
+                timestamp: header.timestamp,
+                present_timestamp,
+            })
+        }
+
+        let is_checkpoint = header.number % config.epoch == 0;
+
+        // Checkpoint blocks need to enforce zero beneficiary
+        if is_checkpoint && !header.beneficiary.is_zero() {
+            return Err(CliqueError::CheckpointBeneficiary { beneficiary: header.beneficiary }.into())
+        }
+
+        // Nonces must be 0x00..0 or 0xff..f, zeroes enforced on checkpoints
+        let nonce = H64::from_low_u64_ne(header.nonce);
+        if is_checkpoint && nonce.as_bytes() != NONCE_DROP_VOTE {
+            return Err(CliqueError::CheckpointVote { nonce: header.nonce }.into())
+        } else if nonce.as_bytes() != NONCE_AUTH_VOTE {
+            return Err(CliqueError::InvalidVote { nonce: header.nonce }.into())
+        }
+
+        // Check that the extra-data contains both the vanity and signature
+        let extra_data_len = header.extra_data.len();
+        if extra_data_len < EXTRA_VANITY {
+            return Err(CliqueError::MissingVanity { extra_data: header.extra_data.clone() }.into())
+        } else if extra_data_len < EXTRA_VANITY + EXTRA_SEAL {
+            return Err(
+                CliqueError::MissingSignature { extra_data: header.extra_data.clone() }.into()
+            )
+        }
+
+        // Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
+        // Safe subtraction because of the check above.
+        let signers_bytes_len = extra_data_len - EXTRA_VANITY - EXTRA_SEAL;
+        if is_checkpoint && signers_bytes_len != 0 {
+            return Err(CliqueError::ExtraSignerList { extra_data: header.extra_data.clone() }.into())
+        } else if signers_bytes_len % Address::len_bytes() != 0 {
+            return Err(
+                CliqueError::CheckpointSigners { extra_data: header.extra_data.clone() }.into()
+            )
+        }
+
+        // Ensure that the mix digest is zero as we don't have fork protection currently
+        if !header.mix_hash.is_zero() {
+            return Err(CliqueError::NonZeroMixHash { mix_hash: header.mix_hash }.into())
+        }
+
+        // Ensure that the block doesn't contain any uncles which are meaningless in PoA
+        if header.ommers_hash != EMPTY_OMMER_ROOT {
+            return Err(Error::BodyOmmersHashDiff {
+                got: header.ommers_hash,
+                expected: EMPTY_OMMER_ROOT,
+            })
+        }
+
+        // Ensure that the block's difficulty is meaningful (may not be correct at this point)
+        if header.number > 0 {
+            if header.difficulty != U256::from(DIFF_INTURN) ||
+                header.difficulty != U256::from(DIFF_NOTURN)
+            {
+                return Err(CliqueError::Difficulty { difficulty: header.difficulty }.into())
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate header regarding to its parent according to clique consensus.
+    pub fn validate_header_regarding_parent(
+        parent: &SealedHeader,
+        child: &SealedHeader,
+        chain_spec: &ChainSpec,
+    ) -> Result<(), Error> {
+        let config = chain_spec.clique.as_ref().expect("cannot validate without clique config");
+
+        // Validate child/parent consistency.
+        validate_header_consistency(parent, child)?;
+
+        // Validate that at least `period` seconds have passed since last block.
+        let expected_at_least = parent.timestamp + config.period;
+        if child.timestamp < expected_at_least {
+            return Err(
+                CliqueError::Timestamp { expected_at_least, received: child.timestamp }.into()
+            )
+        }
+
+        // Validate gas limit increase/decrease.
+        validate_gas_limit_difference(child, parent, chain_spec)?;
+
+        // EIP-1559 check base fee
+        validate_eip_1559_base_fee(child, parent, chain_spec)?;
+
+        Ok(())
+    }
 }
