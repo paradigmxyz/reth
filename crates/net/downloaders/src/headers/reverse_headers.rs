@@ -24,6 +24,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tracing::trace;
+use super::task::TaskDownloader;
 
 /// A heuristic that is used to determine the number of requests that should be prepared for a peer.
 /// This should ensure that there are always requests lined up for peers to handle while the
@@ -496,6 +497,16 @@ where
         let mut rem = self.queued_validated_headers.split_off(batch_size);
         std::mem::swap(&mut rem, &mut self.queued_validated_headers);
         rem
+    }
+}
+
+impl<H> ReverseHeadersDownloader<H> where
+    H: HeadersClient,
+    Self: HeaderDownloader + 'static,
+{
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning it.
+    pub fn as_task(self) -> TaskDownloader {
+        TaskDownloader::spawn(self)
     }
 }
 

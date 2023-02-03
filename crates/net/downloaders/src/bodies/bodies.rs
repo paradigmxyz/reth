@@ -1,5 +1,4 @@
-use crate::metrics::DownloaderMetrics;
-
+use crate::{metrics::DownloaderMetrics, bodies::task::TaskDownloader};
 use super::queue::BodiesRequestQueue;
 use futures::Stream;
 use futures_util::StreamExt;
@@ -186,7 +185,7 @@ where
     fn is_terminated(&self) -> bool {
         // There is nothing to request if the range is empty
         let nothing_to_request = self.download_range.is_empty() ||
-            // or all blocks have already been requested. 
+            // or all blocks have already been requested.
             self.in_progress_queue
                 .last_requested_block_number
                 .map(|last| last + 1 == self.download_range.end)
@@ -238,6 +237,17 @@ where
             }
         }
         None
+    }
+}
+
+impl<B, DB> BodiesDownloader<B, DB> where
+    B: BodiesClient + 'static,
+    DB: Database,
+    Self: BodyDownloader + 'static,
+{
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning it.
+    pub fn as_task(self) -> TaskDownloader {
+        TaskDownloader::spawn(self)
     }
 }
 
