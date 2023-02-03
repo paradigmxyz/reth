@@ -373,7 +373,8 @@ where
                 revm::return_ok!() => true,
                 revm::return_revert!() => false,
                 _ => false,
-                //e => return Err(Error::EVMError { error_code: e as u32 }),
+                // TODO: Handle after bumping to revm v3.0: https://github.com/paradigmxyz/reth/issues/463
+                // e => return Err(Error::EVMError { error_code: e as u32 }),
             };
 
             // Add spent gas.
