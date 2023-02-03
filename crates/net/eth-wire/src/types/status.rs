@@ -58,10 +58,10 @@ impl From<Genesis> for Status {
         }
 
         // calculate the hash
-        let sealed_header = header.seal();
+        let header_hash = header.hash_slow();
 
         // set the new genesis hash after modifying the base fee
-        chainspec.genesis_hash = sealed_header.hash();
+        chainspec.genesis_hash = header_hash;
 
         // we need to calculate the fork id AFTER re-setting the genesis hash
         let forkid = chainspec.fork_id(0);
@@ -70,8 +70,8 @@ impl From<Genesis> for Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Id(chain),
             total_difficulty,
-            blockhash: sealed_header.hash(),
-            genesis: sealed_header.hash(),
+            blockhash: header_hash,
+            genesis: header_hash,
             forkid,
         }
     }

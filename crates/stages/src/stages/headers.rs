@@ -87,16 +87,16 @@ where
         let (_, head) = header_cursor
             .seek_exact((head_num, head_hash).into())?
             .ok_or(DatabaseIntegrityError::Header { number: head_num, hash: head_hash })?;
-        let local_head = SealedHeader::new(head, head_hash);
+        let local_head = head.seal(head_hash);
 
         // Look up the next header
         let next_header = cursor
             .next()?
-            .map(|(next_num, next_hash)| -> Result<Header, StageError> {
+            .map(|(next_num, next_hash)| -> Result<SealedHeader, StageError> {
                 let (_, next) = header_cursor
                     .seek_exact((next_num, next_hash).into())?
                     .ok_or(DatabaseIntegrityError::Header { number: next_num, hash: next_hash })?;
-                Ok(next)
+                Ok(next.seal(next_hash))
             })
             .transpose()?;
 
@@ -105,7 +105,7 @@ where
         // progress, then there is a gap in the database and we should start downloading in
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
-            Some(header) if stage_progress + 1 != header.number => SyncTarget::Gap(header.seal()),
+            Some(header) if stage_progress + 1 != header.number => SyncTarget::Gap(header),
             None => SyncTarget::Tip(self.next_fork_choice_state().await.head_block_hash),
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
@@ -287,7 +287,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_interfaces::{
-            consensus::ForkchoiceState,
+            consensus::{Consensus, ForkchoiceState},
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
@@ -382,7 +382,7 @@ mod tests {
                                 // validate the header
                                 let header = tx.get::<tables::Headers>(key)?;
                                 assert!(header.is_some());
-                                let header = header.unwrap().seal();
+                                let header = self.consensus.seal_header(header.unwrap()).unwrap();
                                 assert_eq!(header.hash(), hash);
                             }
                             Ok(())

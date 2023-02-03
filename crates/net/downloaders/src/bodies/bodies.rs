@@ -144,7 +144,7 @@ where
             }
 
             // Add header to the result collection
-            headers.push(SealedHeader::new(header, hash));
+            headers.push(header.seal(hash));
 
             // Increment current block number
             current_block_num += 1;

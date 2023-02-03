@@ -194,6 +194,9 @@ pub enum DownloadError {
     /// Error while executing the request.
     #[error(transparent)]
     RequestError(#[from] RequestError),
+    /// Error while validating header.
+    #[error(transparent)]
+    ConsensusError(#[from] consensus::Error),
     /// Error while reading data from database.
     #[error(transparent)]
     DatabaseError(#[from] db::Error),

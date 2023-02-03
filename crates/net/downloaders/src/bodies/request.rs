@@ -9,7 +9,7 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
+use reth_primitives::{Header, PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
 use std::{
     collections::VecDeque,
     pin::Pin,
@@ -170,7 +170,7 @@ where
                 let block = SealedBlock {
                     header: next_header,
                     body: next_body.transactions,
-                    ommers: next_body.ommers.into_iter().map(|header| header.seal()).collect(),
+                    ommers: next_body.ommers.into_iter().map(Header::seal_slow).collect(),
                 };
 
                 if let Err(error) = self.consensus.pre_validate_block(&block) {

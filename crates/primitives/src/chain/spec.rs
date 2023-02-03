@@ -212,7 +212,7 @@ impl From<EthersGenesis> for ChainSpec {
             alloc,
         };
 
-        let genesis_hash = Header::from(genesis_block.clone()).seal().hash();
+        let genesis_hash = Header::from(genesis_block.clone()).hash_slow();
         let paris_ttd = genesis.config.terminal_total_difficulty.map(|ttd| ttd.into());
         let hardfork_opts = vec![
             (Hardfork::Homestead, genesis.config.homestead_block),
@@ -458,7 +458,7 @@ mod tests {
         // tests that we skip any forks in block 0, that's the genesis ruleset
         let empty_genesis = Genesis::default();
         let empty_header: Header = empty_genesis.clone().into();
-        let empty_sealed = empty_header.seal();
+        let empty_sealed = empty_header.seal_slow();
         let spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis)
@@ -490,7 +490,7 @@ mod tests {
         // forks activated at the same block should be deduplicated
         let empty_genesis = Genesis::default();
         let empty_header: Header = empty_genesis.clone().into();
-        let empty_sealed = empty_header.seal();
+        let empty_sealed = empty_header.seal_slow();
         let unique_spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())

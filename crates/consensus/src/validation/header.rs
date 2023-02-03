@@ -310,9 +310,6 @@ pub mod clique {
     ) -> Result<(), Error> {
         let config = chain_spec.clique.as_ref().expect("cannot validate without clique config");
 
-        // Validate child/parent consistency.
-        validate_header_consistency(parent, child)?;
-
         // Validate that at least `period` seconds have passed since last block.
         let expected_at_least = parent.timestamp + config.period;
         if child.timestamp < expected_at_least {
@@ -320,6 +317,9 @@ pub mod clique {
                 CliqueError::Timestamp { expected_at_least, received: child.timestamp }.into()
             )
         }
+
+        // Validate child/parent consistency.
+        validate_header_consistency(parent, child)?;
 
         // Validate gas limit increase/decrease.
         validate_gas_limit_difference(child, parent, chain_spec)?;

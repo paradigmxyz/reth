@@ -105,7 +105,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             difficulty: Default::default(),
             nonce: Default::default(),
         };
-        let header = header.seal();
+        let header = header.seal_slow();
 
         if payload.block_hash != header.hash() {
             return Err(EngineApiError::PayloadBlockHash {
@@ -320,9 +320,9 @@ mod tests {
             transformed.header.ommers_hash =
                 proofs::calculate_ommers_root(transformed.ommers.iter());
             SealedBlock {
-                header: transformed.header.seal(),
+                header: transformed.header.seal_slow(),
                 body: transformed.body,
-                ommers: transformed.ommers.into_iter().map(Header::seal).collect(),
+                ommers: transformed.ommers.into_iter().map(Header::seal_slow).collect(),
             }
         }
 

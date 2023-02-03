@@ -106,8 +106,18 @@ impl Header {
         self.ommers_hash == EMPTY_LIST_HASH && self.transactions_root == EMPTY_ROOT
     }
 
+    /// Seal the header with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    pub fn seal(self, hash: H256) -> SealedHeader {
+        SealedHeader { header: self, hash }
+    }
+
     /// Calculate hash and seal the Header so that it can't be changed.
-    pub fn seal(self) -> SealedHeader {
+    ///
+    /// WARNING: This method naively encodes and calculates the hash of **all** header fields.
+    /// This might not be applicable to various consensus protocols.
+    pub fn seal_slow(self) -> SealedHeader {
         let hash = self.hash_slow();
         SealedHeader { header: self, hash }
     }
@@ -232,11 +242,10 @@ impl From<Block<EthersH256>> for SealedHeader {
             base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
             ..Default::default()
         };
-        let hash = match block.hash {
-            Some(hash) => hash.0.into(),
-            None => header.hash_slow(),
-        };
-        SealedHeader::new(header, hash)
+        match block.hash {
+            Some(hash) => header.seal(hash.0.into()),
+            None => header.seal_slow(),
+        }
     }
 }
 
@@ -280,13 +289,6 @@ impl Deref for SealedHeader {
 }
 
 impl SealedHeader {
-    /// Construct a new sealed header.
-    ///
-    /// Applicable when hash is known from the database provided it's not corrupted.
-    pub fn new(header: Header, hash: H256) -> Self {
-        Self { header, hash }
-    }
-
     /// Extract raw header that can be modified.
     pub fn unseal(self) -> Header {
         self.header

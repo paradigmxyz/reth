@@ -199,7 +199,12 @@ where
         let mut validated = Vec::with_capacity(headers.len());
 
         for parent in headers {
-            let parent = parent.seal();
+            let parent =
+                self.consensus.seal_header(parent).map_err(|error| HeadersResponseError {
+                    request: request.clone(),
+                    peer_id: Some(peer_id),
+                    error: error.into(),
+                })?;
 
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -295,7 +300,13 @@ where
                     })
                 }
 
-                let target = headers.remove(0).seal();
+                let target = self.consensus.seal_header(headers.remove(0)).map_err(|error| {
+                    HeadersResponseError {
+                        request: request.clone(),
+                        peer_id: Some(peer_id),
+                        error: error.into(),
+                    }
+                })?;
 
                 if target.hash() != sync_target_hash {
                     return Err(HeadersResponseError {
@@ -955,7 +966,7 @@ mod tests {
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(SealedHeader::new(Default::default(), H256::random()));
+        let target = SyncTarget::Gap(Header::default().seal(H256::random()));
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
@@ -979,7 +990,7 @@ mod tests {
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
         next.number += 1;
-        downloader.update_local_head(SealedHeader::new(next, H256::random()));
+        downloader.update_local_head(next.seal(H256::random()));
         assert!(downloader.queued_validated_headers.is_empty());
     }
 

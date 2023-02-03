@@ -29,18 +29,25 @@ impl CliqueConsensus {
             CliqueError::HeaderSignerRecovery { signature, hash: header.hash() }.into()
         })
     }
-
-    // TODO: make a part of [Consensus] trait
-    fn seal_header(&self, mut header: Header) -> Result<SealedHeader, Error> {
-        let extra_data = header.extra_data.clone();
-        header.extra_data = Bytes::from(&extra_data[..extra_data.len() - EXTRA_SEAL]); // TODO:
-        let hash = header.hash_slow();
-        header.extra_data = extra_data;
-        Ok(SealedHeader::new(header, hash))
-    }
 }
 
 impl Consensus for CliqueConsensus {
+    fn seal_header(&self, mut header: Header) -> Result<SealedHeader, Error> {
+        let extra_data = header.extra_data.clone();
+        let extra_data_len = extra_data.len();
+        let end_byte = extra_data_len
+            .checked_sub(EXTRA_SEAL)
+            .ok_or(CliqueError::MissingSignature { extra_data: extra_data.clone() })?;
+
+        // Set trimmed extra data on header.
+        header.extra_data = Bytes::from(&extra_data[..end_byte]);
+        let hash = header.hash_slow();
+
+        // Reset the `extra_data` field
+        header.extra_data = extra_data;
+        Ok(header.seal(hash))
+    }
+
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         todo!()
     }
@@ -85,14 +92,15 @@ mod tests {
         let consensus = CliqueConsensus::new(ChainSpecBuilder::mainnet().build());
 
         let extra_data = Bytes::from(vec![0; EXTRA_VANITY + EXTRA_SEAL]);
-        let mut header = Header::default();
-        header.base_fee_per_gas = Some(0);
-        header.extra_data = extra_data.clone();
-        // Zero out all roots
-        header.ommers_hash = H256::zero();
-        header.state_root = H256::zero();
-        header.transactions_root = H256::zero();
-        header.receipts_root = H256::zero();
+        let header = Header {
+            ommers_hash: H256::zero(),
+            state_root: H256::zero(),
+            transactions_root: H256::zero(),
+            receipts_root: H256::zero(),
+            base_fee_per_gas: Some(0),
+            extra_data: extra_data.clone(),
+            ..Default::default()
+        };
 
         let sealed = consensus.seal_header(header).unwrap();
         assert_eq!(sealed.hash(), expected);

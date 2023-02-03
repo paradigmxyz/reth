@@ -422,7 +422,7 @@ mod tests {
                 TestConsensus,
             },
         };
-        use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
+        use reth_primitives::{BlockNumber, Header, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{
             collections::{HashMap, VecDeque},
             ops::Range,
@@ -725,7 +725,7 @@ mod tests {
                             let (_, header) = header_cursor
                                 .seek_exact((num, hash).into())?
                                 .expect("missing header");
-                            headers.push(SealedHeader::new(header, hash));
+                            headers.push(header.seal(hash));
                         }
                         Ok(headers)
                     })??);
@@ -752,7 +752,7 @@ mod tests {
                         response.push(BlockResponse::Full(SealedBlock {
                             header,
                             body: body.transactions,
-                            ommers: body.ommers.into_iter().map(|h| h.seal()).collect(),
+                            ommers: body.ommers.into_iter().map(Header::seal_slow).collect(),
                         }));
                     }
 

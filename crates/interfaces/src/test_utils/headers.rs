@@ -168,7 +168,7 @@ impl Stream for TestDownload {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
-                        resp.1.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
+                        resp.1.into_iter().skip(1).map(|h| h.seal_slow()).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
@@ -308,6 +308,10 @@ impl StatusUpdater for TestStatusUpdater {
 
 #[async_trait::async_trait]
 impl Consensus for TestConsensus {
+    fn seal_header(&self, header: Header) -> Result<SealedHeader, consensus::Error> {
+        Ok(header.seal_slow())
+    }
+
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
     }

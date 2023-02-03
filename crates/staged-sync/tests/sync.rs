@@ -114,7 +114,7 @@ async fn init_geth() -> (CliqueGethInstance, ChainSpec) {
         local_genesis_header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
     }
 
-    let local_genesis = local_genesis_header.seal();
+    let local_genesis = local_genesis_header.seal_slow();
     assert_eq!(local_genesis, remote_genesis, "genesis blocks should match, we computed {local_genesis:#?} but geth computed {remote_genesis:#?}");
 
     // set the chainspec genesis hash

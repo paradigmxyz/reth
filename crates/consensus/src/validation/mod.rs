@@ -26,7 +26,7 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     validate_header_standalone(&block.header, chain_spec)?;
     validate_block_standalone(block)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
-    validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
+    validate_header_regarding_parent(&parent.seal(block.parent_hash), &block.header, chain_spec)?;
 
     // NOTE: depending on the need of the stages, recovery could be done in different place.
     let transactions = block
@@ -115,6 +115,7 @@ mod tests {
         let signer = Address::zero();
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
     }
+
     /// got test block
     fn mock_block() -> (SealedBlock, Header) {
         // https://etherscan.io/block/15867168 where transaction root and receipts root are cleared
@@ -149,7 +150,7 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal(), body, ommers }, parent)
+        (SealedBlock { header: header.seal_slow(), body, ommers }, parent)
     }
 
     #[test]

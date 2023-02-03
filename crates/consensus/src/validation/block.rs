@@ -2,7 +2,7 @@
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
     constants::{EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_ELASTICITY_MULTIPLIER},
-    proofs, SealedBlock, SealedHeader,
+    proofs, Header, SealedBlock, SealedHeader,
 };
 use reth_provider::HeaderProvider;
 
@@ -72,7 +72,7 @@ pub fn calculate_next_block_base_fee(gas_used: u64, gas_limit: u64, base_fee: u6
 pub fn validate_block_regarding_chain<P: HeaderProvider>(
     block: &SealedBlock,
     provider: &P,
-) -> RethResult<SealedHeader> {
+) -> RethResult<Header> {
     let hash = block.header.hash();
 
     // Check if block is known.
@@ -86,7 +86,7 @@ pub fn validate_block_regarding_chain<P: HeaderProvider>(
         .ok_or(Error::ParentUnknown { hash: block.parent_hash })?;
 
     // Return parent header.
-    Ok(parent.seal())
+    Ok(parent)
 }
 
 #[cfg(test)]
