@@ -1,11 +1,7 @@
-
-
 //! Error variants for the `eth_` namespace.
 
 use crate::{impl_to_rpc_result, result::ToRpcResult};
 use reth_transaction_pool::{error::PoolError, Pool};
-use std::convert::From;
-
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
