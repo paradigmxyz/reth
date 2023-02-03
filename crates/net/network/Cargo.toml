@@ -30,6 +30,7 @@ reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-provider = { path = "../../storage/provider"}
+reth-metrics-common = { path = "../../metrics/common" }
 
 # async/futures
 futures = "0.3"
