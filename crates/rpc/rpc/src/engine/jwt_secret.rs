@@ -52,8 +52,8 @@ impl TryInto<JwtSecret> for String {
 
     /// Creates an instance of [`JwtSecret`][crate::engine::JwtSecret].
     /// Generates and error if one of the following applies:
-    /// - The `hex` argument is not a valid hexadecimal string
-    /// - The `hex` argument length is less than `JWT_SECRET_LEN`
+    /// - `self` is not a valid hexadecimal string
+    /// - `self` argument length is less than `JWT_SECRET_LEN`
     fn try_into(self) -> Result<JwtSecret, Self::Error> {
         let hex: String = self.trim().into();
         if hex.len() != JWT_SECRET_LEN {
