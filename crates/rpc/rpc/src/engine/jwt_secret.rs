@@ -43,7 +43,8 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 /// for the JWT, which is included in the JWT along with its payload.
 /// -----------------------------------------------------------------
 /// [Secret key - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#key-distribution)
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct JwtSecret(String);
 
 impl JwtSecret {

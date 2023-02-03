@@ -12,6 +12,7 @@ use crate::JwtSecret;
 
 /// Middleware struct that provides JWT bearer
 /// token check for incoming Http requests
+#[allow(missing_debug_implementations)]
 pub struct JwtLayer(JwtSecret);
 
 impl JwtLayer {
@@ -28,6 +29,8 @@ impl<S> Layer<S> for JwtLayer {
         JwtService { secret: self.0.clone(), inner }
     }
 }
+
+#[allow(missing_debug_implementations)]
 pub struct JwtService<S> {
     secret: JwtSecret,
     inner: S,
@@ -80,6 +83,7 @@ impl<S> JwtService<S> {
 }
 
 #[pin_project]
+#[allow(missing_debug_implementations)]
 pub struct ResponseFuture<F, B> {
     #[pin]
     kind: Kind<F, B>,
