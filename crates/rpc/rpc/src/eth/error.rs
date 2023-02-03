@@ -1,7 +1,7 @@
 //! Error variants for the `eth_` namespace.
 
 use crate::{impl_to_rpc_result, result::ToRpcResult};
-use reth_transaction_pool::{error::PoolError, Pool};
+use reth_transaction_pool::{error::PoolError};
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
@@ -18,30 +18,10 @@ pub(crate) enum EthApiError {
     #[error("Invalid transaction signature")]
     InvalidTransactionSignature,
     #[error(transparent)]
-    PoolError(GethCompatPoolError),
+    PoolError(PoolError),
 }
 
 impl_to_rpc_result!(EthApiError);
-
-/// A helper error type that ensures error messages are compatible with `geth`
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub(crate) struct GethCompatPoolError(PoolError);
-
-impl GethCompatPoolError {
-
-    fn from(err: PoolError) -> GethTxPoolError {
-        match err {
-            PoolError::ReplacementUnderpriced(_) =>GethTxPoolError::ReplaceUnderpriced,
-            PoolError::ProtocolFeeCapTooLow(_, _) => GethTxPoolError::Underpriced,
-            PoolError::SpammerExceededCapacity(_, _) => GethTxPoolError::TxPoolOverflow,
-            PoolError::DiscardedOnInsert(_) => GethTxPoolError::TxPoolOverflow,
-            PoolError::TxExceedsGasLimit(_, _, _) => GethTxPoolError::GasLimit,
-            PoolError::TxExceedsMaxInitCodeSize(_, _, _) => GethTxPoolError::OversizedData,
-        }
-    }
-
-}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GethTxPoolError {
@@ -63,9 +43,22 @@ pub(crate) enum GethTxPoolError {
     OversizedData,
 }
 
+impl GethTxPoolError {
+
+    fn from(err: PoolError) -> GethTxPoolError {
+        match err {
+            PoolError::ReplacementUnderpriced(_) =>GethTxPoolError::ReplaceUnderpriced,
+            PoolError::ProtocolFeeCapTooLow(_, _) => GethTxPoolError::Underpriced,
+            PoolError::SpammerExceededCapacity(_, _) => GethTxPoolError::TxPoolOverflow,
+            PoolError::DiscardedOnInsert(_) => GethTxPoolError::TxPoolOverflow,
+            PoolError::TxExceedsGasLimit(_, _, _) => GethTxPoolError::GasLimit,
+            PoolError::TxExceedsMaxInitCodeSize(_, _, _) => GethTxPoolError::OversizedData,
+        }
+    }
+}
 
 impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
-        EthApiError::PoolError(GethCompatPoolError(err))
+        EthApiError::PoolError(err)
     }
 }
