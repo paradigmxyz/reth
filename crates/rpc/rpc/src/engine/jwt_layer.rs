@@ -48,7 +48,7 @@ use crate::JwtSecret;
 ///  // ));
 ///  
 ///  let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");
-///  let secret: JwtSecret = AUTH_SECRET.try_into().unwrap();
+///  let secret = JwtSecret::from_hex(AUTH_SECRET).unwrap();
 ///  let layer = JwtLayer::new(secret);
 ///  let middleware = tower::ServiceBuilder::default().layer(layer);
 ///  

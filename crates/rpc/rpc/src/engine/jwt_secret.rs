@@ -51,32 +51,22 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 #[derive(Clone)]
 pub struct JwtSecret([u8; 32]);
 
-impl TryInto<JwtSecret> for String {
-    type Error = JwtError;
-
+impl JwtSecret {
     /// Creates an instance of [`JwtSecret`][crate::engine::JwtSecret].
     /// Generates and error if one of the following applies:
-    /// - `self` is not a valid hexadecimal string
-    /// - `self` argument length is less than `JWT_SECRET_LEN`
-    fn try_into(self) -> Result<JwtSecret, Self::Error> {
-        let hex: String = self.trim().into();
+    /// - `hex` is not a valid hexadecimal string
+    /// - `hex` argument length is less than `JWT_SECRET_LEN`
+    pub fn from_hex<S: AsRef<str>>(hex: S) -> Result<Self, JwtError> {
+        let hex: &str = hex.as_ref().trim();
         if hex.len() != JWT_SECRET_LEN {
             Err(JwtError::InvalidLength(JWT_SECRET_LEN, hex.len()))
         } else {
-            let hex_bytes = hex::decode(&hex)?;
+            let hex_bytes = hex::decode(hex)?;
             let mut bytes = [0; 32];
             let mut writer = &mut bytes[..];
             let _ = writer.write(hex_bytes.get(0..32).expect("This should never happen"));
             Ok(JwtSecret(bytes))
         }
-    }
-}
-
-impl TryInto<JwtSecret> for &str {
-    type Error = JwtError;
-
-    fn try_into(self) -> Result<JwtSecret, Self::Error> {
-        self.to_string().try_into()
     }
 }
 
@@ -125,7 +115,7 @@ impl JwtSecret {
     pub fn random() -> Self {
         let random_bytes: [u8; 32] = rand::thread_rng().gen();
         let secret = hex_encode(random_bytes);
-        secret.try_into().unwrap()
+        JwtSecret::from_hex(secret).unwrap()
     }
 
     #[cfg(test)]
@@ -168,19 +158,19 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     #[test]
-    fn try_into() {
+    fn from_hex() {
         let key = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
-        let secret: Result<JwtSecret, _> = key.try_into();
+        let secret: Result<JwtSecret, _> = JwtSecret::from_hex(key);
         assert!(matches!(secret, Ok(_)));
 
-        let secret: Result<JwtSecret, _> = key.to_string().try_into();
+        let secret: Result<JwtSecret, _> = JwtSecret::from_hex(key.to_string());
         assert!(matches!(secret, Ok(_)));
     }
 
     #[test]
     fn original_key_integrity_across_transformations() {
         let original = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
-        let secret: JwtSecret = original.try_into().unwrap();
+        let secret = JwtSecret::from_hex(original).unwrap();
         let bytes = &secret.0;
         let computed = hex::encode(bytes);
         assert_eq!(original, computed);
@@ -197,14 +187,14 @@ mod tests {
     #[test]
     fn creation_error_wrong_len() {
         let hex = "f79ae8046";
-        let result: Result<JwtSecret, JwtError> = hex.try_into();
+        let result = JwtSecret::from_hex(hex);
         assert!(matches!(result, Err(JwtError::InvalidLength(_, _))));
     }
 
     #[test]
     fn creation_error_wrong_hex_string() {
         let hex: String = "This__________Is__________Not_______An____Hex_____________String".into();
-        let result: Result<JwtSecret, JwtError> = hex.try_into();
+        let result = JwtSecret::from_hex(hex);
         assert!(matches!(result, Err(JwtError::JwtSecretHexDecodeError(_))));
     }
 
