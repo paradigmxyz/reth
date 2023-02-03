@@ -745,7 +745,10 @@ mod tests {
                         remote_capabilities: Arc::clone(&capabilities),
                         session_id,
                         commands_rx: ReceiverStream::new(commands_rx),
-                        to_session: self.active_session_tx.clone(),
+                        to_session: MeteredSender::new(
+                            self.active_session_tx.clone(),
+                            "network_active_session",
+                        ),
                         request_tx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
