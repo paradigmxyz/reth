@@ -11,7 +11,8 @@ pub trait BlockExecutor<T> {
     ///
     /// If no senders are specified, the `execute` function MUST recover the senders for the
     /// provided block's transactions internally. We use this to allow for calculating senders in
-    /// parallel in e.g. staged sync, so that execution can happen without paying for sender recovery costs.
+    /// parallel in e.g. staged sync, so that execution can happen without paying for sender
+    /// recovery costs.
     fn execute(&mut self, block: &Block, senders: Option<Vec<Address>>) -> Result<T, Error>;
 }
 
