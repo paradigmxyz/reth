@@ -19,6 +19,7 @@ use reth_eth_wire::{
     DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
+use reth_metrics_common::metered_sender::MeteredSender;
 use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
 use std::{
@@ -74,7 +75,7 @@ pub(crate) struct ActiveSession {
     /// Incoming commands from the manager
     pub(crate) commands_rx: ReceiverStream<SessionCommand>,
     /// Sink to send messages to the [`SessionManager`](super::SessionManager).
-    pub(crate) to_session: mpsc::Sender<ActiveSessionMessage>,
+    pub(crate) to_session: MeteredSender<ActiveSessionMessage>,
     /// Incoming request to send to delegate to the remote peer.
     pub(crate) request_tx: Fuse<ReceiverStream<PeerRequest>>,
     /// All requests sent to the remote peer we're waiting on a response
