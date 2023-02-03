@@ -50,6 +50,7 @@ macro_rules! impl_fixed_hash_type {
         mod hash_tests {
             use super::*;
 
+            #[cfg_attr(miri, ignore)] // proptests hang miri
             #[test]
             fn arbitrary() {
                 $(

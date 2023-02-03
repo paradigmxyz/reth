@@ -358,6 +358,7 @@ mod tests {
         assert_ne!(wrong_b, b);
     }
 
+    #[cfg_attr(miri, ignore)] // proptests hang miri
     #[test]
     fn arbitrary() {
         proptest::proptest!(|(bytes: Bytes)| {

@@ -57,6 +57,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             mod #mod_tests {
                 #(#traits)*
 
+                #[cfg_attr(miri, ignore)] // proptests hang miri
                 #[test]
                 fn proptest() {
                     let mut config = proptest::prelude::ProptestConfig::with_cases(#default_cases as u32);
