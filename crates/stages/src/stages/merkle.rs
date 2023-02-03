@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, trie::DBTrieLoader, ExecInput, ExecOutput, Stage, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
-use reth_db::database::Database;
+use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::consensus;
 use std::fmt::Debug;
 use tracing::*;
@@ -139,6 +139,16 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             info!(target: "sync::stages::merkle::exec", "Stage is always skipped");
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
+
+        let target_root = tx.get_header_by_num(input.unwind_to)?.state_root;
+
+        // If the merkle stage fails to execute, the trie changes weren't commited
+        // and the root stayed the same
+        if tx.get::<tables::AccountsTrie>(target_root)?.is_some() {
+            info!(target: "sync::stages::merkle::unwind", "Stage skipped");
+            return Ok(UnwindOutput { stage_progress: input.unwind_to })
+        }
+
         let loader = DBTrieLoader::default();
         let current_root = tx.get_header_by_num(input.stage_progress)?.state_root;
 
