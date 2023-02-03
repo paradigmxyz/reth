@@ -2,6 +2,7 @@ use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     node::handle_events,
     utils::chainspec::chain_spec_value_parser,
+    utils::chainspec::genesis_value_parser,
 };
 use clap::Parser;
 use eyre::Context;
@@ -9,8 +10,8 @@ use futures::StreamExt;
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{bodies, headers, test_utils::FileClient};
-use reth_interfaces::consensus::Consensus;
-use reth_primitives::ChainSpec;
+use reth_interfaces::consensus::{Consensus, ForkchoiceState};
+use reth_primitives::{ChainSpec, AllGenesisFormats};
 use reth_staged_sync::{
     utils::init::{init_db, init_genesis},
     Config,
@@ -52,12 +53,12 @@ pub struct ImportCommand {
         value_name = "CHAIN_OR_PATH",
         verbatim_doc_comment,
         default_value = "mainnet",
-        value_parser = chain_spec_value_parser
+        value_parser = genesis_value_parser
     )]
     chain: ChainSpec,
 
-    /// The file to import.
-    #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment, default_value_t)]
+    /// The block file to import.
+    #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PlatformPath<ConfigPath>,
 }
 
@@ -73,17 +74,28 @@ impl ImportCommand {
         info!(target: "reth::cli", "Database opened");
 
         // self.start_metrics_endpoint()?;
+        info!(target: "reth::cli", ttd=?self.chain.paris_ttd, "Initializing genesis");
+        info!(target: "reth::cli", paris_status=?self.chain.paris_status(), "Using paris status for genesis");
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let consensus = self.init_consensus()?;
+        // create a new FileClient
+        info!(target: "reth::cli", "Importing chain file");
+        let file_client = Arc::new(FileClient::new(&self.path).await?);
+        let tip = file_client.tip().expect("file client has no tip");
+        info!(target: "reth::cli", "Chain file imported");
+
+        let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        // create a new FileClient
-        let file_client = Arc::new(FileClient::new(&self.path).await?);
+        notifier.send(ForkchoiceState {
+            head_block_hash: tip,
+            safe_block_hash: tip,
+            finalized_block_hash: tip,
+        })?;
 
         // construct downloaders and start pipeline
-        let mut pipeline = self.build_pipeline(&config, &file_client, &consensus, &db).await?;
+        let mut pipeline = self.build_pipeline(&config, &file_client, consensus.clone(), &db).await?;
 
         tokio::spawn(handle_events(pipeline.events().map(Into::into)));
 
@@ -99,13 +111,13 @@ impl ImportCommand {
         &self,
         config: &Config,
         file_client: &Arc<FileClient>,
-        consensus: &Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus>,
         db: &Arc<Env<WriteMap>>,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, Arc<FileClient>>> {
         let header_downloader =
-            self.spawn_headers_downloader(config, consensus, &file_client.clone());
+            self.spawn_headers_downloader(config, consensus.clone(), &file_client.clone());
         let body_downloader =
-            self.spawn_bodies_downloader(config, consensus, &file_client.clone(), db);
+            self.spawn_bodies_downloader(config, consensus.clone(), &file_client.clone(), db);
         let stage_conf = &config.stages;
 
         let pipeline = Pipeline::builder()
@@ -133,41 +145,31 @@ impl ImportCommand {
         Ok(pipeline)
     }
 
-    fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
-        let beacon_consensus = Arc::new(BeaconConsensus::builder().build(self.chain.clone()));
-
-        // TODO: the node command requires a tip update, so we need to figure out how to do that
-        // with only a file
-        todo!()
-    }
-
     fn spawn_headers_downloader(
         &self,
         config: &Config,
-        consensus: &Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus>,
         file_client: &Arc<FileClient>,
     ) -> reth_downloaders::headers::task::TaskDownloader {
         // TODO: how to deal with the fact that this is a reverse downloader, and the blocks are
         // written forwards in the file? RLP can only be parsed forwards
         // do we need a forward downloader?
         let headers_conf = &config.stages.headers;
-        headers::task::TaskDownloader::spawn(
-            headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
-                .request_limit(headers_conf.downloader_batch_size)
-                .stream_batch_size(headers_conf.commit_threshold as usize)
-                .build(consensus.clone(), file_client.clone()),
-        )
+        headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
+            .request_limit(headers_conf.downloader_batch_size)
+            .stream_batch_size(headers_conf.commit_threshold as usize)
+            .build(consensus.clone(), file_client.clone())
+            .as_task()
     }
 
     fn spawn_bodies_downloader(
         &self,
         config: &Config,
-        consensus: &Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus>,
         file_client: &Arc<FileClient>,
         db: &Arc<Env<WriteMap>>,
     ) -> reth_downloaders::bodies::task::TaskDownloader {
         let bodies_conf = &config.stages.bodies;
-        bodies::task::TaskDownloader::spawn(
             bodies::bodies::BodiesDownloaderBuilder::default()
                 .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
                 .with_request_limit(bodies_conf.downloader_request_limit)
@@ -176,8 +178,8 @@ impl ImportCommand {
                     bodies_conf.downloader_min_concurrent_requests..=
                         bodies_conf.downloader_max_concurrent_requests,
                 )
-                .build(file_client.clone(), consensus.clone(), db.clone()),
-        )
+                .build(file_client.clone(), consensus.clone(), db.clone())
+                .as_task()
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
