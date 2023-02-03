@@ -585,4 +585,25 @@ mod tests {
         // perform block validation with paris not activated
         validate_header_standalone(&header.seal(), &chain_spec).unwrap();
     }
+
+    #[test]
+    fn paris_activated_nonzero_difficulty_fails() {
+        let (_, mut header) = mock_block();
+        let mut chain_spec = MAINNET.clone();
+
+        // set paris at genesis and ensure it is supported
+        chain_spec.paris_ttd = Some(U256::ZERO);
+        chain_spec.paris_block = Some(0);
+        assert_eq!(
+            chain_spec.paris_status(),
+            ParisStatus::Supported { terminal_total_difficulty: U256::ZERO, block: Some(0) }
+        );
+
+        // ensure the difficulty is not zero
+        header.difficulty = U256::from(1);
+
+        // ensure we fail because difficulty increased post merge
+        let validation_res = validate_header_standalone(&header.seal(), &chain_spec);
+        assert_eq!(validation_res, Err(Error::TheMergeDifficultyIsNotZero));
+    }
 }
