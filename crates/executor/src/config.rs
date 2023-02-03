@@ -41,7 +41,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm::SpecId {
 #[cfg(test)]
 mod tests {
     use crate::config::revm_spec;
-    use reth_primitives::{ChainSpecBuilder, Head, MAINNET};
+    use reth_primitives::{ChainSpecBuilder, Head, MAINNET, U256};
     #[test]
     fn test_to_revm_spec() {
         assert_eq!(
@@ -95,7 +95,25 @@ mod tests {
     #[test]
     fn test_eth_spec() {
         assert_eq!(
-            revm_spec(&MAINNET, Head { number: 15537394 + 10, ..Default::default() }),
+            revm_spec(
+                &MAINNET,
+                Head {
+                    total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+                    ..Default::default()
+                }
+            ),
+            revm::MERGE
+        );
+        // TTD trumps the block number
+        assert_eq!(
+            revm_spec(
+                &MAINNET,
+                Head {
+                    number: 15537394 - 10,
+                    total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+                    ..Default::default()
+                }
+            ),
             revm::MERGE
         );
         assert_eq!(

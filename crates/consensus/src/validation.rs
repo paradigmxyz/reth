@@ -250,7 +250,7 @@ pub fn validate_header_regarding_parent(
 
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
-    if chain_spec.fork(Hardfork::London).active_at_block(child.number) {
+    if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
         parent_gas_limit = parent.gas_limit * constants::EIP1559_ELASTICITY_MULTIPLIER;
     }
 

@@ -501,7 +501,8 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
-                b.header.difficulty = chain_spec.fork(Hardfork::Paris).ttd().unwrap();
+                b.header.difficulty =
+                    chain_spec.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1);
                 b
             });
             let block = random_block(101, Some(parent.hash()), None, Some(0));
