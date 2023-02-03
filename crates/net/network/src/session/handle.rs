@@ -169,4 +169,9 @@ pub(crate) enum ActiveSessionMessage {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },
+    /// Remote peer is considered in protocol violation
+    ProtocolBreach {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
+    },
 }

@@ -756,6 +756,12 @@ where
                         .apply_reputation_change(&peer_id, ReputationChangeKind::BadMessage);
                     this.metrics.invalid_messages_received.increment(1);
                 }
+                SwarmEvent::ProtocolBreach { peer_id } => {
+                    this.swarm
+                        .state_mut()
+                        .peers_mut()
+                        .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
+                }
             }
         }
 

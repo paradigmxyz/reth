@@ -1,0 +1,39 @@
+[package]
+name = "reth-rpc"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = """
+Reth RPC implementation
+"""
+[dependencies]
+# reth
+reth-interfaces = { path = "../../interfaces" }
+reth-primitives = { path = "../../primitives" }
+reth-rpc-api = { path = "../rpc-api" }
+reth-rlp = { path = "../../rlp" }
+reth-rpc-types = { path = "../rpc-types" }
+reth-provider = { path = "../../storage/provider" }
+reth-transaction-pool = { path = "../../transaction-pool" }
+reth-network-api = { path = "../../net/network-api" }
+reth-rpc-engine-api = { path = "../rpc-engine-api" }
+
+# rpc
+jsonrpsee = { version = "0.16" }
+
+# async
+async-trait = "0.1"
+tokio = { version = "1", features = ["sync"] }
+
+# misc
+secp256k1 = { version = "0.24", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+hex = "0.4"

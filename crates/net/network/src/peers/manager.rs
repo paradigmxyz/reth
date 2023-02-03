@@ -9,7 +9,7 @@ use crate::{
 use futures::StreamExt;
 use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_common::ban_list::BanList;
-use reth_network_api::ReputationChangeKind;
+use reth_network_api::{PeerKind, ReputationChangeKind};
 use reth_primitives::{ForkId, NodeRecord, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -858,16 +858,6 @@ impl PeerConnectionState {
     fn is_unconnected(&self) -> bool {
         matches!(self, PeerConnectionState::Idle)
     }
-}
-
-/// Represents the kind of peer
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub enum PeerKind {
-    /// Basic peer kind.
-    #[default]
-    Basic,
-    /// Trusted peer.
-    Trusted,
 }
 
 /// Commands the [`PeersManager`] listens for.

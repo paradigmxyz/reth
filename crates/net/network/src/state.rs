@@ -8,12 +8,13 @@ use crate::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
     },
-    peers::{PeerAction, PeerKind, PeersManager},
+    peers::{PeerAction, PeersManager},
     FetchClient,
 };
 use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
+use reth_network_api::PeerKind;
 use reth_primitives::{ForkId, PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{

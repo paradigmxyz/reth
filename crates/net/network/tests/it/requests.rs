@@ -7,7 +7,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::test_utils::{NetworkEventStream, Testnet};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{
     Block, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
     TransactionSigned, TxEip2930, H256, U256,
@@ -115,7 +115,7 @@ async fn test_get_header() {
         let res = fetch0.get_headers(req).await;
         assert!(res.is_ok(), "{res:?}");
 
-        let headers = res.unwrap().1 .0;
+        let headers = res.unwrap().1;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0], header);
     }

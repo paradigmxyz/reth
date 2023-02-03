@@ -10,7 +10,7 @@ description = "Network interfaces"
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-
+reth-eth-wire = { path = "../eth-wire" }
 
 # io
 serde = { version = "1.0", features = ["derive"] }

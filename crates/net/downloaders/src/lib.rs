@@ -4,6 +4,7 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+#![allow(clippy::result_large_err)]
 
 //! Implements the downloader algorithms.
 
@@ -16,5 +17,5 @@ pub mod headers;
 /// Common downloader metrics.
 pub mod metrics;
 
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;

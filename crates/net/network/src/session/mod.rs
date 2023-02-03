@@ -19,6 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_metrics_common::metered_sender::MeteredSender;
 use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
@@ -55,8 +56,12 @@ pub(crate) struct SessionManager {
     next_id: usize,
     /// Keeps track of all sessions
     counter: SessionCounter,
-    /// The maximum time we wait for a response from a peer.
-    request_timeout: Duration,
+    ///  The maximum initial time an [ActiveSession] waits for a response from the peer before it
+    /// responds to an _internal_ request with a `TimeoutError`
+    initial_internal_request_timeout: Duration,
+    /// If an [ActiveSession] does not receive a response at all within this duration then it is
+    /// considered a protocol violation and the session will initiate a drop.
+    protocol_breach_request_timeout: Duration,
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
@@ -87,7 +92,7 @@ pub(crate) struct SessionManager {
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
-    active_session_tx: mpsc::Sender<ActiveSessionMessage>,
+    active_session_tx: MeteredSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
@@ -113,7 +118,8 @@ impl SessionManager {
         Self {
             next_id: 0,
             counter: SessionCounter::new(config.limits),
-            request_timeout: config.request_timeout,
+            initial_internal_request_timeout: config.initial_internal_request_timeout,
+            protocol_breach_request_timeout: config.protocol_breach_request_timeout,
             secret_key,
             status,
             hello_message,
@@ -124,7 +130,7 @@ impl SessionManager {
             active_sessions: Default::default(),
             pending_sessions_tx,
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
-            active_session_tx,
+            active_session_tx: MeteredSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
         }
@@ -169,7 +175,7 @@ impl SessionManager {
     /// Invoked on a received status update.
     ///
     /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
-    /// active [`ForkId`](reth_primitives::ForkId). See also [`ForkFilter::set_head`].
+    /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
     pub(crate) fn on_status_update(
         &mut self,
         height: u64,
@@ -323,6 +329,9 @@ impl SessionManager {
                     ActiveSessionMessage::BadMessage { peer_id } => {
                         Poll::Ready(SessionEvent::BadMessage { peer_id })
                     }
+                    ActiveSessionMessage::ProtocolBreach { peer_id } => {
+                        Poll::Ready(SessionEvent::ProtocolBreach { peer_id })
+                    }
                 }
             }
         }
@@ -377,7 +386,9 @@ impl SessionManager {
 
                 let messages = PeerRequestSender::new(peer_id, to_session_tx);
 
-                let timeout = Arc::new(AtomicU64::new(self.request_timeout.as_millis() as u64));
+                let timeout = Arc::new(AtomicU64::new(
+                    self.initial_internal_request_timeout.as_millis() as u64,
+                ));
 
                 let session = ActiveSession {
                     next_id: 0,
@@ -392,8 +403,11 @@ impl SessionManager {
                     conn,
                     queued_outgoing: Default::default(),
                     received_requests: Default::default(),
-                    timeout_interval: tokio::time::interval(self.request_timeout),
-                    request_timeout: Arc::clone(&timeout),
+                    internal_request_timeout_interval: tokio::time::interval(
+                        self.initial_internal_request_timeout,
+                    ),
+                    internal_request_timeout: Arc::clone(&timeout),
+                    protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                 };
 
                 self.spawn(session);
@@ -557,6 +571,11 @@ pub(crate) enum SessionEvent {
     },
     /// Received a bad message from the peer.
     BadMessage {
+        /// Identifier of the remote peer.
+        peer_id: PeerId,
+    },
+    /// Remote peer is considered in protocol violation
+    ProtocolBreach {
         /// Identifier of the remote peer.
         peer_id: PeerId,
     },

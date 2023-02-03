@@ -226,6 +226,7 @@ impl StateFetcher {
         res: RequestResult<Vec<Header>>,
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
+        let reputation_change = res.reputation_change_err();
 
         let resp = self.inflight_headers_requests.remove(&peer_id);
         let is_likely_bad_response = resp
@@ -239,10 +240,9 @@ impl StateFetcher {
 
         if is_error {
             // if the response was erroneous we want to report the peer.
-            return Some(BlockResponseOutcome::BadResponse(
-                peer_id,
-                ReputationChangeKind::BadMessage,
-            ))
+            return reputation_change.map(|reputation_change| {
+                BlockResponseOutcome::BadResponse(peer_id, reputation_change)
+            })
         }
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
@@ -401,11 +401,11 @@ pub(crate) enum FetchAction {
 /// Outcome of a processed response.
 ///
 /// Returned after processing a response.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BlockResponseOutcome {
     /// Continue with another request to the peer.
     Request(PeerId, BlockRequest),
-    /// How to handle a bad response and the reputation change to apply.
+    /// How to handle a bad response and the reputation change to apply, if any.
     BadResponse(PeerId, ReputationChangeKind),
 }
 
@@ -482,5 +482,35 @@ mod tests {
         // Then we get peer 2 always (now lowest)
         assert_eq!(fetcher.next_peer(), Some(peer2));
         assert_eq!(fetcher.next_peer(), Some(peer2));
+    }
+
+    #[tokio::test]
+    async fn test_on_block_headers_response() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let peer_id = H512::random();
+
+        assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
+
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)),
+            Some(BlockResponseOutcome::BadResponse(peer_id, ReputationChangeKind::Timeout))
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::BadResponse)),
+            None
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::ChannelClosed)),
+            None
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::ConnectionDropped)),
+            None
+        );
+        assert_eq!(
+            fetcher.on_block_headers_response(peer_id, Err(RequestError::UnsupportedCapability)),
+            None
+        );
     }
 }

@@ -12,8 +12,8 @@ Ethereum network discovery
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-reth-rlp = { path = "../../common/rlp", features = ["enr"] }
-reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-rlp = { path = "../../rlp", features = ["enr"] }
+reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-net-common = { path = "../common" }
 reth-net-nat = { path = "../nat" }
 

@@ -10,7 +10,7 @@
 //! Provides abstractions for the reth-network crate.
 
 use async_trait::async_trait;
-use reth_primitives::{NodeRecord, H256, U256};
+use reth_primitives::{NodeRecord, PeerId, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
@@ -21,6 +21,7 @@ pub mod reputation;
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
+use reth_eth_wire::DisconnectReason;
 
 /// Provides general purpose information about the network.
 #[async_trait]
@@ -44,6 +45,44 @@ pub trait PeersInfo: Send + Sync {
 
     /// Returns the Ethereum Node Record of the node.
     fn local_node_record(&self) -> NodeRecord;
+}
+
+/// Provides an API for managing the peers of the network.
+pub trait Peers: PeersInfo {
+    /// Adds a peer to the peer set.
+    fn add_peer(&self, peer: PeerId, addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Basic, addr);
+    }
+
+    /// Adds a trusted peer to the peer set.
+    fn add_trusted_peer(&self, peer: PeerId, addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Trusted, addr);
+    }
+
+    /// Adds a peer to the known peer set, with the given kind.
+    fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr);
+
+    /// Removes a peer from the peer set that corresponds to given kind.
+    fn remove_peer(&self, peer: PeerId, kind: PeerKind);
+
+    /// Disconnect an existing connection to the given peer.
+    fn disconnect_peer(&self, peer: PeerId);
+
+    /// Disconnect an existing connection to the given peer using the provided reason
+    fn disconnect_peer_with_reason(&self, peer: PeerId, reason: DisconnectReason);
+
+    /// Send a reputation change for the given peer.
+    fn reputation_change(&self, peer_id: PeerId, kind: ReputationChangeKind);
+}
+
+/// Represents the kind of peer
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub enum PeerKind {
+    /// Basic peer kind.
+    #[default]
+    Basic,
+    /// Trusted peer.
+    Trusted,
 }
 
 /// The status of the network being ran by the local node.

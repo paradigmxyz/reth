@@ -1,5 +1,6 @@
 /// A naive concurrent downloader.
-pub mod concurrent;
+#[allow(clippy::module_inception)]
+pub mod bodies;
 
 /// TODO:
 pub mod task;
@@ -7,5 +8,5 @@ pub mod task;
 mod queue;
 mod request;
 
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;

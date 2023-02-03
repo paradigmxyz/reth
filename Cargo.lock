@@ -103,9 +103,9 @@ checksum = "2cb2f989d18dd141ab8ae82f64d1a8cdd37e0840f73a406896cf5e99502fab61"
 
 [[package]]
 name = "aquamarine"
-version = "0.1.12"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a941c39708478e8eea39243b5983f1c42d2717b3620ee91f4a52115fd02ac43f"
+checksum = "1d7cba9b073f771a6f76683be98624dd68e867ff9e6adcad3afbb3d2044c3afa"
 dependencies = [
  "itertools 0.9.0",
  "proc-macro-error",
@@ -4081,21 +4081,10 @@ dependencies = [
 name = "reth-consensus"
 version = "0.1.0"
 dependencies = [
- "assert_matches",
- "async-trait",
- "auto_impl 1.0.1",
- "bytes",
- "futures",
- "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-rlp",
- "reth-rpc-types",
- "serde",
- "thiserror",
  "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -4190,6 +4179,7 @@ name = "reth-downloaders"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "bytes",
  "futures",
  "futures-util",
  "metrics",
@@ -4199,9 +4189,13 @@ dependencies = [
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
+ "reth-rlp",
  "reth-tracing",
+ "tempfile",
+ "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.4",
  "tracing",
 ]
 
@@ -4439,6 +4433,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
+ "reth-metrics-common",
  "reth-metrics-derive",
  "reth-net-common",
  "reth-network",
@@ -4465,6 +4460,7 @@ name = "reth-network-api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "reth-eth-wire",
  "reth-primitives",
  "serde",
  "thiserror",
@@ -4576,15 +4572,16 @@ dependencies = [
  "async-trait",
  "hex",
  "jsonrpsee",
- "reth-consensus",
  "reth-interfaces",
- "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-rlp",
  "reth-rpc-api",
+ "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-transaction-pool",
+ "secp256k1 0.24.3",
  "serde",
  "serde_json",
  "thiserror",
@@ -4613,6 +4610,24 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "strum",
+]
+
+[[package]]
+name = "reth-rpc-engine-api"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "bytes",
+ "futures",
+ "reth-executor",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rlp",
+ "reth-rpc-types",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -4648,6 +4663,7 @@ dependencies = [
  "reth-interfaces",
  "reth-net-nat",
  "reth-network",
+ "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-staged-sync",

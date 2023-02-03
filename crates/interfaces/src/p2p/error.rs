@@ -1,5 +1,6 @@
 use super::headers::client::HeadersRequest;
 use crate::{consensus, db};
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, Header, WithPeerId, H256};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -14,6 +15,9 @@ pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 pub trait EthResponseValidator {
     /// Determine whether the response matches what we requested in [HeadersRequest]
     fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool;
+
+    /// Return the response reputation impact if any
+    fn reputation_change_err(&self) -> Option<ReputationChangeKind>;
 }
 
 impl EthResponseValidator for RequestResult<Vec<Header>> {
@@ -37,6 +41,28 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
             Err(_) => true,
         }
     }
+
+    /// [RequestError::ChannelClosed] is not possible here since these errors are mapped to
+    /// `ConnectionDropped`, which will be handled when the dropped connection is cleaned up.
+    ///
+    /// [RequestError::ConnectionDropped] should be ignored here because this is already handled
+    /// when the dropped connection is handled.
+    ///
+    /// [RequestError::UnsupportedCapability] is not used yet because we only support active session
+    /// for eth protocol.
+    fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
+        if let Err(err) = self {
+            match err {
+                RequestError::ChannelClosed => None,
+                RequestError::ConnectionDropped => None,
+                RequestError::UnsupportedCapability => None,
+                RequestError::Timeout => Some(ReputationChangeKind::Timeout),
+                RequestError::BadResponse => None,
+            }
+        } else {
+            None
+        }
+    }
 }
 
 /// Error variants that can happen when sending requests to a session.
@@ -45,8 +71,6 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
 pub enum RequestError {
     #[error("Closed channel to the peer.")]
     ChannelClosed,
-    #[error("Not connected to the peer.")]
-    NotConnected,
     #[error("Connection to a peer dropped while handling the request.")]
     ConnectionDropped,
     #[error("Capability Message is not supported by remote peer.")]

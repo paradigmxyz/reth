@@ -7,8 +7,8 @@ use crate::{
     utils::{chainspec::chain_spec_value_parser, init::init_db},
     NetworkOpts,
 };
-use reth_consensus::BeaconConsensus;
-use reth_downloaders::bodies::concurrent::ConcurrentDownloaderBuilder;
+use reth_consensus::beacon::BeaconConsensus;
+use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
@@ -126,8 +126,7 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let consensus: Arc<BeaconConsensus> =
-                    Arc::new(BeaconConsensus::new(self.chain.clone()));
+                let (consensus, _) = BeaconConsensus::builder().build(self.chain.clone());
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
@@ -150,7 +149,7 @@ impl Command {
                 let fetch_client = Arc::new(network.fetch_client().await?);
 
                 let mut stage = BodyStage {
-                    downloader: ConcurrentDownloaderBuilder::default()
+                    downloader: BodiesDownloaderBuilder::default()
                         .with_stream_batch_size(num_blocks as usize)
                         .with_request_limit(config.stages.bodies.downloader_request_limit)
                         .with_max_buffered_responses(
