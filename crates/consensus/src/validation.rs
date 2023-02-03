@@ -46,24 +46,22 @@ pub fn validate_header_standalone(
 
     // EIP-3675: Upgrade consensus to Proof-of-Stake:
     // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if let ParisStatus::Supported { block, .. } = chain_spec.paris_status() {
-        if let Some(block) = block {
-            if header.number >= block {
-                if header.difficulty != U256::ZERO {
-                    return Err(Error::TheMergeDifficultyIsNotZero)
-                }
-
-                if header.nonce != 0 {
-                    return Err(Error::TheMergeNonceIsNotZero)
-                }
-
-                if header.ommers_hash != EMPTY_OMMER_ROOT {
-                    return Err(Error::TheMergeOmmerRootIsNotEmpty)
-                }
-
-                // mixHash is used instead of difficulty inside EVM
-                // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
+    if let ParisStatus::Supported { block: Some(block), .. } = chain_spec.paris_status() {
+        if header.number >= block {
+            if header.difficulty != U256::ZERO {
+                return Err(Error::TheMergeDifficultyIsNotZero)
             }
+
+            if header.nonce != 0 {
+                return Err(Error::TheMergeNonceIsNotZero)
+            }
+
+            if header.ommers_hash != EMPTY_OMMER_ROOT {
+                return Err(Error::TheMergeOmmerRootIsNotEmpty)
+            }
+
+            // mixHash is used instead of difficulty inside EVM
+            // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
         }
     }
 
