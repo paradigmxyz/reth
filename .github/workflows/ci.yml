@@ -241,6 +241,8 @@ jobs:
         run: cargo miri setup
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: Install geth
         run: |
