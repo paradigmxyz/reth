@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{time::{SystemTime, UNIX_EPOCH, Duration}, io::Write};
 
 use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
@@ -32,7 +32,7 @@ pub enum JwtError {
 const JWT_SECRET_LEN: usize = 64;
 
 /// The JWT `iat` (issued-at) claim cannot exceed +-60 seconds from the current time.
-const JWT_MAX_IAT_DIFF: u64 = 60;
+const JWT_MAX_IAT_DIFF: Duration = Duration::from_secs(60);
 
 /// The execution layer client MUST support at least the following alg HMAC + SHA256 (HS256)
 const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
@@ -45,23 +45,38 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 /// [Secret key - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#key-distribution)
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
-pub struct JwtSecret(String);
+pub struct JwtSecret([u8; 32]);
 
-impl JwtSecret {
+impl TryInto<JwtSecret> for String {
+    type Error = JwtError;
+
     /// Creates an instance of [`JwtSecret`][crate::engine::JwtSecret].
     /// Generates and error if one of the following applies:
     /// - The `hex` argument is not a valid hexadecimal string
     /// - The `hex` argument length is less than `JWT_SECRET_LEN`
-    pub fn new(hex: String) -> Result<JwtSecret, JwtError> {
-        let hex: String = hex.trim().into();
+    fn try_into(self) -> Result<JwtSecret, Self::Error> {
+        let hex: String = self.trim().into();
         if hex.len() != JWT_SECRET_LEN {
             Err(JwtError::InvalidLength(JWT_SECRET_LEN, hex.len()))
         } else {
-            hex::decode(&hex)?;
-            Ok(Self(hex))
+            let hex_bytes = hex::decode(&hex)?;
+            let mut bytes = [0; 32];
+            let mut writer = &mut bytes[..];
+            let _ = writer.write(hex_bytes.get(0..32).expect("This should never happen"));
+            Ok(JwtSecret(bytes))
         }
     }
+}
 
+impl TryInto<JwtSecret> for &str {
+    type Error = JwtError;
+
+    fn try_into(self) -> Result<JwtSecret, Self::Error> {
+        self.to_string().try_into()
+    }
+}
+
+impl JwtSecret {
     /// Validates a JWT token along the following rules:
     /// - The JWT signature is valid.
     /// - The JWT is signed with the `HMAC + SHA256 (HS256)` algorithm.
@@ -70,9 +85,9 @@ impl JwtSecret {
     /// [JWT Claims - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims)
     pub fn validate(&self, jwt: String) -> Result<(), JwtError> {
         let validation = Validation::new(JWT_SIGNATURE_ALGO);
-        let key = self.as_string();
+        let bytes = &self.0;
 
-        match decode::<Claims>(&jwt, &DecodingKey::from_secret(key.as_bytes()), &validation) {
+        match decode::<Claims>(&jwt, &DecodingKey::from_secret(bytes), &validation) {
             Ok(token) => {
                 if !token.claims.is_within_time_window() {
                     Err(JwtError::InvalidIssuanceTimestamp)?
@@ -96,18 +111,13 @@ impl JwtSecret {
     pub fn random() -> Self {
         let random_bytes: [u8; 32] = rand::thread_rng().gen();
         let secret = hex_encode(random_bytes);
-        Self(secret)
-    }
-
-    /// Returns a string representation of the secret
-    pub fn as_string(&self) -> String {
-        self.0.clone()
+        secret.try_into().unwrap()
     }
 
     #[cfg(test)]
     pub(crate) fn encode(&self, claims: &Claims) -> Result<String, Box<dyn std::error::Error>> {
-        let secret = self.as_string();
-        let key = jsonwebtoken::EncodingKey::from_secret(secret.as_bytes());
+        let bytes = &self.0;
+        let key = jsonwebtoken::EncodingKey::from_secret(bytes);
         let algo = jsonwebtoken::Header::new(Algorithm::HS256);
         Ok(jsonwebtoken::encode(&algo, claims, &key)?)
     }
@@ -129,47 +139,60 @@ pub(crate) struct Claims {
 impl Claims {
     fn is_within_time_window(&self) -> bool {
         let now = SystemTime::now();
-        let now_secs: u64 = now.duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let iat_secs: u64 = self.iat.duration_since(UNIX_EPOCH).unwrap().as_secs();
-        now_secs.abs_diff(iat_secs) <= JWT_MAX_IAT_DIFF
+        let now_secs = now.duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let iat_secs = self.iat.duration_since(UNIX_EPOCH).unwrap().as_secs();
+        now_secs.abs_diff(iat_secs) <= JWT_MAX_IAT_DIFF.as_secs()
     }
 }
 
 #[cfg(test)]
-mod tests_jwtsecret {
-    use crate::engine::JwtSecret;
+mod tests {
+    use crate::engine::jwt_secret::JWT_MAX_IAT_DIFF;
 
-    use super::JwtError;
+    use super::{Claims, JwtError, JwtSecret};
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn try_into() {
+        let key = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
+        let secret: Result<JwtSecret, _> = key.try_into();
+        assert!(matches!(secret, Ok(_)));
+
+        let secret: Result<JwtSecret, _> = key.to_string().try_into();
+        assert!(matches!(secret, Ok(_)));
+    }
+
+    #[test]
+    fn original_key_integrity_across_transformations() {
+        let original = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
+        let secret: JwtSecret = original.try_into().unwrap();
+        let bytes = &secret.0;
+        let computed = hex::encode(bytes);
+        assert_eq!(original, computed);
+    }
 
     #[test]
     fn secret_has_64_hex_digits() {
         let expected_len = 64;
-        let jwt = JwtSecret::random();
-        assert_eq!(jwt.0.len(), expected_len);
+        let secret = JwtSecret::random();
+        let hex = hex::encode(&secret.0);
+        assert_eq!(hex.len(), expected_len);
     }
 
     #[test]
     fn creation_error_wrong_len() {
-        let hex: String = "f79ae8046".into();
-        let result = JwtSecret::new(hex);
+        let hex = "f79ae8046";
+        let result: Result<JwtSecret, JwtError> = hex.try_into();
         assert!(matches!(result, Err(JwtError::InvalidLength(_, _))));
     }
 
     #[test]
     fn creation_error_wrong_hex_string() {
         let hex: String = "This__________Is__________Not_______An____Hex_____________String".into();
-        let result = JwtSecret::new(hex);
+        let result: Result<JwtSecret, JwtError> = hex.try_into();
         assert!(matches!(result, Err(JwtError::JwtSecretHexDecodeError(_))));
     }
-}
-
-#[cfg(test)]
-mod tests_jwt_validation {
-    use crate::engine::jwt_secret::JWT_MAX_IAT_DIFF;
-
-    use super::{Claims, JwtError, JwtSecret};
-    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-    use std::time::{Duration, SystemTime};
 
     #[test]
     fn validation_ok() {
@@ -187,7 +210,7 @@ mod tests_jwt_validation {
         let secret = JwtSecret::random();
 
         // Check past 'iat' claim more than 60 secs
-        let offset = Duration::from_secs(JWT_MAX_IAT_DIFF + 1);
+        let offset = Duration::from_secs(JWT_MAX_IAT_DIFF.as_secs() + 1);
         let out_of_window_time = SystemTime::now().checked_sub(offset).unwrap();
         let claims = Claims { iat: out_of_window_time, exp: 10000000000 };
         let jwt: String = secret.encode(&claims).unwrap();
@@ -197,7 +220,7 @@ mod tests_jwt_validation {
         assert!(matches!(result, Err(JwtError::InvalidIssuanceTimestamp)));
 
         // Check future 'iat' claim more than 60 secs
-        let offset = Duration::from_secs(JWT_MAX_IAT_DIFF + 1);
+        let offset = Duration::from_secs(JWT_MAX_IAT_DIFF.as_secs() + 1);
         let out_of_window_time = SystemTime::now().checked_add(offset).unwrap();
         let claims = Claims { iat: out_of_window_time, exp: 10000000000 };
         let jwt: String = secret.encode(&claims).unwrap();
@@ -222,9 +245,9 @@ mod tests_jwt_validation {
     #[test]
     fn validation_error_unsupported_algorithm() {
         let secret = JwtSecret::random();
-        let key_str = secret.as_string();
+        let bytes =&secret.0;
 
-        let key = EncodingKey::from_secret(key_str.as_bytes());
+        let key = EncodingKey::from_secret(bytes);
         let unsupported_algo = Header::new(Algorithm::HS384);
 
         let claims = Claims { iat: SystemTime::now(), exp: 10000000000 };
