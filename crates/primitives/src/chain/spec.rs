@@ -397,7 +397,7 @@ impl From<&ChainSpec> for ChainSpecBuilder {
 }
 
 /// Merge Status
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParisStatus {
     /// Paris is not supported
     NotSupported,

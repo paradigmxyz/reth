@@ -314,7 +314,7 @@ pub fn validate_header_regarding_parent(
 ///  If we already know the block.
 ///  If parent is known
 ///
-/// Returns parent block header  
+/// Returns parent block header
 pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
     block: &SealedBlock,
     provider: &PROV,
@@ -366,8 +366,8 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
 mod tests {
     use reth_interfaces::Result;
     use reth_primitives::{
-        hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
-        TransactionSigned, MAINNET,
+        hex_literal::hex, Account, Address, BlockHash, Bytes, Header, ParisStatus, Signature,
+        TransactionKind, TransactionSigned, MAINNET,
     };
 
     use super::*;
@@ -567,5 +567,22 @@ mod tests {
             ),
             Err(Error::TransactionNonceNotConsistent.into())
         );
+    }
+
+    #[test]
+    fn paris_not_activated_nonzero_difficulty() {
+        let (_, mut header) = mock_block();
+        let mut chain_spec = MAINNET.clone();
+
+        // un-set paris
+        chain_spec.paris_ttd = None;
+        chain_spec.paris_block = None;
+        assert_eq!(chain_spec.paris_status(), ParisStatus::NotSupported);
+
+        // ensure the difficulty is not zero
+        header.difficulty = U256::from(1);
+
+        // perform block validation with paris not activated
+        validate_header_standalone(&header.seal(), &chain_spec).unwrap();
     }
 }
