@@ -255,9 +255,6 @@ jobs:
             echo $HOME/bin >> $GITHUB_PATH
             geth version
 
-      - name: Install latest nextest release
-        uses: taiki-e/install-action@nextest
-
       - name: Install libclang # Necessary for compiling reth-mdbx-sys
         run: |
           sudo apt update
