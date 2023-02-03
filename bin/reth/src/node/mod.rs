@@ -18,7 +18,7 @@ use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
 use reth_net_nat::NatResolver;
 use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle, PeerInfo};
-use reth_network_api::NetworkInfo;
+use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
 use reth_staged_sync::{utils::init::init_genesis, Config};
@@ -116,6 +116,9 @@ impl Command {
         info!(target: "reth::cli", "Connecting to P2P network");
         let netconf = self.load_network_config(&config, &db);
         let network = netconf.start_network().await?;
+
+        self.load_peers(&network).await?;
+
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         let mut pipeline = self.build_pipeline(&config, &network, &consensus, &db).await?;
@@ -132,7 +135,7 @@ impl Command {
             _ = tokio::signal::ctrl_c() => {},
         };
 
-        dump_peers(network.to_owned(), self.known.to_owned()).await?;
+        self.dump_peers(&network).await?;
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -269,22 +272,28 @@ impl Command {
                 .build(fetch_client.clone(), consensus.clone(), db.clone()),
         )
     }
-}
 
-// Dumps peers to `file_path` for persistence.
-async fn dump_peers(
-    network: NetworkHandle,
-    file_path: PlatformPath<KnownPeersPath>,
-) -> Result<(), eyre::Error> {
-    let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
-    let known_peers: Vec<NodeRecord> = network
-        .get_peers()
-        .await?
-        .into_iter()
-        .map(|PeerInfo { remote_id, remote_addr, .. }| NodeRecord::new(remote_addr, remote_id))
-        .collect();
-    serde_json::to_writer_pretty(writer, &known_peers)?;
-    Ok(())
+    async fn load_peers(&self, network: &NetworkHandle) -> Result<(), eyre::Error> {
+        let reader = std::io::BufReader::new(std::fs::File::open(&self.known)?);
+        info!(target: "reth::cli", file = ?self.known, "Loading saved peers");
+        let known_peers: Vec<NodeRecord> = serde_json::from_reader(reader)?;
+        known_peers.into_iter().for_each(|record| network.add_peer(record.id, record.udp_addr()));
+        Ok(())
+    }
+
+    // Dumps peers to `file_path` for persistence.
+    async fn dump_peers(&self, network: &NetworkHandle) -> Result<(), eyre::Error> {
+        info!(target: "reth::cli", file = ?self.known, "Saving current peers");
+        let writer = std::io::BufWriter::new(std::fs::File::create(&self.known)?);
+        let known_peers: Vec<NodeRecord> = network
+            .get_peers()
+            .await?
+            .into_iter()
+            .map(|PeerInfo { remote_id, remote_addr, .. }| NodeRecord::new(remote_addr, remote_id))
+            .collect();
+        serde_json::to_writer_pretty(writer, &known_peers)?;
+        Ok(())
+    }
 }
 
 /// The current high-level state of the node.
