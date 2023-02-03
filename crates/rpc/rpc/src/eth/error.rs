@@ -23,6 +23,8 @@ pub(crate) enum EthApiError {
 
 impl_to_rpc_result!(EthApiError);
 
+
+/// A helper error type that mirrors `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GethTxPoolError {
     #[error("already known")]
