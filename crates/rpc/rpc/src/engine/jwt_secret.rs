@@ -1,4 +1,9 @@
-use std::{time::{SystemTime, UNIX_EPOCH, Duration}, io::Write};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    io::Write,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
@@ -44,7 +49,6 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 /// -----------------------------------------------------------------
 /// [Secret key - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#key-distribution)
 #[derive(Clone)]
-#[allow(missing_debug_implementations)]
 pub struct JwtSecret([u8; 32]);
 
 impl TryInto<JwtSecret> for String {
@@ -73,6 +77,16 @@ impl TryInto<JwtSecret> for &str {
 
     fn try_into(self) -> Result<JwtSecret, Self::Error> {
         self.to_string().try_into()
+    }
+}
+
+impl std::fmt::Debug for JwtSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut hasher = DefaultHasher::new();
+        let bytes = &self.0;
+        bytes.hash(&mut hasher);
+        let hash = format!("{}", hasher.finish());
+        f.debug_tuple("JwtSecretHash").field(&hex::encode(hash)).finish()
     }
 }
 
@@ -245,7 +259,7 @@ mod tests {
     #[test]
     fn validation_error_unsupported_algorithm() {
         let secret = JwtSecret::random();
-        let bytes =&secret.0;
+        let bytes = &secret.0;
 
         let key = EncodingKey::from_secret(bytes);
         let unsupported_algo = Header::new(Algorithm::HS384);
