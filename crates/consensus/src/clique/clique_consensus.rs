@@ -2,9 +2,7 @@
 use super::constants::*;
 use crate::validation::clique;
 use reth_interfaces::consensus::{CliqueError, Consensus, Error, ForkchoiceState};
-use reth_primitives::{
-    recovery::secp256k1, Address, BlockNumber, Bytes, ChainSpec, Header, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockNumber, Bytes, ChainSpec, Header, SealedBlock, SealedHeader};
 use tokio::sync::watch;
 
 /// Implementation of Clique proof-of-authority consensus protocol.
@@ -18,22 +16,11 @@ impl CliqueConsensus {
     pub fn new(chain_spec: ChainSpec) -> Self {
         Self { chain_spec }
     }
-
-    fn recover_header_signer(&self, header: &SealedHeader) -> Result<Address, Error> {
-        let extra_data_len = header.extra_data.len();
-        let signature = extra_data_len
-            .checked_sub(EXTRA_SEAL)
-            .and_then(|start| -> Option<[u8; 65]> { header.extra_data[start..].try_into().ok() })
-            .ok_or(CliqueError::MissingSignature { extra_data: header.extra_data.clone() })?;
-        secp256k1::recover(&signature, header.hash().as_fixed_bytes()).map_err(|_| {
-            CliqueError::HeaderSignerRecovery { signature, hash: header.hash() }.into()
-        })
-    }
 }
 
 impl Consensus for CliqueConsensus {
     fn seal_header(&self, mut header: Header) -> Result<SealedHeader, Error> {
-        let extra_data = header.extra_data.clone();
+        let extra_data = std::mem::take(&mut header.extra_data);
         let extra_data_len = extra_data.len();
         let end_byte = extra_data_len
             .checked_sub(EXTRA_SEAL)

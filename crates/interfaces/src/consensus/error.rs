@@ -108,4 +108,8 @@ pub enum CliqueError {
     Timestamp { expected_at_least: u64, received: u64 },
     #[error("Failed to recover header signer. Signature: {signature:?}. Hash: {hash:?}")]
     HeaderSignerRecovery { signature: [u8; 65], hash: H256 },
+    #[error("Invalid voting chain. Expected: {expected}. Received: {received}")]
+    InvalidVotingChain { expected: BlockNumber, received: BlockNumber },
+    #[error("Unathorized signer {signer:?}")]
+    UnauthorizedSigner { signer: Address },
 }
