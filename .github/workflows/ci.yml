@@ -242,6 +242,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install geth
+        run: |
+            mkdir -p "$HOME/bin"
+            wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
+            tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
+            mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
+            chmod u+x "$HOME/bin/geth"
+            export PATH=$HOME/bin:$PATH
+            echo $HOME/bin >> $GITHUB_PATH
+            geth version
+
       - name: Install latest nextest release
         uses: taiki-e/install-action@nextest
 
