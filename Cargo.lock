@@ -4396,6 +4396,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-interfaces",
+ "reth-metrics-common",
  "reth-metrics-derive",
  "reth-net-common",
  "reth-network",
