@@ -80,7 +80,7 @@ impl<S> Layer<S> for JwtLayer {
     }
 }
 
-/// This trait is the actual implementation of
+/// This type is the actual implementation of
 /// the middleware. It follows the [`Service`](tower::Service)
 /// specification to correctly proxy Http requests
 /// to its inner service.
