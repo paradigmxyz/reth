@@ -4142,6 +4142,7 @@ name = "reth-downloaders"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "bytes",
  "futures",
  "futures-util",
  "metrics",
@@ -4157,6 +4158,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.4",
  "tracing",
 ]
 
