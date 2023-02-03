@@ -1,7 +1,7 @@
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::Future;
 pub use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockHashOrNumber, HeadersDirection, H256, U256};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, H256, U256};
 use std::{fmt::Debug, pin::Pin};
 
 /// The header request struct to be sent to connected peers, which
@@ -17,13 +17,13 @@ pub struct HeadersRequest {
 }
 
 /// The headers future type
-pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<BlockHeaders>> + Send + Sync>>;
+pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
     /// The headers type
-    type Output: Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send + Unpin;
+    type Output: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
@@ -31,7 +31,7 @@ pub trait HeadersClient: DownloadClient {
         self.get_headers_with_priority(request, Priority::Normal)
     }
 
-    /// Sends the header request to the p2p network with priroity set and returns the header
+    /// Sends the header request to the p2p network with priority set and returns the header
     /// response received from a peer.
     fn get_headers_with_priority(
         &self,

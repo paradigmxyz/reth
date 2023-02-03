@@ -1,8 +1,10 @@
 //! Consensus for ethereum network
 use crate::validation;
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader, H256};
-use tokio::sync::{watch, watch::error::SendError};
+use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader};
+use tokio::sync::watch;
+
+use super::BeaconConsensusBuilder;
 
 /// Ethereum beacon consensus
 ///
@@ -11,35 +13,29 @@ use tokio::sync::{watch, watch::error::SendError};
 #[derive(Debug)]
 pub struct BeaconConsensus {
     /// Watcher over the forkchoice state
-    channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
+    forkchoice_state_rx: watch::Receiver<ForkchoiceState>,
     /// Configuration
     chain_spec: ChainSpec,
 }
 
 impl BeaconConsensus {
     /// Create a new instance of [BeaconConsensus]
-    pub fn new(chain_spec: ChainSpec) -> Self {
-        Self {
-            channel: watch::channel(ForkchoiceState {
-                head_block_hash: H256::zero(),
-                finalized_block_hash: H256::zero(),
-                safe_block_hash: H256::zero(),
-            }),
-            chain_spec,
-        }
+    pub fn new(
+        chain_spec: ChainSpec,
+        forkchoice_state_rx: watch::Receiver<ForkchoiceState>,
+    ) -> Self {
+        Self { chain_spec, forkchoice_state_rx }
+    }
+
+    /// Create new [BeaconConsensusBuilder].
+    pub fn builder() -> BeaconConsensusBuilder {
+        BeaconConsensusBuilder::default()
     }
 }
 
 impl Consensus for BeaconConsensus {
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
-        self.channel.1.clone()
-    }
-
-    fn notify_fork_choice_state(
-        &self,
-        state: ForkchoiceState,
-    ) -> Result<(), SendError<ForkchoiceState>> {
-        self.channel.0.send(state)
+        self.forkchoice_state_rx.clone()
     }
 
     fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {

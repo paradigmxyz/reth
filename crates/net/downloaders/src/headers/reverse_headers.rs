@@ -8,7 +8,7 @@ use reth_interfaces::{
     p2p::{
         error::{DownloadError, DownloadResult, PeerRequestResult},
         headers::{
-            client::{BlockHeaders, HeadersClient, HeadersRequest},
+            client::{HeadersClient, HeadersRequest},
             downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         },
         priority::Priority,
@@ -279,8 +279,7 @@ where
         let HeadersRequestOutcome { request, outcome } = response;
         match outcome {
             Ok(res) => {
-                let (peer_id, headers) = res.split();
-                let mut headers = headers.0;
+                let (peer_id, mut headers) = res.split();
 
                 // update total downloaded metric
                 self.metrics.total_downloaded.increment(headers.len() as u64);
@@ -337,8 +336,7 @@ where
 
         match outcome {
             Ok(res) => {
-                let (peer_id, headers) = res.split();
-                let mut headers = headers.0;
+                let (peer_id, mut headers) = res.split();
 
                 // update total downloaded metric
                 self.metrics.total_downloaded.increment(headers.len() as u64);
@@ -693,7 +691,7 @@ where
     }
 }
 
-/// A future that returns a list of [`BlockHeaders`] on success.
+/// A future that returns a list of [`Header`] on success.
 struct HeadersRequestFuture<F> {
     request: Option<HeadersRequest>,
     fut: F,
@@ -701,7 +699,7 @@ struct HeadersRequestFuture<F> {
 
 impl<F> Future for HeadersRequestFuture<F>
 where
-    F: Future<Output = PeerRequestResult<BlockHeaders>> + Sync + Send + Unpin,
+    F: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin,
 {
     type Output = HeadersRequestOutcome;
 
@@ -717,7 +715,7 @@ where
 /// The outcome of the [HeadersRequestFuture]
 struct HeadersRequestOutcome {
     request: HeadersRequest,
-    outcome: PeerRequestResult<BlockHeaders>,
+    outcome: PeerRequestResult<Vec<Header>>,
 }
 
 // === impl OrderedHeadersResponse ===
