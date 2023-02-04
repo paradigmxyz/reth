@@ -2,7 +2,7 @@ use crate::{
     error::{BackoffKind, SessionError},
     peers::{
         reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
-        ReputationChangeWeights,
+        ReputationChangeWeights, DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
 };
@@ -713,7 +713,12 @@ impl ConnectionInfo {
 
 impl Default for ConnectionInfo {
     fn default() -> Self {
-        ConnectionInfo { num_outbound: 0, num_inbound: 0, max_outbound: 100, max_inbound: 30 }
+        ConnectionInfo {
+            num_outbound: 0,
+            num_inbound: 0,
+            max_outbound: DEFAULT_MAX_PEERS_OUTBOUND,
+            max_inbound: DEFAULT_MAX_PEERS_INBOUND,
+        }
     }
 }
 
