@@ -13,7 +13,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
 /// The [`StageId`] of the storage hashing stage.
-pub const STORAGE_HASHING: StageId = StageId("StorageHashingStage");
+pub const STORAGE_HASHING: StageId = StageId("StorageHashing");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
