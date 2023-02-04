@@ -837,6 +837,9 @@ async fn authenticate_stream(
     };
 
     // if the hello handshake was successful we can try status handshake
+    //
+    // Before trying status handshake, set up the version to shared_capability
+    let status = Status { version: p2p_stream.shared_capability().version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,
