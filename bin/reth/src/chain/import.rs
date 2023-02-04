@@ -151,9 +151,6 @@ impl ImportCommand {
         consensus: Arc<dyn Consensus>,
         file_client: &Arc<FileClient>,
     ) -> reth_downloaders::headers::task::TaskDownloader {
-        // TODO: how to deal with the fact that this is a reverse downloader, and the blocks are
-        // written forwards in the file? RLP can only be parsed forwards
-        // do we need a forward downloader?
         let headers_conf = &config.stages.headers;
         headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
             .request_limit(headers_conf.downloader_batch_size)
