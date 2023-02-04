@@ -75,4 +75,9 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
         });
         Box::pin(rx).await.unwrap()
     }
+
+    /// Run a hook before [Stage::unwind]. Required for MerkleStage.
+    fn before_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+        Ok(())
+    }
 }
