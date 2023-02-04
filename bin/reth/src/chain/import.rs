@@ -64,6 +64,7 @@ pub struct ImportCommand {
 }
 
 impl ImportCommand {
+    /// Execute the `import` command
     pub async fn execute(&self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth import starting");
 

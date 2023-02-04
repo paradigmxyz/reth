@@ -40,6 +40,7 @@ pub struct InitCommand {
 }
 
 impl InitCommand {
+    /// Execute the `init` command
     pub async fn execute(&self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth import starting");
 
@@ -48,7 +49,7 @@ impl InitCommand {
         info!(target: "reth::cli", "Database opened");
 
         info!(target: "reth::cli", ttd=?self.chain.paris_ttd, "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+        init_genesis(db, self.chain.clone())?;
         Ok(())
     }
 }
