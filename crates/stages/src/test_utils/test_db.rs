@@ -1,6 +1,10 @@
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind, WriteMap, RW},
+    mdbx::{
+        test_utils::{create_test_db, create_test_db_with_path},
+        tx::Tx,
+        Env, EnvKind, WriteMap, RW,
+    },
     models::{BlockNumHash, StoredBlockBody},
     table::Table,
     tables,
@@ -8,7 +12,7 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, path::Path, sync::Arc};
 
 use crate::db::Transaction;
 
@@ -33,6 +37,10 @@ impl Default for TestTransaction {
 }
 
 impl TestTransaction {
+    pub fn new(path: &Path) -> Self {
+        Self { tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)) }
+    }
+
     /// Return a database wrapped in [Transaction].
     pub fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
         Transaction::new(self.tx.borrow()).expect("failed to create db container")
