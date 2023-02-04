@@ -36,6 +36,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::codec::{Decoder, LengthDelimitedCodec};
 use tracing::{instrument, trace};
 
 mod active;
@@ -262,6 +263,18 @@ impl SessionManager {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect(reason);
         }
+    }
+
+    /// Sends a disconnect message with  TooManyPeers reason.
+    ///
+    /// Called when We currently don't have additional capacity to establish a session from an
+    /// incoming connection.
+    pub(crate) fn disconnect_incoming_connection(&self, stream: TcpStream) {
+        self.spawn(async move {
+            let sink = LengthDelimitedCodec::default().framed(stream);
+            let mut stream = UnauthedP2PStream::new(sink);
+            let _ = stream.send_disconnect(DisconnectReason::TooManyPeers).await;
+        });
     }
 
     /// Sends a message to the peer's session
