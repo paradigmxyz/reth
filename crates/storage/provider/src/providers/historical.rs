@@ -64,6 +64,24 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
             Ok(self.tx.get::<tables::PlainAccountState>(address)?)
         }
     }
+
+    /// Get account code by its address
+    fn account_code(&self, addr: Address) -> Result<Option<Bytes>> {
+        // Get basic account information
+        let acc = match self.basic_account(addr)? {
+            Some(acc) => acc,
+            None => return Ok(None),
+        };
+        // Get code hash
+        let code_hash = acc.bytecode_hash;
+        // Get the code from the code hash
+        self.code_by_hash(code_hash.unwrap())
+    }
+
+    /// Get account code by its hash
+    fn code_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
+        self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
+    }
 }
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for HistoricalStateProviderRef<'a, 'b, TX> {
@@ -146,7 +164,11 @@ macro_rules! derive_from_ref {
     };
 }
 
-derive_from_ref!(AccountProvider, fn basic_account(&self, address: Address) -> Result<Option<Account>>);
+derive_from_ref!(AccountProvider,
+    fn basic_account(&self, address: Address) -> Result<Option<Account>>, 
+    fn account_code(&self, address: Address) ->  Result<Option<Bytes>>,
+    fn code_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>
+);
 derive_from_ref!(BlockHashProvider, fn block_hash(&self, number: U256) -> Result<Option<H256>>);
 derive_from_ref!(
     StateProvider,
