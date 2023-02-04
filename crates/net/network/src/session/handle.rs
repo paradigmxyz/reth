@@ -24,9 +24,20 @@ use tokio::{
 #[derive(Debug)]
 pub(crate) struct PendingSessionHandle {
     /// Can be used to tell the session to disconnect the connection/abort the handshake process.
-    pub(crate) _disconnect_tx: oneshot::Sender<()>,
+    pub(crate) disconnect_tx: Option<oneshot::Sender<()>>,
     /// The direction of the session
     pub(crate) direction: Direction,
+}
+
+// === impl PendingSessionHandle ===
+
+impl PendingSessionHandle {
+    /// Sends a disconnect command to the pending session.
+    pub(crate) fn disconnect(&mut self) {
+        if let Some(tx) = self.disconnect_tx.take() {
+            let _ = tx.send(());
+        }
+    }
 }
 
 /// An established session with a remote peer.
