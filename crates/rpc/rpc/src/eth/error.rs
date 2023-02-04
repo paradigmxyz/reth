@@ -1,7 +1,7 @@
 //! Error variants for the `eth_` namespace.
 
 use crate::{impl_to_rpc_result, result::ToRpcResult};
-use reth_transaction_pool::{error::PoolError};
+use reth_transaction_pool::error::PoolError;
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
@@ -23,7 +23,6 @@ pub(crate) enum EthApiError {
 
 impl_to_rpc_result!(EthApiError);
 
-
 /// A helper error type that mirrors `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GethTxPoolError {
@@ -42,14 +41,13 @@ pub(crate) enum GethTxPoolError {
     #[error("negative value")]
     NegativeValue,
     #[error("oversized data")]
-    OversizedData
+    OversizedData,
 }
 
 impl From<PoolError> for GethTxPoolError {
-
     fn from(err: PoolError) -> GethTxPoolError {
         match err {
-            PoolError::ReplacementUnderpriced(_) =>GethTxPoolError::ReplaceUnderpriced,
+            PoolError::ReplacementUnderpriced(_) => GethTxPoolError::ReplaceUnderpriced,
             PoolError::ProtocolFeeCapTooLow(_, _) => GethTxPoolError::Underpriced,
             PoolError::SpammerExceededCapacity(_, _) => GethTxPoolError::TxPoolOverflow,
             PoolError::DiscardedOnInsert(_) => GethTxPoolError::TxPoolOverflow,
@@ -62,5 +60,5 @@ impl From<PoolError> for GethTxPoolError {
 impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
         EthApiError::PoolError(GethTxPoolError::from(err))
-        }   
+    }
 }
