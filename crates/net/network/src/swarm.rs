@@ -417,6 +417,8 @@ pub(crate) enum SwarmEvent {
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
 }
 
+/// Represents the state of the connection of the node. If shutting down,
+/// new connections won't be established.
 #[derive(Default)]
 pub(crate) enum NetworkConnectionState {
     #[default]

@@ -267,12 +267,17 @@ impl SessionManager {
         }
     }
 
+    /// Initiates a shutdown of all sessions.
+    ///
+    /// It will trigger the disconnect on all the session tasks to gracefully terminate. The result
+    /// will be picked by the receiver.
     pub(crate) fn disconnect_all(&self, reason: Option<DisconnectReason>) {
         for (_, session) in self.active_sessions.iter() {
             session.disconnect(reason);
         }
     }
 
+    /// Disconnects all pending sessions.
     pub(crate) fn disconnect_all_pending(&mut self) {
         for (_, session) in self.pending_sessions.iter_mut() {
             session.disconnect();

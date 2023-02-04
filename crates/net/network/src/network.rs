@@ -162,6 +162,9 @@ impl NetworkHandle {
     }
 
     /// Send message to gracefully shutdown node.
+    ///
+    /// This will disconnect all active and pending sessions and prevent
+    /// new connections to be established.
     pub async fn shutdown(&self) -> Result<(), oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.send_message(NetworkHandleMessage::Shutdown(tx));
