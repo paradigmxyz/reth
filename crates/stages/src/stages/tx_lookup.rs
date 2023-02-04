@@ -78,6 +78,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
 
+        tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
+
         let mut cursor_txhash = tx.cursor_write::<tables::TxHashNumber>()?;
 
         // If the last element is smaller than our first, then we can just append into the DB.
@@ -89,7 +91,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         // Sort before inserting the reverse lookup for hash -> tx_id.
-        tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
         for (tx_hash, id) in tx_list {
             if append {
                 cursor_txhash.append(tx_hash, id)?;
