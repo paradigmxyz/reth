@@ -1,53 +1,61 @@
-#![allow(dead_code, unused_imports, non_snake_case)]
-
 use criterion::{
-    async_executor::FuturesExecutor, black_box, criterion_group, criterion_main,
-    measurement::WallTime, BenchmarkGroup, Criterion,
+    async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
+    BenchmarkGroup, Criterion,
 };
-use proptest::{
-    arbitrary::Arbitrary,
-    collection::vec as proptest_vec,
-    prelude::{any_with, ProptestConfig},
-    strategy::{Strategy, ValueTree},
-    test_runner::TestRunner,
-};
-use reth_db::{
-    cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    database::Database,
-    mdbx::{test_utils::create_test_db_with_path, Env, EnvKind, WriteMap},
-    transaction::DbTxMut,
-};
-use reth_primitives::{Header, SealedBlock, TransactionSigned, H256, U256};
+use reth_db::mdbx::{Env, WriteMap};
+use reth_primitives::H256;
 use reth_stages::{
-    stages::TransactionLookupStage, test_utils::TestTransaction, ExecInput, Stage, StageId,
-    StageSetBuilder, UnwindInput,
+    stages::{SenderRecoveryStage, TransactionLookupStage},
+    test_utils::TestTransaction,
+    ExecInput, Stage, StageId, UnwindInput,
 };
-use std::{path::Path, sync::Arc, time::Instant};
-criterion_group!(benches, stages);
+use std::path::{Path, PathBuf};
+
+criterion_group!(benches, tx_lookup, senders);
 criterion_main!(benches);
 
-const VECTORS_FOLDER: &str = "testdata/stages";
-const FILE_PATH: &str = "testdata/stages/blocks";
-const BENCH_DB_PATH: &str = "/tmp/reth-benches-stages";
-const NUM_BLOCKS: usize = 10_000;
-
-pub fn stages(c: &mut Criterion) {
+fn senders(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
     group.measurement_time(std::time::Duration::from_millis(2000));
     group.warm_up_time(std::time::Duration::from_millis(2000));
+    // don't need to run each stage for that many times
+    group.sample_size(10);
 
-    let tx = prepare_blocks(NUM_BLOCKS).unwrap();
-
-    measure_txlookup_stage(&mut group, tx);
+    for batch in [1000usize, 10_000, 100_000, 250_000] {
+        let num_blocks = 10_000;
+        let mut stage = SenderRecoveryStage::default();
+        stage.batch_size = batch;
+        stage.commit_threshold = num_blocks;
+        let label = format!("SendersRecovery-batch-{}", batch);
+        measure_stage(&mut group, stage, num_blocks - 1 /* why do we need - 1 here? */, label);
+    }
 }
 
-fn measure_txlookup_stage(group: &mut BenchmarkGroup<WallTime>, tx: TestTransaction) {
-    let stage = TransactionLookupStage::new(NUM_BLOCKS as u64);
+fn tx_lookup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Stages");
+    group.measurement_time(std::time::Duration::from_millis(2000));
+    group.warm_up_time(std::time::Duration::from_millis(2000));
+    // don't need to run each stage for that many times
+    group.sample_size(10);
+
+    let num_blocks = 10_000;
+    let stage = TransactionLookupStage::new(num_blocks);
+    measure_stage(&mut group, stage, num_blocks, "TransactionLookup".to_string());
+}
+
+fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
+    group: &mut BenchmarkGroup<WallTime>,
+    stage: S,
+    num_blocks: u64,
+    label: String,
+) {
+    let path = txs_testdata(num_blocks as usize);
+    let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
-    input.previous_stage = Some((StageId("Another"), NUM_BLOCKS as u64));
+    input.previous_stage = Some((StageId("Another"), num_blocks));
 
-    group.bench_function(stringify!(TransactionLookupStage), move |b| {
+    group.bench_function(label, move |b| {
         b.to_async(FuturesExecutor).iter_with_setup(
             || {
                 // criterion setup does not support async, so we have to use our own runtime
@@ -71,75 +79,23 @@ fn measure_txlookup_stage(group: &mut BenchmarkGroup<WallTime>, tx: TestTransact
     });
 }
 
-fn prepare_blocks(num_blocks: usize) -> eyre::Result<TestTransaction> {
-    let file_path = Path::new(FILE_PATH);
+use reth_interfaces::test_utils::generators::random_block_range;
 
-    let blocks = if file_path.exists() {
-        bincode::deserialize_from(std::io::BufReader::new(std::fs::File::open(file_path)?))?
-    } else {
-        generate_blocks(num_blocks, VECTORS_FOLDER, file_path)?
-    };
+// Helper for generating testdata for the sender recovery stage and tx lookup stages (512MB).
+// Returns the path to the database file and the number of blocks written.
+fn txs_testdata(num_blocks: usize) -> PathBuf {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
+    let txs_range = 100..150;
 
-    println!("\n## Preparing DB `{}`. \n", file_path.display());
+    if !path.exists() {
+        println!("Transactions testdata not found, generating to {:?}", path.display());
+        let tx = TestTransaction::new(&path);
 
-    // Reset DB
-    let _ = std::fs::remove_dir_all(BENCH_DB_PATH);
-    let tx = TestTransaction {
-        tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, Path::new(BENCH_DB_PATH))),
-    };
-
-    tx.insert_blocks(blocks.iter(), None)?;
-    tx.insert_headers(blocks.iter().map(|block| &block.header))?;
-
-    Ok(tx)
-}
-
-fn generate_blocks(
-    num_blocks: usize,
-    path: &str,
-    file_path: &Path,
-) -> eyre::Result<Vec<SealedBlock>> {
-    let mut runner = TestRunner::new(ProptestConfig::default());
-
-    std::fs::create_dir_all(path)?;
-
-    println!("\n## Generating blocks into `{}`. \n", file_path.display());
-
-    // We want to generate each element of the struct separately, instead of
-    // `any_with::<SealdedBlock>()`, because otherwise .ommers and .body might just generate too
-    // many values unnecessarily.
-    let block_header_strat = any_with::<Header>(<Header as Arbitrary>::Parameters::default());
-    let ommers_strat =
-        proptest_vec(any_with::<Header>(<Header as Arbitrary>::Parameters::default()), 0..3);
-    let body_strat = proptest_vec(
-        any_with::<TransactionSigned>(<TransactionSigned as Arbitrary>::Parameters::default()),
-        0..10,
-    );
-
-    let mut blocks = vec![];
-    for i in 0..num_blocks {
-        // Generate random blocks
-        let (mut header, ommers, body) = (&block_header_strat, &ommers_strat, &body_strat)
-            .new_tree(&mut runner)
-            .unwrap()
-            .current();
-
-        // Fix the Header.number since it's random
-        let ommers = ommers
-            .into_iter()
-            .map(|mut ommer| {
-                ommer.number = i as u64;
-                ommer.seal()
-            })
-            .collect();
-
-        header.number = i as u64;
-
-        blocks.push(SealedBlock { header: header.seal(), ommers, body });
+        // This takes a while because it does sig recovery internally
+        let blocks = random_block_range(0..num_blocks as u64, H256::zero(), txs_range);
+        tx.insert_blocks(blocks.iter(), None).unwrap();
+        tx.inner().commit().unwrap();
     }
 
-    bincode::serialize_into(std::io::BufWriter::new(std::fs::File::create(file_path)?), &blocks)
-        .unwrap();
-
-    Ok(blocks)
+    path
 }
