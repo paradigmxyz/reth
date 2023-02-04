@@ -313,6 +313,7 @@ mod ethereum_types_support {
 
     fixed_revm_uint_impl!(RU128, 16);
     fixed_revm_uint_impl!(RU256, 32);
+    impl_max_encoded_len!(RU256, { length_of_length(32) + 32 });
 }
 
 macro_rules! slice_impl {
@@ -403,9 +404,9 @@ where
     }
 }
 
-pub fn encode_iter<'a, K>(i: impl Iterator<Item = &'a K> + Clone, out: &mut dyn BufMut)
+pub fn encode_iter<K>(i: impl Iterator<Item = K> + Clone, out: &mut dyn BufMut)
 where
-    K: Encodable + 'a,
+    K: Encodable,
 {
     let mut h = Header { list: true, payload_length: 0 };
     for x in i.clone() {
