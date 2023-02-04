@@ -21,7 +21,7 @@ use reth_stages::{
     Pipeline, StageSet,
 };
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, debug};
 
 /// Imports a chain file by parsing the blocks contained in the file and running the sync pipeline
 /// on the loaded blocks.
@@ -67,6 +67,8 @@ impl ImportCommand {
     /// Execute the `import` command
     pub async fn execute(&self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth import starting");
+
+        debug!(target: "reth::cli", chain_spec = ?self.chain, "Importing chain with chainspec");
 
         let config: Config = self.load_config()?;
         info!(target: "reth::cli", path = %self.db, "Configuration loaded");
