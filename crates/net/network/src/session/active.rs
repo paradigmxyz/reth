@@ -123,7 +123,7 @@ impl ActiveSession {
                     received: Instant::now(),
                 };
                 if self
-                    .emit_message_cloned(PeerMessage::EthRequest(PeerRequest::$req_item {
+                    .emit_request(PeerMessage::EthRequest(PeerRequest::$req_item {
                         request,
                         response: tx,
                     }))
@@ -168,18 +168,18 @@ impl ActiveSession {
                 ))
             }
             EthMessage::NewBlockHashes(msg) => {
-                self.emit_message(PeerMessage::NewBlockHashes(msg));
+                self.emit_broadcast(PeerMessage::NewBlockHashes(msg));
             }
             EthMessage::NewBlock(msg) => {
                 let block =
                     NewBlockMessage { hash: msg.block.header.hash_slow(), block: Arc::new(*msg) };
-                self.emit_message(PeerMessage::NewBlock(block));
+                self.emit_broadcast(PeerMessage::NewBlock(block));
             }
             EthMessage::Transactions(msg) => {
-                self.emit_message(PeerMessage::ReceivedTransaction(msg));
+                self.emit_broadcast(PeerMessage::ReceivedTransaction(msg));
             }
             EthMessage::NewPooledTransactionHashes(msg) => {
-                self.emit_message(PeerMessage::PooledTransactions(msg));
+                self.emit_broadcast(PeerMessage::PooledTransactions(msg));
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders);
@@ -276,19 +276,22 @@ impl ActiveSession {
     }
 
     /// Send a message back to the [`SessionManager`](super::SessionManager)
-    fn emit_message(&self, message: PeerMessage) {
-        let _ = self.try_emit_message(message).map_err(|err| {
-            warn!(
-                target : "net",
-                %err,
-                "dropping incoming message",
-            );
-        });
+    fn emit_broadcast(&self, message: PeerMessage) {
+        let _ = self
+            .to_session
+            .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
+            .map_err(|err| {
+                trace!(
+                    target : "net",
+                    %err,
+                    "dropping incoming broadcast",
+                );
+            });
     }
 
     /// Send a message back to the [`SessionManager`](super::SessionManager)
     /// covering both broadcasts and incoming requests
-    fn emit_message_cloned(
+    fn emit_request(
         &self,
         message: PeerMessage,
     ) -> Result<(), mpsc::error::TrySendError<ActiveSessionMessage>> {
@@ -296,15 +299,14 @@ impl ActiveSession {
             // we want this message to always arrive, so we clone the sender
             .clone()
             .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
-    }
-
-    /// Send a message back to the [`SessionManager`](super::SessionManager)
-    fn try_emit_message(
-        &self,
-        message: PeerMessage,
-    ) -> Result<(), mpsc::error::TrySendError<ActiveSessionMessage>> {
-        self.to_session
-            .try_send(ActiveSessionMessage::ValidMessage { peer_id: self.remote_peer_id, message })
+            .map_err(|err| {
+                warn!(
+                    target : "net",
+                    %err,
+                    "dropping incoming request",
+                );
+                err
+            })
     }
 
     /// Notify the manager that the peer sent a bad message
