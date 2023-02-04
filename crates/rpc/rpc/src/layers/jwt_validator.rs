@@ -14,7 +14,7 @@ pub struct JwtAuthValidator {
 
 impl JwtAuthValidator {
     /// Creates a new instance of [`JwtAuthValidator`].
-    /// Validation logics are implemnted inside the `secret`
+    /// Validation logics are implemnted by the `secret`
     /// argument (see [`JwtSecret`]).
     pub fn new(secret: JwtSecret) -> Self {
         Self { secret }

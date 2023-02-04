@@ -14,7 +14,7 @@ pub trait AuthValidator {
     /// Body type of the error response
     type ResponseBody;
 
-    /// This function ins invoked by the [`AuthLayer`][crate::layers::AuthLayer]
+    /// This function is invoked by the [`AuthLayer`][crate::layers::AuthLayer]
     /// to perform validation on Http headers.
     /// The result conveys validation errors in the form of an Http response.
     fn validate(&self, headers: &HeaderMap) -> Result<(), Response<Self::ResponseBody>>;
