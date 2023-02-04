@@ -149,7 +149,10 @@ impl HeadersClient for FileClient {
         let start_num = match request.start {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
                 Some(num) => *num,
-                None => return Box::pin(async move { Err(RequestError::BadResponse) }),
+                None => {
+                    warn!(%hash, "Could not find starting block number for requested header hash");
+                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                }
             },
             BlockHashOrNumber::Number(num) => num,
         };
