@@ -1,5 +1,6 @@
 //! A headers downloader that can handle multiple requests concurrently.
 
+use super::task::TaskDownloader;
 use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
@@ -24,7 +25,6 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tracing::trace;
-use super::task::TaskDownloader;
 
 /// A heuristic that is used to determine the number of requests that should be prepared for a peer.
 /// This should ensure that there are always requests lined up for peers to handle while the
@@ -358,6 +358,8 @@ where
                 // validate the response
                 let highest = &headers[0];
 
+                trace!(target: "downloaders::headers", requested_block_number, highest=?highest.number, "Validating non-empty headers response");
+
                 if highest.number != requested_block_number {
                     return Err(HeadersResponseError {
                         request,
@@ -463,6 +465,7 @@ where
 
     /// Starts a request future
     fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+        trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
     }
 
@@ -500,11 +503,13 @@ where
     }
 }
 
-impl<H> ReverseHeadersDownloader<H> where
+impl<H> ReverseHeadersDownloader<H>
+where
     H: HeadersClient,
     Self: HeaderDownloader + 'static,
 {
-    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning it.
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
+    /// it.
     pub fn as_task(self) -> TaskDownloader {
         TaskDownloader::spawn(self)
     }

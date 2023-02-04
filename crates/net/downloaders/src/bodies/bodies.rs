@@ -1,5 +1,5 @@
-use crate::{metrics::DownloaderMetrics, bodies::task::TaskDownloader};
 use super::queue::BodiesRequestQueue;
+use crate::{bodies::task::TaskDownloader, metrics::DownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -240,12 +240,14 @@ where
     }
 }
 
-impl<B, DB> BodiesDownloader<B, DB> where
+impl<B, DB> BodiesDownloader<B, DB>
+where
     B: BodiesClient + 'static,
     DB: Database,
     Self: BodyDownloader + 'static,
 {
-    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning it.
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
+    /// it.
     pub fn as_task(self) -> TaskDownloader {
         TaskDownloader::spawn(self)
     }

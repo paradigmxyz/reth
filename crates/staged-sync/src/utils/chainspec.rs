@@ -1,4 +1,4 @@
-use reth_primitives::{ChainSpec, GOERLI, MAINNET, SEPOLIA, AllGenesisFormats};
+use reth_primitives::{AllGenesisFormats, ChainSpec, GOERLI, MAINNET, SEPOLIA};
 use std::path::PathBuf;
 
 /// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path

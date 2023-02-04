@@ -1,8 +1,7 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     node::handle_events,
-    utils::chainspec::chain_spec_value_parser,
-    utils::chainspec::genesis_value_parser,
+    utils::chainspec::{chain_spec_value_parser, genesis_value_parser},
 };
 use clap::Parser;
 use eyre::Context;
@@ -11,7 +10,7 @@ use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{bodies, headers, test_utils::FileClient};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
-use reth_primitives::{ChainSpec, AllGenesisFormats};
+use reth_primitives::{AllGenesisFormats, ChainSpec};
 use reth_staged_sync::{
     utils::init::{init_db, init_genesis},
     Config,
@@ -95,7 +94,8 @@ impl ImportCommand {
         })?;
 
         // construct downloaders and start pipeline
-        let mut pipeline = self.build_pipeline(&config, &file_client, consensus.clone(), &db).await?;
+        let mut pipeline =
+            self.build_pipeline(&config, &file_client, consensus.clone(), &db).await?;
 
         tokio::spawn(handle_events(pipeline.events().map(Into::into)));
 
@@ -140,6 +140,7 @@ impl ImportCommand {
                         commit_threshold: stage_conf.execution.commit_threshold,
                     }),
             )
+            .with_max_block(0)
             .build();
 
         Ok(pipeline)
@@ -170,16 +171,16 @@ impl ImportCommand {
         db: &Arc<Env<WriteMap>>,
     ) -> reth_downloaders::bodies::task::TaskDownloader {
         let bodies_conf = &config.stages.bodies;
-            bodies::bodies::BodiesDownloaderBuilder::default()
-                .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
-                .with_request_limit(bodies_conf.downloader_request_limit)
-                .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
-                .with_concurrent_requests_range(
-                    bodies_conf.downloader_min_concurrent_requests..=
-                        bodies_conf.downloader_max_concurrent_requests,
-                )
-                .build(file_client.clone(), consensus.clone(), db.clone())
-                .as_task()
+        bodies::bodies::BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
+            .with_request_limit(bodies_conf.downloader_request_limit)
+            .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
+            .with_concurrent_requests_range(
+                bodies_conf.downloader_min_concurrent_requests..=
+                    bodies_conf.downloader_max_concurrent_requests,
+            )
+            .build(file_client.clone(), consensus.clone(), db.clone())
+            .as_task()
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
