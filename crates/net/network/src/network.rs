@@ -167,7 +167,7 @@ impl NetworkHandle {
     /// new connections to be established.
     pub async fn shutdown(&self) -> Result<(), oneshot::error::RecvError> {
         let (tx, rx) = oneshot::channel();
-        let _ = self.send_message(NetworkHandleMessage::Shutdown(tx));
+        self.send_message(NetworkHandleMessage::Shutdown(tx));
         rx.await
     }
 }
