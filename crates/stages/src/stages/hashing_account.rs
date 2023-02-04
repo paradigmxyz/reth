@@ -184,7 +184,7 @@ mod tests {
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
 
     #[tokio::test]
-    async fn execute_below_clean_threshold() {
+    async fn execute_clean_account_hashing() {
         let (previous_stage, stage_progress) = (20, 10);
         // Set up the runner
         let mut runner = AccountHashingTestRunner::default();
