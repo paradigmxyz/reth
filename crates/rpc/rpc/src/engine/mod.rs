@@ -13,11 +13,6 @@ use tokio::sync::{
     oneshot::{self, Receiver},
 };
 
-mod jwt_layer;
-mod jwt_secret;
-pub use jwt_layer::JwtLayer;
-pub use jwt_secret::{JwtError, JwtSecret};
-
 /// The server implementation of Engine API
 pub struct EngineApi {
     /// Handle to the consensus engine
@@ -110,30 +105,3 @@ impl EngineApiServer for EngineApi {
             .await
     }
 }
-
-/*
-#[cfg(test)]
-mod tests {
-
-    const AUTH_JWT: &str = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
-    const AUTH_PORT: u32 = 8551;
-    const AUTH_ADDR: &str = "0.0.0.0";
-
-
-    #[tokio::test]
-    async fn valid_jwt() {
-        assert!(false);
-    }
-
-    #[tokio::test]
-    async fn missing_jwt_error() {
-        assert!(false);
-    }
-
-    #[tokio::test]
-    async fn wrong_jwt_signature_error() {
-        assert!(false);
-    }
-
-}
-*/

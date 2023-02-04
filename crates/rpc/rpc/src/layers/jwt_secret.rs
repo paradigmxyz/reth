@@ -11,7 +11,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Errors returned by the [`JwtSecret`][crate::engine::JwtSecret]
+/// Errors returned by the [`JwtSecret`][crate::layers::JwtSecret]
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum JwtError {
@@ -52,7 +52,7 @@ const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 pub struct JwtSecret([u8; 32]);
 
 impl JwtSecret {
-    /// Creates an instance of [`JwtSecret`][crate::engine::JwtSecret].
+    /// Creates an instance of [`JwtSecret`][crate::layers::JwtSecret].
     /// Generates and error if one of the following applies:
     /// - `hex` is not a valid hexadecimal string
     /// - `hex` argument length is less than `JWT_SECRET_LEN`
@@ -110,7 +110,7 @@ impl JwtSecret {
         Ok(())
     }
 
-    /// Generates a random [`JwtSecret`][crate::engine::JwtSecret]
+    /// Generates a random [`JwtSecret`][crate::layers::JwtSecret]
     /// containing a hex-encoded 256 bit secret key.
     pub fn random() -> Self {
         let random_bytes: [u8; 32] = rand::thread_rng().gen();
@@ -137,9 +137,8 @@ impl JwtSecret {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Claims {
     /// The "iat" value MUST be a number containing a NumericDate value.
-    /// According to the RFC A NumericDate represents the number of seconds from
+    /// According to the RFC A NumericDate represents the number of seconds since
     /// the UNIX_EPOCH.
-    /// ---------------------------------------------------------------------------
     /// - [`RFC-7519 - Spec`](https://www.rfc-editor.org/rfc/rfc7519#section-4.1.6)
     /// - [`RFC-7519 - Notations`](https://www.rfc-editor.org/rfc/rfc7519#section-2)
     pub(crate) iat: u64,
@@ -156,7 +155,7 @@ impl Claims {
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::jwt_secret::JWT_MAX_IAT_DIFF;
+    use crate::layers::jwt_secret::JWT_MAX_IAT_DIFF;
 
     use super::{Claims, JwtError, JwtSecret};
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};

@@ -2346,9 +2346,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.23"
+version = "0.14.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "034711faac9d2166cb1baf1a2fb0b60b1f277f8492fd72176c17f3515e1abd3c"
+checksum = "5e011372fa0b68db8350aa7a248930ecc7839bf46d8485577d69f117a75f164c"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -4557,6 +4557,8 @@ dependencies = [
  "async-trait",
  "hex",
  "http",
+ "http-body",
+ "hyper",
  "jsonrpsee",
  "jsonwebtoken",
  "pin-project",

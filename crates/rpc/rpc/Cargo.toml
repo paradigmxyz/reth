@@ -23,6 +23,8 @@ reth-rpc-engine-api = { path = "../rpc-engine-api" }
 # rpc
 jsonrpsee = { version = "0.16" }
 http = "0.2.8"
+http-body = "0.4.5"
+hyper = "0.14.24"
 jsonwebtoken = "8"
 
 # async
@@ -45,3 +47,5 @@ hex = "0.4"
 rand = "0.8.5"
 tracing = "0.1"
 
+[dev-dependencies]
+jsonrpsee = { version = "0.16", features = ["client"]}
