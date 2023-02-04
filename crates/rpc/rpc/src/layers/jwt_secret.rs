@@ -17,11 +17,11 @@ use thiserror::Error;
 pub enum JwtError {
     #[error(transparent)]
     JwtSecretHexDecodeError(#[from] hex::FromHexError),
-    #[error("JWT key is expected to have a length of {0} digits. {1} digits key provided.")]
+    #[error("JWT key is expected to have a length of {0} digits. {1} digits key provided")]
     InvalidLength(usize, usize),
     #[error("Unsupported signature algorithm. Only HS256 is supported")]
     UnsupportedSignatureAlgorithm,
-    #[error("The provided signature is invalid.")]
+    #[error("The provided signature is invalid")]
     InvalidSignature,
     #[error("The iat (issued-at) claim is not within +-60 seconds from the current time")]
     InvalidIssuanceTimestamp,

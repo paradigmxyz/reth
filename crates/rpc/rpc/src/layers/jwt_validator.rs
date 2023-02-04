@@ -46,16 +46,12 @@ impl AuthValidator for JwtAuthValidator {
 /// This is an utility function that retrieves a bearer
 /// token from an authorization Http header.
 fn get_bearer(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("authorization")
-        .map(|header| header.to_str())
-        .and_then(|result| result.ok())
-        .and_then(|auth| {
-            let prefix = "Bearer ";
-            auth.find(prefix)
-                .map(|index| &auth[index + prefix.len()..])
-                .map(|token| token.to_owned())
-        })
+    let header = headers.get("authorization")?;
+    let auth: &str = header.to_str().ok()?;
+    let prefix = "Bearer ";
+    let index = auth.find(prefix)?;
+    let token: &str = &auth[index + prefix.len()..];
+    Some(token.into())
 }
 
 fn err_response() -> Response<hyper::Body> {
