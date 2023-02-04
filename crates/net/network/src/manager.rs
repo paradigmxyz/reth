@@ -28,7 +28,7 @@ use crate::{
     peers::{PeersHandle, PeersManager},
     session::SessionManager,
     state::NetworkState,
-    swarm::{Swarm, SwarmEvent},
+    swarm::{NetworkConnectionState, Swarm, SwarmEvent},
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
@@ -206,7 +206,7 @@ where
             Arc::clone(&num_active_peers),
         );
 
-        let swarm = Swarm::new(incoming, sessions, state);
+        let swarm = Swarm::new(incoming, sessions, state, NetworkConnectionState::default());
 
         let (to_manager_tx, from_handle_rx) = mpsc::unbounded_channel();
 
@@ -512,6 +512,17 @@ where
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
+            }
+            NetworkHandleMessage::Shutdown(tx) => {
+                // Set connection status to `Shutdown`. Stops node to accept
+                // new incoming connections as well as sending connection requests to newly
+                // discovered nodes.
+                self.swarm.on_shutdown_requested();
+                // Disconnect all active connections
+                self.swarm.sessions_mut().disconnect_all(Some(DisconnectReason::ClientQuitting));
+                // drop pending connections
+                self.swarm.sessions_mut().disconnect_all_pending();
+                let _ = tx.send(());
             }
             NetworkHandleMessage::ReputationChange(peer_id, kind) => {
                 self.swarm.state_mut().peers_mut().apply_reputation_change(&peer_id, kind);

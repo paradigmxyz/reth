@@ -509,3 +509,45 @@ async fn test_geth_disconnect() {
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_shutdown() {
+    let net = Testnet::create(3).await;
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+    let handle2 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
+    handle1.add_peer(*handle2.peer_id(), handle2.local_addr());
+
+    let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+
+    // Before shutting down, we have two connected peers
+    let peer1 = listener0.next_session_established().await.unwrap();
+    let peer2 = listener0.next_session_established().await.unwrap();
+    assert!(expected_connections.contains(&peer1));
+    assert!(expected_connections.contains(&peer2));
+    assert_eq!(handle0.num_connected_peers(), 2);
+
+    handle0.shutdown().await.unwrap();
+
+    // All sessions get disconnected
+    let (peer1, _reason) = listener0.next_session_closed().await.unwrap();
+    let (peer2, _reason) = listener0.next_session_closed().await.unwrap();
+    assert!(expected_connections.remove(&peer1));
+    assert!(expected_connections.remove(&peer2));
+    assert_eq!(handle0.num_connected_peers(), 0);
+
+    // New connections are rejected
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    let (_peer, reason) = listener0.next_session_closed().await.unwrap();
+    assert_eq!(reason, Some(DisconnectReason::DisconnectRequested));
+}

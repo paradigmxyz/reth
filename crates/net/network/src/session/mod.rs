@@ -222,8 +222,10 @@ impl SessionManager {
             self.fork_filter.clone(),
         ));
 
-        let handle =
-            PendingSessionHandle { _disconnect_tx: disconnect_tx, direction: Direction::Incoming };
+        let handle = PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Incoming,
+        };
         self.pending_sessions.insert(session_id, handle);
         self.counter.inc_pending_inbound();
         Ok(session_id)
@@ -248,7 +250,7 @@ impl SessionManager {
         ));
 
         let handle = PendingSessionHandle {
-            _disconnect_tx: disconnect_tx,
+            disconnect_tx: Some(disconnect_tx),
             direction: Direction::Outgoing(remote_peer_id),
         };
         self.pending_sessions.insert(session_id, handle);
@@ -262,6 +264,23 @@ impl SessionManager {
     pub(crate) fn disconnect(&self, node: PeerId, reason: Option<DisconnectReason>) {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect(reason);
+        }
+    }
+
+    /// Initiates a shutdown of all sessions.
+    ///
+    /// It will trigger the disconnect on all the session tasks to gracefully terminate. The result
+    /// will be picked by the receiver.
+    pub(crate) fn disconnect_all(&self, reason: Option<DisconnectReason>) {
+        for (_, session) in self.active_sessions.iter() {
+            session.disconnect(reason);
+        }
+    }
+
+    /// Disconnects all pending sessions.
+    pub(crate) fn disconnect_all_pending(&mut self) {
+        for (_, session) in self.pending_sessions.iter_mut() {
+            session.disconnect();
         }
     }
 
