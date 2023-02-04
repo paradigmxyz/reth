@@ -1,7 +1,7 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     node::handle_events,
-    utils::chainspec::{chain_spec_value_parser, genesis_value_parser},
+    utils::chainspec::genesis_value_parser,
 };
 use clap::Parser;
 use eyre::Context;
@@ -10,7 +10,7 @@ use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{bodies, headers, test_utils::FileClient};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
-use reth_primitives::{AllGenesisFormats, ChainSpec};
+use reth_primitives::ChainSpec;
 use reth_staged_sync::{
     utils::init::{init_db, init_genesis},
     Config,
