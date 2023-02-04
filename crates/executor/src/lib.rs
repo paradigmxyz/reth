@@ -9,6 +9,9 @@
 
 pub mod config;
 pub mod eth_dao_fork;
+
+/// Execution result types
+pub mod execution_result;
 /// Executor
 pub mod executor;
 /// Wrapper around revm database and types
