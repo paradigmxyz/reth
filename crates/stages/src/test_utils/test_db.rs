@@ -70,6 +70,7 @@ impl TestTransaction {
         })
     }
 
+    #[allow(clippy::type_complexity)]
     /// Return full table as Vec
     pub fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
     where
