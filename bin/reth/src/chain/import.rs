@@ -23,6 +23,8 @@ use reth_stages::{
 use std::sync::Arc;
 use tracing::info;
 
+/// Imports a chain file by parsing the blocks contained in the file and running the sync pipeline
+/// on the loaded blocks.
 #[derive(Debug, Parser)]
 pub struct ImportCommand {
     /// The path to the configuration file to use.
@@ -72,10 +74,7 @@ impl ImportCommand {
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
 
-        // self.start_metrics_endpoint()?;
         info!(target: "reth::cli", ttd=?self.chain.paris_ttd, "Initializing genesis");
-        info!(target: "reth::cli", paris_status=?self.chain.paris_status(), "Using paris status for genesis");
-
         init_genesis(db.clone(), self.chain.clone())?;
 
         // create a new FileClient
