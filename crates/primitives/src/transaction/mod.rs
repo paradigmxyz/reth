@@ -172,12 +172,6 @@ pub enum Transaction {
     Eip1559(TxEip1559),
 }
 
-impl Default for Transaction {
-    fn default() -> Self {
-        Self::Legacy(TxLegacy::default())
-    }
-}
-
 impl Transaction {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
@@ -428,24 +422,15 @@ impl Transaction {
     }
 }
 
+impl Default for Transaction {
+    fn default() -> Self {
+        Self::Legacy(TxLegacy::default())
+    }
+}
+
 /// This encodes the transaction _without_ the signature, and is only suitable for creating a hash
 /// intended for signing.
 impl Encodable for Transaction {
-    fn length(&self) -> usize {
-        match self {
-            Transaction::Legacy { .. } => {
-                let payload_length = self.fields_len() + self.eip155_fields_len();
-                // 'header length' + 'payload length'
-                length_of_length(payload_length) + payload_length
-            }
-            _ => {
-                let payload_length = self.fields_len();
-                // 'transaction type byte length' + 'header length' + 'payload length'
-                1 + length_of_length(payload_length) + payload_length
-            }
-        }
-    }
-
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         match self {
             Transaction::Legacy { .. } => {
@@ -458,6 +443,21 @@ impl Encodable for Transaction {
                 out.put_u8(self.tx_type() as u8);
                 Header { list: true, payload_length: self.fields_len() }.encode(out);
                 self.encode_fields(out);
+            }
+        }
+    }
+
+    fn length(&self) -> usize {
+        match self {
+            Transaction::Legacy { .. } => {
+                let payload_length = self.fields_len() + self.eip155_fields_len();
+                // 'header length' + 'payload length'
+                length_of_length(payload_length) + payload_length
+            }
+            _ => {
+                let payload_length = self.fields_len();
+                // 'transaction type byte length' + 'header length' + 'payload length'
+                1 + length_of_length(payload_length) + payload_length
             }
         }
     }
@@ -475,16 +475,16 @@ pub enum TransactionKind {
 }
 
 impl Encodable for TransactionKind {
-    fn length(&self) -> usize {
-        match self {
-            TransactionKind::Call(to) => to.length(),
-            TransactionKind::Create => 1, // EMPTY_STRING_CODE is a single byte
-        }
-    }
     fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
             TransactionKind::Create => out.put_u8(EMPTY_STRING_CODE),
+        }
+    }
+    fn length(&self) -> usize {
+        match self {
+            TransactionKind::Call(to) => to.length(),
+            TransactionKind::Create => 1, // EMPTY_STRING_CODE is a single byte
         }
     }
 }
@@ -520,143 +520,7 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{
-    prelude::{any, Strategy},
-    strategy::BoxedStrategy,
-};
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for TransactionSigned {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<TransactionSigned>;
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        any::<(Transaction, Signature)>()
-            .prop_map(move |(mut transaction, sig)| {
-                if let Some(chain_id) = transaction.chain_id().cloned() {
-                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-                }
-                let mut tx =
-                    TransactionSigned { hash: Default::default(), signature: sig, transaction };
-                tx.hash = tx.recalculate_hash();
-                tx
-            })
-            .boxed()
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let mut transaction = Transaction::arbitrary(u)?;
-        if let Some(chain_id) = transaction.chain_id().cloned() {
-            // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-            transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-        }
-
-        let mut tx = TransactionSigned {
-            hash: Default::default(),
-            signature: Signature::arbitrary(u)?,
-            transaction,
-        };
-        tx.hash = tx.recalculate_hash();
-
-        Ok(tx)
-    }
-}
-
-impl From<TransactionSignedEcRecovered> for TransactionSigned {
-    fn from(recovered: TransactionSignedEcRecovered) -> Self {
-        recovered.signed_transaction
-    }
-}
-
-impl Encodable for TransactionSigned {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.encode_inner(out, true);
-    }
-
-    fn length(&self) -> usize {
-        self.payload_len_inner()
-    }
-}
-
-/// This `Decodable` implementation only supports decoding the transaction format sent over p2p.
-impl Decodable for TransactionSigned {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        // keep this around so we can use it to calculate the hash
-        let original_encoding = *buf;
-
-        let first_header = Header::decode(buf)?;
-        // if the transaction is encoded as a string then it is a typed transaction
-        if !first_header.list {
-            // Bytes that are going to be used to create a hash of transaction.
-            // For eip2728 types transaction header is not used inside hash
-            let original_encoding = *buf;
-
-            let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
-            buf.advance(1);
-            // decode the list header for the rest of the transaction
-            let header = Header::decode(buf)?;
-            if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
-            }
-
-            // decode common fields
-            let transaction = match tx_type {
-                1 => Transaction::Eip2930(TxEip2930 {
-                    chain_id: Decodable::decode(buf)?,
-                    nonce: Decodable::decode(buf)?,
-                    gas_price: Decodable::decode(buf)?,
-                    gas_limit: Decodable::decode(buf)?,
-                    to: Decodable::decode(buf)?,
-                    value: Decodable::decode(buf)?,
-                    input: Bytes(Decodable::decode(buf)?),
-                    access_list: Decodable::decode(buf)?,
-                }),
-                2 => Transaction::Eip1559(TxEip1559 {
-                    chain_id: Decodable::decode(buf)?,
-                    nonce: Decodable::decode(buf)?,
-                    max_priority_fee_per_gas: Decodable::decode(buf)?,
-                    max_fee_per_gas: Decodable::decode(buf)?,
-                    gas_limit: Decodable::decode(buf)?,
-                    to: Decodable::decode(buf)?,
-                    value: Decodable::decode(buf)?,
-                    input: Bytes(Decodable::decode(buf)?),
-                    access_list: Decodable::decode(buf)?,
-                }),
-                _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
-            };
-
-            let signature = Signature::decode(buf)?;
-
-            let hash = keccak256(&original_encoding[..first_header.payload_length]);
-            let signed = TransactionSigned { transaction, hash, signature };
-            Ok(signed)
-        } else {
-            let mut transaction = Transaction::Legacy(TxLegacy {
-                nonce: Decodable::decode(buf)?,
-                gas_price: Decodable::decode(buf)?,
-                gas_limit: Decodable::decode(buf)?,
-                to: Decodable::decode(buf)?,
-                value: Decodable::decode(buf)?,
-                input: Bytes(Decodable::decode(buf)?),
-                chain_id: None,
-            });
-            let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(buf)?;
-            if let Some(id) = extracted_id {
-                transaction.set_chain_id(id);
-            }
-
-            let tx_length = first_header.payload_length + first_header.length();
-            let hash = keccak256(&original_encoding[..tx_length]);
-            let signed = TransactionSigned { transaction, hash, signature };
-            Ok(signed)
-        }
-    }
-}
+// === impl TransactionSigned ===
 
 impl TransactionSigned {
     /// Transaction signature.
@@ -758,6 +622,140 @@ impl TransactionSigned {
     }
 }
 
+impl From<TransactionSignedEcRecovered> for TransactionSigned {
+    fn from(recovered: TransactionSignedEcRecovered) -> Self {
+        recovered.signed_transaction
+    }
+}
+
+impl Encodable for TransactionSigned {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        self.encode_inner(out, true);
+    }
+
+    fn length(&self) -> usize {
+        self.payload_len_inner()
+    }
+}
+
+/// This `Decodable` implementation only supports decoding the transaction format sent over p2p.
+impl Decodable for TransactionSigned {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        // keep this around so we can use it to calculate the hash
+        let original_encoding = *buf;
+
+        let first_header = Header::decode(buf)?;
+        // if the transaction is encoded as a string then it is a typed transaction
+        if !first_header.list {
+            // Bytes that are going to be used to create a hash of transaction.
+            // For eip2728 types transaction header is not used inside hash
+            let original_encoding = *buf;
+
+            let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
+            buf.advance(1);
+            // decode the list header for the rest of the transaction
+            let header = Header::decode(buf)?;
+            if !header.list {
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+            }
+
+            // decode common fields
+            let transaction = match tx_type {
+                1 => Transaction::Eip2930(TxEip2930 {
+                    chain_id: Decodable::decode(buf)?,
+                    nonce: Decodable::decode(buf)?,
+                    gas_price: Decodable::decode(buf)?,
+                    gas_limit: Decodable::decode(buf)?,
+                    to: Decodable::decode(buf)?,
+                    value: Decodable::decode(buf)?,
+                    input: Bytes(Decodable::decode(buf)?),
+                    access_list: Decodable::decode(buf)?,
+                }),
+                2 => Transaction::Eip1559(TxEip1559 {
+                    chain_id: Decodable::decode(buf)?,
+                    nonce: Decodable::decode(buf)?,
+                    max_priority_fee_per_gas: Decodable::decode(buf)?,
+                    max_fee_per_gas: Decodable::decode(buf)?,
+                    gas_limit: Decodable::decode(buf)?,
+                    to: Decodable::decode(buf)?,
+                    value: Decodable::decode(buf)?,
+                    input: Bytes(Decodable::decode(buf)?),
+                    access_list: Decodable::decode(buf)?,
+                }),
+                _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
+            };
+
+            let signature = Signature::decode(buf)?;
+
+            let hash = keccak256(&original_encoding[..first_header.payload_length]);
+            let signed = TransactionSigned { transaction, hash, signature };
+            Ok(signed)
+        } else {
+            let mut transaction = Transaction::Legacy(TxLegacy {
+                nonce: Decodable::decode(buf)?,
+                gas_price: Decodable::decode(buf)?,
+                gas_limit: Decodable::decode(buf)?,
+                to: Decodable::decode(buf)?,
+                value: Decodable::decode(buf)?,
+                input: Bytes(Decodable::decode(buf)?),
+                chain_id: None,
+            });
+            let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(buf)?;
+            if let Some(id) = extracted_id {
+                transaction.set_chain_id(id);
+            }
+
+            let tx_length = first_header.payload_length + first_header.length();
+            let hash = keccak256(&original_encoding[..tx_length]);
+            let signed = TransactionSigned { transaction, hash, signature };
+            Ok(signed)
+        }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for TransactionSigned {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<TransactionSigned>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, Strategy};
+
+        any::<(Transaction, Signature)>()
+            .prop_map(move |(mut transaction, sig)| {
+                if let Some(chain_id) = transaction.chain_id().cloned() {
+                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+                }
+                let mut tx =
+                    TransactionSigned { hash: Default::default(), signature: sig, transaction };
+                tx.hash = tx.recalculate_hash();
+                tx
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut transaction = Transaction::arbitrary(u)?;
+        if let Some(chain_id) = transaction.chain_id().cloned() {
+            // Otherwise we might overflow when calculating `v` on `recalculate_hash`
+            transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+        }
+
+        let mut tx = TransactionSigned {
+            hash: Default::default(),
+            signature: Signature::arbitrary(u)?,
+            transaction,
+        };
+        tx.hash = tx.recalculate_hash();
+
+        Ok(tx)
+    }
+}
+
 /// Signed transaction with recovered signer.
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
@@ -768,16 +766,6 @@ pub struct TransactionSignedEcRecovered {
     #[deref]
     #[as_ref]
     signed_transaction: TransactionSigned,
-}
-
-impl Encodable for TransactionSignedEcRecovered {
-    fn length(&self) -> usize {
-        self.signed_transaction.length()
-    }
-
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.signed_transaction.encode(out)
-    }
 }
 
 impl TransactionSignedEcRecovered {
@@ -812,6 +800,16 @@ impl FromRecoveredTransaction for TransactionSignedEcRecovered {
     #[inline]
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         tx
+    }
+}
+
+impl Encodable for TransactionSignedEcRecovered {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        self.signed_transaction.encode(out)
+    }
+
+    fn length(&self) -> usize {
+        self.signed_transaction.length()
     }
 }
 

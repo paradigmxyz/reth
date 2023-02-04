@@ -19,6 +19,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_metrics_common::metered_sender::MeteredSender;
 use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
 use reth_tasks::TaskExecutor;
@@ -91,7 +92,7 @@ pub(crate) struct SessionManager {
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
-    active_session_tx: mpsc::Sender<ActiveSessionMessage>,
+    active_session_tx: MeteredSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
@@ -129,7 +130,7 @@ impl SessionManager {
             active_sessions: Default::default(),
             pending_sessions_tx,
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
-            active_session_tx,
+            active_session_tx: MeteredSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
         }

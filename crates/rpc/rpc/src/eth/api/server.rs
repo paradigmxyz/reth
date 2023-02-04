@@ -42,7 +42,7 @@ where
     }
 
     async fn accounts(&self) -> Result<Vec<Address>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApiSpec::accounts(self))
     }
 
     fn block_number(&self) -> Result<U256> {

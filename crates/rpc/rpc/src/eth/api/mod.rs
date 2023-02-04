@@ -7,13 +7,18 @@ use crate::eth::signer::EthSigner;
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{ChainInfo, U64};
+use reth_primitives::{
+    rpc::{BlockId, BlockNumber},
+    Address, ChainInfo, H256, U64,
+};
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
+mod block;
 mod server;
+mod state;
 mod transactions;
 
 /// `Eth` API trait.
@@ -29,6 +34,9 @@ pub trait EthApiSpec: Send + Sync {
 
     /// Returns client chain info
     fn chain_info(&self) -> Result<ChainInfo>;
+
+    /// Returns a list of addresses owned by client.
+    fn accounts(&self) -> Vec<Address>;
 }
 
 /// `Eth` API implementation.
@@ -69,6 +77,58 @@ impl<Pool, Client, Network> EthApi<Pool, Client, Network> {
     }
 }
 
+// === State access helpers ===
+
+impl<Pool, Client, Network> EthApi<Pool, Client, Network>
+where
+    Client: BlockProvider + StateProviderFactory + 'static,
+{
+    fn convert_block_number(&self, num: BlockNumber) -> Result<Option<u64>> {
+        self.client().convert_block_number(num)
+    }
+
+    /// Returns the state at the given [BlockId] enum.
+    pub(crate) fn state_at_block_id(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+        match block_id {
+            BlockId::Hash(hash) => self.state_at_hash(H256(hash.0)).map(Some),
+            BlockId::Number(num) => self.state_at_block_number(num),
+        }
+    }
+
+    /// Returns the state at the given [BlockNumber] enum
+    ///
+    /// Returns `None` if no state available.
+    pub(crate) fn state_at_block_number(
+        &self,
+        num: BlockNumber,
+    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+        if let Some(number) = self.convert_block_number(num)? {
+            self.state_at_number(number).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Returns the state at the given block number
+    pub(crate) fn state_at_hash(
+        &self,
+        block_hash: H256,
+    ) -> Result<<Client as StateProviderFactory>::HistorySP<'_>> {
+        self.client().history_by_block_hash(block_hash)
+    }
+
+    /// Returns the state at the given block number
+    pub(crate) fn state_at_number(
+        &self,
+        block_number: u64,
+    ) -> Result<<Client as StateProviderFactory>::HistorySP<'_>> {
+        self.client().history_by_block_number(block_number)
+    }
+}
+
 #[async_trait]
 impl<Pool, Client, Network> EthApiSpec for EthApi<Pool, Client, Network>
 where
@@ -92,6 +152,10 @@ where
     /// Returns the current info for the chain
     fn chain_info(&self) -> Result<ChainInfo> {
         self.client().chain_info()
+    }
+
+    fn accounts(&self) -> Vec<Address> {
+        self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
     }
 }
 

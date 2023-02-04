@@ -54,6 +54,7 @@ mod error;
 mod id;
 mod pipeline;
 mod stage;
+mod trie;
 mod util;
 
 #[allow(missing_docs)]

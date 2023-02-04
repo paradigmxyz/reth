@@ -138,18 +138,20 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
                 }))
             }
         };
+        let block_hash = block.header.hash();
+        let parent_hash = block.parent_hash;
 
         // The block already exists in our database
-        if self.client.is_known(&block.hash())? {
-            return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block.hash()))
+        if self.client.is_known(&block_hash)? {
+            return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash))
         }
 
-        let Some(parent) = self.client.block(BlockId::Hash(EthersH256(block.parent_hash.0)))? else {
+        let Some(parent) = self.client.block(BlockId::Hash(EthersH256(parent_hash.0)))? else {
              // TODO: cache block for storing later
              return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
         };
 
-        if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
+        if let Some(parent_td) = self.client.header_td(&parent_hash)? {
             if Some(parent_td) <= self.chain_spec.paris_status().terminal_total_difficulty() {
                 return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                     validation_error: EngineApiError::PayloadPreMerge.to_string(),
@@ -167,26 +169,17 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             }))
         }
 
-        let (header, body, _) = block.split();
-        let transactions = body
-            .into_iter()
-            .map(|tx| {
-                let tx_hash = tx.hash;
-                tx.into_ecrecovered().ok_or(EngineApiError::PayloadSignerRecovery { hash: tx_hash })
-            })
-            .collect::<Result<Vec<_>, EngineApiError>>()?;
         let mut state_provider = SubState::new(State::new(&*self.client));
         match executor::execute_and_verify_receipt(
-            &header,
-            &transactions,
-            &[],
+            &block.unseal(),
+            None,
             &self.chain_spec,
             &mut state_provider,
         ) {
-            Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, header.hash())),
+            Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash)),
             Err(err) => Ok(PayloadStatus::new(
                 PayloadStatusEnum::Invalid { validation_error: err.to_string() },
-                header.parent_hash, // The parent hash is already in our database hence it is valid
+                parent_hash, // The parent hash is already in our database hence it is valid
             )),
         }
     }

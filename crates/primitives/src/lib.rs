@@ -54,7 +54,7 @@ pub use log::Log;
 pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
-pub use storage::StorageEntry;
+pub use storage::{StorageEntry, StorageTrieEntry};
 pub use transaction::{
     AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction, Signature,
     Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,

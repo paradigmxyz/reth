@@ -1,12 +1,19 @@
 use async_trait::async_trait;
-use reth_primitives::{Block, Bloom, H256};
+use reth_primitives::{Address, Block, Bloom, H256};
 use thiserror::Error;
 
-/// Takes block and executes it, returns error
+/// An executor capable of executing a block.
 #[async_trait]
-pub trait BlockExecutor: Send + Sync {
-    /// Execute block
-    async fn execute(&self, _block: Block) -> Error;
+pub trait BlockExecutor<T> {
+    /// Execute a block.
+    ///
+    /// The number of `senders` should be equal to the number of transactions in the block.
+    ///
+    /// If no senders are specified, the `execute` function MUST recover the senders for the
+    /// provided block's transactions internally. We use this to allow for calculating senders in
+    /// parallel in e.g. staged sync, so that execution can happen without paying for sender
+    /// recovery costs.
+    fn execute(&mut self, block: &Block, senders: Option<Vec<Address>>) -> Result<T, Error>;
 }
 
 /// BlockExecutor Errors
@@ -17,6 +24,8 @@ pub enum Error {
     VerificationFailed,
     #[error("Fatal internal error")]
     ExecutionFatalError,
+    #[error("Failed to recover sender for transaction")]
+    SenderRecoveryError,
     #[error("Receipt cumulative gas used {got:?} is different from expected {expected:?}")]
     ReceiptCumulativeGasUsedDiff { got: u64, expected: u64 },
     #[error("Receipt log count {got:?} is different from expected {expected:?}.")]
