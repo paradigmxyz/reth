@@ -19,9 +19,9 @@ pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpec, eyre::Error> {
 /// to a custom one.
 pub fn genesis_value_parser(s: &str) -> Result<ChainSpec, eyre::Error> {
     Ok(match s {
-        "mainnet" => MAINNET.clone().into(),
-        "goerli" => GOERLI.clone().into(),
-        "sepolia" => SEPOLIA.clone().into(),
+        "mainnet" => MAINNET.clone(),
+        "goerli" => GOERLI.clone(),
+        "sepolia" => SEPOLIA.clone(),
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
