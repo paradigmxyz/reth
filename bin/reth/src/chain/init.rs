@@ -49,7 +49,17 @@ impl InitCommand {
         info!(target: "reth::cli", "Database opened");
 
         info!(target: "reth::cli", ttd=?self.chain.paris_ttd, "Initializing genesis");
-        init_genesis(db, self.chain.clone())?;
+        let genesis_hash = init_genesis(db, self.chain.clone())?;
+
+        if genesis_hash != self.chain.genesis_hash() {
+            // TODO: better error text
+            return Err(eyre::eyre!(
+                "Genesis hash mismatch: expected {}, got {}",
+                self.chain.genesis_hash(),
+                genesis_hash
+            ))
+        }
+
         Ok(())
     }
 }

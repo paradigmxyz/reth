@@ -76,7 +76,16 @@ impl ImportCommand {
         info!(target: "reth::cli", "Database opened");
 
         info!(target: "reth::cli", ttd=?self.chain.paris_ttd, "Initializing genesis");
-        init_genesis(db.clone(), self.chain.clone())?;
+        let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
+
+        if genesis_hash != self.chain.genesis_hash() {
+            // TODO: better error text
+            return Err(eyre::eyre!(
+                "Genesis hash mismatch: expected {}, got {}",
+                self.chain.genesis_hash(),
+                genesis_hash
+            ))
+        }
 
         // create a new FileClient
         info!(target: "reth::cli", "Importing chain file");
@@ -103,7 +112,7 @@ impl ImportCommand {
         info!(target: "reth::cli", "Starting sync pipeline");
         pipeline.run(db.clone()).await?;
 
-        info!(target: "reth::cli", "Finishing up");
+        info!(target: "reth::cli", "Successfully completed block import!");
         Ok(())
     }
 
