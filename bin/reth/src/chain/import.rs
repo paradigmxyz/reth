@@ -21,7 +21,7 @@ use reth_stages::{
     Pipeline, StageSet,
 };
 use std::sync::Arc;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Imports a chain file by parsing the blocks contained in the file and running the sync pipeline
 /// on the loaded blocks.
