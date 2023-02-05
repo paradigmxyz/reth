@@ -1,7 +1,7 @@
-use http::{HeaderMap, Response, StatusCode};
+use http::{HeaderMap, Response, StatusCode, header};
 use tracing::error;
 
-use crate::{AuthValidator, JwtSecret};
+use crate::{AuthValidator, JwtError, JwtSecret};
 
 /// Implements JWT validation logics and integrates
 /// to an Http [`AuthLayer`][crate::layers::AuthLayer]
@@ -30,13 +30,14 @@ impl AuthValidator for JwtAuthValidator {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!(target = "engine::jwt-validator", "{e}");
-                    let response = err_response();
+                    let response = err_response(e);
                     Err(response)
                 }
             },
             None => {
-                error!(target = "engine::jwt-validator", "Missing JWT header");
-                let response = err_response();
+                let e = JwtError::MissingOrInvalidAuthorizationHeader;
+                error!(target = "engine::jwt-validator", "{e}");
+                let response = err_response(e);
                 Err(response)
             }
         }
@@ -46,7 +47,7 @@ impl AuthValidator for JwtAuthValidator {
 /// This is an utility function that retrieves a bearer
 /// token from an authorization Http header.
 fn get_bearer(headers: &HeaderMap) -> Option<String> {
-    let header = headers.get("authorization")?;
+    let header = headers.get(header::AUTHORIZATION)?;
     let auth: &str = header.to_str().ok()?;
     let prefix = "Bearer ";
     let index = auth.find(prefix)?;
@@ -54,10 +55,11 @@ fn get_bearer(headers: &HeaderMap) -> Option<String> {
     Some(token.into())
 }
 
-fn err_response() -> Response<hyper::Body> {
-    let body = hyper::Body::empty();
-    // We build a static response.
-    // So we are safe to "expect" on the result
+fn err_response(err: JwtError) -> Response<hyper::Body> {
+    let body = hyper::Body::from(err.to_string());
+    // We build a response from an error message.
+    // We don't cope with headers or other structured fields.
+    // Then we are safe to "expect" on the result.
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
         .body(body)

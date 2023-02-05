@@ -25,6 +25,8 @@ pub enum JwtError {
     InvalidSignature,
     #[error("The iat (issued-at) claim is not within +-60 seconds from the current time")]
     InvalidIssuanceTimestamp,
+    #[error("Autorization header is missing or invalid")]
+    MissingOrInvalidAuthorizationHeader,
     #[error("JWT decoding error {0}")]
     JwtDecodingError(String),
 }

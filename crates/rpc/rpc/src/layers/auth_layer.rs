@@ -162,11 +162,9 @@ where
 #[cfg(test)]
 mod tests {
 
-    use http::{header, HeaderMap};
+    use http::{header, Method, Request, StatusCode};
+    use hyper::{body, Body};
     use jsonrpsee::{
-        core::{client::ClientT, Error},
-        http_client::{HttpClient, HttpClientBuilder},
-        rpc_params,
         server::{RandomStringIdProvider, ServerBuilder, ServerHandle},
         RpcModule,
     };
@@ -175,12 +173,12 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use crate::{layers::jwt_secret::Claims, JwtAuthValidator, JwtSecret};
-
     use super::AuthLayer;
+    use crate::{layers::jwt_secret::Claims, JwtAuthValidator, JwtError, JwtSecret};
 
     const AUTH_PORT: u32 = 8551;
     const AUTH_ADDR: &str = "0.0.0.0";
+    const SECRET: &str = "f79ae8046bc11c9927afe911db7143c51a806c4a537cc08e0d37140b0192f430";
 
     #[tokio::test]
     async fn test_jwt_layer() {
@@ -189,71 +187,89 @@ mod tests {
         valid_jwt().await;
         missing_jwt_error().await;
         wrong_jwt_signature_error().await;
+        invalid_issuance_timestamp_error().await;
+        jwt_decode_error().await;
     }
 
     async fn valid_jwt() {
         let claims = Claims { iat: to_u64(SystemTime::now()), exp: 10000000000 };
-        let secret = JwtSecret::random();
+        let secret = JwtSecret::from_hex(SECRET).unwrap(); // Same secret as the server
         let jwt = secret.encode(&claims).unwrap();
-
-        let headers = auth_header(Some(jwt));
-        let client = build_client(headers);
-        let server = spawn_server(secret).await;
-
-        let result: String = client.request("greet_melkor", rpc_params!()).await.unwrap();
-
-        let expected = "You are the dark lord".to_string();
-        assert_eq!(result, expected);
-
-        server.stop().unwrap();
-        server.stopped().await;
+        let (status, _) = send_request(Some(jwt)).await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     async fn missing_jwt_error() {
-        let empty_headers = auth_header(None);
-        let client = build_client(empty_headers);
-        let secret = JwtSecret::random();
-        let server = spawn_server(secret).await;
-
-        let result: Result<String, jsonrpsee::core::Error> =
-            client.request("greet_melkor", rpc_params!()).await;
-
-        assert!(matches!(result, Err(Error::Transport(_))));
-
-        server.stop().unwrap();
-        server.stopped().await;
+        let (status, body) = send_request(None).await;
+        let expected = JwtError::MissingOrInvalidAuthorizationHeader;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body, expected.to_string());
     }
 
     async fn wrong_jwt_signature_error() {
-        // We sign JWT claims with a secret different from the server's secret
+        // This secret is different from the server. This will generate a
+        // different signature
+        let secret = JwtSecret::random();
         let claims = Claims { iat: to_u64(SystemTime::now()), exp: 10000000000 };
-        let secret_1 = JwtSecret::random();
-        let jwt = secret_1.encode(&claims).unwrap();
+        let jwt = secret.encode(&claims).unwrap();
 
-        let headers = auth_header(Some(jwt));
-        let client = build_client(headers);
+        let (status, body) = send_request(Some(jwt)).await;
+        let expected = JwtError::InvalidSignature;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body, expected.to_string());
+    }
 
-        // We spawn a server with a different secret
-        let secret_2 = JwtSecret::random();
-        let server = spawn_server(secret_2).await;
+    async fn invalid_issuance_timestamp_error() {
+        let secret = JwtSecret::from_hex(SECRET).unwrap(); // Same secret as the server
 
-        let result: Result<String, jsonrpsee::core::Error> =
-            client.request("greet_melkor", rpc_params!()).await;
+        let iat = to_u64(SystemTime::now()) + 1000;
+        let claims = Claims { iat, exp: 10000000000 };
+        let jwt = secret.encode(&claims).unwrap();
 
-        assert!(matches!(result, Err(Error::Transport(_))));
+        let (status, body) = send_request(Some(jwt)).await;
+        let expected = JwtError::InvalidIssuanceTimestamp;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body, expected.to_string());
+    }
+
+    async fn jwt_decode_error() {
+        let jwt = "this jwt has serious encoding problems".to_string();
+        let (status, body) = send_request(Some(jwt)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body, "JWT decoding error Error(InvalidToken)".to_string());
+    }
+
+    async fn send_request(jwt: Option<String>) -> (StatusCode, String) {
+        let server = spawn_server().await;
+        let client = hyper::Client::new();
+
+        let jwt = jwt.unwrap_or("".into());
+        let address = format!("http://{AUTH_ADDR}:{AUTH_PORT}");
+        let bearer = format!("Bearer {jwt}");
+        let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;
+
+        let req = Request::builder()
+            .method(Method::POST)
+            .header(header::AUTHORIZATION, bearer)
+            .header(header::CONTENT_TYPE, "application/json")
+            .uri(address)
+            .body(Body::from(body))
+            .unwrap();
+
+        let res = client.request(req).await.unwrap();
+        let status = res.status();
+        let body_bytes = body::to_bytes(res.into_body()).await.unwrap();
+        let body = String::from_utf8(body_bytes.to_vec()).expect("response was not valid utf-8");
 
         server.stop().unwrap();
         server.stopped().await;
-    }
 
-    fn build_client(headers: HeaderMap) -> HttpClient {
-        let address = format!("http://{AUTH_ADDR}:{AUTH_PORT}");
-        HttpClientBuilder::default().set_headers(headers).build(&address).unwrap()
+        (status, body)
     }
 
     /// Spawn a new RPC server equipped with a JwtLayer auth middleware.
-    /// `secret` is the JWT secret provided to the middleware.
-    async fn spawn_server(secret: JwtSecret) -> ServerHandle {
+    async fn spawn_server() -> ServerHandle {
+        let secret = JwtSecret::from_hex(SECRET).unwrap(); 
         let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");
         let validator = JwtAuthValidator::new(secret);
         let layer = AuthLayer::new(validator);
@@ -274,15 +290,6 @@ mod tests {
         let handle = server.start(module).unwrap();
 
         handle
-    }
-
-    fn auth_header(jwt: Option<String>) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        if let Some(jwt) = jwt {
-            let bearer = format!("Bearer {jwt}");
-            headers.insert(header::AUTHORIZATION, bearer.parse().unwrap());
-        }
-        headers
     }
 
     fn to_u64(time: SystemTime) -> u64 {
