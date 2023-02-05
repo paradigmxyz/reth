@@ -265,15 +265,16 @@ impl SessionManager {
         }
     }
 
-    /// Sends a disconnect message with  TooManyPeers reason.
-    ///
-    /// Called when We currently don't have additional capacity to establish a session from an
-    /// incoming connection.
-    pub(crate) fn disconnect_incoming_connection(&self, stream: TcpStream) {
+    /// Sends a disconnect message to the peer with the given [DisconnectReason].
+    pub(crate) fn disconnect_incoming_connection(
+        &self,
+        stream: TcpStream,
+        reason: DisconnectReason,
+    ) {
         self.spawn(async move {
             let sink = LengthDelimitedCodec::default().framed(stream);
             let mut stream = UnauthedP2PStream::new(sink);
-            let _ = stream.send_disconnect(DisconnectReason::TooManyPeers).await;
+            let _ = stream.send_disconnect(reason).await;
         });
     }
 

@@ -9,7 +9,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    Status,
+    DisconnectReason, Status,
 };
 use reth_primitives::PeerId;
 use reth_provider::BlockProvider;
@@ -199,7 +199,10 @@ where
                         }
                         InboundConnectionError::ExceedsLimit(limit) => {
                             trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
-                            self.sessions.disconnect_incoming_connection(stream);
+                            self.sessions.disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
                     return None
