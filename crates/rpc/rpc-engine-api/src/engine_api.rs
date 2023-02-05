@@ -603,7 +603,7 @@ mod tests {
         #[tokio::test]
         async fn empty_head() {
             let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
+            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
@@ -631,12 +631,13 @@ mod tests {
                     validation_error: EngineApiError::ForkchoiceEmptyHead.to_string(),
                 })
             );
+            assert!(!tip_rx.has_changed().unwrap());
         }
 
         #[tokio::test]
         async fn unknown_head_hash() {
             let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
+            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
@@ -660,12 +661,13 @@ mod tests {
                 result.unwrap().unwrap(),
                 ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing)
             );
+            assert!(!tip_rx.has_changed().unwrap());
         }
 
         #[tokio::test]
         async fn unknown_finalized_hash() {
             let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
+            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
             let client = Arc::new(MockEthProvider::default());
             let engine = EngineApi {
                 client: client.clone(),
@@ -697,6 +699,7 @@ mod tests {
                 result.unwrap().unwrap(),
                 ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing)
             );
+            assert!(!tip_rx.has_changed().unwrap());
         }
 
         #[tokio::test]
