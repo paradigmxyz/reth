@@ -191,7 +191,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
     pub fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
-        _payload_attributes: Option<PayloadAttributes>,
+        payload_attributes: Option<PayloadAttributes>,
     ) -> EngineApiResult<ForkchoiceUpdated> {
         let ForkchoiceState { head_block_hash, finalized_block_hash, .. } = fork_choice_state;
 
@@ -215,7 +215,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             tracing::error!(target: "rpc::engine_api", ?error, "Failed to update forkchoice state");
         }
 
-        // TODO: optionally build the block
+        if let Some(_attr) = payload_attributes {
+            // TODO: optionally build the block
+        }
 
         let chain_info = self.client.chain_info()?;
         Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
@@ -299,7 +301,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::generators::random_block;
-    use reth_primitives::H256;
+    use reth_primitives::{H256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -307,7 +309,7 @@ mod tests {
         use super::*;
         use bytes::{Bytes, BytesMut};
         use reth_interfaces::test_utils::generators::random_header;
-        use reth_primitives::{Block, MAINNET};
+        use reth_primitives::Block;
         use reth_rlp::DecodeError;
 
         fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> SealedBlock {
@@ -566,8 +568,6 @@ mod tests {
     // non exhaustive tests for engine_getPayload
     // TODO: amend when block building is implemented
     mod get_payload {
-        use reth_primitives::MAINNET;
-
         use super::*;
 
         #[tokio::test]
@@ -595,10 +595,163 @@ mod tests {
         }
     }
 
+    mod fork_choice_updated {
+        use reth_interfaces::test_utils::generators::random_header;
+
+        use super::*;
+
+        #[tokio::test]
+        async fn empty_head() {
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
+            let engine = EngineApi {
+                client: Arc::new(MockEthProvider::default()),
+                chain_spec: MAINNET.clone(),
+                local_store: Default::default(),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
+            };
+
+            tokio::spawn(engine);
+
+            let (result_tx, result_rx) = oneshot::channel();
+            msg_tx
+                .send(EngineApiMessage::ForkchoiceUpdated(
+                    ForkchoiceState::default(),
+                    None,
+                    result_tx,
+                ))
+                .expect("failed to send engine msg");
+
+            let result = result_rx.await;
+            assert_matches!(result, Ok(Ok(_)));
+            assert_eq!(
+                result.unwrap().unwrap(),
+                ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
+                    validation_error: EngineApiError::ForkchoiceEmptyHead.to_string(),
+                })
+            );
+        }
+
+        #[tokio::test]
+        async fn unknown_head_hash() {
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
+            let engine = EngineApi {
+                client: Arc::new(MockEthProvider::default()),
+                chain_spec: MAINNET.clone(),
+                local_store: Default::default(),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
+            };
+
+            tokio::spawn(engine);
+
+            let state = ForkchoiceState { head_block_hash: H256::random(), ..Default::default() };
+
+            let (result_tx, result_rx) = oneshot::channel();
+            msg_tx
+                .send(EngineApiMessage::ForkchoiceUpdated(state, None, result_tx))
+                .expect("failed to send engine msg");
+
+            let result = result_rx.await;
+            assert_matches!(result, Ok(Ok(_)));
+            assert_eq!(
+                result.unwrap().unwrap(),
+                ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing)
+            );
+        }
+
+        #[tokio::test]
+        async fn unknown_finalized_hash() {
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
+            let client = Arc::new(MockEthProvider::default());
+            let engine = EngineApi {
+                client: client.clone(),
+                chain_spec: MAINNET.clone(),
+                local_store: Default::default(),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
+            };
+
+            tokio::spawn(engine);
+
+            let head = random_header(100, None);
+            client.add_header(head.hash(), head.clone().unseal());
+
+            let state = ForkchoiceState {
+                head_block_hash: head.hash(),
+                finalized_block_hash: H256::random(),
+                ..Default::default()
+            };
+
+            let (result_tx, result_rx) = oneshot::channel();
+            msg_tx
+                .send(EngineApiMessage::ForkchoiceUpdated(state, None, result_tx))
+                .expect("failed to send engine msg");
+
+            let result = result_rx.await;
+            assert_matches!(result, Ok(Ok(_)));
+            assert_eq!(
+                result.unwrap().unwrap(),
+                ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing)
+            );
+        }
+
+        #[tokio::test]
+        async fn forkchoice_state_is_updated() {
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
+            let client = Arc::new(MockEthProvider::default());
+            let engine = EngineApi {
+                client: client.clone(),
+                chain_spec: MAINNET.clone(),
+                local_store: Default::default(),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
+            };
+
+            tokio::spawn(engine);
+
+            let finalized = random_header(90, None);
+            let head = random_header(100, None);
+            client.extend_headers([
+                (head.hash(), head.clone().unseal()),
+                (finalized.hash(), finalized.clone().unseal()),
+            ]);
+
+            let state = ForkchoiceState {
+                head_block_hash: head.hash(),
+                finalized_block_hash: finalized.hash(),
+                ..Default::default()
+            };
+
+            let (result_tx, result_rx) = oneshot::channel();
+            msg_tx
+                .send(EngineApiMessage::ForkchoiceUpdated(state.clone(), None, result_tx))
+                .expect("failed to send engine msg");
+
+            let result = result_rx.await;
+            assert_matches!(result, Ok(Ok(_)));
+            assert_eq!(
+                result.unwrap().unwrap(),
+                ForkchoiceUpdated {
+                    payload_id: None,
+                    payload_status: PayloadStatus {
+                        status: PayloadStatusEnum::Valid,
+                        latest_valid_hash: Some(head.hash())
+                    }
+                }
+            );
+
+            assert!(tip_rx.has_changed().unwrap());
+            assert_eq!(tip_rx.borrow().clone(), state);
+        }
+    }
+
     // https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-3
     mod exchange_transition_configuration {
-        use reth_primitives::MAINNET;
-
         use super::*;
 
         #[tokio::test]
