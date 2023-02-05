@@ -238,9 +238,21 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Disables Discv4 discovery.
+    pub fn no_discv4_discovery(mut self) -> Self {
+        self.discovery_v4_builder = None;
+        self
+    }
+
     /// Sets the dns discovery config to use.
     pub fn dns_discovery(mut self, config: DnsDiscoveryConfig) -> Self {
         self.dns_discovery_config = Some(config);
+        self
+    }
+
+    /// Disables DNS discovery
+    pub fn no_dns_discovery(mut self) -> Self {
+        self.dns_discovery_config = None;
         self
     }
 
@@ -258,9 +270,10 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// disables discovery.
+    /// Disables all discovery services.
     pub fn disable_discovery(&mut self) {
         self.discovery_v4_builder = None;
+        self.dns_discovery_config = None;
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
