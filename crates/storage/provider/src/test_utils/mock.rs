@@ -166,31 +166,7 @@ impl AccountProvider for MockEthProvider {
         Ok(self.accounts.lock().get(&address).cloned().map(|a| a.account))
     }
 
-     /// Get account code by its address
-     fn account_code(&self, addr: Address) -> Result<Option<Bytes>> {
-        // Get basic account information
-        let acc = match self.basic_account(addr)? {
-            Some(acc) => acc,
-            None => return Ok(None),
-        };
-        // Get code hash
-        let code_hash = acc.bytecode_hash;
-        // Get the code from the code hash
-        self.code_by_hash(code_hash.unwrap())
-    }
-
-    /// Get account code by its hash
-    fn code_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
-        let lock = self.accounts.lock();
-        Ok(lock.values().find_map(|account| {
-            match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
-                (Some(bytecode_hash), Some(bytecode)) if *bytecode_hash == code_hash => {
-                    Some(bytecode.clone())
-                }
-                _ => None,
-            }
-        }))
-    }
+    
 }
 
 impl StateProvider for MockEthProvider {
