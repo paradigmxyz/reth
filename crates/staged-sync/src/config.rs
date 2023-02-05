@@ -113,7 +113,7 @@ impl Default for BodiesConfig {
         Self {
             downloader_request_limit: 200,
             downloader_stream_batch_size: 10000,
-            downloader_max_buffered_responses: 30000,
+            downloader_max_buffered_responses: 1000,
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
