@@ -1,4 +1,4 @@
-use http::{HeaderMap, Response, StatusCode, header};
+use http::{header, HeaderMap, Response, StatusCode};
 use tracing::error;
 
 use crate::{AuthValidator, JwtError, JwtSecret};
