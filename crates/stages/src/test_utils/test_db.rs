@@ -19,7 +19,7 @@ use crate::db::Transaction;
 /// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
 ///
-/// ```rust
+/// ```rust,ignore
 /// let tx = TestTransaction::default();
 /// stage.execute(&mut tx.container(), input);
 /// ```
@@ -92,7 +92,7 @@ impl TestTransaction {
     /// Map a collection of values and store them in the database.
     /// This function commits the transaction before exiting.
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let tx = TestTransaction::default();
     /// tx.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
@@ -116,7 +116,7 @@ impl TestTransaction {
     /// optional last element that was stored.
     /// This function commits the transaction before exiting.
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let tx = TestTransaction::default();
     /// tx.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
