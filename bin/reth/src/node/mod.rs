@@ -80,6 +80,10 @@ pub struct Command {
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
+
+    /// Runs the sync only up to the specified block
+    #[arg(long = "debug.max-block", help_heading = "Debug")]
+    max_block: u64,
 }
 
 impl Command {
@@ -200,6 +204,7 @@ impl Command {
         let stage_conf = &config.stages;
 
         let pipeline = Pipeline::builder()
+            .with_max_block(self.max_block)
             .with_sync_state_updater(network.clone())
             .add_stages(
                 OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
