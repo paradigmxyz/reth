@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::StageId;
 
 mod macros;
