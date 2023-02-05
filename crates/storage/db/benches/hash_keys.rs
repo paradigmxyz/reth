@@ -18,6 +18,15 @@ use std::{collections::HashSet, time::Instant};
 criterion_group!(benches, hash_keys);
 criterion_main!(benches);
 
+/// It benchmarks the insertion of rows into a table where `Keys` are hashes.
+/// * `append`: Table is empty. Sorts during benchmark.
+/// * `insert_sorted`: Table is preloaded with rows (same as batch size). Sorts during benchmark.
+/// * `insert_unsorted`: Table is preloaded with rows (same as batch size).
+/// * `put_sorted`: Table is preloaded with rows (same as batch size). Sorts during benchmark.
+/// * `put_unsorted`: Table is preloaded with rows (same as batch size).
+///
+/// It does the above steps with different batches of rows. 10_000, 100_000, 1_000_000. In the
+/// end, the table statistics are shown (eg. number of pages, table size...)
 pub fn hash_keys(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash-Keys Table Insertion");
 
