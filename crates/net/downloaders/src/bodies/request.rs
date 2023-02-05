@@ -167,11 +167,13 @@ where
                 self.buffer.push(BlockResponse::Empty(next_header));
             } else {
                 let next_body = bodies.next().unwrap();
-                let block = SealedBlock {
-                    header: next_header,
-                    body: next_body.transactions,
-                    ommers: next_body.ommers.into_iter().map(Header::seal_slow).collect(),
-                };
+                let ommers = next_body
+                    .ommers
+                    .into_iter()
+                    .map(|h| self.consensus.seal_header(h))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let block =
+                    SealedBlock { header: next_header, body: next_body.transactions, ommers };
 
                 if let Err(error) = self.consensus.pre_validate_block(&block) {
                     // Put the header back and return an error
