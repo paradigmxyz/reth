@@ -19,5 +19,8 @@ target/
 # Generated test-vectors for DB
 testdata/micro/db
 
+# Generated data for stage benchmarks
+crates/stages/testdata
+
 # prometheus data dir
 data/
