@@ -160,6 +160,16 @@ impl NetworkHandle {
     pub fn bandwidth_meter(&self) -> &BandwidthMeter {
         &self.inner.bandwidth_meter
     }
+
+    /// Send message to gracefully shutdown node.
+    ///
+    /// This will disconnect all active and pending sessions and prevent
+    /// new connections to be established.
+    pub async fn shutdown(&self) -> Result<(), oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send_message(NetworkHandleMessage::Shutdown(tx));
+        rx.await
+    }
 }
 
 // === API Implementations ===
@@ -302,4 +312,6 @@ pub(crate) enum NetworkHandleMessage {
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),
     /// Get PeerInfo for a specific peer
     GetPeerInfoById(PeerId, oneshot::Sender<Option<PeerInfo>>),
+    /// Gracefully shutdown network
+    Shutdown(oneshot::Sender<()>),
 }

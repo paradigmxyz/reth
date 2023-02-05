@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_eth_wire::DisconnectReason;
+use reth_eth_wire::{capability::Capability, DisconnectReason, HelloBuilder};
 use reth_primitives::PeerId;
 use reth_provider::{test_utils::NoopProvider, BlockProvider, HeaderProvider};
 use secp256k1::SecretKey;
@@ -281,17 +281,33 @@ where
     /// to any available IP and port.
     pub fn new(client: Arc<C>) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
-        Self::with_secret_key(client, secret_key)
+        let config = Self::network_config_builder(secret_key).build(Arc::clone(&client));
+        Self { config, client, secret_key }
     }
 
     /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
     /// available IP and port.
     pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = Self::network_config_builder(secret_key).build(Arc::clone(&client));
+        Self { config, client, secret_key }
+    }
+
+    /// Initialize the network with a given capabilities.
+    pub fn with_capabilities(client: Arc<C>, capabilities: Vec<Capability>) -> Self {
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let builder = Self::network_config_builder(secret_key);
+        let hello_message =
+            HelloBuilder::new(builder.get_peer_id()).capabilities(capabilities).build();
+        let config = builder.hello_message(hello_message).build(Arc::clone(&client));
+
+        Self { config, client, secret_key }
+    }
+
+    fn network_config_builder(secret_key: SecretKey) -> NetworkConfigBuilder {
+        NetworkConfigBuilder::new(secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
-            .build(Arc::clone(&client));
-        Self { config, client, secret_key }
     }
 }
 
