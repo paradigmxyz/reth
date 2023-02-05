@@ -32,7 +32,7 @@ pub struct SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { batch_size: 1000, commit_threshold: 5000 }
+        Self { batch_size: 250000, commit_threshold: 10000 }
     }
 }
 
