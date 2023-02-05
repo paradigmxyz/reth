@@ -88,6 +88,8 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
     let txs_range = 100..150;
 
     if !path.exists() {
+        // create the dirs
+        std::fs::create_dir_all(&path).unwrap();
         println!("Transactions testdata not found, generating to {:?}", path.display());
         let tx = TestTransaction::new(&path);
 

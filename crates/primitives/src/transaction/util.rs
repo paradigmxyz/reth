@@ -2,10 +2,9 @@ use crate::{keccak256, Address};
 
 pub(crate) mod secp256k1 {
     use super::*;
-    use ::secp256k1::SECP256K1;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
-        Error, Message,
+        Error, Message, SECP256K1,
     };
 
     /// secp256k1 signer recovery
