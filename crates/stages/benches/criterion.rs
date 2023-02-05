@@ -16,8 +16,7 @@ criterion_main!(benches);
 
 fn senders(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(2000));
-    group.warm_up_time(std::time::Duration::from_millis(2000));
+
     // don't need to run each stage for that many times
     group.sample_size(10);
 
@@ -33,8 +32,7 @@ fn senders(c: &mut Criterion) {
 
 fn tx_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(2000));
-    group.warm_up_time(std::time::Duration::from_millis(2000));
+
     // don't need to run each stage for that many times
     group.sample_size(10);
 

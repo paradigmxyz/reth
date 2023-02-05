@@ -20,8 +20,8 @@ criterion_main!(benches);
 
 pub fn hash_keys(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash-Keys Table Insertion");
-    group.measurement_time(std::time::Duration::from_millis(200));
-    group.warm_up_time(std::time::Duration::from_millis(200));
+
+    group.sample_size(10);
 
     measure_table_insertion::<TxHashNumber>(&mut group);
 }
