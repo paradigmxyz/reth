@@ -1,6 +1,10 @@
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    mdbx::{test_utils::create_test_db, tx::Tx, Env, EnvKind, WriteMap, RW},
+    mdbx::{
+        test_utils::{create_test_db, create_test_db_with_path},
+        tx::Tx,
+        Env, EnvKind, WriteMap, RW,
+    },
     models::{BlockNumHash, StoredBlockBody},
     table::Table,
     tables,
@@ -8,20 +12,21 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, path::Path, sync::Arc};
 
 use crate::db::Transaction;
 
 /// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
 ///
-/// ```rust
+/// ```rust,ignore
 /// let tx = TestTransaction::default();
 /// stage.execute(&mut tx.container(), input);
 /// ```
 #[derive(Debug)]
-pub(crate) struct TestTransaction {
-    tx: Arc<Env<WriteMap>>,
+pub struct TestTransaction {
+    /// WriteMap DB
+    pub tx: Arc<Env<WriteMap>>,
 }
 
 impl Default for TestTransaction {
@@ -32,18 +37,22 @@ impl Default for TestTransaction {
 }
 
 impl TestTransaction {
+    pub fn new(path: &Path) -> Self {
+        Self { tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)) }
+    }
+
     /// Return a database wrapped in [Transaction].
-    pub(crate) fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
+    pub fn inner(&self) -> Transaction<'_, Env<WriteMap>> {
         Transaction::new(self.tx.borrow()).expect("failed to create db container")
     }
 
     /// Get a pointer to an internal database.
-    pub(crate) fn inner_raw(&self) -> Arc<Env<WriteMap>> {
+    pub fn inner_raw(&self) -> Arc<Env<WriteMap>> {
         self.tx.clone()
     }
 
     /// Invoke a callback with transaction committing it afterwards
-    pub(crate) fn commit<F>(&self, f: F) -> Result<(), DbError>
+    pub fn commit<F>(&self, f: F) -> Result<(), DbError>
     where
         F: FnOnce(&mut Tx<'_, RW, WriteMap>) -> Result<(), DbError>,
     {
@@ -54,7 +63,7 @@ impl TestTransaction {
     }
 
     /// Invoke a callback with a read transaction
-    pub(crate) fn query<F, R>(&self, f: F) -> Result<R, DbError>
+    pub fn query<F, R>(&self, f: F) -> Result<R, DbError>
     where
         F: FnOnce(&Tx<'_, RW, WriteMap>) -> Result<R, DbError>,
     {
@@ -62,15 +71,16 @@ impl TestTransaction {
     }
 
     /// Check if the table is empty
-    pub(crate) fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
+    pub fn table_is_empty<T: Table>(&self) -> Result<bool, DbError> {
         self.query(|tx| {
             let last = tx.cursor_read::<T>()?.last()?;
             Ok(last.is_none())
         })
     }
 
+    #[allow(clippy::type_complexity)]
     /// Return full table as Vec
-    pub(crate) fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
+    pub fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
     where
         T::Key: Default + Ord,
     {
@@ -82,12 +92,12 @@ impl TestTransaction {
     /// Map a collection of values and store them in the database.
     /// This function commits the transaction before exiting.
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let tx = TestTransaction::default();
     /// tx.map_put::<Table, _, _>(&items, |item| item)?;
     /// ```
     #[allow(dead_code)]
-    pub(crate) fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
+    pub fn map_put<T, S, F>(&self, values: &[S], mut map: F) -> Result<(), DbError>
     where
         T: Table,
         S: Clone,
@@ -106,16 +116,12 @@ impl TestTransaction {
     /// optional last element that was stored.
     /// This function commits the transaction before exiting.
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let tx = TestTransaction::default();
     /// tx.transform_append::<Table, _, _>(&items, |prev, item| prev.unwrap_or_default() + item)?;
     /// ```
     #[allow(dead_code)]
-    pub(crate) fn transform_append<T, S, F>(
-        &self,
-        values: &[S],
-        mut transform: F,
-    ) -> Result<(), DbError>
+    pub fn transform_append<T, S, F>(&self, values: &[S], mut transform: F) -> Result<(), DbError>
     where
         T: Table,
         <T as Table>::Value: Clone,
@@ -135,11 +141,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Key]
-    pub(crate) fn ensure_no_entry_above<T, F>(
-        &self,
-        num: u64,
-        mut selector: F,
-    ) -> Result<(), DbError>
+    pub fn ensure_no_entry_above<T, F>(&self, num: u64, mut selector: F) -> Result<(), DbError>
     where
         T: Table,
         F: FnMut(T::Key) -> BlockNumber,
@@ -155,7 +157,7 @@ impl TestTransaction {
 
     /// Check that there is no table entry above a given
     /// number by [Table::Value]
-    pub(crate) fn ensure_no_entry_above_by_value<T, F>(
+    pub fn ensure_no_entry_above_by_value<T, F>(
         &self,
         num: u64,
         mut selector: F,
@@ -176,7 +178,7 @@ impl TestTransaction {
 
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
     /// that are supposed to be populated by the headers stage.
-    pub(crate) fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
+    pub fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
@@ -197,11 +199,7 @@ impl TestTransaction {
 
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
     /// Superset functionality of [TestTransaction::insert_headers].
-    pub(crate) fn insert_blocks<'a, I>(
-        &self,
-        blocks: I,
-        tx_offset: Option<u64>,
-    ) -> Result<(), DbError>
+    pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedBlock>,
     {
