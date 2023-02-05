@@ -43,3 +43,111 @@ where
         Ok(hash)
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use reth_transaction_pool::test_utils::testing_pool;
+
+    use crate::EthApi;
+    use test_utils::NoopClient;
+
+
+
+
+    #[tokio::test]
+    async fn send_raw_transaction() {
+
+        let pool = testing_pool();
+
+        let client = NoopClient::default();
+
+        
+        let eth_api = EthApi::new(client, pool, );
+
+    }
+
+
+
+    pub mod test_utils {
+        use reth_provider::{BlockProvider, StateProviderFactory, BlockHashProvider, StateProvider, AccountProvider};
+        use reth_interfaces::Result;
+        use reth_primitives::{ChainInfo, U256, rpc::BlockId, Block};
+
+        #[derive(Debug, Default)]
+        pub struct NoopClient;
+
+        pub struct NoopSP;
+
+        impl AccountProvider for NoopClient {
+            fn basic_account(&self,address:reth_primitives::Address) -> Result<Option<reth_primitives::Account> > {
+                todo!();
+            }
+        }
+
+        impl StateProvider for NoopClient {
+            fn storage(&self,account:reth_primitives::Address,storage_key:reth_primitives::StorageKey) -> Result<Option<reth_primitives::StorageValue> > {
+                todo!();
+            }
+
+            fn bytecode_by_hash(&self,code_hash:reth_primitives::H256) -> Result<Option<reth_primitives::Bytes> > {
+                todo!();
+            }
+
+        }
+
+
+        impl BlockHashProvider for NoopClient {
+
+            fn block_hash(&self,number:U256) -> Result<Option<reth_primitives::H256> > {
+                todo!();
+            }
+
+        }
+
+        impl BlockProvider for NoopClient {
+
+            fn chain_info(&self) -> Result<ChainInfo> {
+                todo!();
+            }
+
+            fn block_number(&self, hash: reth_primitives::H256) -> Result<Option<reth_primitives::BlockNumber>> {
+                todo!();
+            }
+
+            fn block(&self, id: BlockId) -> Result<Option<Block>> {
+                todo!();
+            }
+
+        }
+
+        impl StateProviderFactory for NoopClient {
+
+            type HistorySP<'a> = NoopClient where Self: 'a;
+            type LatestSP<'a> = NoopClient where Self: 'a;
+
+            fn latest(&self) -> Result<Self::LatestSP<'_>> {
+                todo!();
+            }
+            
+            fn history_by_block_number(&self, block: reth_primitives::BlockNumber) -> Result<Self::HistorySP<'_>> {
+                todo!();
+            }
+
+            fn history_by_block_hash(&self, block: reth_primitives::BlockHash) -> Result<Self::HistorySP<'_>> {
+                todo!();
+            }
+        }
+
+
+    }
+
+
+
+
+
+
+
+
+}
+
