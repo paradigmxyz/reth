@@ -23,7 +23,7 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// The Engine API response sender
@@ -36,7 +36,8 @@ pub struct EngineApi<Client> {
     client: Arc<Client>,
     /// Consensus configuration
     chain_spec: ChainSpec,
-    rx: UnboundedReceiverStream<EngineApiMessage>,
+    message_rx: UnboundedReceiverStream<EngineApiMessage>,
+    forkchoice_state_tx: watch::Sender<ForkchoiceState>,
     // TODO: Placeholder for storing future blocks. Make cache bounded.
     // Use [lru](https://crates.io/crates/lru) crate
     local_store: HashMap<H64, ExecutionPayload>,
@@ -47,8 +48,6 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
     fn on_message(&mut self, msg: EngineApiMessage) {
         match msg {
             EngineApiMessage::GetPayload(payload_id, tx) => {
-                // NOTE: Will always result in `PayloadUnknown` since we don't support block
-                // building for now.
                 let _ = tx.send(self.get_payload(payload_id).ok_or(EngineApiError::PayloadUnknown));
             }
             EngineApiMessage::NewPayload(payload, tx) => {
@@ -119,6 +118,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
 
     /// Called to retrieve the latest state of the network, validate new blocks, and maintain
     /// consistency between the Consensus and Execution layers.
+    ///
+    /// NOTE: Will always result in `PayloadUnknown` since we don't support block
+    /// building for now.
     pub fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload> {
         self.local_store.get(&payload_id).cloned()
     }
@@ -209,7 +211,11 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
         }
 
-        // TODO: update tip
+        if let Err(error) = self.forkchoice_state_tx.send(fork_choice_state) {
+            tracing::error!(target: "rpc::engine_api", ?error, "Failed to update forkchoice state");
+        }
+
+        // TODO: optionally build the block
 
         let chain_info = self.client.chain_info()?;
         Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
@@ -277,7 +283,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         loop {
-            match ready!(this.rx.poll_next_unpin(cx)) {
+            match ready!(this.message_rx.poll_next_unpin(cx)) {
                 Some(msg) => this.on_message(msg),
                 None => {
                     // channel closed
@@ -321,12 +327,14 @@ mod tests {
 
         #[tokio::test]
         async fn payload_validation() {
-            let (_tx, rx) = unbounded_channel();
+            let (_msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             let block = random_block(100, Some(H256::random()), Some(3), Some(0));
@@ -409,13 +417,15 @@ mod tests {
 
         #[tokio::test]
         async fn payload_known() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let client = Arc::new(MockEthProvider::default());
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
@@ -427,7 +437,8 @@ mod tests {
             client.add_header(block_hash, block.header.unseal());
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineApiMessage::NewPayload(execution_payload, result_tx))
+            msg_tx
+                .send(EngineApiMessage::NewPayload(execution_payload, result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -438,19 +449,22 @@ mod tests {
 
         #[tokio::test]
         async fn payload_parent_unknown() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
 
             let (result_tx, result_rx) = oneshot::channel();
             let block = random_block(100, Some(H256::random()), None, Some(0)); // payload must have no ommers
-            tx.send(EngineApiMessage::NewPayload(block.into(), result_tx))
+            msg_tx
+                .send(EngineApiMessage::NewPayload(block.into(), result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -461,14 +475,16 @@ mod tests {
 
         #[tokio::test]
         async fn payload_pre_merge() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
@@ -483,7 +499,8 @@ mod tests {
 
             client.add_block(parent.hash(), parent.clone().unseal());
 
-            tx.send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
+            msg_tx
+                .send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -496,14 +513,16 @@ mod tests {
 
         #[tokio::test]
         async fn invalid_payload_timestamp() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let chain_spec = MAINNET.clone();
             let client = Arc::new(MockEthProvider::default());
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
@@ -525,7 +544,8 @@ mod tests {
 
             client.add_block(parent.hash(), parent.clone().unseal());
 
-            tx.send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
+            msg_tx
+                .send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -552,12 +572,14 @@ mod tests {
 
         #[tokio::test]
         async fn payload_unknown() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
@@ -565,7 +587,8 @@ mod tests {
             let payload_id = H64::random();
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineApiMessage::GetPayload(payload_id, result_tx))
+            msg_tx
+                .send(EngineApiMessage::GetPayload(payload_id, result_tx))
                 .expect("failed to send engine msg");
 
             assert_matches!(result_rx.await, Ok(Err(EngineApiError::PayloadUnknown)));
@@ -580,13 +603,15 @@ mod tests {
 
         #[tokio::test]
         async fn terminal_td_mismatch() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let chain_spec = MAINNET.clone();
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
@@ -601,11 +626,12 @@ mod tests {
             };
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
-                transition_config.clone(),
-                result_tx,
-            ))
-            .expect("failed to send engine msg");
+            msg_tx
+                .send(EngineApiMessage::ExchangeTransitionConfiguration(
+                    transition_config.clone(),
+                    result_tx,
+                ))
+                .expect("failed to send engine msg");
 
             assert_matches!(
                 result_rx.await,
@@ -617,14 +643,16 @@ mod tests {
 
         #[tokio::test]
         async fn terminal_block_hash_mismatch() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let client = Arc::new(MockEthProvider::default());
             let chain_spec = MAINNET.clone();
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
@@ -644,11 +672,12 @@ mod tests {
 
             // Unknown block number
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
-                transition_config.clone(),
-                result_tx,
-            ))
-            .expect("failed to send engine msg");
+            msg_tx
+                .send(EngineApiMessage::ExchangeTransitionConfiguration(
+                    transition_config.clone(),
+                    result_tx,
+                ))
+                .expect("failed to send engine msg");
 
             assert_matches!(
                 result_rx.await,
@@ -664,11 +693,12 @@ mod tests {
             );
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
-                transition_config.clone(),
-                result_tx,
-            ))
-            .expect("failed to send engine msg");
+            msg_tx
+                .send(EngineApiMessage::ExchangeTransitionConfiguration(
+                    transition_config.clone(),
+                    result_tx,
+                ))
+                .expect("failed to send engine msg");
 
             assert_matches!(
                 result_rx.await,
@@ -680,14 +710,16 @@ mod tests {
 
         #[tokio::test]
         async fn configurations_match() {
-            let (tx, rx) = unbounded_channel();
+            let (msg_tx, msg_rx) = unbounded_channel();
+            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
             let client = Arc::new(MockEthProvider::default());
             let chain_spec = MAINNET.clone();
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
                 local_store: Default::default(),
-                rx: UnboundedReceiverStream::new(rx),
+                message_rx: UnboundedReceiverStream::new(msg_rx),
+                forkchoice_state_tx: tip_tx,
             };
 
             tokio::spawn(engine);
@@ -707,11 +739,12 @@ mod tests {
             client.add_block(terminal_block.hash(), terminal_block.clone().unseal());
 
             let (result_tx, result_rx) = oneshot::channel();
-            tx.send(EngineApiMessage::ExchangeTransitionConfiguration(
-                transition_config.clone(),
-                result_tx,
-            ))
-            .expect("failed to send engine msg");
+            msg_tx
+                .send(EngineApiMessage::ExchangeTransitionConfiguration(
+                    transition_config.clone(),
+                    result_tx,
+                ))
+                .expect("failed to send engine msg");
 
             assert_matches!(
                 result_rx.await,
