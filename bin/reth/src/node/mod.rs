@@ -293,7 +293,18 @@ async fn dump_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> ey
     let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
     let known_peers = network.peers_handle().all_peers().await;
 
-    let threshold = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0) - 10000;
+    let discard_percentage = 0.7;
+
+    // TODO: use crates/net/network/src/peers/reputation.rs constant
+    const BANNED_REPUTATION: i32 = 50 * -1024;
+
+    // Get top peer reputation or 0 if positive
+    let max_rep = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0).min(0);
+
+    // Discards peers below X% reputation, relative to `max_peer`
+    let threshold =
+        ((max_rep - BANNED_REPUTATION) as f64 * discard_percentage) as i32 + BANNED_REPUTATION;
+
     let top_peers: Vec<NodeRecord> =
         known_peers.into_iter().filter(|(rep, _)| *rep > threshold).map(|(_, node)| node).collect();
     serde_json::to_writer_pretty(writer, &top_peers)?;

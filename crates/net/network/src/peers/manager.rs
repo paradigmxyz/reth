@@ -1027,7 +1027,7 @@ impl PeersConfig {
         self
     }
 
-    /// Nodes to initially connect to.
+    /// Read from file nodes to initially connect to.
     pub fn with_basic_nodes_from_file(
         self,
         optional_file: Option<impl AsRef<Path>>,
