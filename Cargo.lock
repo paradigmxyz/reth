@@ -4708,7 +4708,6 @@ dependencies = [
  "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
- "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
