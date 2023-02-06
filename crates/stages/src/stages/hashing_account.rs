@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -91,6 +91,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 break
             }
         } else {
+            let mut plain_accounts = tx.cursor_read::<tables::PlainAccountState>()?;
+            let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>()?;
+
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
             tx.cursor_read::<tables::AccountChangeSet>()?
@@ -106,16 +109,19 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 // iterate over plain state and get newest value.
                 // Assumption we are okay to make is that plainstate represent
                 // `previous_stage_progress` state.
-                .map(|address| tx.get::<tables::PlainAccountState>(address).map(|a| (address, a)))
+                .map(|address| {
+                    plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v)))
+                })
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
-                .try_for_each(|(address, account)| {
+                .try_for_each(|(address, account)| -> Result<(), StageError> {
                     let hashed_address = keccak256(address);
                     if let Some(account) = account {
-                        tx.put::<tables::HashedAccount>(hashed_address, account)
-                    } else {
-                        tx.delete::<tables::HashedAccount>(hashed_address, None).map(|_| ())
+                        hashed_accounts.upsert(hashed_address, account)?
+                    } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                        hashed_accounts.delete_current()?;
                     }
+                    Ok(())
                 })?;
         }
 
@@ -134,6 +140,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+
+        let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>()?;
 
         // Aggregate all transition changesets and and make list of account that have been changed.
         tx.cursor_read::<tables::AccountChangeSet>()?
@@ -156,12 +164,13 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             .collect::<BTreeMap<_, _>>()
             .into_iter()
             // Apply values to HashedState (if Account is None remove it);
-            .try_for_each(|(hashed_address, account)| {
+            .try_for_each(|(hashed_address, account)| -> Result<(), StageError> {
                 if let Some(account) = account {
-                    tx.put::<tables::HashedAccount>(hashed_address, account)
-                } else {
-                    tx.delete::<tables::HashedAccount>(hashed_address, None).map(|_| ())
+                    hashed_accounts.upsert(hashed_address, account)?;
+                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                    hashed_accounts.delete_current()?;
                 }
+                Ok(())
             })?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
