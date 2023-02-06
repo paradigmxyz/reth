@@ -1,9 +1,15 @@
-use crate::{BlockHashProvider, BlockProvider, HeaderProvider};
+use crate::{
+    AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider,
+    StateProviderFactory,
+};
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
+use reth_primitives::{
+    rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, Bytes, ChainInfo, Header,
+    StorageKey, StorageValue, H256, U256,
+};
 
 /// Supports various api interfaces for testing purposes.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Copy)]
 #[non_exhaustive]
 pub struct NoopProvider;
 
@@ -44,5 +50,38 @@ impl HeaderProvider for NoopProvider {
 
     fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
         Ok(None)
+    }
+}
+
+impl AccountProvider for NoopProvider {
+    fn basic_account(&self, _address: Address) -> Result<Option<Account>> {
+        Ok(None)
+    }
+}
+
+impl StateProvider for NoopProvider {
+    fn storage(&self, _account: Address, _storage_key: StorageKey) -> Result<Option<StorageValue>> {
+        Ok(None)
+    }
+
+    fn bytecode_by_hash(&self, _code_hash: H256) -> Result<Option<Bytes>> {
+        Ok(None)
+    }
+}
+
+impl StateProviderFactory for NoopProvider {
+    type HistorySP<'a> = NoopProvider where Self: 'a;
+    type LatestSP<'a> = NoopProvider where Self: 'a;
+
+    fn latest(&self) -> Result<Self::LatestSP<'_>> {
+        Ok(*self)
+    }
+
+    fn history_by_block_number(&self, _block: BlockNumber) -> Result<Self::HistorySP<'_>> {
+        Ok(*self)
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+        Ok(*self)
     }
 }
