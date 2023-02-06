@@ -533,10 +533,8 @@ where
             NetworkHandleMessage::GetStatus(tx) => {
                 let _ = tx.send(self.status());
             }
-            NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty } => {
-                if let Some(transition) =
-                    self.swarm.sessions_mut().on_status_update(height, hash, total_difficulty)
-                {
+            NetworkHandleMessage::StatusUpdate { head } => {
+                if let Some(transition) = self.swarm.sessions_mut().on_status_update(head) {
                     self.swarm.state_mut().update_fork_id(transition.current);
                 }
             }

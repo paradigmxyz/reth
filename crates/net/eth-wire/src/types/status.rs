@@ -1,11 +1,8 @@
-use crate::{BlockHashNumber, EthVersion, StatusBuilder};
+use crate::{EthVersion, StatusBuilder};
 
 use ethers_core::utils::Genesis;
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{
-    constants::EIP1559_INITIAL_BASE_FEE, Chain, ChainSpec, ForkId, Hardfork, Header, H256, MAINNET,
-    U256,
-};
+use reth_primitives::{Chain, ChainSpec, ForkId, Hardfork, Head, H256, MAINNET, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -47,32 +44,15 @@ impl From<Genesis> for Status {
     fn from(genesis: Genesis) -> Status {
         let chain = genesis.config.chain_id;
         let total_difficulty = genesis.difficulty.into();
-        let mut chainspec = ChainSpec::from(genesis);
-        let mut header = Header::from(chainspec.genesis().clone());
-
-        let hardforks = chainspec.hardforks();
-
-        // set initial base fee depending on eip-1559
-        if Some(&0u64) == hardforks.get(&Hardfork::London) {
-            header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
-        }
-
-        // calculate the hash
-        let sealed_header = header.seal();
-
-        // set the new genesis hash after modifying the base fee
-        chainspec.genesis_hash = sealed_header.hash();
-
-        // we need to calculate the fork id AFTER re-setting the genesis hash
-        let forkid = chainspec.fork_id(0);
+        let chainspec = ChainSpec::from(genesis);
 
         Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Id(chain),
             total_difficulty,
-            blockhash: sealed_header.hash(),
-            genesis: sealed_header.hash(),
-            forkid,
+            blockhash: chainspec.genesis_hash(),
+            genesis: chainspec.genesis_hash(),
+            forkid: chainspec.fork_id(&Head::default()),
         }
     }
 }
@@ -84,20 +64,16 @@ impl Status {
     }
 
     /// Create a [`StatusBuilder`] from the given [`ChainSpec`](reth_primitives::ChainSpec) and
-    /// head block number.
+    /// head block.
     ///
     /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
     /// and head.
-    ///
-    /// The user should set the `total_difficulty` field if desired. Otherwise, the total
-    /// difficulty will be set to the [`Default`](std::default::Default) implementation for
-    /// [`Status`].
-    pub fn spec_builder(spec: &ChainSpec, head: &BlockHashNumber) -> StatusBuilder {
+    pub fn spec_builder(spec: &ChainSpec, head: &Head) -> StatusBuilder {
         Self::builder()
             .chain(spec.chain)
             .genesis(spec.genesis_hash())
             .blockhash(head.hash)
-            .forkid(spec.fork_id(head.number))
+            .forkid(spec.fork_id(head))
     }
 }
 

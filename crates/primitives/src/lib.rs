@@ -38,7 +38,7 @@ pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::{
-    Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ParisStatus, GOERLI, MAINNET, SEPOLIA,
+    Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA,
 };
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
@@ -46,7 +46,7 @@ pub use constants::{
 pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
-pub use header::{Header, HeadersDirection, SealedHeader};
+pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;

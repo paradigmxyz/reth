@@ -530,7 +530,7 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        let state_root = genesis_state_root(genesis.alloc);
+        let state_root = genesis_state_root(&genesis.alloc);
 
         assert_matches!(
             trie.calculate_root(&tx),
