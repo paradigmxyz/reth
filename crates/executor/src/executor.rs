@@ -649,7 +649,8 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(&block, None, &chain_spec, &mut db).unwrap();
+        let out =
+            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
@@ -777,6 +778,7 @@ mod tests {
         // execute chain and verify receipts
         let out = execute_and_verify_receipt(
             &Block { header, body: vec![], ommers: vec![] },
+            U256::ZERO,
             None,
             &chain_spec,
             &mut db,
@@ -864,7 +866,9 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(&block.unseal(), None, &chain_spec, &mut db).unwrap();
+        let out =
+            execute_and_verify_receipt(&block.unseal(), U256::ZERO, None, &chain_spec, &mut db)
+                .unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
