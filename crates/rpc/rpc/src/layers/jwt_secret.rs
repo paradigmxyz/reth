@@ -44,18 +44,19 @@ const JWT_MAX_IAT_DIFF: Duration = Duration::from_secs(60);
 /// The execution layer client MUST support at least the following alg HMAC + SHA256 (HS256)
 const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 
-/// Value-object holding a reference to an hex-encoded 256 bit secret key.
+/// Value-object holding a reference to an hex-encoded 256-bit secret key.
 /// A JWT secret key is used to secure JWT-based authentication. The secret key is
-/// a shared secret between the server and the clienta and is used to calculate a digital signature
+/// a shared secret between the server and the client and is used to calculate a digital signature
 /// for the JWT, which is included in the JWT along with its payload.
-/// -----------------------------------------------------------------
-/// [Secret key - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#key-distribution)
+///
+/// See also: [Secret key - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#key-distribution)
 #[derive(Clone)]
 pub struct JwtSecret([u8; 32]);
 
 impl JwtSecret {
     /// Creates an instance of [`JwtSecret`][crate::layers::JwtSecret].
-    /// Generates and error if one of the following applies:
+    ///
+    /// Returns an error if one of the following applies:
     /// - `hex` is not a valid hexadecimal string
     /// - `hex` argument length is less than `JWT_SECRET_LEN`
     pub fn from_hex<S: AsRef<str>>(hex: S) -> Result<Self, JwtError> {
@@ -64,9 +65,8 @@ impl JwtSecret {
             Err(JwtError::InvalidLength(JWT_SECRET_LEN, hex.len()))
         } else {
             let hex_bytes = hex::decode(hex)?;
-            let mut bytes = [0; 32];
-            let mut writer = &mut bytes[..];
-            let _ = writer.write(hex_bytes.get(0..32).expect("This should never happen"));
+            // is 32bytes, see length check
+            let bytes = hex_bytes.try_into().expect("is expected len");
             Ok(JwtSecret(bytes))
         }
     }
@@ -87,8 +87,8 @@ impl JwtSecret {
     /// - The JWT signature is valid.
     /// - The JWT is signed with the `HMAC + SHA256 (HS256)` algorithm.
     /// - The JWT `iat` (issued-at) claim is a timestamp within +-60 seconds from the current time.
-    /// -----------------------------------------------------------------
-    /// [JWT Claims - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims)
+    ///
+    /// See also: [JWT Claims - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims)
     pub fn validate(&self, jwt: String) -> Result<(), JwtError> {
         let validation = Validation::new(JWT_SIGNATURE_ALGO);
         let bytes = &self.0;
@@ -157,9 +157,8 @@ impl Claims {
 
 #[cfg(test)]
 mod tests {
-    use crate::layers::jwt_secret::JWT_MAX_IAT_DIFF;
-
     use super::{Claims, JwtError, JwtSecret};
+    use crate::layers::jwt_secret::JWT_MAX_IAT_DIFF;
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
