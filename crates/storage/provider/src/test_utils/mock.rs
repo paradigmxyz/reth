@@ -165,8 +165,6 @@ impl AccountProvider for MockEthProvider {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         Ok(self.accounts.lock().get(&address).cloned().map(|a| a.account))
     }
-
-    
 }
 
 impl StateProvider for MockEthProvider {

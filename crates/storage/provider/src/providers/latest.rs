@@ -24,8 +24,6 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for LatestStateProviderRef<'a, 'b, TX
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         self.db.get::<tables::PlainAccountState>(address).map_err(Into::into)
     }
-
-
 }
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for LatestStateProviderRef<'a, 'b, TX> {
@@ -82,7 +80,7 @@ macro_rules! derive_from_ref {
     };
 }
 
-derive_from_ref!(AccountProvider,fn basic_account(&self, address: Address) -> Result<Option<Account>>);
+derive_from_ref!(AccountProvider, fn basic_account(&self, address: Address) -> Result<Option<Account>>);
 derive_from_ref!(BlockHashProvider, fn block_hash(&self, number: U256) -> Result<Option<H256>>);
 derive_from_ref!(
     StateProvider,
