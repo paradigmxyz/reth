@@ -308,6 +308,8 @@ where
                         )?
                         .ok_or(DownloadError::MissingHeader { block_number: *range.start() })?;
 
+                    self.metrics.out_of_order_requests.increment(1);
+
                     // Dispatch contiguous request.
                     self.in_progress_queue.push_new_request(
                         Arc::clone(&self.client),

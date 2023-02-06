@@ -540,6 +540,7 @@ where
                     }
 
                     trace!(target: "downloaders::headers", new=?target, "Request new sync target");
+                    self.metrics.out_of_order_requests.increment(1);
                     self.sync_target = Some(new_sync_target);
                     self.sync_target_request =
                         Some(self.request_fut(self.get_sync_target_request(tip), Priority::High));
