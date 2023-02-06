@@ -1065,7 +1065,10 @@ mod tests {
 
         let message = builder.active_session_rx.next().await.unwrap();
         match message {
-            ActiveSessionMessage::ValidMessage { message: PeerMessage::PooledTransactions(_), .. } => {},
+            ActiveSessionMessage::ValidMessage {
+                message: PeerMessage::PooledTransactions(_),
+                ..
+            } => {}
             _ => unreachable!(),
         }
     }
