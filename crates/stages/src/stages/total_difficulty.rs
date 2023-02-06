@@ -8,7 +8,8 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::U256;
+use reth_interfaces::consensus::Error;
+use reth_primitives::{ChainSpec, Hardfork, EMPTY_OMMER_ROOT, MAINNET, U256};
 use tracing::*;
 
 const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
@@ -20,13 +21,15 @@ const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
 /// table.
 #[derive(Debug)]
 pub struct TotalDifficultyStage {
+    /// The chain specification.
+    pub chain_spec: ChainSpec,
     /// The number of table entries to commit at once
     pub commit_threshold: u64,
 }
 
 impl Default for TotalDifficultyStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { chain_spec: MAINNET.clone(), commit_threshold: 100_000 }
     }
 }
 
@@ -69,6 +72,30 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         for entry in walker {
             let (key, header) = entry?;
             td += header.difficulty;
+
+            if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(td) {
+                if header.difficulty != U256::ZERO {
+                    return Err(StageError::Validation {
+                        block: header.number,
+                        error: Error::TheMergeDifficultyIsNotZero,
+                    })
+                }
+
+                if header.nonce != 0 {
+                    return Err(StageError::Validation {
+                        block: header.number,
+                        error: Error::TheMergeNonceIsNotZero,
+                    })
+                }
+
+                if header.ommers_hash != EMPTY_OMMER_ROOT {
+                    return Err(StageError::Validation {
+                        block: header.number,
+                        error: Error::TheMergeOmmerRootIsNotEmpty,
+                    })
+                }
+            }
+
             cursor_td.append(key, td.into())?;
         }
 
@@ -93,7 +120,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 mod tests {
     use reth_db::transaction::DbTx;
     use reth_interfaces::test_utils::generators::{random_header, random_header_range};
-    use reth_primitives::{BlockNumber, SealedHeader};
+    use reth_primitives::{BlockNumber, SealedHeader, MAINNET};
 
     use super::*;
     use crate::test_utils::{
@@ -162,7 +189,10 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TotalDifficultyStage { commit_threshold: self.commit_threshold }
+            TotalDifficultyStage {
+                chain_spec: MAINNET.clone(),
+                commit_threshold: self.commit_threshold,
+            }
         }
     }
 
