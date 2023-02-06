@@ -502,8 +502,8 @@ impl ForkCondition {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, GOERLI,
-        MAINNET, SEPOLIA,
+        Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
+        Head, GOERLI, MAINNET, SEPOLIA,
     };
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
@@ -679,10 +679,128 @@ mod tests {
 
     /// Checks that time-based forks work
     ///
-    /// This is based off of the test vectors here:https://github.com/ethereum/go-ethereum/blob/5c8cc10d1e05c23ff1108022f4150749e73c0ca1/core/forkid/forkid_test.go#L155-L188
+    /// This is based off of the test vectors here: https://github.com/ethereum/go-ethereum/blob/5c8cc10d1e05c23ff1108022f4150749e73c0ca1/core/forkid/forkid_test.go#L155-L188
     #[test]
-    #[ignore]
     fn timestamped_forks() {
-        todo!()
+        let mainnet_with_shanghai = ChainSpecBuilder::mainnet()
+            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(1668000000))
+            .build();
+        test_fork_ids(
+            &mainnet_with_shanghai,
+            &[
+                (
+                    Head { number: 0, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xfc, 0x64, 0xec, 0x04]), next: 1150000 },
+                ), // Unsynced
+                (
+                    Head { number: 1149999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xfc, 0x64, 0xec, 0x04]), next: 1150000 },
+                ), // Last Frontier block
+                (
+                    Head { number: 1150000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x97, 0xc2, 0xc3, 0x4c]), next: 1920000 },
+                ), // First Homestead block
+                (
+                    Head { number: 1919999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x97, 0xc2, 0xc3, 0x4c]), next: 1920000 },
+                ), // Last Homestead block
+                (
+                    Head { number: 1920000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x91, 0xd1, 0xf9, 0x48]), next: 2463000 },
+                ), // First DAO block
+                (
+                    Head { number: 2462999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x91, 0xd1, 0xf9, 0x48]), next: 2463000 },
+                ), // Last DAO block
+                (
+                    Head { number: 2463000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x7a, 0x64, 0xda, 0x13]), next: 2675000 },
+                ), // First Tangerine block
+                (
+                    Head { number: 2674999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x7a, 0x64, 0xda, 0x13]), next: 2675000 },
+                ), // Last Tangerine block
+                (
+                    Head { number: 2675000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x3e, 0xdd, 0x5b, 0x10]), next: 4370000 },
+                ), // First Spurious block
+                (
+                    Head { number: 4369999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x3e, 0xdd, 0x5b, 0x10]), next: 4370000 },
+                ), // Last Spurious block
+                (
+                    Head { number: 4370000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xa0, 0x0b, 0xc3, 0x24]), next: 7280000 },
+                ), // First Byzantium block
+                (
+                    Head { number: 7279999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xa0, 0x0b, 0xc3, 0x24]), next: 7280000 },
+                ), // Last Byzantium block
+                (
+                    Head { number: 7280000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
+                ), // First and last Constantinople, first Petersburg block
+                (
+                    Head { number: 9068999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
+                ), // Last Petersburg block
+                (
+                    Head { number: 9069000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x87, 0x9d, 0x6e, 0x30]), next: 9200000 },
+                ), // First Istanbul and first Muir Glacier block
+                (
+                    Head { number: 9199999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x87, 0x9d, 0x6e, 0x30]), next: 9200000 },
+                ), // Last Istanbul and first Muir Glacier block
+                (
+                    Head { number: 9200000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe0, 0x29, 0xe9, 0x91]), next: 12244000 },
+                ), // First Muir Glacier block
+                (
+                    Head { number: 12243999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe0, 0x29, 0xe9, 0x91]), next: 12244000 },
+                ), // Last Muir Glacier block
+                (
+                    Head { number: 12244000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x0e, 0xb4, 0x40, 0xf6]), next: 12965000 },
+                ), // First Berlin block
+                (
+                    Head { number: 12964999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x0e, 0xb4, 0x40, 0xf6]), next: 12965000 },
+                ), // Last Berlin block
+                (
+                    Head { number: 12965000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 13773000 },
+                ), // First London block
+                (
+                    Head { number: 13772999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 13773000 },
+                ), // Last London block
+                (
+                    Head { number: 13773000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x20, 0xc3, 0x27, 0xfc]), next: 15050000 },
+                ), // First Arrow Glacier block
+                (
+                    Head { number: 15049999, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x20, 0xc3, 0x27, 0xfc]), next: 15050000 },
+                ), // Last Arrow Glacier block
+                (
+                    Head { number: 15050000, timestamp: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1668000000 },
+                ), // First Gray Glacier block
+                (
+                    Head { number: 19999999, timestamp: 1667999999, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1668000000 },
+                ), // Last Gray Glacier block
+                (
+                    Head { number: 20000000, timestamp: 1668000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x71, 0x14, 0x76, 0x44]), next: 0 },
+                ), // First Shanghai block
+                (
+                    Head { number: 20000000, timestamp: 2668000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0x71, 0x14, 0x76, 0x44]), next: 0 },
+                ), // Future Shanghai block
+            ],
+        );
     }
 }
