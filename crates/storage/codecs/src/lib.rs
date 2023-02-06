@@ -1,6 +1,6 @@
 use bytes::{Buf, Bytes};
 pub use codecs_derive::*;
-use revm_interpreter::{B160 as H160, B256 as H256, U256};
+use revm_interpreter::primitives::{B160 as H160, B256 as H256, U256};
 
 /// Trait that implements the `Compact` codec.
 ///
