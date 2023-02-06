@@ -267,7 +267,7 @@ mod tests {
 
         assert_matches!(
             downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &bodies))
         );
     }
 
@@ -349,7 +349,7 @@ mod tests {
 
         assert_matches!(
             downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &bodies))
         );
     }
 }

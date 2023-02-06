@@ -83,8 +83,9 @@ impl BodiesClient for TestBodiesClient {
                     .take(max_batch_size.unwrap_or(usize::MAX))
                     .map(|hash| {
                         bodies
-                            .remove(&hash)
+                            .get(&hash)
                             .expect("Downloader asked for a block it should not ask for")
+                            .clone()
                     })
                     .collect(),
             )

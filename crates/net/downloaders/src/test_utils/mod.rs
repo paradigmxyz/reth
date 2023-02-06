@@ -38,6 +38,29 @@ pub(crate) fn generate_bodies(
     (headers, bodies)
 }
 
+/// Generate a set of non-empty bodies
+pub(crate) fn generate_non_empty_bodies(
+    rng: std::ops::Range<u64>,
+) -> (Vec<SealedHeader>, HashMap<H256, BlockBody>) {
+    let blocks = random_block_range(rng, H256::zero(), 1..3);
+
+    let headers = blocks.iter().map(|block| block.header.clone()).collect();
+    let bodies = blocks
+        .into_iter()
+        .map(|block| {
+            (
+                block.hash(),
+                BlockBody {
+                    transactions: block.body,
+                    ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                },
+            )
+        })
+        .collect();
+
+    (headers, bodies)
+}
+
 /// Generate a set of bodies, write them to a temporary file, and return the file along with the
 /// bodies and corresponding block hashes
 pub(crate) async fn generate_bodies_file(

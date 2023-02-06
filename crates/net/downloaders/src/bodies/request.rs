@@ -263,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn request_submits_until_fullfilled() {
         // Generate some random blocks
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, bodies) = generate_bodies(0..20);
 
         let batch_size = 2;
         let client = Arc::new(
@@ -277,7 +277,7 @@ mod tests {
         )
         .with_headers(headers.clone());
 
-        assert_eq!(fut.await, zip_blocks(headers.iter(), &mut bodies));
+        assert_eq!(fut.await, zip_blocks(headers.iter(), &bodies));
         assert_eq!(
             client.times_requested(),
             // div_ceild

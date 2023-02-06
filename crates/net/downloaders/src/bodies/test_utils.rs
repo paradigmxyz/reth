@@ -13,12 +13,12 @@ use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(
     headers: impl Iterator<Item = &'a SealedHeader>,
-    bodies: &mut HashMap<H256, BlockBody>,
+    bodies: &HashMap<H256, BlockBody>,
 ) -> Vec<BlockResponse> {
     headers
         .into_iter()
         .map(|header| {
-            let body = bodies.remove(&header.hash()).expect("body exists");
+            let body = bodies.get(&header.hash()).expect("body exists").clone();
             if header.is_empty() {
                 BlockResponse::Empty(header.clone())
             } else {

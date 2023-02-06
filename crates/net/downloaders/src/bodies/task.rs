@@ -148,7 +148,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, bodies) = generate_bodies(0..20);
 
         insert_headers(&db, &headers);
 
@@ -166,7 +166,7 @@ mod tests {
 
         assert_matches!(
             downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &bodies))
         );
         assert_eq!(client.times_requested(), 1);
     }
@@ -176,7 +176,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, bodies) = generate_bodies(0..20);
 
         // Insert a subset of headers to the database
         insert_headers(&db, &headers[10..]);
@@ -194,7 +194,7 @@ mod tests {
         downloader.set_download_range(10..20).expect("failed to set download range");
         assert_matches!(
             downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(10), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(10), &bodies))
         );
 
         downloader.set_download_range(0..20).expect("failed to set download range");

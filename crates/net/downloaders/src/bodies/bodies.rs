@@ -279,7 +279,9 @@ where
                     _ => Range::default(),
                 };
 
-                let mut requests = Vec::<RangeInclusive<BlockNumber>>::default();
+                let max_request_len = self.request_limit.min(self.stream_batch_size as u64);
+
+                let mut requests = Vec::<Range<BlockNumber>>::default();
                 for num in range.start..=latest_queued {
                     // Check if block has been downloaded or is currently in progress
                     if queued_bodies_range.contains(&num) ||
@@ -289,24 +291,24 @@ where
                         continue
                     }
 
-                    match requests.last().map(|range| *range.end()) {
-                        // Extend the last range if contiguous
-                        Some(range_end) if range_end + 1 == num => {
-                            let range = requests.pop().unwrap();
-                            requests.push(*range.start()..=num);
+                    match requests.last_mut() {
+                        // Extend the last range if it remains contiguous and request size is under
+                        // limit
+                        Some(range)
+                            if range.end == num &&
+                                range.end.saturating_sub(range.start) < max_request_len =>
+                        {
+                            *range = range.start..num + 1; // exclusive range
                         }
                         // Push the new request range
-                        Some(_) | None => requests.push(num..=num),
+                        _ => requests.push(num..num + 1), // exclusive range
                     };
                 }
 
                 for range in requests {
                     let headers = self
-                        .query_headers(
-                            *range.start()..*range.end() + 1,
-                            range.clone().count() as u64,
-                        )?
-                        .ok_or(DownloadError::MissingHeader { block_number: *range.start() })?;
+                        .query_headers(range.start..range.end, range.clone().count() as u64)?
+                        .ok_or(DownloadError::MissingHeader { block_number: range.start })?;
 
                     // Dispatch contiguous request.
                     self.in_progress_queue.push_new_request(
@@ -545,15 +547,13 @@ mod tests {
     use super::*;
     use crate::{
         bodies::test_utils::{insert_headers, zip_blocks},
-        test_utils::{generate_bodies, TestBodiesClient},
+        test_utils::{generate_bodies, generate_non_empty_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_eth_wire::BlockBody;
-    use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
-    use reth_primitives::H256;
-    use std::{collections::HashMap, sync::Arc};
+    use reth_interfaces::test_utils::TestConsensus;
+    use std::sync::Arc;
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded
@@ -561,7 +561,7 @@ mod tests {
     async fn streams_bodies_in_order() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
+        let (headers, bodies) = generate_bodies(0..20);
 
         insert_headers(&db, &headers);
 
@@ -577,7 +577,7 @@ mod tests {
 
         assert_matches!(
             downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter(), &bodies))
         );
         assert_eq!(client.times_requested(), 1);
     }
@@ -588,21 +588,7 @@ mod tests {
     async fn requests_correct_number_of_times() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let blocks = random_block_range(0..200, H256::zero(), 1..2);
-
-        let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
-        let bodies = blocks
-            .into_iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody {
-                        transactions: block.body,
-                        ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
+        let (headers, bodies) = generate_non_empty_bodies(0..200);
 
         insert_headers(&db, &headers);
 
@@ -623,7 +609,7 @@ mod tests {
     async fn streams_bodies_in_order_after_range_reset() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..100);
+        let (headers, bodies) = generate_bodies(0..100);
 
         insert_headers(&db, &headers);
 
@@ -644,11 +630,78 @@ mod tests {
 
             assert_matches!(
                 downloader.next().await,
-                Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &mut bodies))
+                Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(range_start as usize).take(stream_batch_size), &bodies))
             );
             assert!(downloader.latest_queued_block_number >= Some(range_start));
             range_start += stream_batch_size as u64;
         }
+    }
+
+    // Check that the out of order bodies are requested during download range reset.
+    #[tokio::test]
+    async fn requests_out_of_order_bodies_during_donwload_reset() {
+        // Generate some random blocks
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let (headers, bodies) = generate_non_empty_bodies(0..100);
+
+        insert_headers(&db, &headers);
+
+        let stream_batch_size = 10;
+        let request_limit = 10;
+        let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(stream_batch_size)
+            .with_request_limit(request_limit)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+
+        let first_expected_batch = zip_blocks(headers.iter().take(stream_batch_size), &bodies);
+
+        // Download first batch
+        downloader.set_download_range(0..100).expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, first_expected_batch)
+        );
+        assert_eq!(client.times_requested(), 10);
+
+        // Re-request first batch
+        downloader.set_download_range(0..100).expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, first_expected_batch)
+        );
+        assert_eq!(client.times_requested(), 11);
+
+        let second_expected_batch =
+            zip_blocks(headers.iter().skip(stream_batch_size).take(stream_batch_size), &bodies);
+
+        // Download second batch
+        downloader.set_download_range(10..100).expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, second_expected_batch)
+        );
+        assert_eq!(client.times_requested(), 11);
+
+        // Re-request second batch
+        downloader.set_download_range(10..100).expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, second_expected_batch)
+        );
+        assert_eq!(client.times_requested(), 12);
+
+        // Re-request first and second batches
+        downloader.set_download_range(0..100).expect("failed to set download range");
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, first_expected_batch)
+        );
+        assert_matches!(
+            downloader.next().await,
+            Some(Ok(res)) => assert_eq!(res, second_expected_batch)
+        );
+        assert_eq!(client.times_requested(), 14);
     }
 
     // Check that the downloader picks up the new range and downloads bodies after previous range
@@ -657,7 +710,7 @@ mod tests {
     async fn can_download_new_range_after_termination() {
         // Generate some random blocks
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..200);
+        let (headers, bodies) = generate_bodies(0..200);
 
         insert_headers(&db, &headers);
 
@@ -672,7 +725,7 @@ mod tests {
         downloader.set_download_range(0..100).expect("failed to set download range");
         assert_matches!(
             downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().take(100), &bodies))
         );
 
         // Check that the stream is terminated
@@ -682,7 +735,7 @@ mod tests {
         downloader.set_download_range(100..200).expect("failed to set download range");
         assert_matches!(
             downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &mut bodies))
+            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(100), &bodies))
         );
     }
 }
