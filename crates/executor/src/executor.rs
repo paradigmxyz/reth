@@ -492,41 +492,6 @@ pub fn execute<DB: StateProvider>(
     executor.execute(block, total_difficulty, senders)
 }
 
-/// Irregular state change at Ethereum DAO hardfork
-pub fn dao_fork_changeset<DB: StateProvider>(
-    db: &mut SubState<DB>,
-) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
-    let mut drained_balance = U256::ZERO;
-    // drain all accounts ether
-    let mut changesets = crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS
-        .iter()
-        .map(|&address| {
-            let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
-            let old = to_reth_acc(&db_account.info);
-            // drain balance
-            drained_balance += core::mem::take(&mut db_account.info.balance);
-            let new = to_reth_acc(&db_account.info);
-            // assume it is changeset as it is irregular state change
-            Ok((address, AccountInfoChangeSet::Changed { new, old }))
-        })
-        .collect::<Result<BTreeMap<H160, AccountInfoChangeSet>, _>>()?;
-
-    // add drained ether to beneficiary.
-    let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
-
-    let beneficiary_db_account = db.load_account(beneficiary).map_err(|_| Error::ProviderError)?;
-    let old = to_reth_acc(&beneficiary_db_account.info);
-    beneficiary_db_account.info.balance += drained_balance;
-    let new = to_reth_acc(&beneficiary_db_account.info);
-
-    let beneficiary_changeset = AccountInfoChangeSet::Changed { new, old };
-
-    // insert changeset
-    changesets.insert(beneficiary, beneficiary_changeset);
-
-    Ok(changesets)
-}
-
 #[cfg(test)]
 mod tests {
 
