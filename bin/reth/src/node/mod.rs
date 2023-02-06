@@ -13,7 +13,6 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
-use reth_discv4::NodeRecord;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
 use reth_net_nat::NatResolver;
@@ -26,7 +25,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -131,10 +130,6 @@ impl Command {
             res = pipeline.run(db.clone()) => res?,
             _ = tokio::signal::ctrl_c() => {},
         };
-
-        if !self.network.no_persist_peers {
-            dump_peers(&self.network.peers_file, &network).await?;
-        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -285,30 +280,6 @@ impl Command {
                 .build(fetch_client.clone(), consensus.clone(), db.clone()),
         )
     }
-}
-
-/// Dumps peers to `file_path` for persistence.
-async fn dump_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> eyre::Result<()> {
-    info!(target: "reth::cli", file = %file_path.as_ref().display(), "Saving current peers");
-    let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
-    let known_peers = network.peers_handle().all_peers().await;
-
-    let discard_percentage = 0.7;
-
-    // TODO: use crates/net/network/src/peers/reputation.rs constant
-    const BANNED_REPUTATION: i32 = 50 * -1024;
-
-    // Get top peer reputation or 0 if positive
-    let max_rep = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0).min(0);
-
-    // Discards peers below X% reputation, relative to `max_peer`
-    let threshold =
-        ((max_rep - BANNED_REPUTATION) as f64 * discard_percentage) as i32 + BANNED_REPUTATION;
-
-    let top_peers: Vec<NodeRecord> =
-        known_peers.into_iter().filter(|(rep, _)| *rep > threshold).map(|(_, node)| node).collect();
-    serde_json::to_writer_pretty(writer, &top_peers)?;
-    Ok(())
 }
 
 /// The current high-level state of the node.

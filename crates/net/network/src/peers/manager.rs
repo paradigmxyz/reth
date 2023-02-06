@@ -1,7 +1,9 @@
 use crate::{
     error::{BackoffKind, SessionError},
     peers::{
-        reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
+        reputation::{
+            is_banned_reputation, BACKOFF_REPUTATION_CHANGE, BANNED_REPUTATION, DEFAULT_REPUTATION,
+        },
         ReputationChangeWeights, DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
@@ -16,7 +18,7 @@ use std::{
     fmt::Display,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
-    path::Path,
+    path::{Path, PathBuf},
     task::{Context, Poll},
     time::Duration,
 };
@@ -26,7 +28,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace, warn};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -106,6 +108,8 @@ pub(crate) struct PeersManager {
     backoff_durations: PeerBackoffDurations,
     /// If non-trusted peers should be connected to
     connect_trusted_nodes_only: bool,
+    /// File to save peers to on shutdown
+    peers_file: Option<PathBuf>,
 }
 
 impl PeersManager {
@@ -121,6 +125,7 @@ impl PeersManager {
             trusted_nodes,
             connect_trusted_nodes_only,
             basic_nodes,
+            peers_file,
             ..
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
@@ -155,6 +160,7 @@ impl PeersManager {
             ban_duration,
             backoff_durations,
             connect_trusted_nodes_only,
+            peers_file,
         }
     }
 
@@ -670,11 +676,45 @@ impl PeersManager {
             }
         }
     }
+
+    /// Dumps peers to `file_path` for persistence.
+    fn dump_peers(&mut self, file_path: &PathBuf) -> Result<(), io::Error> {
+        info!(target : "net::peers", file = %file_path.display(), "Saving current peers");
+        let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
+        let known_peers: Vec<(i32, NodeRecord)> =
+            self.peers.iter().map(|(k, v)| (v.reputation, NodeRecord::new(v.addr, *k))).collect();
+
+        let discard_percentage = 0.7;
+
+        // Get top peer reputation or 0 if positive
+        let max_rep = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0).min(0);
+
+        // Discards peers below X% reputation, relative to `max_peer`
+        let threshold =
+            ((max_rep - BANNED_REPUTATION) as f64 * discard_percentage) as i32 + BANNED_REPUTATION;
+
+        let top_peers: Vec<NodeRecord> = known_peers
+            .into_iter()
+            .filter(|(rep, _)| *rep > threshold)
+            .map(|(_, node)| node)
+            .collect();
+        serde_json::to_writer_pretty(writer, &top_peers)?;
+        Ok(())
+    }
 }
 
 impl Default for PeersManager {
     fn default() -> Self {
         PeersManager::new(Default::default())
+    }
+}
+
+impl Drop for PeersManager {
+    fn drop(&mut self) {
+        let Some(file_path) = self.peers_file.take() else { return };
+        if let Err(err) = self.dump_peers(&file_path) {
+            warn!(target = "net::peers", ?err, file = ?file_path.display(), "Failed to save peers to file")
+        }
     }
 }
 
@@ -948,6 +988,9 @@ pub struct PeersConfig {
     /// Basic nodes to connect to.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub basic_nodes: HashSet<NodeRecord>,
+    /// Optional file to persist peers in.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub peers_file: Option<PathBuf>,
     /// How long to ban bad peers.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub ban_duration: Duration,
@@ -976,6 +1019,7 @@ impl Default for PeersConfig {
             trusted_nodes: Default::default(),
             connect_trusted_nodes_only: false,
             basic_nodes: Default::default(),
+            peers_file: None,
         }
     }
 }
@@ -1027,7 +1071,7 @@ impl PeersConfig {
         self
     }
 
-    /// Read from file nodes to initially connect to.
+    /// Read from file nodes to initially connect to. Ignored if None.
     pub fn with_basic_nodes_from_file(
         self,
         optional_file: Option<impl AsRef<Path>>,
@@ -1042,6 +1086,12 @@ impl PeersConfig {
         };
         let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
         Ok(self.with_basic_nodes(nodes))
+    }
+
+    /// Adds file to save peers to on shutdown
+    pub fn with_optional_peers_file(mut self, peers_file: Option<impl AsRef<Path>>) -> Self {
+        self.peers_file = peers_file.map(|p| p.as_ref().to_path_buf());
+        self
     }
 }
 
