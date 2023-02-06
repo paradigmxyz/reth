@@ -59,7 +59,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let account_changesets = tx
             .cursor_read::<tables::AccountChangeSet>()?
-            .walk(from_transition)?
+            .walk(Some(from_transition))?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition).unwrap_or_default())
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -122,7 +122,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let account_changeset = tx
             .cursor_read::<tables::AccountChangeSet>()?
-            .walk(from_transition_rev)?
+            .walk(Some(from_transition_rev))?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition_rev).unwrap_or_default())
             .collect::<Result<Vec<_>, _>>()?;
 

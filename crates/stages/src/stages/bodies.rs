@@ -610,7 +610,7 @@ mod tests {
 
                     let mut prev_key: Option<BlockNumHash> = None;
                     let mut expected_transition_id = 0;
-                    for entry in bodies_cursor.walk(first_body_key)? {
+                    for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (key, body) = entry?;
 
                         // Validate sequentiality only after prev progress,

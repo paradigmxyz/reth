@@ -7,7 +7,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Account, Address, H160};
+use reth_primitives::{keccak256, Account, Address};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -63,7 +63,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             tx.clear::<tables::HashedAccount>()?;
             tx.commit()?;
 
-            let mut first_key = H160::zero();
+            let mut first_key = None;
             loop {
                 let next_key = {
                     let mut accounts = tx.cursor_read::<tables::PlainAccountState>()?;
@@ -85,7 +85,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 };
                 tx.commit()?;
                 if let Some((next_key, _)) = next_key {
-                    first_key = next_key;
+                    first_key = Some(next_key);
                     continue
                 }
                 break

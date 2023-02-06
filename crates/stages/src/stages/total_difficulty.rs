@@ -63,7 +63,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         let start_key = tx.get_block_numhash(start_block)?;
         let walker = cursor_headers
-            .walk(start_key)?
+            .walk(Some(start_key))?
             .take_while(|e| e.as_ref().map(|(_, h)| h.number <= end_block).unwrap_or_default());
         // Walk over newly inserted headers, update & insert td
         for entry in walker {

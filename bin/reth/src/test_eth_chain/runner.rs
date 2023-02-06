@@ -174,7 +174,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         let storage = db.view(|tx| -> Result<_, DbError> {
             let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-            let walker = cursor.first()?.map(|first| cursor.walk(first.0)).transpose()?;
+            let walker = cursor.first()?.map(|first| cursor.walk(Some(first.0))).transpose()?;
             Ok(walker.map(|mut walker| {
                 let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
                 while let Some(Ok((address, slot))) = walker.next() {
@@ -210,7 +210,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
             }
             Some(RootOrState::State(state)) => db.view(|tx| -> eyre::Result<()> {
                 let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-                let walker = cursor.first()?.map(|first| cursor.walk(first.0)).transpose()?;
+                let walker = cursor.first()?.map(|first| cursor.walk(Some(first.0))).transpose()?;
                 let storage = walker.map(|mut walker| {
                     let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
                     while let Some(Ok((address, slot))) = walker.next() {
