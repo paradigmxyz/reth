@@ -17,7 +17,7 @@ use reth_discv4::NodeRecord;
 use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
 use reth_net_nat::NatResolver;
-use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle, PeerInfo};
+use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
@@ -300,13 +300,12 @@ async fn load_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> ey
 async fn dump_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> eyre::Result<()> {
     info!(target: "reth::cli", file = %file_path.as_ref().display(), "Saving current peers");
     let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
-    let known_peers: Vec<NodeRecord> = network
-        .get_peers()
-        .await?
-        .into_iter()
-        .map(|PeerInfo { remote_id, remote_addr, .. }| NodeRecord::new(remote_addr, remote_id))
-        .collect();
-    serde_json::to_writer_pretty(writer, &known_peers)?;
+    let known_peers = network.peers_handle().all_peers().await;
+
+    let threshold = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0);
+    let top_peers: Vec<NodeRecord> =
+        known_peers.into_iter().filter(|(rep, _)| *rep > threshold).map(|(_, node)| node).collect();
+    serde_json::to_writer_pretty(writer, &top_peers)?;
     Ok(())
 }
 

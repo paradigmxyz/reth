@@ -63,6 +63,14 @@ impl PeersHandle {
 
         rx.await.unwrap_or(None)
     }
+
+    /// Send a reputation change for the given peer.
+    pub async fn all_peers(&self) -> Vec<(i32, NodeRecord)> {
+        let (tx, rx) = oneshot::channel();
+        self.send(PeerCommand::GetPeers(tx));
+
+        rx.await.unwrap_or_default()
+    }
 }
 
 /// Maintains the state of _all_ the peers known to the network.
@@ -623,6 +631,14 @@ impl PeersManager {
                     PeerCommand::GetPeer(peer, tx) => {
                         let _ = tx.send(self.peers.get(&peer).cloned());
                     }
+                    PeerCommand::GetPeers(tx) => {
+                        let _ = tx.send(
+                            self.peers
+                                .iter()
+                                .map(|(k, v)| (v.reputation, NodeRecord::new(v.addr, *k)))
+                                .collect(),
+                        );
+                    }
                 }
             }
 
@@ -876,6 +892,8 @@ pub(crate) enum PeerCommand {
     ReputationChange(PeerId, ReputationChangeKind),
     /// Get information about a peer
     GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
+    /// Get reputation and address information on all peers
+    GetPeers(oneshot::Sender<Vec<(i32, NodeRecord)>>),
 }
 
 /// Actions the peer manager can trigger.
