@@ -49,7 +49,11 @@ pub struct Command {
     /// The path to the known peers file. Connected peers are
     /// dumped to this file on node shutdown, and read on startup.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    known: PlatformPath<KnownPeersPath>,
+    peers_file: PlatformPath<KnownPeersPath>,
+
+    /// Do not persist peers. This ignores the --peers-file option.
+    #[arg(long, verbatim_doc_comment)]
+    no_persist_peers: bool,
 
     /// The chain this node is running.
     ///
@@ -117,7 +121,9 @@ impl Command {
         let netconf = self.load_network_config(&config, &db);
         let network = netconf.start_network().await?;
 
-        load_peers(&self.known, &network).await?;
+        if !self.no_persist_peers {
+            load_peers(&self.peers_file, &network).await?;
+        }
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
@@ -135,7 +141,9 @@ impl Command {
             _ = tokio::signal::ctrl_c() => {},
         };
 
-        dump_peers(&self.known, &network).await?;
+        if !self.no_persist_peers {
+            dump_peers(&self.peers_file, &network).await?;
+        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -276,7 +284,7 @@ impl Command {
 
 /// Loads peers from `file_path` and adds them to the network
 async fn load_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> eyre::Result<()> {
-    let reader = match std::fs::File::open(&file_path) {
+    let reader = match std::fs::File::open(file_path) {
         Ok(file) => std::io::BufReader::new(file),
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
         Err(e) => Err(e)?,
@@ -290,7 +298,7 @@ async fn load_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> ey
 /// Dumps peers to `file_path` for persistence.
 async fn dump_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> eyre::Result<()> {
     info!(target: "reth::cli", file = %file_path.as_ref().display(), "Saving current peers");
-    let writer = std::io::BufWriter::new(std::fs::File::create(&file_path)?);
+    let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
     let known_peers: Vec<NodeRecord> = network
         .get_peers()
         .await?
