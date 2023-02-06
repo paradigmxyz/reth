@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    dirs::{ConfigPath, DbPath, KnownPeersPath, PlatformPath},
+    dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
     NetworkOpts,
@@ -45,15 +45,6 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: PlatformPath<DbPath>,
-
-    /// The path to the known peers file. Connected peers are
-    /// dumped to this file on node shutdown, and read on startup.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    peers_file: PlatformPath<KnownPeersPath>,
-
-    /// Do not persist peers. This ignores the --peers-file option.
-    #[arg(long, verbatim_doc_comment)]
-    no_persist_peers: bool,
 
     /// The chain this node is running.
     ///
@@ -125,8 +116,8 @@ impl Command {
         let netconf = self.load_network_config(&config, &db);
         let network = netconf.start_network().await?;
 
-        if !self.no_persist_peers {
-            load_peers(&self.peers_file, &network).await?;
+        if !self.network.no_persist_peers {
+            load_peers(&self.network.peers_file, &network).await?;
         }
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -145,8 +136,8 @@ impl Command {
             _ = tokio::signal::ctrl_c() => {},
         };
 
-        if !self.no_persist_peers {
-            dump_peers(&self.peers_file, &network).await?;
+        if !self.network.no_persist_peers {
+            dump_peers(&self.network.peers_file, &network).await?;
         }
 
         info!(target: "reth::cli", "Finishing up");

@@ -15,6 +15,7 @@ pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
 pub mod test_vectors;
+use dirs::{KnownPeersPath, PlatformPath};
 pub use reth_staged_sync::utils;
 
 use clap::Args;
@@ -42,4 +43,13 @@ struct NetworkOpts {
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
     bootnodes: Option<Vec<NodeRecord>>,
+
+    /// The path to the known peers file. Connected peers are
+    /// dumped to this file on node shutdown, and read on startup.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
+    peers_file: PlatformPath<KnownPeersPath>,
+
+    /// Do not persist peers. This ignores the --peers-file option.
+    #[arg(long, verbatim_doc_comment)]
+    no_persist_peers: bool,
 }
