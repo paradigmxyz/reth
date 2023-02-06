@@ -450,7 +450,7 @@ mod tests {
                 if let Some(e) = tx
                     .cursor_dup_write::<tables::HashedStorage>()?
                     .seek_by_key_subkey(hashed_address, hashed_entry.key)?
-                    .and_then(|e| if e.key == hashed_entry.key { Some(e) } else { None })
+                    .filter(|e| e.key == hashed_entry.key)
                 {
                     tx.delete::<tables::HashedStorage>(hashed_address, Some(e))
                         .expect("failed to delete entry");
@@ -491,7 +491,7 @@ mod tests {
                     }
 
                     if entry.value != U256::ZERO {
-                        storage_cursor.insert(tid_address.address(), entry)?;
+                        storage_cursor.upsert(tid_address.address(), entry)?;
                     }
                 }
                 Ok(())
