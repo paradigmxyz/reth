@@ -87,19 +87,11 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     next_key.map(|(key, _)| key)
                 };
                 tx.commit()?;
-<<<<<<< HEAD
-                if let Some((next_key, _)) = next_key {
-                    first_key = Some(next_key);
-                    continue
-                }
-                break
-=======
 
                 first_key = match next_key {
-                    Some(key) => key,
+                    Some(key) => Some(key),
                     None => break,
                 };
->>>>>>> main
             }
         } else {
             let mut plain_storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
