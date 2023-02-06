@@ -651,6 +651,59 @@ impl TransactionSigned {
         initial_tx.hash = initial_tx.recalculate_hash();
         initial_tx
     }
+
+    pub fn decode_enveloped(&self, tx: Bytes) -> Result<Self, DecodeError> {
+        let mut data = tx.as_ref();
+
+        let transaction = if data[0] > 0x7f {
+            // legacy transaction
+            todo!()
+        } else {
+            let first_header = Header::decode(&mut data)?;
+
+            let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
+            data.advance(1);
+            // decode the list header for the rest of the transaction
+            let header = Header::decode(&mut data)?;
+            if !header.list {
+                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+            }
+
+            // decode common fields
+            let transaction = match tx_type {
+                1 => Transaction::Eip2930(TxEip2930 {
+                    chain_id: Decodable::decode(&mut data)?,
+                    nonce: Decodable::decode(&mut data)?,
+                    gas_price: Decodable::decode(&mut data)?,
+                    gas_limit: Decodable::decode(&mut data)?,
+                    to: Decodable::decode(&mut data)?,
+                    value: Decodable::decode(&mut data)?,
+                    input: Bytes(Decodable::decode(&mut data)?),
+                    access_list: Decodable::decode(&mut data)?,
+                }),
+                2 => Transaction::Eip1559(TxEip1559 {
+                    chain_id: Decodable::decode(&mut data)?,
+                    nonce: Decodable::decode(&mut data)?,
+                    max_priority_fee_per_gas: Decodable::decode(&mut data)?,
+                    max_fee_per_gas: Decodable::decode(&mut data)?,
+                    gas_limit: Decodable::decode(&mut data)?,
+                    to: Decodable::decode(&mut data)?,
+                    value: Decodable::decode(&mut data)?,
+                    input: Bytes(Decodable::decode(&mut data)?),
+                    access_list: Decodable::decode(&mut data)?,
+                }),
+                _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
+            };
+
+            let signature = Signature::decode(&mut data)?;
+
+            let hash = keccak256(&data[..first_header.payload_length]);
+            let signed = TransactionSigned { transaction, hash, signature };
+            Ok(signed)
+        };
+
+        transaction
+    }
 }
 
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
