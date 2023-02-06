@@ -26,7 +26,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{io::ErrorKind, net::SocketAddr, sync::Arc, time::Duration};
+use std::{io::ErrorKind, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -117,7 +117,7 @@ impl Command {
         let netconf = self.load_network_config(&config, &db);
         let network = netconf.start_network().await?;
 
-        self.load_peers(&network).await?;
+        load_peers(&self.known, &network).await?;
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
@@ -135,7 +135,7 @@ impl Command {
             _ = tokio::signal::ctrl_c() => {},
         };
 
-        self.dump_peers(&network).await?;
+        dump_peers(&self.known, &network).await?;
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -272,32 +272,33 @@ impl Command {
                 .build(fetch_client.clone(), consensus.clone(), db.clone()),
         )
     }
+}
 
-    async fn load_peers(&self, network: &NetworkHandle) -> eyre::Result<()> {
-        let reader = match std::fs::File::open(&self.known) {
-            Ok(file) => std::io::BufReader::new(file),
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
-            Err(e) => Err(e)?,
-        };
-        info!(target: "reth::cli", file = ?self.known, "Loading saved peers");
-        let known_peers: Vec<NodeRecord> = serde_json::from_reader(reader)?;
-        known_peers.into_iter().for_each(|record| network.add_peer(record.id, record.udp_addr()));
-        Ok(())
-    }
+/// Loads peers from `file_path` and adds them to the network
+async fn load_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> eyre::Result<()> {
+    let reader = match std::fs::File::open(&file_path) {
+        Ok(file) => std::io::BufReader::new(file),
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(e) => Err(e)?,
+    };
+    info!(target: "reth::cli", file = %file_path.as_ref().display(), "Loading saved peers");
+    let known_peers: Vec<NodeRecord> = serde_json::from_reader(reader)?;
+    known_peers.into_iter().for_each(|record| network.add_peer(record.id, record.udp_addr()));
+    Ok(())
+}
 
-    // Dumps peers to `file_path` for persistence.
-    async fn dump_peers(&self, network: &NetworkHandle) -> Result<(), eyre::Error> {
-        info!(target: "reth::cli", file = ?self.known, "Saving current peers");
-        let writer = std::io::BufWriter::new(std::fs::File::create(&self.known)?);
-        let known_peers: Vec<NodeRecord> = network
-            .get_peers()
-            .await?
-            .into_iter()
-            .map(|PeerInfo { remote_id, remote_addr, .. }| NodeRecord::new(remote_addr, remote_id))
-            .collect();
-        serde_json::to_writer_pretty(writer, &known_peers)?;
-        Ok(())
-    }
+/// Dumps peers to `file_path` for persistence.
+async fn dump_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> eyre::Result<()> {
+    info!(target: "reth::cli", file = %file_path.as_ref().display(), "Saving current peers");
+    let writer = std::io::BufWriter::new(std::fs::File::create(&file_path)?);
+    let known_peers: Vec<NodeRecord> = network
+        .get_peers()
+        .await?
+        .into_iter()
+        .map(|PeerInfo { remote_id, remote_addr, .. }| NodeRecord::new(remote_addr, remote_id))
+        .collect();
+    serde_json::to_writer_pretty(writer, &known_peers)?;
+    Ok(())
 }
 
 /// The current high-level state of the node.
