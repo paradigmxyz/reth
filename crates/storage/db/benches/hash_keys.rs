@@ -14,6 +14,7 @@ use reth_db::{
     mdbx::Env,
 };
 use std::{collections::HashSet, time::Instant};
+use test_fuzz::runtime::num_traits::Zero;
 
 criterion_group!(benches, hash_keys);
 criterion_main!(benches);
@@ -52,7 +53,8 @@ where
     let bench_db_path = Path::new(BENCH_DB_PATH);
 
     let scenarios: Vec<(fn(_, _) -> _, &str)> = vec![
-        (append::<T>, "append"),
+        (append::<T>, "append_all"),
+        (append::<T>, "append_input"),
         (insert::<T>, "insert_unsorted"),
         (insert::<T>, "insert_sorted"),
         (put::<T>, "put_unsorted"),
@@ -64,12 +66,28 @@ where
     let (preload, unsorted_input) = generate_batches::<T>(size);
 
     for (scenario, scenario_str) in scenarios {
+        // Append does not preload the table
+        let mut preload_size = size;
+        let mut input_size = size;
+        if scenario_str.contains("append") {
+            if scenario_str == "append_all" {
+                input_size = size * 2;
+            }
+            preload_size = 0;
+        }
+
+        // Setup phase before each benchmark iteration
         let setup = || {
             // Reset DB
             let _ = std::fs::remove_dir_all(bench_db_path);
             let db = create_test_db_with_path::<WriteMap>(EnvKind::RW, bench_db_path);
 
-            if scenario_str != "append" {
+            let mut unsorted_input = unsorted_input.clone();
+            if scenario_str == "append_all" {
+                unsorted_input.extend_from_slice(&preload);
+            }
+
+            if preload_size > 0 {
                 db.update(|tx| {
                     for (key, value) in &preload {
                         let _ = tx.put::<T>(key.clone(), value.clone());
@@ -78,9 +96,10 @@ where
                 .unwrap();
             }
 
-            (unsorted_input.clone(), db)
+            (unsorted_input, db)
         };
 
+        // Iteration to be benchmarked
         let execution = |(input, db)| {
             let mut input: Vec<(T::Key, T::Value)> = input;
             if scenario_str.contains("_sorted") || scenario_str.contains("append") {
@@ -89,9 +108,17 @@ where
             scenario(db, input)
         };
 
-        group.bench_function(format!("{} | ({size}) {scenario_str} ", T::NAME), |b| {
-            b.iter_with_setup(setup, execution);
-        });
+        group.bench_function(
+            format!(
+                "{} |  {scenario_str} | preload: {} | writing: {} ",
+                T::NAME,
+                preload_size,
+                input_size
+            ),
+            |b| {
+                b.iter_with_setup(setup, execution);
+            },
+        );
 
         // Execute once more to show table stats (doesn't count for benchmarking speed)
         let db = execution(setup());
