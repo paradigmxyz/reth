@@ -15,9 +15,9 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>;
 
-    /// Get account code by its address
-    /// Returns `None` if the account doesn't exist or
-    /// account is not a contract
+    /// Get account code by its address.
+    ///
+    /// Returns `None` if the account doesn't exist or account is not a contract
     fn account_code(&self, addr: Address) -> Result<Option<Bytes>> {
         // Get basic account information
         // Returns None if acc doesn't exist
@@ -25,16 +25,17 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
             Some(acc) => acc,
             None => return Ok(None),
         };
-        // Return None if the account doesn't has any code
+
         if let Some(code_hash) = acc.bytecode_hash {
             if code_hash == KECCAK_EMPTY {
                 return Ok(None)
             }
             // Get the code from the code hash
             return self.bytecode_by_hash(code_hash)
-        } else {
-            Ok(None)
         }
+
+        // Return `None` if no code hash is set
+        Ok(None)
     }
 }
 
