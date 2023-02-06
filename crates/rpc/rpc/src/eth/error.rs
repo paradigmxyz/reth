@@ -18,19 +18,47 @@ pub(crate) enum EthApiError {
     #[error("Invalid transaction signature")]
     InvalidTransactionSignature,
     #[error(transparent)]
-    PoolError(GethCompatPoolError),
+    PoolError(GethTxPoolError),
 }
 
 impl_to_rpc_result!(EthApiError);
 
-/// A helper error type that ensures error messages are compatible with `geth`
-// TODO: replace thiserror with custom convert
+/// A helper error type that mirrors `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub(crate) struct GethCompatPoolError(PoolError);
+pub(crate) enum GethTxPoolError {
+    #[error("already known")]
+    AlreadyKnown,
+    #[error("invalid sender")]
+    InvalidSender,
+    #[error("transaction underpriced")]
+    Underpriced,
+    #[error("txpool is full")]
+    TxPoolOverflow,
+    #[error("replacement transaction underpriced")]
+    ReplaceUnderpriced,
+    #[error("exceeds block gas limit")]
+    GasLimit,
+    #[error("negative value")]
+    NegativeValue,
+    #[error("oversized data")]
+    OversizedData,
+}
+
+impl From<PoolError> for GethTxPoolError {
+    fn from(err: PoolError) -> GethTxPoolError {
+        match err {
+            PoolError::ReplacementUnderpriced(_) => GethTxPoolError::ReplaceUnderpriced,
+            PoolError::ProtocolFeeCapTooLow(_, _) => GethTxPoolError::Underpriced,
+            PoolError::SpammerExceededCapacity(_, _) => GethTxPoolError::TxPoolOverflow,
+            PoolError::DiscardedOnInsert(_) => GethTxPoolError::TxPoolOverflow,
+            PoolError::TxExceedsGasLimit(_, _, _) => GethTxPoolError::GasLimit,
+            PoolError::TxExceedsMaxInitCodeSize(_, _, _) => GethTxPoolError::OversizedData,
+        }
+    }
+}
 
 impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
-        EthApiError::PoolError(GethCompatPoolError(err))
+        EthApiError::PoolError(GethTxPoolError::from(err))
     }
 }

@@ -43,6 +43,8 @@ pub enum Error {
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
     #[error("Block ommer hash ({got:?}) is different then expected: ({expected:?})")]
     BodyOmmersHashDiff { got: H256, expected: H256 },
+    #[error("Block state root ({got:?}) is different then expected: ({expected:?})")]
+    BodyStateRootDiff { got: H256, expected: H256 },
     #[error("Block transaction root ({got:?}) is different then expected: ({expected:?})")]
     BodyTransactionRootDiff { got: H256, expected: H256 },
     #[error("Block receipts root ({got:?}) is different then expected: ({expected:?}).")]

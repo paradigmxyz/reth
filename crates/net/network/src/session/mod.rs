@@ -222,8 +222,10 @@ impl SessionManager {
             self.fork_filter.clone(),
         ));
 
-        let handle =
-            PendingSessionHandle { _disconnect_tx: disconnect_tx, direction: Direction::Incoming };
+        let handle = PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Incoming,
+        };
         self.pending_sessions.insert(session_id, handle);
         self.counter.inc_pending_inbound();
         Ok(session_id)
@@ -248,7 +250,7 @@ impl SessionManager {
         ));
 
         let handle = PendingSessionHandle {
-            _disconnect_tx: disconnect_tx,
+            disconnect_tx: Some(disconnect_tx),
             direction: Direction::Outgoing(remote_peer_id),
         };
         self.pending_sessions.insert(session_id, handle);
@@ -262,6 +264,23 @@ impl SessionManager {
     pub(crate) fn disconnect(&self, node: PeerId, reason: Option<DisconnectReason>) {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect(reason);
+        }
+    }
+
+    /// Initiates a shutdown of all sessions.
+    ///
+    /// It will trigger the disconnect on all the session tasks to gracefully terminate. The result
+    /// will be picked by the receiver.
+    pub(crate) fn disconnect_all(&self, reason: Option<DisconnectReason>) {
+        for (_, session) in self.active_sessions.iter() {
+            session.disconnect(reason);
+        }
+    }
+
+    /// Disconnects all pending sessions.
+    pub(crate) fn disconnect_all_pending(&mut self) {
+        for (_, session) in self.pending_sessions.iter_mut() {
+            session.disconnect();
         }
     }
 
@@ -398,6 +417,7 @@ impl SessionManager {
                     session_id,
                     commands_rx: ReceiverStream::new(commands_rx),
                     to_session: self.active_session_tx.clone(),
+                    pending_message_to_session: None,
                     request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
@@ -818,6 +838,9 @@ async fn authenticate_stream(
     };
 
     // if the hello handshake was successful we can try status handshake
+    //
+    // Before trying status handshake, set up the version to shared_capability
+    let status = Status { version: p2p_stream.shared_capability().version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,

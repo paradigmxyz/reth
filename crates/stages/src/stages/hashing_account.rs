@@ -56,8 +56,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
-        // AccountHashing table
-        if to_transition - from_transition > self.clean_threshold {
+        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
+        // genesis accounts are not in changeset.
+        if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
             // clear table, load all accounts and hash it
             tx.clear::<tables::HashedAccount>()?;
             tx.commit()?;
@@ -183,7 +184,7 @@ mod tests {
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
 
     #[tokio::test]
-    async fn execute_below_clean_threshold() {
+    async fn execute_clean_account_hashing() {
         let (previous_stage, stage_progress) = (20, 10);
         // Set up the runner
         let mut runner = AccountHashingTestRunner::default();

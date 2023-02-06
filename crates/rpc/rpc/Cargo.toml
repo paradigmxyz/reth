@@ -15,20 +15,27 @@ reth-primitives = { path = "../../primitives" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rlp = { path = "../../rlp" }
 reth-rpc-types = { path = "../rpc-types" }
-reth-provider = { path = "../../storage/provider" }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-network-api = { path = "../../net/network-api" }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 
 # rpc
 jsonrpsee = { version = "0.16" }
+http = "0.2.8"
+http-body = "0.4.5"
+hyper = "0.14.24"
+jsonwebtoken = "8"
 
 # async
 async-trait = "0.1"
 tokio = { version = "1", features = ["sync"] }
+tower = "0.4"
+tokio-stream = "0.1"
+pin-project = "1.0"
 
 # misc
-secp256k1 = { version = "0.24", features = [
+secp256k1 = { version = "0.26.0", features = [
     "global-context",
     "rand-std",
     "recovery",
@@ -37,3 +44,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
 hex = "0.4"
+rand = "0.8.5"
+tracing = "0.1"
+
+[dev-dependencies]
+jsonrpsee = { version = "0.16", features = ["client"]}
