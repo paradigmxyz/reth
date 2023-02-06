@@ -1,14 +1,12 @@
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    io::Write,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
 use hex::encode as hex_encode;
 use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 
 /// Errors returned by the [`JwtSecret`][crate::layers::JwtSecret]
@@ -168,7 +166,7 @@ mod tests {
         let secret: Result<JwtSecret, _> = JwtSecret::from_hex(key);
         assert!(matches!(secret, Ok(_)));
 
-        let secret: Result<JwtSecret, _> = JwtSecret::from_hex(key.to_string());
+        let secret: Result<JwtSecret, _> = JwtSecret::from_hex(key);
         assert!(matches!(secret, Ok(_)));
     }
 
@@ -185,7 +183,7 @@ mod tests {
     fn secret_has_64_hex_digits() {
         let expected_len = 64;
         let secret = JwtSecret::random();
-        let hex = hex::encode(&secret.0);
+        let hex = hex::encode(secret.0);
         assert_eq!(hex.len(), expected_len);
     }
 

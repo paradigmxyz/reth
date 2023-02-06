@@ -287,9 +287,7 @@ mod tests {
         let mut module = RpcModule::new(());
         module.register_method("greet_melkor", |_, _| Ok("You are the dark lord")).unwrap();
 
-        let handle = server.start(module).unwrap();
-
-        handle
+        server.start(module).unwrap()
     }
 
     fn to_u64(time: SystemTime) -> u64 {
