@@ -65,7 +65,7 @@ impl PeersHandle {
         rx.await.unwrap_or(None)
     }
 
-    /// Send a reputation change for the given peer.
+    /// Returns all the currently connected peers and their reputations.
     pub async fn all_peers(&self) -> Vec<(i32, NodeRecord)> {
         let (tx, rx) = oneshot::channel();
         self.send(PeerCommand::GetPeers(tx));
