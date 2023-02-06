@@ -516,7 +516,8 @@ impl Future for ActiveSession {
 
             // read incoming messages from the wire
             'receive: loop {
-                // try to send the pending message that
+                // try to resend the pending message that we could not send because the channel was
+                // full.
                 if let Some(msg) = this.pending_message_to_session.take() {
                     match this.to_session.try_send(msg) {
                         Ok(_) => {}
