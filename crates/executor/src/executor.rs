@@ -494,7 +494,6 @@ pub fn execute<DB: StateProvider>(
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::HashMap;
 
     use crate::revm_wrap::State;

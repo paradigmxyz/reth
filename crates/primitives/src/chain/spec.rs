@@ -8,6 +8,391 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+/// The Ethereum mainnet spec
+pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain: Chain::mainnet(),
+    genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
+        .expect("Can't deserialize Mainnet genesis json"),
+    hardforks: BTreeMap::from([
+        (Hardfork::Frontier, ForkCondition::Block(0)),
+        (Hardfork::Homestead, ForkCondition::Block(1150000)),
+        (Hardfork::Dao, ForkCondition::Block(1920000)),
+        (Hardfork::Tangerine, ForkCondition::Block(2463000)),
+        (Hardfork::SpuriousDragon, ForkCondition::Block(2675000)),
+        (Hardfork::Byzantium, ForkCondition::Block(4370000)),
+        (Hardfork::Constantinople, ForkCondition::Block(7280000)),
+        (Hardfork::Petersburg, ForkCondition::Block(7280000)),
+        (Hardfork::Istanbul, ForkCondition::Block(9069000)),
+        (Hardfork::MuirGlacier, ForkCondition::Block(9200000)),
+        (Hardfork::Berlin, ForkCondition::Block(12244000)),
+        (Hardfork::London, ForkCondition::Block(12965000)),
+        (Hardfork::ArrowGlacier, ForkCondition::Block(13773000)),
+        (Hardfork::GrayGlacier, ForkCondition::Block(15050000)),
+        (
+            Hardfork::Paris,
+            ForkCondition::TTD {
+                fork_block: None,
+                total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+            },
+        ),
+    ]),
+});
+
+/// The Goerli spec
+pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain: Chain::goerli(),
+    genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
+        .expect("Can't deserialize Goerli genesis json"),
+    hardforks: BTreeMap::from([
+        (Hardfork::Frontier, ForkCondition::Block(0)),
+        (Hardfork::Istanbul, ForkCondition::Block(1561651)),
+        (Hardfork::Berlin, ForkCondition::Block(4460644)),
+        (Hardfork::London, ForkCondition::Block(5062605)),
+        (
+            Hardfork::Paris,
+            ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
+        ),
+    ]),
+});
+
+/// The Sepolia spec
+pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain: Chain::sepolia(),
+    genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
+        .expect("Can't deserialize Sepolia genesis json"),
+    hardforks: BTreeMap::from([
+        (Hardfork::Frontier, ForkCondition::Block(0)),
+        (Hardfork::Homestead, ForkCondition::Block(0)),
+        (Hardfork::Dao, ForkCondition::Block(0)),
+        (Hardfork::Tangerine, ForkCondition::Block(0)),
+        (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+        (Hardfork::Byzantium, ForkCondition::Block(0)),
+        (Hardfork::Constantinople, ForkCondition::Block(0)),
+        (Hardfork::Petersburg, ForkCondition::Block(0)),
+        (Hardfork::Istanbul, ForkCondition::Block(0)),
+        (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+        (Hardfork::Berlin, ForkCondition::Block(0)),
+        (Hardfork::London, ForkCondition::Block(0)),
+        (
+            Hardfork::Paris,
+            ForkCondition::TTD {
+                fork_block: Some(1735371),
+                total_difficulty: U256::from(17_000_000_000_000_000u64),
+            },
+        ),
+    ]),
+});
+
+/// An Ethereum chain specification.
+///
+/// A chain specification describes:
+///
+/// - Meta-information about the chain (the chain ID)
+/// - The genesis block of the chain ([`Genesis`])
+/// - What hardforks are activated, and under which conditions
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChainSpec {
+    /// The chain ID
+    pub chain: Chain,
+
+    /// The genesis block
+    pub genesis: Genesis,
+
+    /// The active hard forks and their activation conditions
+    pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+}
+
+impl ChainSpec {
+    /// Get information about the chain itself
+    pub fn chain(&self) -> Chain {
+        self.chain
+    }
+
+    /// Get the genesis block specification.
+    ///
+    /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
+    pub fn genesis(&self) -> &Genesis {
+        &self.genesis
+    }
+
+    /// Get the header for the genesis block.
+    pub fn genesis_header(&self) -> Header {
+        // If London is activated at genesis, we set the initial base fee as per EIP-1559.
+        let base_fee_per_gas = if self.fork(Hardfork::London).active_at_block(0) {
+            Some(EIP1559_INITIAL_BASE_FEE)
+        } else {
+            None
+        };
+
+        Header {
+            gas_limit: self.genesis.gas_limit,
+            difficulty: self.genesis.difficulty,
+            nonce: self.genesis.nonce,
+            extra_data: self.genesis.extra_data.clone(),
+            state_root: genesis_state_root(&self.genesis.alloc),
+            timestamp: self.genesis.timestamp,
+            mix_hash: self.genesis.mix_hash,
+            beneficiary: self.genesis.coinbase,
+            base_fee_per_gas,
+            ..Default::default()
+        }
+    }
+
+    /// Get the hash of the genesis block.
+    pub fn genesis_hash(&self) -> H256 {
+        self.genesis_header().hash_slow()
+    }
+
+    /// Returns the forks in this specification and their activation conditions.
+    pub fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
+        &self.hardforks
+    }
+
+    /// Get the fork condition for the given fork.
+    pub fn fork(&self, fork: Hardfork) -> ForkCondition {
+        self.hardforks.get(&fork).copied().unwrap_or(ForkCondition::Never)
+    }
+
+    /// Get an iterator of all hardforks with their respective activation conditions.
+    pub fn forks_iter(&self) -> impl Iterator<Item = (Hardfork, ForkCondition)> + '_ {
+        self.hardforks.iter().map(|(f, b)| (*f, *b))
+    }
+
+    /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
+    pub fn fork_filter(&self, head: Head) -> ForkFilter {
+        let forks = self.forks_iter().filter_map(|(_, condition)| {
+            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
+            // fork filter.
+            Some(match condition {
+                ForkCondition::Block(block) => ForkFilterKey::Block(block),
+                ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
+                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                _ => return None,
+            })
+        });
+
+        ForkFilter::new(head, self.genesis_hash(), forks)
+    }
+
+    /// Compute the [`ForkId`] for the given [`Head`]
+    pub fn fork_id(&self, head: &Head) -> ForkId {
+        let mut curr_forkhash = ForkHash::from(self.genesis_hash());
+        let mut current_applied_value = 0;
+
+        for (_, cond) in self.forks_iter() {
+            let value = match cond {
+                ForkCondition::Block(block) => block,
+                ForkCondition::Timestamp(time) => time,
+                ForkCondition::TTD { fork_block: Some(block), .. } => block,
+                _ => continue,
+            };
+
+            if cond.active_at_head(head) {
+                if value != current_applied_value {
+                    curr_forkhash += value;
+                    current_applied_value = value;
+                }
+            } else {
+                return ForkId { hash: curr_forkhash, next: value }
+            }
+        }
+        ForkId { hash: curr_forkhash, next: 0 }
+    }
+
+    /// Build a chainspec using [`ChainSpecBuilder`]
+    pub fn builder() -> ChainSpecBuilder {
+        ChainSpecBuilder::default()
+    }
+}
+
+impl From<EthersGenesis> for ChainSpec {
+    fn from(genesis: EthersGenesis) -> Self {
+        let alloc = genesis
+            .alloc
+            .iter()
+            .map(|(addr, account)| (addr.0.into(), account.clone().into()))
+            .collect::<HashMap<H160, GenesisAccount>>();
+
+        let genesis_block = Genesis {
+            nonce: genesis.nonce.as_u64(),
+            timestamp: genesis.timestamp.as_u64(),
+            gas_limit: genesis.gas_limit.as_u64(),
+            difficulty: genesis.difficulty.into(),
+            mix_hash: genesis.mix_hash.0.into(),
+            coinbase: genesis.coinbase.0.into(),
+            extra_data: genesis.extra_data.0.into(),
+            alloc,
+        };
+
+        // Block-based hardforks
+        let hardfork_opts = vec![
+            (Hardfork::Homestead, genesis.config.homestead_block),
+            (Hardfork::Dao, genesis.config.dao_fork_block),
+            (Hardfork::Tangerine, genesis.config.eip150_block),
+            (Hardfork::SpuriousDragon, genesis.config.eip155_block),
+            (Hardfork::Byzantium, genesis.config.byzantium_block),
+            (Hardfork::Constantinople, genesis.config.constantinople_block),
+            (Hardfork::Petersburg, genesis.config.petersburg_block),
+            (Hardfork::Istanbul, genesis.config.istanbul_block),
+            (Hardfork::MuirGlacier, genesis.config.muir_glacier_block),
+            (Hardfork::Berlin, genesis.config.berlin_block),
+            (Hardfork::London, genesis.config.london_block),
+            (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
+            (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
+        ];
+        let mut hardforks = hardfork_opts
+            .iter()
+            .filter_map(|(hardfork, opt)| opt.map(|block| (*hardfork, ForkCondition::Block(block))))
+            .collect::<BTreeMap<_, _>>();
+
+        // Paris
+        if let Some(ttd) = genesis.config.terminal_total_difficulty {
+            hardforks.insert(
+                Hardfork::Paris,
+                ForkCondition::TTD {
+                    total_difficulty: ttd.into(),
+                    fork_block: genesis.config.merge_netsplit_block,
+                },
+            );
+        }
+
+        Self { chain: genesis.config.chain_id.into(), genesis: genesis_block, hardforks }
+    }
+}
+
+/// A helper to build custom chain specs
+#[derive(Debug, Default)]
+pub struct ChainSpecBuilder {
+    chain: Option<Chain>,
+    genesis: Option<Genesis>,
+    hardforks: BTreeMap<Hardfork, ForkCondition>,
+}
+
+impl ChainSpecBuilder {
+    /// Construct a new builder from the mainnet chain spec.
+    pub fn mainnet() -> Self {
+        Self {
+            chain: Some(MAINNET.chain),
+            genesis: Some(MAINNET.genesis.clone()),
+            hardforks: MAINNET.hardforks.clone(),
+        }
+    }
+
+    /// Set the chain ID
+    pub fn chain(mut self, chain: Chain) -> Self {
+        self.chain = Some(chain);
+        self
+    }
+
+    /// Set the genesis block.
+    pub fn genesis(mut self, genesis: Genesis) -> Self {
+        self.genesis = Some(genesis);
+        self
+    }
+
+    /// Add the given fork with the given activation condition to the spec.
+    pub fn with_fork(mut self, fork: Hardfork, condition: ForkCondition) -> Self {
+        self.hardforks.insert(fork, condition);
+        self
+    }
+
+    /// Enable Frontier at genesis.
+    pub fn frontier_activated(mut self) -> Self {
+        self.hardforks.insert(Hardfork::Frontier, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Homestead at genesis.
+    pub fn homestead_activated(mut self) -> Self {
+        self = self.frontier_activated();
+        self.hardforks.insert(Hardfork::Homestead, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Tangerine at genesis.
+    pub fn tangerine_whistle_activated(mut self) -> Self {
+        self = self.homestead_activated();
+        self.hardforks.insert(Hardfork::Tangerine, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Spurious Dragon at genesis.
+    pub fn spurious_dragon_activated(mut self) -> Self {
+        self = self.tangerine_whistle_activated();
+        self.hardforks.insert(Hardfork::SpuriousDragon, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Byzantium at genesis.
+    pub fn byzantium_activated(mut self) -> Self {
+        self = self.spurious_dragon_activated();
+        self.hardforks.insert(Hardfork::Byzantium, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Petersburg at genesis.
+    pub fn petersburg_activated(mut self) -> Self {
+        self = self.byzantium_activated();
+        self.hardforks.insert(Hardfork::Petersburg, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Istanbul at genesis.
+    pub fn istanbul_activated(mut self) -> Self {
+        self = self.petersburg_activated();
+        self.hardforks.insert(Hardfork::Istanbul, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Berlin at genesis.
+    pub fn berlin_activated(mut self) -> Self {
+        self = self.istanbul_activated();
+        self.hardforks.insert(Hardfork::Berlin, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable London at genesis.
+    pub fn london_activated(mut self) -> Self {
+        self = self.berlin_activated();
+        self.hardforks.insert(Hardfork::London, ForkCondition::Block(0));
+        self
+    }
+
+    /// Enable Paris at genesis.
+    pub fn paris_activated(mut self) -> Self {
+        self = self.berlin_activated();
+        self.hardforks.insert(
+            Hardfork::Paris,
+            ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+        );
+        self
+    }
+
+    /// Build the resulting [`ChainSpec`].
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the chain ID and genesis is not set ([`Self::set_chain`] and
+    /// [`Self::set_genesis`])
+    pub fn build(self) -> ChainSpec {
+        ChainSpec {
+            chain: self.chain.expect("The chain is required"),
+            genesis: self.genesis.expect("The genesis is required"),
+            hardforks: self.hardforks,
+        }
+    }
+}
+
+impl From<&ChainSpec> for ChainSpecBuilder {
+    fn from(value: &ChainSpec) -> Self {
+        Self {
+            chain: Some(value.chain),
+            genesis: Some(value.genesis.clone()),
+            hardforks: value.hardforks.clone(),
+        }
+    }
+}
+
 /// The condition at which a fork is activated.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ForkCondition {
@@ -110,380 +495,6 @@ impl ForkCondition {
                 Head { total_difficulty, ..Default::default() }
             }
             ForkCondition::Never => unreachable!(),
-        }
-    }
-}
-
-/// The Ethereum mainnet spec
-pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
-    chain: Chain::mainnet(),
-    genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
-        .expect("Can't deserialize Mainnet genesis json"),
-    hardforks: BTreeMap::from([
-        (Hardfork::Frontier, ForkCondition::Block(0)),
-        (Hardfork::Homestead, ForkCondition::Block(1150000)),
-        (Hardfork::Dao, ForkCondition::Block(1920000)),
-        (Hardfork::Tangerine, ForkCondition::Block(2463000)),
-        (Hardfork::SpuriousDragon, ForkCondition::Block(2675000)),
-        (Hardfork::Byzantium, ForkCondition::Block(4370000)),
-        (Hardfork::Constantinople, ForkCondition::Block(7280000)),
-        (Hardfork::Petersburg, ForkCondition::Block(7280000)),
-        (Hardfork::Istanbul, ForkCondition::Block(9069000)),
-        (Hardfork::MuirGlacier, ForkCondition::Block(9200000)),
-        (Hardfork::Berlin, ForkCondition::Block(12244000)),
-        (Hardfork::London, ForkCondition::Block(12965000)),
-        (Hardfork::ArrowGlacier, ForkCondition::Block(13773000)),
-        (Hardfork::GrayGlacier, ForkCondition::Block(15050000)),
-        (
-            Hardfork::Paris,
-            ForkCondition::TTD {
-                fork_block: None,
-                total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
-            },
-        ),
-    ]),
-});
-
-/// The Goerli spec
-pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
-    chain: Chain::goerli(),
-    genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
-        .expect("Can't deserialize Goerli genesis json"),
-    hardforks: BTreeMap::from([
-        (Hardfork::Frontier, ForkCondition::Block(0)),
-        (Hardfork::Istanbul, ForkCondition::Block(1561651)),
-        (Hardfork::Berlin, ForkCondition::Block(4460644)),
-        (Hardfork::London, ForkCondition::Block(5062605)),
-        (
-            Hardfork::Paris,
-            ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
-        ),
-    ]),
-});
-
-/// The Sepolia spec
-pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
-    chain: Chain::sepolia(),
-    genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
-        .expect("Can't deserialize Sepolia genesis json"),
-    hardforks: BTreeMap::from([
-        (Hardfork::Frontier, ForkCondition::Block(0)),
-        (Hardfork::Homestead, ForkCondition::Block(0)),
-        (Hardfork::Dao, ForkCondition::Block(0)),
-        (Hardfork::Tangerine, ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-        (Hardfork::Byzantium, ForkCondition::Block(0)),
-        (Hardfork::Constantinople, ForkCondition::Block(0)),
-        (Hardfork::Petersburg, ForkCondition::Block(0)),
-        (Hardfork::Istanbul, ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-        (Hardfork::Berlin, ForkCondition::Block(0)),
-        (Hardfork::London, ForkCondition::Block(0)),
-        (
-            Hardfork::Paris,
-            ForkCondition::TTD {
-                fork_block: Some(1735371),
-                total_difficulty: U256::from(17_000_000_000_000_000u64),
-            },
-        ),
-    ]),
-});
-
-/// The Ethereum chain spec
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChainSpec {
-    /// The chain id
-    pub chain: Chain,
-
-    /// The genesis block information
-    pub genesis: Genesis,
-
-    /// The active hard forks and their block numbers
-    pub hardforks: BTreeMap<Hardfork, ForkCondition>,
-}
-
-impl ChainSpec {
-    /// Returns the chain id
-    pub fn chain(&self) -> Chain {
-        self.chain
-    }
-
-    /// Get the genesis block specification.
-    ///
-    /// To get the header for the genesis block, use [`Self::genesis_header`] instead.
-    pub fn genesis(&self) -> &Genesis {
-        &self.genesis
-    }
-
-    /// Get the header for the genesis block.
-    pub fn genesis_header(&self) -> Header {
-        // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        let base_fee_per_gas = if self.fork(Hardfork::London).active_at_block(0) {
-            Some(EIP1559_INITIAL_BASE_FEE)
-        } else {
-            None
-        };
-
-        Header {
-            gas_limit: self.genesis.gas_limit,
-            difficulty: self.genesis.difficulty,
-            nonce: self.genesis.nonce,
-            extra_data: self.genesis.extra_data.clone(),
-            state_root: genesis_state_root(&self.genesis.alloc),
-            timestamp: self.genesis.timestamp,
-            mix_hash: self.genesis.mix_hash,
-            beneficiary: self.genesis.coinbase,
-            base_fee_per_gas,
-            ..Default::default()
-        }
-    }
-
-    /// Returns the chain genesis hash
-    pub fn genesis_hash(&self) -> H256 {
-        self.genesis_header().hash_slow()
-    }
-
-    /// Returns the supported hardforks and their fork block numbers
-    pub fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
-        &self.hardforks
-    }
-
-    /// Get the fork condition for the given fork.
-    pub fn fork(&self, fork: Hardfork) -> ForkCondition {
-        self.hardforks.get(&fork).copied().unwrap_or(ForkCondition::Never)
-    }
-
-    /// Get an iterator of all harforks with theirs respectives block number
-    pub fn forks_iter(&self) -> impl Iterator<Item = (Hardfork, ForkCondition)> + '_ {
-        self.hardforks.iter().map(|(f, b)| (*f, *b))
-    }
-
-    /// Creates a [`ForkFilter`](crate::ForkFilter) for the given [Header].
-    pub fn fork_filter(&self, head: Head) -> ForkFilter {
-        let forks = self.forks_iter().filter_map(|(_, condition)| {
-            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
-            // fork filter.
-            Some(match condition {
-                ForkCondition::Block(block) => ForkFilterKey::Block(block),
-                ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
-                _ => return None,
-            })
-        });
-
-        ForkFilter::new(head, self.genesis_hash(), forks)
-    }
-
-    /// Compute the forkid for the given [Header]
-    pub fn fork_id(&self, head: &Head) -> ForkId {
-        let mut curr_forkhash = ForkHash::from(self.genesis_hash());
-        let mut current_applied_value = 0;
-
-        for (_, cond) in self.forks_iter() {
-            let value = match cond {
-                ForkCondition::Block(block) => block,
-                ForkCondition::Timestamp(time) => time,
-                ForkCondition::TTD { fork_block: Some(block), .. } => block,
-                _ => continue,
-            };
-
-            if cond.active_at_head(head) {
-                if value != current_applied_value {
-                    curr_forkhash += value;
-                    current_applied_value = value;
-                }
-            } else {
-                return ForkId { hash: curr_forkhash, next: value }
-            }
-        }
-        ForkId { hash: curr_forkhash, next: 0 }
-    }
-
-    /// Returns a [ChainSpecBuilder] to help build custom specs
-    pub fn builder() -> ChainSpecBuilder {
-        ChainSpecBuilder::default()
-    }
-}
-
-impl From<EthersGenesis> for ChainSpec {
-    fn from(genesis: EthersGenesis) -> Self {
-        let alloc = genesis
-            .alloc
-            .iter()
-            .map(|(addr, account)| (addr.0.into(), account.clone().into()))
-            .collect::<HashMap<H160, GenesisAccount>>();
-
-        let genesis_block = Genesis {
-            nonce: genesis.nonce.as_u64(),
-            timestamp: genesis.timestamp.as_u64(),
-            gas_limit: genesis.gas_limit.as_u64(),
-            difficulty: genesis.difficulty.into(),
-            mix_hash: genesis.mix_hash.0.into(),
-            coinbase: genesis.coinbase.0.into(),
-            extra_data: genesis.extra_data.0.into(),
-            alloc,
-        };
-
-        // Block-based hardforks
-        let hardfork_opts = vec![
-            (Hardfork::Homestead, genesis.config.homestead_block),
-            (Hardfork::Dao, genesis.config.dao_fork_block),
-            (Hardfork::Tangerine, genesis.config.eip150_block),
-            (Hardfork::SpuriousDragon, genesis.config.eip155_block),
-            (Hardfork::Byzantium, genesis.config.byzantium_block),
-            (Hardfork::Constantinople, genesis.config.constantinople_block),
-            (Hardfork::Petersburg, genesis.config.petersburg_block),
-            (Hardfork::Istanbul, genesis.config.istanbul_block),
-            (Hardfork::MuirGlacier, genesis.config.muir_glacier_block),
-            (Hardfork::Berlin, genesis.config.berlin_block),
-            (Hardfork::London, genesis.config.london_block),
-            (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
-            (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
-        ];
-        let mut hardforks = hardfork_opts
-            .iter()
-            .filter_map(|(hardfork, opt)| opt.map(|block| (*hardfork, ForkCondition::Block(block))))
-            .collect::<BTreeMap<_, _>>();
-
-        // Paris
-        if let Some(ttd) = genesis.config.terminal_total_difficulty {
-            hardforks.insert(
-                Hardfork::Paris,
-                ForkCondition::TTD {
-                    total_difficulty: ttd.into(),
-                    fork_block: genesis.config.merge_netsplit_block,
-                },
-            );
-        }
-
-        Self { chain: genesis.config.chain_id.into(), genesis: genesis_block, hardforks }
-    }
-}
-
-/// A helper to build custom chain specs
-#[derive(Debug, Default)]
-pub struct ChainSpecBuilder {
-    chain: Option<Chain>,
-    genesis: Option<Genesis>,
-    hardforks: BTreeMap<Hardfork, ForkCondition>,
-}
-
-impl ChainSpecBuilder {
-    /// Returns a [ChainSpec] builder initialized with Ethereum mainnet config
-    pub fn mainnet() -> Self {
-        Self {
-            chain: Some(MAINNET.chain),
-            genesis: Some(MAINNET.genesis.clone()),
-            hardforks: MAINNET.hardforks.clone(),
-        }
-    }
-
-    /// Sets the chain id
-    pub fn chain(mut self, chain: Chain) -> Self {
-        self.chain = Some(chain);
-        self
-    }
-
-    /// Sets the genesis
-    pub fn genesis(mut self, genesis: Genesis) -> Self {
-        self.genesis = Some(genesis);
-        self
-    }
-
-    /// Insert the given fork with the given activation condition
-    pub fn with_fork(mut self, fork: Hardfork, condition: ForkCondition) -> Self {
-        self.hardforks.insert(fork, condition);
-        self
-    }
-
-    /// Enables Frontier
-    pub fn frontier_activated(mut self) -> Self {
-        self.hardforks.insert(Hardfork::Frontier, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables Homestead
-    pub fn homestead_activated(mut self) -> Self {
-        self = self.frontier_activated();
-        self.hardforks.insert(Hardfork::Homestead, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables Tangerine
-    pub fn tangerine_whistle_activated(mut self) -> Self {
-        self = self.homestead_activated();
-        self.hardforks.insert(Hardfork::Tangerine, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables SpuriousDragon
-    pub fn spurious_dragon_activated(mut self) -> Self {
-        self = self.tangerine_whistle_activated();
-        self.hardforks.insert(Hardfork::SpuriousDragon, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables Byzantium
-    pub fn byzantium_activated(mut self) -> Self {
-        self = self.spurious_dragon_activated();
-        self.hardforks.insert(Hardfork::Byzantium, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables Petersburg
-    pub fn petersburg_activated(mut self) -> Self {
-        self = self.byzantium_activated();
-        self.hardforks.insert(Hardfork::Petersburg, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables Istanbul
-    pub fn istanbul_activated(mut self) -> Self {
-        self = self.petersburg_activated();
-        self.hardforks.insert(Hardfork::Istanbul, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables Berlin
-    pub fn berlin_activated(mut self) -> Self {
-        self = self.istanbul_activated();
-        self.hardforks.insert(Hardfork::Berlin, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables London
-    pub fn london_activated(mut self) -> Self {
-        self = self.berlin_activated();
-        self.hardforks.insert(Hardfork::London, ForkCondition::Block(0));
-        self
-    }
-
-    /// Enables Paris
-    pub fn paris_activated(mut self) -> Self {
-        self = self.berlin_activated();
-        self.hardforks.insert(
-            Hardfork::Paris,
-            ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
-        );
-        self
-    }
-
-    /// Build a [ChainSpec]
-    pub fn build(self) -> ChainSpec {
-        ChainSpec {
-            chain: self.chain.expect("The chain is required"),
-            genesis: self.genesis.expect("The genesis is required"),
-            hardforks: self.hardforks,
-        }
-    }
-}
-
-impl From<&ChainSpec> for ChainSpecBuilder {
-    fn from(value: &ChainSpec) -> Self {
-        Self {
-            chain: Some(value.chain),
-            genesis: Some(value.genesis.clone()),
-            hardforks: value.hardforks.clone(),
         }
     }
 }
