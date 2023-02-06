@@ -372,8 +372,8 @@ impl ChainSpecBuilder {
     ///
     /// # Panics
     ///
-    /// This function panics if the chain ID and genesis is not set ([`Self::set_chain`] and
-    /// [`Self::set_genesis`])
+    /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
+    /// [`Self::genesis`])
     pub fn build(self) -> ChainSpec {
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
