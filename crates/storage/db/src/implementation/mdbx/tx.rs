@@ -7,8 +7,9 @@ use crate::{
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     Error,
 };
+use metrics::histogram;
 use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
@@ -68,7 +69,10 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
     }
 
     fn commit(self) -> Result<bool, Error> {
-        self.inner.commit().map_err(|e| Error::Commit(e.into()))
+        let start = Instant::now();
+        let result = self.inner.commit().map_err(|e| Error::Commit(e.into()));
+        histogram!("tx.commit", start.elapsed());
+        result
     }
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {

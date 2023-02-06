@@ -29,6 +29,9 @@ secp256k1 = { version = "0.24.2", default-features = false, features = [
 ], optional = true }
 modular-bitfield = "0.11.2"
 
+# metrics
+metrics = "0.20.1"
+
 # misc
 bytes = "1.2.1"
 page_size = "0.4.2"
