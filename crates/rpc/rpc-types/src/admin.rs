@@ -1,16 +1,19 @@
-use reth_network_api::NetworkStatus;
+use reth_network_api::{EthProtocolInfo, NetworkStatus};
 use reth_primitives::{NodeRecord, PeerId};
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    collections::BTreeMap,
+    net::{IpAddr, SocketAddr},
+};
 
 /// Represents the `admin_nodeInfo` response, which can be queried for all the information
 /// known about the running node at the networking granularity.
 ///
 /// Note: this format is not standardized. Reth follows Geth's format,
 /// see: <https://geth.ethereum.org/docs/interacting-with-geth/rpc/ns-admin>
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeInfo {
-    /// Enode in URL format.
+    /// Enode of the node in URL format.
     pub enode: NodeRecord,
     /// ID of the local node.
     pub id: PeerId,
@@ -21,9 +24,10 @@ pub struct NodeInfo {
     pub listen_addr: SocketAddr,
     /// Ports exposed by the node for discovery and listening.
     pub ports: Ports,
+    /// Name of the network
+    pub name: String,
     /// Networking protocols being run by the local node.
-    #[serde(flatten)]
-    pub status: NetworkStatus,
+    pub protocols: Protocols,
 }
 
 impl NodeInfo {
@@ -35,16 +39,42 @@ impl NodeInfo {
             ip: enr.address,
             listen_addr: enr.tcp_addr(),
             ports: Ports { discovery: enr.udp_port, listener: enr.tcp_port },
-            status,
+            name: status.client_version,
+            protocols: Protocols { eth: status.eth_protocol_info, other: Default::default() },
         }
     }
 }
 
+/// All supported protocols
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Protocols {
+    /// Info about `eth` sub-protocol
+    pub eth: EthProtocolInfo,
+    /// Placeholder for any other protocols
+    #[serde(flatten, default)]
+    pub other: BTreeMap<String, serde_json::Value>,
+}
+
 /// Ports exposed by the node for discovery and listening.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ports {
     /// Port exposed for node discovery.
     pub discovery: u16,
     /// Port exposed for listening.
     pub listener: u16,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_node_info_roundtrip() {
+        let sample = r#"{"enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@[::]:30303","id":"44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d","ip":"::","listenAddr":"[::]:30303","name":"reth","ports":{"discovery":30303,"listener":30303},"protocols":{"eth":{"difficulty":17334254859343145000,"genesis":"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3","head":"0xb83f73fbe6220c111136aefd27b160bf4a34085c65ba89f24246b3162257c36a","network":1}}}"#;
+
+        let info: NodeInfo = serde_json::from_str(sample).unwrap();
+        let serialized = serde_json::to_string_pretty(&info).unwrap();
+        let de_serialized: NodeInfo = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(info, de_serialized)
+    }
 }

@@ -96,13 +96,18 @@ mod __reexport {
     pub use tiny_keccak;
 }
 
+// Useful reexports
+pub use __reexport::*;
+
 /// Various utilities
 pub mod utils {
     pub use ethers_core::types::serde_helpers;
 }
 
-// Useful reexports
-pub use __reexport::*;
+/// Helpers for working with serde
+pub mod serde_helper {
+    pub use crate::jsonu256::deserialize_json_u256;
+}
 
 /// Returns the keccak256 hash for the given data.
 #[inline]
