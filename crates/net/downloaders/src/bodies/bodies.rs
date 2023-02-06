@@ -291,17 +291,19 @@ where
                         continue
                     }
 
+                    // Extend the last range if it remains contiguous and request size
+                    // is under limit.
+                    // The ranges are inclusive to simplify calculation of request length.
+                    let new_range_end = num + 1;
                     if let Some(range) = requests.last_mut() {
-                        // Extend the last range if it remains contiguous and request size is under
-                        // limit
                         let range_len = range.end.saturating_sub(range.start);
                         if range.end == num && range_len < max_request_len {
-                            *range = range.start..num + 1;
+                            *range = range.start..new_range_end;
                         } else {
-                            requests.push(num..num + 1);
+                            requests.push(num..new_range_end);
                         }
                     } else {
-                        requests.push(num..num + 1);
+                        requests.push(num..new_range_end);
                     }
                 }
 
