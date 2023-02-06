@@ -328,7 +328,11 @@ mod tests {
             output,
             Ok(ExecOutput { stage_progress, done: true }) if stage_progress > first_run_progress
         );
-        assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
+        assert_matches!(
+            runner.validate_execution(input, output.ok()),
+            Ok(_),
+            "execution validation"
+        );
     }
 
     /// Checks that the stage unwinds correctly, even if a transaction in a block is missing.
@@ -382,7 +386,7 @@ mod tests {
             Ok(UnwindOutput { stage_progress }) if stage_progress == 1
         );
 
-        assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
+        assert_matches!(runner.validate_unwind(input), Ok(_), "unwind validation");
     }
 
     mod test_utils {
