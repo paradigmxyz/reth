@@ -9,20 +9,21 @@ pub const WEI_3ETH: u128 = 3000000000000000000u128;
 /// Five ethereum worth of wei
 pub const WEI_5ETH: u128 = 5000000000000000000u128;
 
+use revm::primitives::SpecId;
 /// return revm_spec from spec configuration.
-pub fn revm_spec(chain_spec: &ChainSpec, for_block: BlockNumber) -> revm::SpecId {
+pub fn revm_spec(chain_spec: &ChainSpec, for_block: BlockNumber) -> revm::primitives::SpecId {
     match for_block {
-        b if chain_spec.fork_active(Hardfork::Shanghai, b) => revm::MERGE_EOF,
-        b if Some(b) >= chain_spec.paris_status().block_number() => revm::MERGE,
-        b if chain_spec.fork_active(Hardfork::London, b) => revm::LONDON,
-        b if chain_spec.fork_active(Hardfork::Berlin, b) => revm::BERLIN,
-        b if chain_spec.fork_active(Hardfork::Istanbul, b) => revm::ISTANBUL,
-        b if chain_spec.fork_active(Hardfork::Petersburg, b) => revm::PETERSBURG,
-        b if chain_spec.fork_active(Hardfork::Byzantium, b) => revm::BYZANTIUM,
-        b if chain_spec.fork_active(Hardfork::SpuriousDragon, b) => revm::SPURIOUS_DRAGON,
-        b if chain_spec.fork_active(Hardfork::Tangerine, b) => revm::TANGERINE,
-        b if chain_spec.fork_active(Hardfork::Homestead, b) => revm::HOMESTEAD,
-        b if chain_spec.fork_active(Hardfork::Frontier, b) => revm::FRONTIER,
+        b if chain_spec.fork_active(Hardfork::Shanghai, b) => SpecId::MERGE_EOF,
+        b if Some(b) >= chain_spec.paris_status().block_number() => SpecId::MERGE,
+        b if chain_spec.fork_active(Hardfork::London, b) => SpecId::LONDON,
+        b if chain_spec.fork_active(Hardfork::Berlin, b) => SpecId::BERLIN,
+        b if chain_spec.fork_active(Hardfork::Istanbul, b) => SpecId::ISTANBUL,
+        b if chain_spec.fork_active(Hardfork::Petersburg, b) => SpecId::PETERSBURG,
+        b if chain_spec.fork_active(Hardfork::Byzantium, b) => SpecId::BYZANTIUM,
+        b if chain_spec.fork_active(Hardfork::SpuriousDragon, b) => SpecId::SPURIOUS_DRAGON,
+        b if chain_spec.fork_active(Hardfork::Tangerine, b) => SpecId::TANGERINE,
+        b if chain_spec.fork_active(Hardfork::Homestead, b) => SpecId::HOMESTEAD,
+        b if chain_spec.fork_active(Hardfork::Frontier, b) => SpecId::FRONTIER,
         _ => panic!("wrong configuration"),
     }
 }

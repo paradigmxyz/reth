@@ -11,9 +11,17 @@ use reth_primitives::{
 };
 use reth_provider::StateProvider;
 use revm::{
-    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Return, SpecId,
+    db::AccountState,
+    primitives::{
+        Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode,
+        ResultAndState, SpecId,
+        ExecutionResult::Success as Success,
+        ExecutionResult::Revert as Revert,
+        ExecutionResult::Halt as Halt
+    },
     EVM,
 };
+use revm_interpreter::primitives::db::Database;
 use std::collections::BTreeMap;
 
 /// Main block executor
@@ -341,69 +349,89 @@ pub fn execute<DB: StateProvider>(
         // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
         // \nENV:{:?}",transaction.hash(),transaction,evm.env);
 
-        let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
-
-        // Fatal internal error.
-        if exit_reason == revm::Return::FatalExternalError {
+        // Fatal internal error
+        if let Err(revm::primitives::EVMError::Database(_)) = out {
             return Err(Error::ExecutionFatalError)
         }
 
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
         // TODO for verification (exit_reason): some error should return EVM error as the block with
         // that transaction can have consensus error that would make block invalid.
-        let is_success = match exit_reason {
-            revm::return_ok!() => true,
-            revm::return_revert!() => false,
-            _ => false,
-            //e => return Err(Error::EVMError { error_code: e as u32 }),
+        let is_success = if let Ok(ResultAndState { ref result, ..}) = out {
+            match &result {
+                Success { .. } => true,
+                _ => false,
+            }
+        } else {
+            false
         };
+        // let is_success = match exit_reason {
+        // revm_interpreter::return_ok!() => true,
+        // revm_interpreter::return_revert!() => false,
+        // _ => false,
+        //     //e => return Err(Error::EVMError { error_code: e as u32 }),
+        // };
 
         // Add spend gas.
-        cumulative_gas_used += gas_used;
+        if let Ok(ResultAndState { ref result, ..}) = out {
+        cumulative_gas_used += match &result {
+                Success{gas_used, ..} => gas_used,
+                Revert{gas_used, ..} => gas_used,
+                Halt{gas_used, ..} => gas_used,
+            }
+        };
+        // cumulative_gas_used += gas_used;
 
         // Transform logs to reth format.
-        let logs: Vec<Log> = logs
-            .into_iter()
-            .map(|l| Log {
-                address: H160(l.address.0),
-                topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
-                data: l.data.into(),
+        if let Ok(ResultAndState {
+            result: revm::primitives::ExecutionResult::Success { logs, .. },
+            state,
+        }) = out
+        {
+            let logs: Vec<Log> = logs
+                .into_iter()
+                .map(|l| Log {
+                    address: H160(l.address.0),
+                    topics: l.topics.into_iter().map(|h| H256(h.0)).collect(),
+                    data: l.data.into(),
+                })
+                .collect();
+
+            // commit state
+            let (changeset, new_bytecodes) =
+                commit_changes(evm.db().expect("Db to not be moved."), state);
+
+            // Push transaction changeset and calculte header bloom filter for receipt.
+            changesets.push(TransactionChangeSet {
+                receipt: Receipt {
+                    tx_type: transaction.tx_type(),
+                    success: is_success,
+                    cumulative_gas_used,
+                    bloom: logs_bloom(logs.iter()),
+                    logs,
+                },
+                changeset,
+                new_bytecodes,
             })
-            .collect();
+        }
 
-        // commit state
-        let (changeset, new_bytecodes) =
-            commit_changes(evm.db().expect("Db to not be moved."), state);
+        // Check if gas used matches the value set in header.
+        if header.gas_used != cumulative_gas_used {
+            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
+        }
 
-        // Push transaction changeset and calculte header bloom filter for receipt.
-        changesets.push(TransactionChangeSet {
-            receipt: Receipt {
-                tx_type: transaction.tx_type(),
-                success: is_success,
-                cumulative_gas_used,
-                bloom: logs_bloom(logs.iter()),
-                logs,
-            },
-            changeset,
-            new_bytecodes,
-        })
+        let db = evm.db.expect("Db is set at the start of the function");
+        let mut block_reward = block_reward_changeset(header, ommers, db, chain_spec)?;
+
+        if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
+            let mut irregular_state_changeset = dao_fork_changeset(db)?;
+            irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
+            block_reward = Some(irregular_state_changeset);
+        }
+
+        Ok::<ExecutionResult, Error>(ExecutionResult { changesets, block_reward });
     }
-
-    // Check if gas used matches the value set in header.
-    if header.gas_used != cumulative_gas_used {
-        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
-    }
-
-    let db = evm.db.expect("Db is set at the start of the function");
-    let mut block_reward = block_reward_changeset(header, ommers, db, chain_spec)?;
-
-    if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
-        let mut irregular_state_changeset = dao_fork_changeset(db)?;
-        irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
-        block_reward = Some(irregular_state_changeset);
-    }
-
-    Ok(ExecutionResult { changesets, block_reward })
+    Err(Error::ExecutionFatalError)
 }
 
 /// Irregular state change at Ethereum DAO hardfork

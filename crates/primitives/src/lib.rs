@@ -87,7 +87,9 @@ pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, H128, H64, U64},
 };
-pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
+pub use revm::primitives::B160 as H160;
+pub use revm_interpreter::primitives::{ruint::aliases::U128,  U256};
+pub use revm::primitives::B256 as H256;
 
 #[doc(hidden)]
 mod __reexport {

@@ -17,9 +17,11 @@ reth-rlp = { path = "../common/rlp", features = [
 reth-rlp-derive = { path = "../common/rlp-derive" }
 reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = [
-    "serde",
-] }
+revm = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7", features = ["serde"] }
+# revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = [
+#     "serde",
+# ] }
 
 # ethereum
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
@@ -73,11 +75,13 @@ serde_json = "1.0"
 hex-literal = "0.3"
 test-fuzz = "3.0.4"
 rand = "0.8"
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = [
-    "serde",
-    "arbitrary",
-] }
+# revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = [
+#     "serde",
+#     "arbitrary",
+# ] }
 
+revm = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7" }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }
 proptest-derive = "0.3"
