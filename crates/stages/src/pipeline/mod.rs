@@ -1,10 +1,13 @@
 use crate::{
     db::Transaction, error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
 };
+use metrics::Gauge;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+use reth_metrics_derive::Metrics;
 use reth_primitives::BlockNumber;
 use std::{
+    collections::HashMap,
     fmt::{Debug, Formatter},
     ops::Deref,
     sync::Arc,
@@ -79,6 +82,7 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     max_block: Option<BlockNumber>,
     listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
+    metrics: Metrics,
 }
 
 impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
@@ -88,6 +92,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
             max_block: None,
             listeners: PipelineEventListeners::default(),
             sync_state_updater: None,
+            metrics: Metrics::default(),
         }
     }
 }
@@ -115,9 +120,23 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
         self.listeners.new_listener()
     }
 
+    fn register_metrics(&mut self, db: Arc<DB>) {
+        for stage in &self.stages {
+            let stage_id = stage.stage.id();
+            self.metrics.stage_checkpoint(
+                stage_id,
+                db.view(|tx| stage_id.get_progress(tx).ok().flatten().unwrap_or_default())
+                    .ok()
+                    .unwrap_or_default(),
+            );
+        }
+    }
+
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
     pub async fn run(&mut self, db: Arc<DB>) -> Result<(), PipelineError> {
+        self.register_metrics(db.clone());
+
         loop {
             let mut state = PipelineState {
                 listeners: self.listeners.clone(),
@@ -167,7 +186,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 "Executing stage"
             );
             let next = queued_stage
-                .execute(state, previous_stage, db)
+                .execute(state, previous_stage, db, &mut self.metrics)
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
@@ -226,6 +245,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.stage_progress;
+                        self.metrics.stage_checkpoint(stage_id, stage_progress);
                         stage_id.save_progress(tx.deref(), stage_progress)?;
 
                         self.listeners
@@ -241,6 +261,28 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
         tx.commit()?;
         Ok(())
+    }
+}
+
+#[derive(Metrics)]
+#[metrics(scope = "sync")]
+struct StageMetrics {
+    /// The block number of the last commit for a stage.
+    checkpoint: Gauge,
+}
+
+#[derive(Default)]
+struct Metrics {
+    checkpoints: HashMap<StageId, StageMetrics>,
+}
+
+impl Metrics {
+    fn stage_checkpoint(&mut self, stage_id: StageId, progress: u64) {
+        self.checkpoints
+            .entry(stage_id)
+            .or_insert_with(|| StageMetrics::new_with_labels(&[("stage", stage_id.to_string())]))
+            .checkpoint
+            .set(progress as f64);
     }
 }
 
@@ -285,6 +327,7 @@ impl<DB: Database> QueuedStage<DB> {
         state: &mut PipelineState,
         previous_stage: Option<(StageId, BlockNumber)>,
         db: &DB,
+        metrics: &mut Metrics,
     ) -> Result<ControlFlow, PipelineError> {
         let stage_id = self.stage.id();
         let mut made_progress = false;
@@ -326,6 +369,7 @@ impl<DB: Database> QueuedStage<DB> {
                         %done,
                         "Stage made progress"
                     );
+                    metrics.stage_checkpoint(stage_id, stage_progress);
                     stage_id.save_progress(tx.deref(), stage_progress)?;
 
                     state.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
