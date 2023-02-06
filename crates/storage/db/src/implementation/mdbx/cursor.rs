@@ -75,17 +75,22 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
 
     fn walk<'cursor>(
         &'cursor mut self,
-        start_key: T::Key,
+        start_key: Option<T::Key>,
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,
     {
-        let start = self
-            .inner
-            .set_range(start_key.encode().as_ref())
-            .map_err(|e| Error::Read(e.into()))?
-            .map(decoder::<T>);
+        if let Some(start_key) = start_key {
+            let start = self
+                .inner
+                .set_range(start_key.encode().as_ref())
+                .map_err(|e| Error::Read(e.into()))?
+                .map(decoder::<T>);
 
+            return Ok(Walker::new(self, start))
+        }
+
+        let start = self.first().transpose();
         Ok(Walker::new(self, start))
     }
 

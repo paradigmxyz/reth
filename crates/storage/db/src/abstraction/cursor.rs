@@ -30,10 +30,12 @@ pub trait DbCursorRO<'tx, T: Table> {
     /// Returns the current `(key, value)` pair of the cursor.
     fn current(&mut self) -> PairResult<T>;
 
-    /// Returns an iterator starting at a key greater or equal than `start_key`.
+    /// Returns an iterator that walks through the table. If `start_key`
+    /// is None, starts from the first entry of the table. If it not, starts at a key
+    /// greater or equal than the key value wrapped inside Some().
     fn walk<'cursor>(
         &'cursor mut self,
-        start_key: T::Key,
+        start_key: Option<T::Key>,
     ) -> Result<Walker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;
