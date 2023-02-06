@@ -418,11 +418,11 @@ impl SessionManager {
                     commands_rx: ReceiverStream::new(commands_rx),
                     to_session: self.active_session_tx.clone(),
                     pending_message_to_session: None,
-                    request_tx: ReceiverStream::new(messages_rx).fuse(),
+                    internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
                     queued_outgoing: Default::default(),
-                    received_requests: Default::default(),
+                    received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
                         self.initial_internal_request_timeout,
                     ),
