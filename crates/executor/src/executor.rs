@@ -14,10 +14,8 @@ use revm::{
     db::AccountState,
     primitives::{
         Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode,
+        ExecutionResult::{Halt, Revert, Success},
         ResultAndState, SpecId,
-        ExecutionResult::Success as Success,
-        ExecutionResult::Revert as Revert,
-        ExecutionResult::Halt as Halt
     },
     EVM,
 };
@@ -357,7 +355,7 @@ pub fn execute<DB: StateProvider>(
         // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
         // TODO for verification (exit_reason): some error should return EVM error as the block with
         // that transaction can have consensus error that would make block invalid.
-        let is_success = if let Ok(ResultAndState { ref result, ..}) = out {
+        let is_success = if let Ok(ResultAndState { ref result, .. }) = out {
             match &result {
                 Success { .. } => true,
                 _ => false,
@@ -373,11 +371,11 @@ pub fn execute<DB: StateProvider>(
         // };
 
         // Add spend gas.
-        if let Ok(ResultAndState { ref result, ..}) = out {
-        cumulative_gas_used += match &result {
-                Success{gas_used, ..} => gas_used,
-                Revert{gas_used, ..} => gas_used,
-                Halt{gas_used, ..} => gas_used,
+        if let Ok(ResultAndState { ref result, .. }) = out {
+            cumulative_gas_used += match &result {
+                Success { gas_used, .. } => gas_used,
+                Revert { gas_used, .. } => gas_used,
+                Halt { gas_used, .. } => gas_used,
             }
         };
         // cumulative_gas_used += gas_used;
@@ -414,24 +412,21 @@ pub fn execute<DB: StateProvider>(
                 new_bytecodes,
             })
         }
-
-        // Check if gas used matches the value set in header.
-        if header.gas_used != cumulative_gas_used {
-            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
-        }
-
-        let db = evm.db.expect("Db is set at the start of the function");
-        let mut block_reward = block_reward_changeset(header, ommers, db, chain_spec)?;
-
-        if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
-            let mut irregular_state_changeset = dao_fork_changeset(db)?;
-            irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
-            block_reward = Some(irregular_state_changeset);
-        }
-
-        Ok::<ExecutionResult, Error>(ExecutionResult { changesets, block_reward });
     }
-    Err(Error::ExecutionFatalError)
+    // Check if gas used matches the value set in header.
+    if header.gas_used != cumulative_gas_used {
+        return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
+    }
+
+    let db = evm.db.expect("Db is set at the start of the function");
+    let mut block_reward = block_reward_changeset(header, ommers, db, chain_spec)?;
+
+    if chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
+        let mut irregular_state_changeset = dao_fork_changeset(db)?;
+        irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
+        block_reward = Some(irregular_state_changeset);
+    }
+    return Ok::<ExecutionResult, Error>(ExecutionResult { changesets, block_reward })
 }
 
 /// Irregular state change at Ethereum DAO hardfork
