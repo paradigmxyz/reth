@@ -31,7 +31,10 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
                 }
 
                 match request.start {
-                    BlockHashOrNumber::Number(block_number) => block_number != headers[0].number,
+                    BlockHashOrNumber::Number(block_number) => headers
+                        .first()
+                        .map(|header| block_number != header.number)
+                        .unwrap_or_default(),
                     BlockHashOrNumber::Hash(_) => {
                         // we don't want to hash the header
                         false
@@ -197,4 +200,22 @@ pub enum DownloadError {
     /// Error while reading data from database.
     #[error(transparent)]
     DatabaseError(#[from] db::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_likely_bad_headers_response() {
+        let request =
+            HeadersRequest { start: 0u64.into(), limit: 0, direction: Default::default() };
+        let headers: Vec<Header> = vec![];
+        assert!(!Ok(headers).is_likely_bad_headers_response(&request));
+
+        let request =
+            HeadersRequest { start: 0u64.into(), limit: 1, direction: Default::default() };
+        let headers: Vec<Header> = vec![];
+        assert!(Ok(headers).is_likely_bad_headers_response(&request));
+    }
 }
