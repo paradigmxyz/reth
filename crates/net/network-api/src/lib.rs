@@ -86,7 +86,7 @@ pub enum PeerKind {
 }
 
 /// The status of the network being ran by the local node.
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetworkStatus {
     /// The local node client version.
     pub client_version: String,
@@ -95,11 +95,11 @@ pub struct NetworkStatus {
     /// Information about the Ethereum Wire Protocol.
     pub eth_protocol_info: EthProtocolInfo,
 }
-
 /// Information about the Ethereum Wire Protocol (ETH)
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EthProtocolInfo {
     /// The current difficulty at the head of the chain.
+    #[serde(deserialize_with = "reth_primitives::serde_helper::deserialize_json_u256")]
     pub difficulty: U256,
     /// The block hash of the head of the chain.
     pub head: H256,
