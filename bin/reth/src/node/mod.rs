@@ -18,7 +18,7 @@ use reth_downloaders::{bodies, headers};
 use reth_interfaces::consensus::{Consensus, ForkchoiceState};
 use reth_net_nat::NatResolver;
 use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle};
-use reth_network_api::{NetworkInfo, Peers};
+use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
 use reth_staged_sync::{utils::init::init_genesis, Config};
@@ -26,7 +26,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{io::ErrorKind, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -116,10 +116,6 @@ impl Command {
         let netconf = self.load_network_config(&config, &db);
         let network = netconf.start_network().await?;
 
-        if !self.network.no_persist_peers {
-            load_peers(&self.network.peers_file, &network).await?;
-        }
-
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         let mut pipeline = self.build_pipeline(&config, &network, &consensus, &db).await?;
@@ -193,12 +189,20 @@ impl Command {
         config: &Config,
         db: &Arc<Env<WriteMap>>,
     ) -> NetworkConfig<ShareableDatabase<Env<WriteMap>>> {
+        let peers_file = if self.network.no_persist_peers {
+            None
+        } else {
+            let file_path = &self.network.peers_file;
+            info!(target: "reth::cli", file = %file_path.as_ref().display(), "Loading saved peers");
+            Some(file_path)
+        };
         config.network_config(
             db.clone(),
             self.chain.clone(),
             self.network.disable_discovery,
             self.network.bootnodes.clone(),
             self.nat,
+            peers_file.map(|f| f.as_ref().to_path_buf()),
         )
     }
 
@@ -281,19 +285,6 @@ impl Command {
                 .build(fetch_client.clone(), consensus.clone(), db.clone()),
         )
     }
-}
-
-/// Loads peers from `file_path` and adds them to the network
-async fn load_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> eyre::Result<()> {
-    let reader = match std::fs::File::open(file_path) {
-        Ok(file) => std::io::BufReader::new(file),
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(e) => Err(e)?,
-    };
-    info!(target: "reth::cli", file = %file_path.as_ref().display(), "Loading saved peers");
-    let known_peers: Vec<NodeRecord> = serde_json::from_reader(reader)?;
-    known_peers.into_iter().for_each(|record| network.add_peer(record.id, record.udp_addr()));
-    Ok(())
 }
 
 /// Dumps peers to `file_path` for persistence.
