@@ -48,7 +48,7 @@ impl InitCommand {
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
 
-        info!(target: "reth::cli", ttd=?self.chain.paris_ttd, "Initializing genesis");
+        info!(target: "reth::cli", "Writing genesis block");
         let genesis_hash = init_genesis(db, self.chain.clone())?;
 
         if genesis_hash != self.chain.genesis_hash() {

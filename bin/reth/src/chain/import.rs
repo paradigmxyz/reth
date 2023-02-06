@@ -77,7 +77,7 @@ impl ImportCommand {
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
 
-        info!(target: "reth::cli", ttd=?self.chain.paris_ttd, "Initializing genesis");
+        info!(target: "reth::cli", "Writing genesis block");
         let genesis_hash = init_genesis(db.clone(), self.chain.clone())?;
 
         if genesis_hash != self.chain.genesis_hash() {
@@ -137,6 +137,7 @@ impl ImportCommand {
                 OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
                     TotalDifficultyStage {
                         commit_threshold: stage_conf.total_difficulty.commit_threshold,
+                        chain_spec: self.chain.clone(),
                     },
                 ),
             )
