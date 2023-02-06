@@ -25,6 +25,11 @@ pub struct DownloaderMetrics {
     /// The number of out-of-order requests sent by the downloader.
     /// The consumer of the download stream is able to re-request data (headers or bodies) in case
     /// it encountered a recoverable error (e.g. during insertion).
+    /// Out-of-order request happen when:
+    ///     - the headers downloader `SyncTarget::Tip` hash is different from the previous sync
+    ///       target hash.
+    ///     - the new download range start for bodies donwloader is less than the last block number
+    ///       returned from the stream.
     pub out_of_order_requests: Counter,
     /// Number of timeout errors while requesting items
     pub timeout_errors: Counter,
