@@ -1,9 +1,10 @@
 #![warn(missing_docs, unreachable_pub)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
-no_crate_inject,
-attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
+    no_crate_inject,
+    attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+#![allow(unused)]
 
 //! Configure reth RPC
 
@@ -57,8 +58,8 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
 
     /// Configure the client instance.
     pub fn with_client<C>(self, client: C) -> RpcModuleBuilder<C, Pool, Network>
-        where
-            C: BlockProvider + StateProviderFactory + 'static,
+    where
+        C: BlockProvider + StateProviderFactory + 'static,
     {
         let Self { pool, config, network, .. } = self;
         RpcModuleBuilder { client, config, network, pool }
@@ -66,8 +67,8 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
 
     /// Configure the transaction pool instance.
     pub fn with_pool<P>(self, pool: P) -> RpcModuleBuilder<Client, P, Network>
-        where
-            P: TransactionPool + 'static,
+    where
+        P: TransactionPool + 'static,
     {
         let Self { client, config, network, .. } = self;
         RpcModuleBuilder { client, config, network, pool }
@@ -75,8 +76,8 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
 
     /// Configure the network instance.
     pub fn with_network<N>(self, network: N) -> RpcModuleBuilder<Client, Pool, N>
-        where
-            N: NetworkInfo + PeersInfo + 'static,
+    where
+        N: NetworkInfo + PeersInfo + 'static,
     {
         let Self { client, config, pool, .. } = self;
         RpcModuleBuilder { client, config, network, pool }
@@ -84,10 +85,10 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
 }
 
 impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network>
-    where
-        Client: BlockProvider + StateProviderFactory + 'static,
-        Pool: TransactionPool + 'static,
-        Network: NetworkInfo + PeersInfo + 'static,
+where
+    Client: BlockProvider + StateProviderFactory + 'static,
+    Pool: TransactionPool + 'static,
+    Network: NetworkInfo + PeersInfo + 'static,
 {
     /// Configures the [RpcModule] which can be used to start the server(s).
     ///
@@ -117,7 +118,7 @@ pub enum RpcModuleConfig {
 
 /// Represents RPC modules that are supported by reth
 #[derive(
-Debug, Clone, Copy, Eq, PartialEq, AsRefStr, EnumVariantNames, EnumString, Deserialize,
+    Debug, Clone, Copy, Eq, PartialEq, AsRefStr, EnumVariantNames, EnumString, Deserialize,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
@@ -144,8 +145,8 @@ impl fmt::Display for RethRpcModule {
 
 impl Serialize for RethRpcModule {
     fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
+    where
+        S: Serializer,
     {
         s.serialize_str(self.as_ref())
     }
@@ -250,7 +251,7 @@ impl RpcServer {
     ///
     /// This returns an [RpcServerHandle] that's connected to the server task(s) until the server is
     /// stopped or the [RpcServerHandle] is dropped.
-    pub async fn start(self, methods: impl Into<Methods>) -> Result<RpcServerHandle, RpcError> {
+    pub async fn start(self, _methods: impl Into<Methods>) -> Result<RpcServerHandle, RpcError> {
         todo!()
     }
 }
