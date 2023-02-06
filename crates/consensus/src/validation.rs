@@ -2,7 +2,7 @@
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
     BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader, Transaction,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, EMPTY_OMMER_ROOT, U256,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
 use reth_provider::{AccountProvider, HeaderProvider};
 use std::{
@@ -39,28 +39,10 @@ pub fn validate_header_standalone(
     }
 
     // Check if base fee is set.
-    if chain_spec.fork_active(Hardfork::London, header.number) && header.base_fee_per_gas.is_none()
+    if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
+        header.base_fee_per_gas.is_none()
     {
         return Err(Error::BaseFeeMissing)
-    }
-
-    // EIP-3675: Upgrade consensus to Proof-of-Stake:
-    // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if Some(header.number) >= chain_spec.paris_status().block_number() {
-        if header.difficulty != U256::ZERO {
-            return Err(Error::TheMergeDifficultyIsNotZero)
-        }
-
-        if header.nonce != 0 {
-            return Err(Error::TheMergeNonceIsNotZero)
-        }
-
-        if header.ommers_hash != EMPTY_OMMER_ROOT {
-            return Err(Error::TheMergeOmmerRootIsNotEmpty)
-        }
-
-        // mixHash is used instead of difficulty inside EVM
-        // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
     }
 
     Ok(())
@@ -78,7 +60,7 @@ pub fn validate_transaction_regarding_header(
     let chain_id = match transaction {
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
-            if chain_spec.fork_active(Hardfork::SpuriousDragon, at_block_number) &&
+            if chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
                 chain_id.is_some()
             {
                 return Err(Error::TransactionOldLegacyChainId)
@@ -87,7 +69,7 @@ pub fn validate_transaction_regarding_header(
         }
         Transaction::Eip2930(TxEip2930 { chain_id, .. }) => {
             // EIP-2930: Optional access lists: https://eips.ethereum.org/EIPS/eip-2930 (New transaction type)
-            if !chain_spec.fork_active(Hardfork::Berlin, at_block_number) {
+            if !chain_spec.fork(Hardfork::Berlin).active_at_block(at_block_number) {
                 return Err(Error::TransactionEip2930Disabled)
             }
             Some(*chain_id)
@@ -99,7 +81,7 @@ pub fn validate_transaction_regarding_header(
             ..
         }) => {
             // EIP-1559: Fee market change for ETH 1.0 chain https://eips.ethereum.org/EIPS/eip-1559
-            if !chain_spec.fork_active(Hardfork::Berlin, at_block_number) {
+            if !chain_spec.fork(Hardfork::Berlin).active_at_block(at_block_number) {
                 return Err(Error::TransactionEip1559Disabled)
             }
 
@@ -259,15 +241,16 @@ pub fn validate_header_regarding_parent(
     }
 
     // difficulty check is done by consensus.
-    if chain_spec.paris_status().block_number() > Some(child.number) {
-        // TODO how this needs to be checked? As ice age did increment it by some formula
-    }
+    // TODO(onbjerg): Unsure what the check here is supposed to be, but it should be moved to
+    // [BeaconConsensus]. if chain_spec.paris_status().block_number() > Some(child.number) {
+    //    // TODO how this needs to be checked? As ice age did increment it by some formula
+    //}
 
     let mut parent_gas_limit = parent.gas_limit;
 
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
-    if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
+    if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
         parent_gas_limit = parent.gas_limit * constants::EIP1559_ELASTICITY_MULTIPLIER;
     }
 
@@ -287,19 +270,20 @@ pub fn validate_header_regarding_parent(
     }
 
     // EIP-1559 check base fee
-    if chain_spec.fork_active(Hardfork::London, child.number) {
+    if chain_spec.fork(Hardfork::London).active_at_block(child.number) {
         let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
 
-        let expected_base_fee = if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
-            constants::EIP1559_INITIAL_BASE_FEE
-        } else {
-            // This BaseFeeMissing will not happen as previous blocks are checked to have them.
-            calculate_next_block_base_fee(
-                parent.gas_used,
-                parent.gas_limit,
-                parent.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?,
-            )
-        };
+        let expected_base_fee =
+            if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
+                constants::EIP1559_INITIAL_BASE_FEE
+            } else {
+                // This BaseFeeMissing will not happen as previous blocks are checked to have them.
+                calculate_next_block_base_fee(
+                    parent.gas_used,
+                    parent.gas_limit,
+                    parent.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?,
+                )
+            };
         if expected_base_fee != base_fee {
             return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
         }
@@ -367,7 +351,7 @@ mod tests {
     use reth_interfaces::Result;
     use reth_primitives::{
         hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
-        TransactionSigned, MAINNET,
+        TransactionSigned, MAINNET, U256,
     };
 
     use super::*;

@@ -5,9 +5,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    constants::EIP1559_INITIAL_BASE_FEE, Account, ChainSpec, Hardfork, Header, H256,
-};
+use reth_primitives::{Account, ChainSpec, H256};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -50,12 +48,7 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256,
     }
 
     // Insert header
-    let mut header: Header = genesis.clone().into();
-
-    // set base fee if EIP-1559 is enabled
-    if chain.fork_active(Hardfork::London, 0) {
-        header.base_fee_per_gas = Some(EIP1559_INITIAL_BASE_FEE);
-    }
+    let header = chain.genesis_header();
 
     let hash = header.hash_slow();
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
