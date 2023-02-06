@@ -302,7 +302,7 @@ async fn dump_peers(file_path: &impl AsRef<Path>, network: &NetworkHandle) -> ey
     let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
     let known_peers = network.peers_handle().all_peers().await;
 
-    let threshold = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0);
+    let threshold = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0) - 10000;
     let top_peers: Vec<NodeRecord> =
         known_peers.into_iter().filter(|(rep, _)| *rep > threshold).map(|(_, node)| node).collect();
     serde_json::to_writer_pretty(writer, &top_peers)?;
