@@ -291,18 +291,18 @@ where
                         continue
                     }
 
-                    match requests.last_mut() {
+                    if let Some(range) = requests.last_mut() {
                         // Extend the last range if it remains contiguous and request size is under
                         // limit
-                        Some(range)
-                            if range.end == num &&
-                                range.end.saturating_sub(range.start) < max_request_len =>
-                        {
-                            *range = range.start..num + 1; // exclusive range
+                        let range_len = range.end.saturating_sub(range.start);
+                        if range.end == num && range_len < max_request_len {
+                            *range = range.start..num + 1;
+                        } else {
+                            requests.push(num..num + 1);
                         }
-                        // Push the new request range
-                        _ => requests.push(num..num + 1), // exclusive range
-                    };
+                    } else {
+                        requests.push(num..num + 1);
+                    }
                 }
 
                 for range in requests {
