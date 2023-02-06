@@ -21,7 +21,7 @@ use reth_eth_wire::{
 };
 use reth_metrics_common::metered_sender::MeteredSender;
 use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
+use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
@@ -176,15 +176,10 @@ impl SessionManager {
     ///
     /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
     /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
-    pub(crate) fn on_status_update(
-        &mut self,
-        height: u64,
-        hash: H256,
-        total_difficulty: U256,
-    ) -> Option<ForkTransition> {
-        self.status.blockhash = hash;
-        self.status.total_difficulty = total_difficulty;
-        self.fork_filter.set_head(height)
+    pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
+        self.status.blockhash = head.hash;
+        self.status.total_difficulty = head.total_difficulty;
+        self.fork_filter.set_head(head)
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this

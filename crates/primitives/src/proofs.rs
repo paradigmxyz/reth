@@ -74,7 +74,7 @@ pub fn calculate_ommers_root<'a>(ommers: impl Iterator<Item = &'a Header> + Clon
 
 /// Calculates the root hash for the state, this corresponds to [geth's
 /// `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
-pub fn genesis_state_root(genesis_alloc: HashMap<Address, GenesisAccount>) -> H256 {
+pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H256 {
     let encoded_accounts = genesis_alloc.iter().map(|(address, account)| {
         let mut acc_rlp = BytesMut::new();
         account.encode(&mut acc_rlp);
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn check_empty_state_root() {
         let genesis_alloc = HashMap::new();
-        let root = genesis_state_root(genesis_alloc);
+        let root = genesis_state_root(&genesis_alloc);
         assert_eq!(root, EMPTY_ROOT);
     }
 
@@ -157,7 +157,7 @@ mod tests {
                 test_addr,
                 GenesisAccount { nonce: None, balance: U256::MAX, code: None, storage: None },
             );
-            let root = genesis_state_root(genesis_alloc);
+            let root = genesis_state_root(&genesis_alloc);
 
             assert_eq!(root, expected_root);
         }
@@ -275,7 +275,7 @@ mod tests {
             ),
         ]);
 
-        let root = genesis_state_root(alloc);
+        let root = genesis_state_root(&alloc);
 
         assert_eq!(root, expected_root);
     }
