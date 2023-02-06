@@ -306,7 +306,7 @@ where
                 }
 
                 for range in requests {
-                    let request_len = range.end.saturating_sub(range.end) as u64;
+                    let request_len = range.end.saturating_sub(range.end);
                     let headers = self
                         .query_headers(range.start..range.end, request_len)?
                         .ok_or(DownloadError::MissingHeader { block_number: range.start })?;
