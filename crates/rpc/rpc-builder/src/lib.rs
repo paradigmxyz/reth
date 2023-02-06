@@ -4,15 +4,16 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+#![allow(unused)]
 
 //! Configure reth RPC
 
 use jsonrpsee::{
     core::{server::rpc_module::Methods, Error as RpcError},
-    server::ServerBuilder,
+    server::{Server, ServerBuilder, ServerHandle},
     RpcModule,
 };
-use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint, IpcServer};
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
@@ -92,9 +93,8 @@ where
     /// Configures the [RpcModule] which can be used to start the server(s).
     ///
     /// See also [RpcServer::start]
-    pub fn build(self) -> RpcModule<()> {
+    pub fn build(self, _servers: TransportRpcModuleConfig) -> TransportRpcModules<()> {
         let Self { client: _, pool: _, network: _, config: _ } = self;
-        let _io = RpcModule::new(());
 
         todo!("merge all handlers")
     }
@@ -164,8 +164,10 @@ impl Serialize for RethRpcModule {
 /// Once the [RpcModule] is built via [RpcModuleBuilder] the servers can be started, See also
 /// [ServerBuilder::build] and [Server::start](jsonrpsee::server::Server::start).
 pub struct RpcServerBuilder {
-    /// Configs for JSON-RPC Http and WS server
-    pub http_ws_server_config: Option<ServerBuilder>,
+    /// Configs for JSON-RPC Http.
+    pub http_server_config: Option<ServerBuilder>,
+    /// Configs for WS server
+    pub ws_server_config: Option<ServerBuilder>,
     /// Address where to bind the http and ws server to
     pub http_ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
@@ -183,12 +185,64 @@ impl RpcServerBuilder {
     ///
     /// Note: The server ist not started and does nothing unless polled, See also
     pub async fn build(self) -> Result<RpcServer, RpcError> {
-        todo!()
+        let socket_addr = self.http_ws_addr.unwrap_or("127.0.0.1:8545".parse().unwrap());
+        /// Todo: default path for ipc
+        let ips_path = self.ipc_server_path.unwrap(); // default path undecided
+
+        let http_server = if let Some(builder) = self.http_server_config {
+            let server = builder.build(socket_addr).await?;
+            Some(server)
+        } else {
+            None
+        };
+
+        let ws_server = if let Some(builder) = self.ws_server_config {
+            let server = builder.build(socket_addr).await?;
+            Some(server)
+        } else {
+            None
+        };
+
+        let ipc_server = if let Some(builder) = self.ipc_server_config {
+            let server = builder.build(ips_path.path())?;
+            Some(server)
+        } else {
+            None
+        };
+
+        Ok(RpcServer { http: http_server, ws: ws_server, ipc: ipc_server })
     }
 }
 
-/// Container type for the configured RPC server(s): http,ws,ipc
-pub struct RpcServer {}
+/// Holds modules to be installed per transport type
+pub struct TransportRpcModuleConfig {
+    /// http module configuration
+    http: Option<RpcModuleConfig>,
+    /// ws module configuration
+    ws: Option<RpcModuleConfig>,
+    /// ipc module configuration
+    ipc: Option<RpcModuleConfig>,
+}
+
+/// Holds installed modules per transport type
+pub struct TransportRpcModules<Context> {
+    /// rpcs module for http
+    http: Option<RpcModule<Context>>,
+    /// rpcs module for ws
+    ws: Option<RpcModule<Context>>,
+    /// rpcs module for ipc
+    ipc: Option<RpcModule<Context>>,
+}
+
+/// Container type for each trandport ie. http, ws, and ipc server
+pub struct RpcServer {
+    /// http server
+    http: Option<Server>,
+    /// ws server
+    ws: Option<Server>,
+    /// ipc server
+    ipc: Option<IpcServer>,
+}
 
 // === impl RpcServer ===
 
@@ -197,7 +251,7 @@ impl RpcServer {
     ///
     /// This returns an [RpcServerHandle] that's connected to the server task(s) until the server is
     /// stopped or the [RpcServerHandle] is dropped.
-    pub fn start(self, _methods: impl Into<Methods>) -> Result<RpcServerHandle, RpcError> {
+    pub async fn start(self, _methods: impl Into<Methods>) -> Result<RpcServerHandle, RpcError> {
         todo!()
     }
 }
@@ -206,14 +260,30 @@ impl RpcServer {
 ///
 /// When stop has been called the server will be stopped.
 #[derive(Debug, Clone)]
-pub struct RpcServerHandle {}
+pub struct RpcServerHandle {
+    http: Option<ServerHandle>,
+    ws: Option<ServerHandle>,
+    ipc: Option<ServerHandle>,
+}
 
 // === impl RpcServerHandle ===
 
 impl RpcServerHandle {
     /// Tell the server to stop without waiting for the server to stop.
-    pub fn stop(&self) -> Result<(), RpcError> {
-        todo!()
+    pub fn stop(self) -> Result<(), RpcError> {
+        if let Some(handle) = self.http {
+            handle.stop()?
+        }
+
+        if let Some(handle) = self.ws {
+            handle.stop()?
+        }
+
+        if let Some(handle) = self.ipc {
+            handle.stop()?
+        }
+
+        Ok(())
     }
 }
 

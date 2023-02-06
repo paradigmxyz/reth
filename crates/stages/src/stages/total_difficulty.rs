@@ -6,7 +6,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::U256;
 use tracing::*;
@@ -50,7 +50,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         // Acquire cursor over total difficulty and headers tables
         let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
-        let mut cursor_headers = tx.cursor_write::<tables::Headers>()?;
+        let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
         let last_header_key = tx.get_block_numhash(input.stage_progress.unwrap_or_default())?;

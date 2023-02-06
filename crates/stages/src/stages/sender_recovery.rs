@@ -21,7 +21,7 @@ const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
 /// in [`TxSenders`][reth_db::tables::TxSenders] table.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SenderRecoveryStage {
     /// The size of the chunk for parallel sender recovery
     pub batch_size: usize,
@@ -32,7 +32,7 @@ pub struct SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { batch_size: 1000, commit_threshold: 5000 }
+        Self { batch_size: 250000, commit_threshold: 10000 }
     }
 }
 
