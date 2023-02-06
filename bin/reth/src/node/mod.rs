@@ -273,7 +273,7 @@ impl Command {
         )
     }
 
-    async fn load_peers(&self, network: &NetworkHandle) -> Result<(), eyre::Error> {
+    async fn load_peers(&self, network: &NetworkHandle) -> eyre::Result<()> {
         let reader = match std::fs::File::open(&self.known) {
             Ok(file) => std::io::BufReader::new(file),
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
