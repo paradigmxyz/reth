@@ -8,7 +8,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
     rpc::{BlockId, H256 as EthersH256},
-    ChainSpec, Header, SealedBlock, TransactionSigned, H64, U256,
+    ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned, H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
 use reth_rlp::Decodable;
@@ -153,12 +153,18 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
              return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
         };
 
-        if let Some(parent_td) = self.client.header_td(&parent_hash)? {
-            if Some(parent_td) <= self.chain_spec.paris_status().terminal_total_difficulty() {
-                return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                    validation_error: EngineApiError::PayloadPreMerge.to_string(),
-                }))
-            }
+        let parent_td = if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
+            parent_td
+        } else {
+            return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::PayloadPreMerge.to_string(),
+            }))
+        };
+
+        if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td) {
+            return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::PayloadPreMerge.to_string(),
+            }))
         }
 
         if block.timestamp <= parent.timestamp {
@@ -172,8 +178,10 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
         }
 
         let mut state_provider = SubState::new(State::new(&*self.client));
+        let total_difficulty = parent_td + block.header.difficulty;
         match executor::execute_and_verify_receipt(
             &block.unseal(),
+            total_difficulty,
             None,
             &self.chain_spec,
             &mut state_provider,
@@ -238,9 +246,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
 
         let merge_terminal_td = self
             .chain_spec
-            .paris_status()
-            .terminal_total_difficulty()
-            .ok_or(EngineApiError::UnknownMergeTerminalTotalDifficulty)?;
+            .fork(Hardfork::Paris)
+            .ttd()
+            .expect("the engine API should not be running for chains w/o paris");
 
         // Compare total difficulty values
         if merge_terminal_td != terminal_total_difficulty {
@@ -494,7 +502,7 @@ mod tests {
             let (result_tx, result_rx) = oneshot::channel();
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
                 b.header.difficulty =
-                    chain_spec.paris_status().terminal_total_difficulty().unwrap();
+                    chain_spec.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1);
                 b
             });
             let block = random_block(101, Some(parent.hash()), None, Some(0));
@@ -535,7 +543,7 @@ mod tests {
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
                 b.header.timestamp = parent_timestamp;
                 b.header.difficulty =
-                    chain_spec.paris_status().terminal_total_difficulty().unwrap() + U256::from(1);
+                    chain_spec.fork(Hardfork::Paris).ttd().unwrap() + U256::from(1);
                 b
             });
             let block =
@@ -773,10 +781,7 @@ mod tests {
             tokio::spawn(engine);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec
-                    .paris_status()
-                    .terminal_total_difficulty()
-                    .unwrap() +
+                terminal_total_difficulty: chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
@@ -792,7 +797,7 @@ mod tests {
             assert_matches!(
                 result_rx.await,
                 Ok(Err(EngineApiError::TerminalTD { execution, consensus }))
-                    if execution == chain_spec.paris_status().terminal_total_difficulty().unwrap()
+                    if execution == chain_spec.fork(Hardfork::Paris).ttd().unwrap()
                         && consensus == U256::from(transition_config.terminal_total_difficulty)
             );
         }
@@ -818,10 +823,7 @@ mod tests {
             let execution_terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec
-                    .paris_status()
-                    .terminal_total_difficulty()
-                    .unwrap(),
+                terminal_total_difficulty: chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
@@ -884,10 +886,7 @@ mod tests {
             let terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec
-                    .paris_status()
-                    .terminal_total_difficulty()
-                    .unwrap(),
+                terminal_total_difficulty: chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };

@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::TryStreamExt;
 use reth_db::{
@@ -8,7 +8,7 @@ use reth_db::{
     database::Database,
     models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
     consensus::Consensus,
@@ -80,6 +80,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         // Update the header range on the downloader
         self.downloader.set_download_range(start_block..end_block + 1)?;
+
+        // Cursor used to get total difficulty
+        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
 
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
@@ -153,7 +156,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Increment the transition if the block contains an addition block reward.
             // If the block does not have a reward, the transition will be the same as the
             // transition at the last transaction of this block.
-            let has_reward = self.consensus.has_block_reward(numhash.number());
+            let td = td_cursor
+                .seek(numhash)?
+                .ok_or(DatabaseIntegrityError::TotalDifficulty { number: numhash.number() })?
+                .1;
+            let has_reward = self.consensus.has_block_reward(td.into());
             if has_reward {
                 transition_id += 1;
             }
@@ -505,7 +512,7 @@ mod tests {
                 let start = input.stage_progress.unwrap_or_default();
                 let end = input.previous_stage_progress() + 1;
                 let blocks = random_block_range(start..end, GENESIS_HASH, 0..2);
-                self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+                self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
@@ -601,6 +608,7 @@ mod tests {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
+                    let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
@@ -653,7 +661,11 @@ mod tests {
                         }
 
                         // Increment expected id for block reward.
-                        if self.consensus.has_block_reward(key.number()) {
+                        let td = td_cursor
+                            .seek(key)?
+                            .expect("Missing TD for header")
+                            .1;
+                        if self.consensus.has_block_reward(td.into()) {
                             expected_transition_id += 1;
                         }
 

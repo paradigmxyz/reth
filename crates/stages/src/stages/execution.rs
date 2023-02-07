@@ -29,6 +29,7 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// Input tables:
 /// - [tables::CanonicalHeaders] get next block to execute.
 /// - [tables::Headers] get for revm environment variables.
+/// - [tables::HeaderTD]
 /// - [tables::BlockBodies] to get tx number
 /// - [tables::Transactions] to execute
 ///
@@ -92,6 +93,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut canonicals = tx.cursor_read::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
         let mut headers = tx.cursor_read::<tables::Headers>()?;
+        // Get total difficulty
+        let mut tds = tx.cursor_read::<tables::HeaderTD>()?;
         // Get bodies with canonical hashes.
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
@@ -110,7 +113,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
             .iter()
-            .map(|key| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
+            .map(|key| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
                 // NOTE: It probably will be faster to fetch all items from one table with cursor,
                 // but to reduce complexity we are using `seek_exact` to skip some
                 // edge cases that can happen.
@@ -119,12 +122,15 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         number: key.number(),
                         hash: key.hash(),
                     })?;
+                let (_, td) = tds
+                    .seek_exact(*key)?
+                    .ok_or(DatabaseIntegrityError::TotalDifficulty { number: key.number() })?;
                 let (_, body) = bodies_cursor
                     .seek_exact(*key)?
                     .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
                 let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
 
-                Ok((header, body, stored_ommers.ommers))
+                Ok((header, td.into(), body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -133,9 +139,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, body, ommers) in block_batch.into_iter() {
+        for (header, td, body, ommers) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
+
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -180,6 +187,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         // execute and store output to results
                         reth_executor::executor::execute_and_verify_receipt(
                             &Block { header, body: transactions, ommers },
+                            td,
                             Some(signers),
                             &self.chain_spec,
                             &mut state_provider,
@@ -196,12 +204,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut current_transition_id = tx.get_block_transition(last_block)?;
         info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
-        let spurious_dragon_activation =
-            self.chain_spec.fork_block(Hardfork::SpuriousDragon).unwrap_or_default();
-
         // apply changes to plain database.
         for (results, block_number) in block_change_patches.into_iter() {
-            let spurious_dragon_active = block_number >= spurious_dragon_activation;
+            let spurious_dragon_active =
+                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
             // insert state change set
             for result in results.changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {

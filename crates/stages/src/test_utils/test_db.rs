@@ -11,7 +11,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
 use std::{borrow::Borrow, path::Path, sync::Arc};
 
 use crate::db::Transaction;
@@ -188,6 +188,31 @@ impl TestTransaction {
             for header in headers {
                 let key: BlockNumHash = header.num_hash().into();
 
+                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+                tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
+                tx.put::<tables::Headers>(key, header.clone().unseal())?;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Inserts total difficulty of headers into the corresponding tables.
+    ///
+    /// Superset functionality of [TestTransaction::insert_headers].
+    pub(crate) fn insert_headers_with_td<'a, I>(&self, headers: I) -> Result<(), DbError>
+    where
+        I: Iterator<Item = &'a SealedHeader>,
+    {
+        self.commit(|tx| {
+            let headers = headers.collect::<Vec<_>>();
+
+            let mut td = U256::ZERO;
+            for header in headers {
+                let key: BlockNumHash = header.num_hash().into();
+
+                td += header.difficulty;
+                tx.put::<tables::HeaderTD>(header.num_hash().into(), td.into())?;
                 tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
                 tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
                 tx.put::<tables::Headers>(key, header.clone().unseal())?;
