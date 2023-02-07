@@ -1065,13 +1065,13 @@ impl PeersConfig {
         self
     }
 
-    /// Nodes to initially connect to.
+    /// Nodes available at launch.
     pub fn with_basic_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
         self.basic_nodes = nodes;
         self
     }
 
-    /// Read from file nodes to initially connect to. Ignored if None.
+    /// Read from file nodes available at launch. Ignored if None.
     pub fn with_basic_nodes_from_file(
         self,
         optional_file: Option<impl AsRef<Path>>,
@@ -1088,7 +1088,7 @@ impl PeersConfig {
         Ok(self.with_basic_nodes(nodes))
     }
 
-    /// Adds file to save peers to on shutdown
+    /// Adds file to save peers to on shutdown.
     pub fn with_peers_file(mut self, peers_file: Option<impl Into<PathBuf>>) -> Self {
         self.peers_file = peers_file.map(|p| p.into());
         self
