@@ -15,6 +15,9 @@ reth-provider = { path = "../storage/provider" }
 # async
 tokio = { version = "1", features = ["sync"] }
 
+# misc
+bytes = "1.2"
+
 [dev-dependencies]
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-provider = { path = "../storage/provider", features = ["test-utils"] }

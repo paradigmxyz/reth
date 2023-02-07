@@ -1,8 +1,9 @@
 //! Implementation of clique voting snapshots.
 //! https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/snapshot.go
 
+use bytes::BufMut;
 use reth_interfaces::consensus::CliqueError;
-use reth_primitives::{Address, BlockHash, BlockNumber, CliqueConfig, SealedHeader, H64};
+use reth_primitives::{Address, BlockHash, BlockNumber, Bytes, CliqueConfig, SealedHeader, H64};
 use std::collections::{hash_map::Entry, BTreeSet, HashMap};
 
 use super::{
@@ -52,18 +53,22 @@ pub struct Tally {
 }
 
 impl Tally {
+    /// Create new voting tally.
     pub fn new(authorize: bool) -> Self {
         Self { authorize, votes: 0 }
     }
 
+    /// Increase the vote count by 1.
     pub fn upvote(&mut self) {
         self.votes += 1;
     }
 
+    /// Decrease the vote count by 1.
     pub fn downvote(&mut self) {
         self.votes = self.votes.saturating_sub(1);
     }
 
+    /// Check if the voting tally is empty.
     pub fn is_empty(&self) -> bool {
         self.votes == 0
     }
@@ -89,27 +94,19 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// Check whether it makes sense to cast the specified vote in the
-    /// given snapshot context (e.g. don't try to add an already authorized signer).
-    pub fn is_valid_vote(&self, vote: &Vote) -> bool {
-        let signer_is_authorized = self.is_authorized_signer(&vote.address);
-        (signer_is_authorized && !vote.authorize) || (!signer_is_authorized && vote.authorize)
-    }
-
     /// Check if the address is an authorized signer.
     pub fn is_authorized_signer(&self, signer: &Address) -> bool {
         self.signers.contains(signer)
     }
 
-    /// Check if the address is a recent signer.
-    pub fn is_recent_signer(&self, signer: &Address) -> bool {
-        self.recents.iter().any(|(_, s)| s == signer)
+    /// Find the recently signed block by the signer.
+    pub fn find_recent_signer_block(&self, signer: &Address) -> Option<BlockNumber> {
+        self.recents.iter().find_map(|(block, s)| if s == signer { Some(*block) } else { None })
     }
 
-    /// Return true if the vote has passed.
-    pub fn vote_has_passed(&self, tally: &Tally) -> bool {
-        let pass_threshold = self.signers.len() / 2;
-        tally.votes > pass_threshold as u64
+    /// Check if the address is a recent signer.
+    pub fn is_recent_signer(&self, signer: &Address) -> bool {
+        self.find_recent_signer_block(signer).is_some()
     }
 
     /// Return a flag if a signer at a given block height is in-turn or not.
@@ -118,6 +115,33 @@ impl Snapshot {
             .iter()
             .position(|s| s == signer)
             .map(|idx| block % self.signers.len() as u64 == idx as u64)
+    }
+
+    /// Return the recents cache limit.
+    pub fn recents_cache_limit(&self) -> u64 {
+        self.signers.len() as u64 / 2 + 1
+    }
+
+    /// Return signers as bytes.
+    pub fn signers_bytes(&self) -> Bytes {
+        let mut bytes = bytes::BytesMut::with_capacity(self.signers.len() * Address::len_bytes());
+        for signer in self.signers.iter() {
+            bytes.put_slice(signer.as_bytes());
+        }
+        bytes.freeze().into()
+    }
+
+    /// Check whether it makes sense to cast the specified vote in the
+    /// given snapshot context (e.g. don't try to add an already authorized signer).
+    fn is_valid_vote(&self, vote: &Vote) -> bool {
+        let signer_is_authorized = self.is_authorized_signer(&vote.address);
+        (signer_is_authorized && !vote.authorize) || (!signer_is_authorized && vote.authorize)
+    }
+
+    /// Return true if the vote has passed.
+    fn vote_has_passed(&self, tally: &Tally) -> bool {
+        let pass_threshold = self.signers.len() / 2;
+        tally.votes > pass_threshold as u64
     }
 
     /// Add a new vote into the cached tally and ordered collection of votes.
@@ -156,9 +180,9 @@ impl Snapshot {
 
     /// Shrink the list of recent signers if above the threshold.
     fn shrink_recents_cache(&mut self, block: BlockNumber) {
-        let recents_threshold = self.signers.len() as u64 / 2 + 1;
-        if block >= recents_threshold {
-            let at_block_number = block - recents_threshold;
+        let recents_limit = self.recents_cache_limit();
+        if block >= recents_limit {
+            let at_block_number = block - recents_limit;
             self.recents.remove(&at_block_number);
         }
     }

@@ -211,18 +211,22 @@ pub fn validate_eip_1559_base_fee(
 /// Methods for validating clique headers
 pub mod clique {
     use super::*;
-    use crate::clique::constants::*;
+    use crate::clique::{
+        constants::*,
+        snapshot::Snapshot,
+        utils::{is_checkpoint_block, recover_header_signer},
+    };
     use reth_interfaces::consensus::{CliqueError, Error};
-    use reth_primitives::{Address, ChainSpec, SealedHeader, EMPTY_OMMER_ROOT, H64, U256};
+    use reth_primitives::{
+        Address, Bytes, ChainSpec, CliqueConfig, SealedHeader, EMPTY_OMMER_ROOT, H64, U256,
+    };
     use std::time::SystemTime;
 
     /// Validate header according to clique consensus rules.
     pub fn validate_header_standalone(
         header: &SealedHeader,
-        chain_spec: &ChainSpec,
+        config: &CliqueConfig,
     ) -> Result<(), Error> {
-        let config = chain_spec.clique.as_ref().expect("cannot validate without clique config");
-
         // Gas used needs to be less then gas limit. Gas used is going to be check after execution.
         if header.gas_used > header.gas_limit {
             return Err(Error::HeaderGasUsedExceedsGasLimit {
@@ -241,7 +245,7 @@ pub mod clique {
             })
         }
 
-        let is_checkpoint = header.number % config.epoch == 0;
+        let is_checkpoint = is_checkpoint_block(config, header.number);
 
         // Checkpoint blocks need to enforce zero beneficiary
         if is_checkpoint && !header.beneficiary.is_zero() {
@@ -306,10 +310,9 @@ pub mod clique {
     pub fn validate_header_regarding_parent(
         parent: &SealedHeader,
         child: &SealedHeader,
+        config: &CliqueConfig,
         chain_spec: &ChainSpec,
     ) -> Result<(), Error> {
-        let config = chain_spec.clique.as_ref().expect("cannot validate without clique config");
-
         // Validate that at least `period` seconds have passed since last block.
         let expected_at_least = parent.timestamp + config.period;
         if child.timestamp < expected_at_least {
@@ -326,6 +329,53 @@ pub mod clique {
 
         // EIP-1559 check base fee
         validate_eip_1559_base_fee(child, parent, chain_spec)?;
+
+        Ok(())
+    }
+
+    /// Validate header regarding snapshot according to clique consensus.
+    pub fn validate_header_regarding_snapshot(
+        header: &SealedHeader,
+        snapshot: &Snapshot,
+        config: &CliqueConfig,
+    ) -> Result<(), Error> {
+        // If the block is a checkpoint block, verify the signer list
+        let is_checkpoint = is_checkpoint_block(config, header.number);
+        if is_checkpoint {
+            let signer_bytes = snapshot.signers_bytes();
+            let extra_suffix = header.extra_data.len() - EXTRA_SEAL;
+            let extra_data_bytes = Bytes::from(&header.extra_data[EXTRA_VANITY..extra_suffix]);
+            if extra_data_bytes != signer_bytes {
+                return Err(
+                    CliqueError::CheckpointSigners { extra_data: header.extra_data.clone() }.into()
+                )
+            }
+        }
+
+        let signer = recover_header_signer(header)?;
+
+        // Verify that the header signer is authorized
+        if !snapshot.is_authorized_signer(&signer) {
+            return Err(CliqueError::UnauthorizedSigner { signer }.into())
+        }
+
+        if let Some(recent_block) = snapshot.find_recent_signer_block(&signer) {
+            // Signer is among recents, only fail if the current block doesn't shift it out
+            let limit = snapshot.recents_cache_limit();
+            if recent_block > header.number - limit {
+                return Err(CliqueError::RecentSigner { signer }.into())
+            }
+        }
+
+        // Ensure that the difficulty corresponds to the turn-ness of the signer
+        let inturn = snapshot
+            .is_signer_inturn(&signer, header.number)
+            .ok_or(CliqueError::UnauthorizedSigner { signer })?;
+        if inturn && header.difficulty != U256::from(DIFF_INTURN) {
+            return Err(CliqueError::Difficulty { difficulty: header.difficulty }.into())
+        } else if header.difficulty != U256::from(DIFF_NOTURN) {
+            return Err(CliqueError::Difficulty { difficulty: header.difficulty }.into())
+        }
 
         Ok(())
     }

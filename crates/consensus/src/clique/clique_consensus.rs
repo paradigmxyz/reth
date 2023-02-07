@@ -1,8 +1,10 @@
 //! Consensus for Clique PoA networks.
-use super::constants::*;
+use super::{constants::*, snapshot::Snapshot};
 use crate::validation::clique;
 use reth_interfaces::consensus::{CliqueError, Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockNumber, Bytes, ChainSpec, Header, SealedBlock, SealedHeader};
+use reth_primitives::{
+    BlockNumber, Bytes, ChainSpec, CliqueConfig, Header, SealedBlock, SealedHeader,
+};
 use tokio::sync::watch;
 
 /// Implementation of Clique proof-of-authority consensus protocol.
@@ -10,11 +12,19 @@ use tokio::sync::watch;
 #[derive(Debug)]
 pub struct CliqueConsensus {
     chain_spec: ChainSpec,
+    /// Cloned clique config from the chain spec for ease of access.
+    config: CliqueConfig,
 }
 
 impl CliqueConsensus {
+    /// Create new instance of clique consensus.
     pub fn new(chain_spec: ChainSpec) -> Self {
-        Self { chain_spec }
+        let config = chain_spec.clique.clone().expect("clique config exists");
+        Self { chain_spec, config }
+    }
+
+    fn retrieve_snapshot(&self) -> Snapshot {
+        todo!()
     }
 }
 
@@ -40,18 +50,12 @@ impl Consensus for CliqueConsensus {
     }
 
     fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {
-        clique::validate_header_standalone(header, &self.chain_spec)?;
-        clique::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
-
-        // TODO: header must be sealed differently
+        clique::validate_header_standalone(header, &self.config)?;
+        clique::validate_header_regarding_parent(parent, header, &self.config, &self.chain_spec)?;
 
         // TODO: Retrieve the snapshot
-
-        // TODO: verify the signer list if it's a checkpoint block
-
-        // TODO: verify the header signer
-
-        // TODO: ensure that the difficulty corresponds to the turn-ness of the signer
+        let snapshot = self.retrieve_snapshot();
+        clique::validate_header_regarding_snapshot(header, &snapshot, &self.config)?;
 
         Ok(())
     }

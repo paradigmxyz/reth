@@ -4044,6 +4044,7 @@ dependencies = [
 name = "reth-consensus"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",

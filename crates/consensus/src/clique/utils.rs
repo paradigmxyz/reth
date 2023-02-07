@@ -2,7 +2,7 @@
 
 use super::constants::EXTRA_SEAL;
 use reth_interfaces::consensus::CliqueError;
-use reth_primitives::{recovery::secp256k1, Address, SealedHeader};
+use reth_primitives::{recovery::secp256k1, Address, BlockNumber, CliqueConfig, SealedHeader};
 
 /// Recover the account from signed header per clique consensus rules.
 pub fn recover_header_signer(header: &SealedHeader) -> Result<Address, CliqueError> {
@@ -13,4 +13,10 @@ pub fn recover_header_signer(header: &SealedHeader) -> Result<Address, CliqueErr
         .ok_or(CliqueError::MissingSignature { extra_data: header.extra_data.clone() })?;
     secp256k1::recover(&signature, header.hash().as_fixed_bytes())
         .map_err(|_| CliqueError::HeaderSignerRecovery { signature, hash: header.hash() })
+}
+
+/// Return `true` if the block is a checkpoint block.
+#[inline]
+pub fn is_checkpoint_block(config: &CliqueConfig, block: BlockNumber) -> bool {
+    block % config.epoch == 0
 }
