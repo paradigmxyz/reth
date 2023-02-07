@@ -14,9 +14,8 @@ reth-rlp = { path = "../common/rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
-revm = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7" }
-# revm-interpreter = "1.0.0"
+revm = { version = "3.0.0"}
+revm-interpreter = "1.0.0"
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 

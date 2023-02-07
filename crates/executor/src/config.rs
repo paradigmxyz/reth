@@ -36,57 +36,57 @@ mod tests {
     fn test_to_revm_spec() {
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().paris_activated().build(), 1),
-            revm::MERGE
+            revm::primitives::MERGE
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().london_activated().build(), 1),
-            revm::LONDON
+            revm::primitives::LONDON
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().berlin_activated().build(), 1),
-            revm::BERLIN
+            revm::primitives::BERLIN
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().istanbul_activated().build(), 1),
-            revm::ISTANBUL
+            revm::primitives::ISTANBUL
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().petersburg_activated().build(), 1),
-            revm::PETERSBURG
+            revm::primitives::PETERSBURG
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().byzantium_activated().build(), 1),
-            revm::BYZANTIUM
+            revm::primitives::BYZANTIUM
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().spurious_dragon_activated().build(), 1),
-            revm::SPURIOUS_DRAGON
+            revm::primitives::SPURIOUS_DRAGON
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().tangerine_whistle_activated().build(), 1),
-            revm::TANGERINE
+            revm::primitives::TANGERINE
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().homestead_activated().build(), 1),
-            revm::HOMESTEAD
+            revm::primitives::HOMESTEAD
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().frontier_activated().build(), 1),
-            revm::FRONTIER
+            revm::primitives::FRONTIER
         );
     }
 
     #[test]
     fn test_eth_spec() {
-        assert_eq!(revm_spec(&MAINNET, 15537394 + 10), revm::MERGE);
-        assert_eq!(revm_spec(&MAINNET, 15537394 - 10), revm::LONDON);
-        assert_eq!(revm_spec(&MAINNET, 12244000 + 10), revm::BERLIN);
-        assert_eq!(revm_spec(&MAINNET, 12244000 - 10), revm::ISTANBUL);
-        assert_eq!(revm_spec(&MAINNET, 7280000 + 10), revm::PETERSBURG);
-        assert_eq!(revm_spec(&MAINNET, 7280000 - 10), revm::BYZANTIUM);
-        assert_eq!(revm_spec(&MAINNET, 2675000 + 10), revm::SPURIOUS_DRAGON);
-        assert_eq!(revm_spec(&MAINNET, 2675000 - 10), revm::TANGERINE);
-        assert_eq!(revm_spec(&MAINNET, 1150000 + 10), revm::HOMESTEAD);
-        assert_eq!(revm_spec(&MAINNET, 1150000 - 10), revm::FRONTIER);
+        assert_eq!(revm_spec(&MAINNET, 15537394 + 10), revm::primitives::MERGE);
+        assert_eq!(revm_spec(&MAINNET, 15537394 - 10), revm::primitives::LONDON);
+        assert_eq!(revm_spec(&MAINNET, 12244000 + 10), revm::primitives::BERLIN);
+        assert_eq!(revm_spec(&MAINNET, 12244000 - 10), revm::primitives::ISTANBUL);
+        assert_eq!(revm_spec(&MAINNET, 7280000 + 10), revm::primitives::PETERSBURG);
+        assert_eq!(revm_spec(&MAINNET, 7280000 - 10), revm::primitives::BYZANTIUM);
+        assert_eq!(revm_spec(&MAINNET, 2675000 + 10), revm::primitives::SPURIOUS_DRAGON);
+        assert_eq!(revm_spec(&MAINNET, 2675000 - 10), revm::primitives::TANGERINE);
+        assert_eq!(revm_spec(&MAINNET, 1150000 + 10), revm::primitives::HOMESTEAD);
+        assert_eq!(revm_spec(&MAINNET, 1150000 - 10), revm::primitives::FRONTIER);
     }
 }

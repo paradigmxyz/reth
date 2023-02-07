@@ -23,9 +23,8 @@ arbitrary = [
 [dependencies]
 bytes = "1.2.1"
 codecs-derive = { version = "0.1.0", path = "./derive", default-features = false }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7", features = ["serde"] }
+revm-interpreter = {version = "1.0.0", features = ["serde"] }
 
-# revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = [
 #     "serde",
 # ] }
 
@@ -35,7 +34,7 @@ proptest = { version = "1.0", optional = true }
 proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "8c22748b484ea2eb19d5200cc81ba7a4c3d7f8c7", features = [
+revm-interpreter = {version = "1.0.0", features = [
     "serde",
     "arbitrary",
 ] }

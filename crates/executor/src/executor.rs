@@ -19,7 +19,6 @@ use revm::{
     },
     EVM,
 };
-use revm_interpreter::primitives::db::Database;
 use std::collections::BTreeMap;
 
 /// Main block executor
@@ -363,13 +362,6 @@ pub fn execute<DB: StateProvider>(
         } else {
             false
         };
-        // let is_success = match exit_reason {
-        // revm_interpreter::return_ok!() => true,
-        // revm_interpreter::return_revert!() => false,
-        // _ => false,
-        //     //e => return Err(Error::EVMError { error_code: e as u32 }),
-        // };
-
         // Add spend gas.
         if let Ok(ResultAndState { ref result, .. }) = out {
             cumulative_gas_used += match &result {
