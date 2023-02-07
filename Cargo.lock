@@ -4477,6 +4477,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.4",
  "tracing",
 ]
 
