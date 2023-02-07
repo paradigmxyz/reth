@@ -186,7 +186,7 @@ impl Command {
         self.init_trusted_nodes(config);
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let netconf = self.load_network_config(&config, &db);
+        let netconf = self.load_network_config(config, &db);
         let network = netconf.start_network().await?;
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -206,17 +206,11 @@ impl Command {
         // building network downloaders
         let fetch_client = Arc::new(network.fetch_client().await?);
 
-        let header_downloader = self.spawn_headers_downloader(&config, &consensus, &fetch_client);
-        let body_downloader = self.spawn_bodies_downloader(&config, &consensus, &fetch_client, &db);
+        let header_downloader = self.spawn_headers_downloader(config, &consensus, &fetch_client);
+        let body_downloader = self.spawn_bodies_downloader(config, &consensus, &fetch_client, &db);
 
         let mut pipeline = self
-            .build_pipeline(
-                &config,
-                header_downloader,
-                body_downloader,
-                network.clone(),
-                &consensus,
-            )
+            .build_pipeline(config, header_downloader, body_downloader, network.clone(), &consensus)
             .await?;
 
         let events = stream_select(
@@ -234,11 +228,11 @@ impl Command {
         file_client: Arc<FileClient>,
     ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
     {
-        let header_downloader = self.spawn_headers_downloader(&config, &consensus, &file_client);
-        let body_downloader = self.spawn_bodies_downloader(&config, &consensus, &file_client, &db);
+        let header_downloader = self.spawn_headers_downloader(&config, consensus, &file_client);
+        let body_downloader = self.spawn_bodies_downloader(&config, consensus, &file_client, &db);
 
         let mut pipeline = self
-            .build_pipeline(&config, header_downloader, body_downloader, file_client, &consensus)
+            .build_pipeline(&config, header_downloader, body_downloader, file_client, consensus)
             .await?;
 
         let events = pipeline.events().map(Into::into);
