@@ -12,9 +12,18 @@ reth-ipc = { path = "../ipc" }
 reth-network-api = { path = "../../net/network-api" }
 reth-provider = { path = "../../storage/provider" }
 reth-rpc = { path = "../rpc" }
+reth-rpc-api = { path = "../rpc-api" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 jsonrpsee = { version = "0.16", features = ["server"] }
 
 strum = { version = "0.24", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+reth-tracing = { path = "../../tracing" }
+reth-rpc-api = { path = "../rpc-api", features = ["client"] }
+reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
+
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }

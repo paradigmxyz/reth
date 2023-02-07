@@ -11,8 +11,11 @@ use async_trait::async_trait;
 pub use mock::*;
 use std::{marker::PhantomData, sync::Arc};
 
+/// A [Pool] used for testing
+pub type TestPool = Pool<NoopTransactionValidator<MockTransaction>, MockOrdering>;
+
 /// Returns a new [Pool] used for testing purposes
-pub fn testing_pool() -> Pool<NoopTransactionValidator<MockTransaction>, MockOrdering> {
+pub fn testing_pool() -> TestPool {
     Pool::new(
         Arc::new(NoopTransactionValidator::default()),
         Arc::new(MockOrdering::default()),
