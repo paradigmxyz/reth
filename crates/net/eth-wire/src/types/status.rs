@@ -4,8 +4,10 @@ use ethers_core::utils::Genesis;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Chain, ChainSpec, ForkId, Hardfork, Head, H256, MAINNET, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
-use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
@@ -13,7 +15,8 @@ use std::fmt::{Debug, Display};
 /// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
 /// hash. This information should be treated as untrusted.
 #[derive_arbitrary(rlp)]
-#[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
     /// 66.

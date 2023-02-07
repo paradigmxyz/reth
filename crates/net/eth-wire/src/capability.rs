@@ -4,8 +4,10 @@ use crate::{version::ParseVersionError, EthMessage, EthVersion};
 use bytes::{BufMut, Bytes};
 use reth_codecs::add_arbitrary_tests;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
-use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::{
@@ -14,7 +16,8 @@ use proptest::{
 };
 
 /// A Capability message consisting of the message-id and the payload
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RawCapabilityMessage {
     /// Identifier of the message.
     pub id: usize,
@@ -24,7 +27,8 @@ pub struct RawCapabilityMessage {
 
 /// Various protocol related event types bubbled up from a session that need to be handled by the
 /// network.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CapabilityMessage {
     /// Eth sub-protocol message.
     Eth(EthMessage),
@@ -34,9 +38,8 @@ pub enum CapabilityMessage {
 
 /// A message indicating a supported capability and capability version.
 #[add_arbitrary_tests(rlp)]
-#[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default, Hash,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Capability {
     /// The name of the subprotocol
     pub name: SmolStr,

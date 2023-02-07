@@ -2,21 +2,14 @@
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Receipt, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// A request for transaction receipts from the given block hashes.
 #[derive_arbitrary(rlp)]
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
     pub Vec<H256>,
@@ -25,17 +18,8 @@ pub struct GetReceipts(
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
 #[derive_arbitrary(rlp, 1)]
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.
     pub Vec<Vec<Receipt>>,

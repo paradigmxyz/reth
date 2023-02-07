@@ -23,7 +23,6 @@ secp256k1 = { version = "0.24", features = [
     "global-context",
     "rand-std",
     "recovery",
-    "serde",
 ] }
 enr = { version = "0.7.0", default-features = false, features = [
     "rust-secp256k1",
@@ -40,7 +39,7 @@ thiserror = "1.0"
 hex = "0.4"
 rand = { version = "0.8", optional = true }
 generic-array = "0.14"
-serde = "1.0"
+serde = { version = "1.0", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
@@ -48,4 +47,6 @@ tokio = { version = "1", features = ["macros"] }
 reth-tracing = { path = "../../tracing" }
 
 [features]
-test-utils = ["rand"]
+default = ["serde"]
+test-utils = ["dep:rand"]
+serde = ["dep:serde"]

@@ -13,7 +13,7 @@ reth-primitives = { path = "../../primitives" }
 reth-eth-wire = { path = "../eth-wire" }
 
 # io
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"], optional = true }
 
 # misc
 async-trait = "0.1"
@@ -21,4 +21,6 @@ thiserror = "1.0.37"
 tokio = { version = "1.21.2", features = ["sync"] }
 
 [features]
+default = ["serde"]
+serde = ["dep:serde"]
 test-utils = []

@@ -37,9 +37,13 @@ lru = "0.9"
 thiserror = "1.0"
 tracing = "0.1"
 parking_lot = "0.12"
-serde = "1.0"
-serde_with = "2.1.0"
+serde = { version = "1.0", optional = true }
+serde_with = { version = "2.1.0", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }
 reth-tracing = { path = "../../tracing" }
+
+[features]
+default = ["serde"]
+serde = ["dep:serde", "dep:serde_with"]
