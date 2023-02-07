@@ -27,7 +27,7 @@ fn senders(c: &mut Criterion) {
         stage.batch_size = batch;
         stage.commit_threshold = num_blocks;
         let label = format!("SendersRecovery-batch-{}", batch);
-        measure_stage(&mut group, stage, num_blocks - 1 /* why do we need - 1 here? */, label);
+        measure_stage(&mut group, stage, num_blocks, label);
     }
 }
 
@@ -106,7 +106,9 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
         let tx = TestTransaction::new(&path);
 
         // This takes a while because it does sig recovery internally
-        let blocks = random_block_range(0..num_blocks as u64, H256::zero(), txs_range);
+        let blocks = random_block_range(0..num_blocks as u64 + 1, H256::zero(), txs_range);
+
+        // insert all blocks
         tx.insert_blocks(blocks.iter(), None).unwrap();
         tx.inner().commit().unwrap();
     }
