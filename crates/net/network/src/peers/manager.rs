@@ -26,7 +26,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, trace};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -106,8 +106,6 @@ pub(crate) struct PeersManager {
     backoff_durations: PeerBackoffDurations,
     /// If non-trusted peers should be connected to
     connect_trusted_nodes_only: bool,
-    /// File to save peers to on shutdown
-    peers_file: Option<PathBuf>,
 }
 
 impl PeersManager {
@@ -123,7 +121,6 @@ impl PeersManager {
             trusted_nodes,
             connect_trusted_nodes_only,
             basic_nodes,
-            peers_file,
             ..
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
@@ -158,7 +155,6 @@ impl PeersManager {
             ban_duration,
             backoff_durations,
             connect_trusted_nodes_only,
-            peers_file,
         }
     }
 
@@ -693,15 +689,6 @@ impl Default for PeersManager {
     }
 }
 
-impl Drop for PeersManager {
-    fn drop(&mut self) {
-        let Some(file_path) = self.peers_file.take() else { return };
-        if let Err(err) = self.dump_peers(&file_path) {
-            warn!(target = "net::peers", ?err, file = ?file_path.display(), "Failed to save peers to file")
-        }
-    }
-}
-
 /// Tracks stats about connected nodes
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -972,9 +959,6 @@ pub struct PeersConfig {
     /// Basic nodes to connect to.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub basic_nodes: HashSet<NodeRecord>,
-    /// Optional file to persist peers in.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub peers_file: Option<PathBuf>,
     /// How long to ban bad peers.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub ban_duration: Duration,
@@ -1003,7 +987,6 @@ impl Default for PeersConfig {
             trusted_nodes: Default::default(),
             connect_trusted_nodes_only: false,
             basic_nodes: Default::default(),
-            peers_file: None,
         }
     }
 }
@@ -1071,12 +1054,6 @@ impl PeersConfig {
         info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
         let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
         Ok(self.with_basic_nodes(nodes))
-    }
-
-    /// Adds file to save peers to on shutdown.
-    pub fn with_peers_file(mut self, peers_file: Option<impl Into<PathBuf>>) -> Self {
-        self.peers_file = peers_file.map(|p| p.into());
-        self
     }
 }
 
