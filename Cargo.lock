@@ -4641,9 +4641,12 @@ dependencies = [
  "reth-network-api",
  "reth-provider",
  "reth-rpc",
+ "reth-rpc-api",
+ "reth-tracing",
  "reth-transaction-pool",
  "serde",
  "strum",
+ "tokio",
 ]
 
 [[package]]
