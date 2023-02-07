@@ -22,7 +22,7 @@ use serde_json::Value;
 use super::EthApiSpec;
 
 #[async_trait::async_trait]
-impl<Pool, Client, Network> EthApiServer for EthApi<Pool, Client, Network>
+impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
     Self: EthApiSpec,
     Pool: TransactionPool + 'static,

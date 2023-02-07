@@ -8,8 +8,20 @@ use reth_rpc_types::RichBlock;
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
+#[non_exhaustive]
 pub struct DebugApi {
     // TODO: add proper handler when implementing functions
+}
+
+// === impl DebugApi ===
+
+impl DebugApi {
+    /// Create a new instance of the [DebugApi]
+    #[allow(clippy::new_without_default)]
+    // TODO add necessary types
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 #[async_trait]
