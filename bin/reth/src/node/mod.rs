@@ -184,13 +184,7 @@ impl Command {
         config: &Config,
         db: &Arc<Env<WriteMap>>,
     ) -> NetworkConfig<ShareableDatabase<Env<WriteMap>>> {
-        let peers_file = if self.network.no_persist_peers {
-            None
-        } else {
-            let file_path = &self.network.peers_file;
-            info!(target: "reth::cli", file = %file_path.as_ref().display(), "Loading saved peers");
-            Some(file_path)
-        };
+        let peers_file = (!self.network.no_persist_peers).then_some(&self.network.peers_file);
         config.network_config(
             db.clone(),
             self.chain.clone(),

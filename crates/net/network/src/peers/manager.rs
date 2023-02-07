@@ -1079,11 +1079,12 @@ impl PeersConfig {
         let Some(file_path) = optional_file else {
             return Ok(self)
         };
-        let reader = match std::fs::File::open(file_path) {
+        let reader = match std::fs::File::open(file_path.as_ref()) {
             Ok(file) => std::io::BufReader::new(file),
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
             Err(e) => Err(e)?,
         };
+        info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
         let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
         Ok(self.with_basic_nodes(nodes))
     }
