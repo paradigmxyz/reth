@@ -254,6 +254,18 @@ impl Transaction {
         }
     }
 
+    /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
+    /// is `None`
+    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        match self {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+                Some(*max_priority_fee_per_gas)
+            }
+        }
+    }
+
     /// Get the transaction's input field.
     pub fn input(&self) -> &Bytes {
         match self {

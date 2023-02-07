@@ -15,6 +15,7 @@ where
         _full: bool,
     ) -> EthResult<Option<RichBlock>> {
         let block = self.client().block(BlockId::Hash(hash.0.into()))?;
+        // TODO: chain info total difficulty
         todo!()
     }
 
@@ -24,6 +25,7 @@ where
         _full: bool,
     ) -> EthResult<Option<RichBlock>> {
         let block = self.client().block(BlockId::Number(number.into()))?;
+        // TODO: chain info total difficulty
         todo!()
     }
 }

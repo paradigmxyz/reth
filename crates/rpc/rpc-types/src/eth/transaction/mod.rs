@@ -9,7 +9,9 @@ pub use signature::Signature;
 pub use typed::*;
 
 use reth_primitives::{
-    rpc::transaction::eip2930::AccessListItem, Address, Bytes, H256, U128, U256, U64,
+    rpc::transaction::eip2930::AccessListItem, rpc_utils::get_contract_address, Address,
+    BlockNumber, Bytes, Transaction as RethTransaction, TransactionKind,
+    TransactionSignedEcRecovered, TxType, H256, U128, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
@@ -64,4 +66,96 @@ pub struct Transaction {
     /// Some(1) for AccessList transaction, None for Legacy
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub transaction_type: Option<U64>,
+}
+
+impl Transaction {
+    /// Create a new rpc transction result, using the given block hash, number, and tx index fields
+    /// to populate the corresponing fields in the rpc result.
+    pub(crate) fn from_recovered_with_block_context(
+        tx: TransactionSignedEcRecovered,
+        block_hash: H256,
+        block_number: BlockNumber,
+        tx_index: U256,
+    ) -> Self {
+        let mut tx = Self::from_recovered(tx);
+        tx.block_hash = Some(block_hash);
+        tx.block_number = Some(U256::from(block_number));
+        tx.transaction_index = Some(tx_index);
+        tx
+    }
+
+    /// Create a new rpc transaction result from a signed and recovered transaction, setting
+    /// environment related fields to `None`.
+    ///
+    /// Sets the sender public key to `None` as well.
+    pub(crate) fn from_recovered(tx: TransactionSignedEcRecovered) -> Self {
+        let signer = tx.signer();
+        let signed_tx = tx.into_signed();
+
+        let to = match signed_tx.kind() {
+            TransactionKind::Create => None,
+            TransactionKind::Call(to) => Some(*to),
+        };
+
+        let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
+            TxType::Legacy => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
+            TxType::EIP2930 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
+            TxType::EIP1559 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
+        };
+
+        let creates = match signed_tx.kind() {
+            TransactionKind::Create => {
+                Some(get_contract_address(signer.0, U256::from(signed_tx.nonce())).0.into())
+            }
+            TransactionKind::Call(_) => None,
+        };
+
+        let chain_id = signed_tx.chain_id().map(|id| U64::from(*id));
+        let access_list = match &signed_tx.transaction {
+            RethTransaction::Legacy(_) => None,
+            RethTransaction::Eip2930(tx) => Some(
+                tx.access_list
+                    .0
+                    .iter()
+                    .map(|item| AccessListItem {
+                        address: item.address.0.into(),
+                        storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
+                    })
+                    .collect(),
+            ),
+            RethTransaction::Eip1559(tx) => Some(
+                tx.access_list
+                    .0
+                    .iter()
+                    .map(|item| AccessListItem {
+                        address: item.address.0.into(),
+                        storage_keys: item.storage_keys.iter().map(|key| key.0.into()).collect(),
+                    })
+                    .collect(),
+            ),
+        };
+
+        Self {
+            hash: signed_tx.hash,
+            nonce: U256::from(signed_tx.nonce()),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: signer,
+            to,
+            value: U256::from(U128::from(*signed_tx.value())),
+            gas_price,
+            max_fee_per_gas,
+            max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),
+            gas: U256::from(signed_tx.gas_limit()),
+            input: signed_tx.input().clone(),
+            creates,
+            chain_id,
+            v: U256::from(signed_tx.signature.v(chain_id.map(|id| id.as_u64()))),
+            r: signed_tx.signature.r,
+            s: signed_tx.signature.s,
+            access_list,
+            transaction_type: Some(U256::from(signed_tx.tx_type() as u8)),
+        }
+    }
 }
