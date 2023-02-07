@@ -19,3 +19,6 @@ serde = { version = "1.0", features = ["derive"] }
 async-trait = "0.1"
 thiserror = "1.0.37"
 tokio = { version = "1.21.2", features = ["sync"] }
+
+[features]
+test-utils = []
