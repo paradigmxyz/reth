@@ -80,17 +80,15 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     where
         Self: Sized,
     {
-        if let Some(start_key) = start_key {
-            let start = self
-                .inner
+        let start = if let Some(start_key) = start_key {
+            self.inner
                 .set_range(start_key.encode().as_ref())
                 .map_err(|e| Error::Read(e.into()))?
-                .map(decoder::<T>);
+                .map(decoder::<T>)
+        } else {
+            self.first().transpose()
+        };
 
-            return Ok(Walker::new(self, start))
-        }
-
-        let start = self.first().transpose();
         Ok(Walker::new(self, start))
     }
 
@@ -117,17 +115,15 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
     where
         Self: Sized,
     {
-        if let Some(start_key) = start_key {
-            let start = self
-                .inner
+        let start = if let Some(start_key) = start_key {
+            self.inner
                 .set_range(start_key.encode().as_ref())
                 .map_err(|e| Error::Read(e.into()))?
-                .map(decoder::<T>);
+                .map(decoder::<T>)
+        } else {
+            self.last().transpose()
+        };
 
-            return Ok(ReverseWalker::new(self, start))
-        }
-
-        let start = self.last().transpose();
         Ok(ReverseWalker::new(self, start))
     }
 }
