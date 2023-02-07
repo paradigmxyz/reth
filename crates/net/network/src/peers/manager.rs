@@ -1089,8 +1089,8 @@ impl PeersConfig {
     }
 
     /// Adds file to save peers to on shutdown
-    pub fn with_optional_peers_file(mut self, peers_file: Option<impl AsRef<Path>>) -> Self {
-        self.peers_file = peers_file.map(|p| p.as_ref().to_path_buf());
+    pub fn with_peers_file(mut self, peers_file: Option<impl Into<PathBuf>>) -> Self {
+        self.peers_file = peers_file.map(|p| p.into());
         self
     }
 }

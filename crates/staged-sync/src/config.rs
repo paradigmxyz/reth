@@ -38,7 +38,7 @@ impl Config {
             .clone()
             .with_basic_nodes_from_file(peers_file.clone())
             .unwrap_or_else(|_| self.peers.clone())
-            .with_optional_peers_file(peers_file);
+            .with_peers_file(peers_file);
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
         NetworkConfigBuilder::new(rng_secret_key())
