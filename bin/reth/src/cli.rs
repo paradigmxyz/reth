@@ -22,7 +22,6 @@ pub async fn run() -> eyre::Result<()> {
     match opt.command {
         Commands::Node(command) => command.execute().await,
         Commands::Init(command) => command.execute().await,
-        Commands::Import(command) => command.execute().await,
         Commands::Db(command) => command.execute().await,
         Commands::Stage(command) => command.execute().await,
         Commands::P2P(command) => command.execute().await,
@@ -37,12 +36,6 @@ pub enum Commands {
     /// Start the node
     #[command(name = "node")]
     Node(node::Command),
-    /// Sync RLP encoded blocks from a file.
-    ///
-    /// The online stages (headers and bodies) are replaced by a file import, after which the
-    /// remaining stages are executed.
-    #[command(name = "import")]
-    Import(chain::ImportCommand),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(chain::InitCommand),

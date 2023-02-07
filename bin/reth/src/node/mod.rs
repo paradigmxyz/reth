@@ -4,7 +4,7 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
+    utils::{chainspec::genesis_value_parser, init::init_db, parse_socket_address},
     NetworkOpts, RpcServerOpts,
 };
 use clap::{crate_version, Parser};
@@ -13,10 +13,17 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
-use reth_downloaders::{bodies, headers};
-use reth_interfaces::consensus::{Consensus, ForkchoiceState};
+use reth_downloaders::{bodies, headers, test_utils::FileClient};
+use reth_interfaces::{
+    consensus::{Consensus, ForkchoiceState},
+    p2p::{
+        bodies::{client::BodiesClient, downloader::BodyDownloader},
+        headers::{client::HeadersClient, downloader::HeaderDownloader},
+    },
+    sync::SyncStateUpdater,
+};
 use reth_net_nat::NatResolver;
-use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle};
+use reth_network::{NetworkConfig, NetworkEvent};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
@@ -59,7 +66,7 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         verbatim_doc_comment,
         default_value = "mainnet",
-        value_parser = chain_spec_value_parser
+        value_parser = genesis_value_parser
     )]
     chain: ChainSpec,
 
@@ -74,6 +81,14 @@ pub struct Command {
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
+
+    /// The path to a block file for import.
+    /// When specified, this syncs RLP encoded blocks from a file.
+    ///
+    /// The online stages (headers and bodies) are replaced by a file import, after which the
+    /// remaining stages are executed.
+    #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment)]
+    import: Option<PlatformPath<ConfigPath>>,
 
     /// Set the chain tip manually for testing purposes.
     ///
@@ -92,7 +107,7 @@ pub struct Command {
 impl Command {
     /// Execute `node` command
     // TODO: RPC
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(mut self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
         // Raise the fd limit of the process.
@@ -102,8 +117,6 @@ impl Command {
         let mut config: Config = self.load_config()?;
         info!(target: "reth::cli", path = %self.db, "Configuration loaded");
 
-        self.init_trusted_nodes(&mut config);
-
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
@@ -112,8 +125,65 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
+        match &self.import {
+            Some(import_path) => {
+                // create a new FileClient
+                info!(target: "reth::cli", "Importing chain file");
+                let file_client = Arc::new(FileClient::new(&import_path).await?);
+
+                // override the tip
+                self.tip = Some(file_client.tip().expect("file client has no tip"));
+                info!(target: "reth::cli", "Chain file imported");
+
+                let consensus = self.init_consensus()?;
+                info!(target: "reth::cli", "Consensus engine initialized");
+
+                // override the max block
+                self.max_block = Some(0);
+
+                let (mut pipeline, events) =
+                    self.build_import_pipeline(config, db.clone(), &consensus, file_client).await?;
+
+                tokio::spawn(handle_events(events));
+
+                // Run pipeline
+                info!(target: "reth::cli", "Starting sync pipeline");
+                pipeline.run(db.clone()).await?;
+
+                // TODO: this is where we'd handle graceful shutdown by listening to ctrl-c
+            }
+            None => {
+                let (mut pipeline, events) =
+                    self.build_networked_pipeline(&mut config, db.clone()).await?;
+
+                tokio::spawn(handle_events(events));
+
+                // Run pipeline
+                info!(target: "reth::cli", "Starting sync pipeline");
+                pipeline.run(db.clone()).await?;
+
+                // TODO: this is where we'd handle graceful shutdown by listening to ctrl-c
+
+                if !self.network.no_persist_peers {
+                    dump_peers(self.network.peers_file.as_ref(), network).await?;
+                }
+            }
+        };
+
+        info!(target: "reth::cli", "Finishing up");
+        Ok(())
+    }
+
+    async fn build_networked_pipeline(
+        &self,
+        config: &mut Config,
+        db: Arc<Env<WriteMap>>,
+    ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
+    {
         let consensus = self.init_consensus()?;
         info!(target: "reth::cli", "Consensus engine initialized");
+
+        self.init_trusted_nodes(config);
 
         info!(target: "reth::cli", "Connecting to P2P network");
         let netconf = self.load_network_config(&config, &db);
@@ -133,25 +203,47 @@ impl Command {
         .await?;
         info!(target: "reth::cli", "Started RPC server");
 
-        let mut pipeline = self.build_pipeline(&config, &network, &consensus, &db).await?;
+        // building network downloaders
+        let fetch_client = Arc::new(network.fetch_client().await?);
 
-        tokio::spawn(handle_events(stream_select(
+        let header_downloader = self.spawn_headers_downloader(&config, &consensus, &fetch_client);
+        let body_downloader = self.spawn_bodies_downloader(&config, &consensus, &fetch_client, &db);
+
+        let mut pipeline = self
+            .build_pipeline(
+                &config,
+                header_downloader,
+                body_downloader,
+                network.clone(),
+                &consensus,
+            )
+            .await?;
+
+        let events = stream_select(
             network.event_listener().map(Into::into),
             pipeline.events().map(Into::into),
-        )));
+        );
+        Ok((pipeline, events))
+    }
 
-        // Run pipeline
-        info!(target: "reth::cli", "Starting sync pipeline");
-        pipeline.run(db.clone()).await?;
+    async fn build_import_pipeline(
+        &self,
+        config: Config,
+        db: Arc<Env<WriteMap>>,
+        consensus: &Arc<dyn Consensus>,
+        file_client: Arc<FileClient>,
+    ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
+    {
+        let header_downloader = self.spawn_headers_downloader(&config, &consensus, &file_client);
+        let body_downloader = self.spawn_bodies_downloader(&config, &consensus, &file_client, &db);
 
-        // TODO: this is where we'd handle graceful shutdown by listening to ctrl-c
+        let mut pipeline = self
+            .build_pipeline(&config, header_downloader, body_downloader, file_client, &consensus)
+            .await?;
 
-        if !self.network.no_persist_peers {
-            dump_peers(self.network.peers_file.as_ref(), network).await?;
-        }
+        let events = pipeline.events().map(Into::into);
 
-        info!(target: "reth::cli", "Finishing up");
-        Ok(())
+        Ok((pipeline, events))
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
@@ -214,17 +306,19 @@ impl Command {
         )
     }
 
-    async fn build_pipeline(
+    async fn build_pipeline<H, B, U>(
         &self,
         config: &Config,
-        network: &NetworkHandle,
+        header_downloader: H,
+        body_downloader: B,
+        updater: U,
         consensus: &Arc<dyn Consensus>,
-        db: &Arc<Env<WriteMap>>,
-    ) -> eyre::Result<Pipeline<Env<WriteMap>, NetworkHandle>> {
-        let fetch_client = Arc::new(network.fetch_client().await?);
-
-        let header_downloader = self.spawn_headers_downloader(config, consensus, &fetch_client);
-        let body_downloader = self.spawn_bodies_downloader(config, consensus, &fetch_client, db);
+    ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
+    where
+        H: HeaderDownloader + 'static,
+        B: BodyDownloader + 'static,
+        U: SyncStateUpdater,
+    {
         let stage_conf = &config.stages;
 
         let mut builder = Pipeline::builder();
@@ -234,7 +328,7 @@ impl Command {
         }
 
         let pipeline = builder
-            .with_sync_state_updater(network.clone())
+            .with_sync_state_updater(updater)
             .add_stages(
                 OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
                     TotalDifficultyStage {
@@ -259,12 +353,15 @@ impl Command {
         Ok(pipeline)
     }
 
-    fn spawn_headers_downloader(
+    fn spawn_headers_downloader<H>(
         &self,
         config: &Config,
         consensus: &Arc<dyn Consensus>,
-        fetch_client: &Arc<FetchClient>,
-    ) -> reth_downloaders::headers::task::TaskDownloader {
+        fetch_client: &Arc<H>,
+    ) -> reth_downloaders::headers::task::TaskDownloader
+    where
+        H: HeadersClient + 'static,
+    {
         let headers_conf = &config.stages.headers;
         headers::task::TaskDownloader::spawn(
             headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
@@ -274,13 +371,16 @@ impl Command {
         )
     }
 
-    fn spawn_bodies_downloader(
+    fn spawn_bodies_downloader<B>(
         &self,
         config: &Config,
         consensus: &Arc<dyn Consensus>,
-        fetch_client: &Arc<FetchClient>,
+        fetch_client: &Arc<B>,
         db: &Arc<Env<WriteMap>>,
-    ) -> reth_downloaders::bodies::task::TaskDownloader {
+    ) -> reth_downloaders::bodies::task::TaskDownloader
+    where
+        B: BodiesClient + 'static,
+    {
         let bodies_conf = &config.stages.bodies;
         bodies::task::TaskDownloader::spawn(
             bodies::bodies::BodiesDownloaderBuilder::default()
