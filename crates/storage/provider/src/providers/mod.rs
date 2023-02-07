@@ -63,7 +63,10 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
 
 impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
+        // TODO
+        let total_difficulty = None;
         Ok(ChainInfo {
+            total_difficulty,
             best_hash: Default::default(),
             best_number: 0,
             last_finalized: None,

@@ -23,6 +23,7 @@ impl BlockHashProvider for NoopProvider {
 impl BlockProvider for NoopProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         Ok(ChainInfo {
+            total_difficulty: None,
             best_hash: Default::default(),
             best_number: 0,
             last_finalized: None,

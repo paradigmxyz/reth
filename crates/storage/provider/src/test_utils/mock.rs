@@ -129,10 +129,15 @@ impl BlockHashProvider for MockEthProvider {
 impl BlockProvider for MockEthProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         let lock = self.headers.lock();
+        let total_difficulty = match lock.values().fold(U256::ZERO, |td, h| td + h.difficulty) {
+            U256::ZERO => None,
+            td => Some(td),
+        };
         Ok(lock
             .iter()
             .max_by_key(|h| h.1.number)
             .map(|(hash, header)| ChainInfo {
+                total_difficulty,
                 best_hash: *hash,
                 best_number: header.number,
                 last_finalized: None,

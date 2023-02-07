@@ -1,8 +1,10 @@
-use crate::{BlockNumber, H256};
+use crate::{BlockNumber, H256, U256};
 
 /// Current status of the blockchain's head.
 #[derive(Debug, Eq, PartialEq)]
 pub struct ChainInfo {
+    /// Current total difficulty.
+    pub total_difficulty: Option<U256>,
     /// Best block hash.
     pub best_hash: H256,
     /// Best block number.
