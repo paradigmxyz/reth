@@ -14,7 +14,7 @@ use std::{
 };
 
 #[cfg(feature = "serde")]
-use secp256k1::serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Configuration parameters that define the performance of the discovery network.
 #[derive(Clone, Debug)]

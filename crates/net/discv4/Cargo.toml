@@ -49,4 +49,4 @@ reth-tracing = { path = "../../tracing" }
 [features]
 default = ["serde"]
 test-utils = ["dep:rand"]
-serde = ["dep:serde", "secp256k1/serde"]
+serde = ["dep:serde"]
