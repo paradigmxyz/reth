@@ -1,9 +1,7 @@
 use crate::{
     error::{BackoffKind, SessionError},
     peers::{
-        reputation::{
-            is_banned_reputation, BACKOFF_REPUTATION_CHANGE, BANNED_REPUTATION, DEFAULT_REPUTATION,
-        },
+        reputation::{is_banned_reputation, BACKOFF_REPUTATION_CHANGE, DEFAULT_REPUTATION},
         ReputationChangeWeights, DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND,
     },
     session::{Direction, PendingSessionHandshakeError},
@@ -681,24 +679,10 @@ impl PeersManager {
     fn dump_peers(&mut self, file_path: &PathBuf) -> Result<(), io::Error> {
         info!(target : "net::peers", file = %file_path.display(), "Saving current peers");
         let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
-        let known_peers: Vec<(i32, NodeRecord)> =
-            self.peers.iter().map(|(k, v)| (v.reputation, NodeRecord::new(v.addr, *k))).collect();
+        let known_peers: Vec<NodeRecord> =
+            self.peers.iter().map(|(k, v)| NodeRecord::new(v.addr, *k)).collect();
 
-        let discard_percentage = 0.7;
-
-        // Get top peer reputation or 0 if positive
-        let max_rep = known_peers.iter().map(|(rep, _)| *rep).max().unwrap_or(0).min(0);
-
-        // Discards peers below X% reputation, relative to `max_peer`
-        let threshold =
-            ((max_rep - BANNED_REPUTATION) as f64 * discard_percentage) as i32 + BANNED_REPUTATION;
-
-        let top_peers: Vec<NodeRecord> = known_peers
-            .into_iter()
-            .filter(|(rep, _)| *rep > threshold)
-            .map(|(_, node)| node)
-            .collect();
-        serde_json::to_writer_pretty(writer, &top_peers)?;
+        serde_json::to_writer_pretty(writer, &known_peers)?;
         Ok(())
     }
 }
