@@ -13,7 +13,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     Error,
 };
-use reth_primitives::{BlockHash, BlockNumber, TransitionId, TxNumber};
+use reth_primitives::{BlockHash, BlockNumber, Header, TransitionId, TxNumber};
 
 use crate::{DatabaseIntegrityError, StageError};
 
@@ -162,6 +162,15 @@ where
             .get::<tables::BlockTransitionIndex>(prev_key.number())?
             .ok_or(DatabaseIntegrityError::BlockTransition { number: prev_key.number() })?;
         Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
+    }
+
+    /// Query the block header by number
+    pub(crate) fn get_header_by_num(&self, block: BlockNumber) -> Result<Header, StageError> {
+        let key = self.get_block_numhash(block)?;
+        let header = self
+            .get::<tables::Headers>(key)?
+            .ok_or(DatabaseIntegrityError::Header { number: block, hash: key.hash() })?;
+        Ok(header)
     }
 
     /// Unwind table by some number key

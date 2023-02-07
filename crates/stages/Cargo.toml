@@ -18,7 +18,7 @@ normal = [
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-executor = { path = "../executor" }
-reth-rlp = { path = "../common/rlp" }
+reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
@@ -38,8 +38,18 @@ thiserror = "1.0.37"
 aquamarine = "0.2.1"
 itertools = "0.10.5"
 rayon = "1.6.0"
+
+# trie
+cita_trie = "4.0.0"
+hasher = "0.1.4"
+
+# arbitrary utils
+arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
+proptest = { version = "1.0", optional = true }
+
 [dev-dependencies]
 # reth
+reth-primitives = { path = "../primitives", features = ["arbitrary"]}
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
@@ -50,6 +60,22 @@ assert_matches = "1.5.0"
 rand = "0.8.5"
 paste = "1.0"
 
+# Stage benchmarks
+criterion = { version = "0.4.0", features = ["async_futures"] }
+proptest = { version = "1.0" }
+arbitrary = { version = "1.1.7", features = ["derive"] }
+
+# trie
+reth-staged-sync = { path = "../staged-sync" }
+triehash = "0.8"
+
 [features]
 default = ["serde"]
 serde = ["dep:serde"]
+test-utils = []
+
+
+[[bench]]
+name = "criterion"
+harness = false
+required-features = ["test-utils"]

@@ -10,12 +10,11 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_executor::{
-    executor::AccountChangeSet,
+    execution_result::AccountChangeSet,
     revm_wrap::{State, SubState},
 };
 use reth_primitives::{
-    Address, ChainSpec, Hardfork, Header, StorageEntry, TransactionSignedEcRecovered, H256,
-    MAINNET, U256,
+    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, H256, MAINNET, U256,
 };
 use reth_provider::LatestStateProviderRef;
 use std::fmt::Debug;
@@ -30,6 +29,7 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// Input tables:
 /// - [tables::CanonicalHeaders] get next block to execute.
 /// - [tables::Headers] get for revm environment variables.
+/// - [tables::HeaderTD]
 /// - [tables::BlockBodies] to get tx number
 /// - [tables::Transactions] to execute
 ///
@@ -93,6 +93,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut canonicals = tx.cursor_read::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
         let mut headers = tx.cursor_read::<tables::Headers>()?;
+        // Get total difficulty
+        let mut tds = tx.cursor_read::<tables::HeaderTD>()?;
         // Get bodies with canonical hashes.
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
@@ -111,7 +113,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Get block headers and bodies from canonical hashes
         let block_batch = canonical_batch
             .iter()
-            .map(|key| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
+            .map(|key| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
                 // NOTE: It probably will be faster to fetch all items from one table with cursor,
                 // but to reduce complexity we are using `seek_exact` to skip some
                 // edge cases that can happen.
@@ -120,12 +122,15 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         number: key.number(),
                         hash: key.hash(),
                     })?;
+                let (_, td) = tds
+                    .seek_exact(*key)?
+                    .ok_or(DatabaseIntegrityError::TotalDifficulty { number: key.number() })?;
                 let (_, body) = bodies_cursor
                     .seek_exact(*key)?
                     .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
                 let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
 
-                Ok((header, body, stored_ommers.ommers))
+                Ok((header, td.into(), body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -134,9 +139,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, body, ommers) in block_batch.iter() {
-            let num = header.number;
-            tracing::trace!(target: "sync::stages::execution", ?num, "Execute block.");
+        for (header, td, body, ommers) in block_batch.into_iter() {
+            let block_number = header.number;
+            tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
+
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -145,7 +151,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
                 if tx_index != index {
-                    error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Transaction gap");
+                    error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Transaction gap");
                     return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
@@ -159,23 +165,15 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .next()
                     .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
-                    error!(target: "sync::stages::execution", block = header.number, expected = index, found = tx_index, ?body, "Signer gap");
+                    error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Signer gap");
                     return Err(
                         DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
                     )
                 }
                 signers.push(tx);
             }
-            // create ecRecovered transaction by matching tx and its signer
-            let recovered_transactions: Vec<_> = transactions
-                .into_iter()
-                .zip(signers.into_iter())
-                .map(|(tx, signer)| {
-                    TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
-                })
-                .collect();
 
-            trace!(target: "sync::stages::execution", number = header.number, txs = recovered_transactions.len(), "Executing block");
+            trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
             // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
             // revm can take more then default allocated stack space. For this case we are using
@@ -188,9 +186,9 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .spawn_scoped(scope, || {
                         // execute and store output to results
                         reth_executor::executor::execute_and_verify_receipt(
-                            header,
-                            &recovered_transactions,
-                            ommers,
+                            &Block { header, body: transactions, ommers },
+                            td,
+                            Some(signers),
                             &self.chain_spec,
                             &mut state_provider,
                         )
@@ -198,20 +196,18 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     .expect("Expects that thread name is not null");
                 handle.join().expect("Expects for thread to not panic")
             })
-            .map_err(|error| StageError::ExecutionError { block: header.number, error })?;
-            block_change_patches.push((changeset, num));
+            .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
+            block_change_patches.push((changeset, block_number));
         }
 
         // Get last tx count so that we can know amount of transaction in the block.
         let mut current_transition_id = tx.get_block_transition(last_block)?;
         info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
-        let spurious_dragon_activation =
-            self.chain_spec.fork_block(Hardfork::SpuriousDragon).unwrap_or_default();
-
         // apply changes to plain database.
         for (results, block_number) in block_change_patches.into_iter() {
-            let spurious_dragon_active = block_number >= spurious_dragon_activation;
+            let spurious_dragon_active =
+                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
             // insert state change set
             for result in results.changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {

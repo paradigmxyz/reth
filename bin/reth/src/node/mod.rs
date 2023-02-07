@@ -69,17 +69,21 @@ pub struct Command {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     metrics: Option<SocketAddr>,
 
+    #[clap(flatten)]
+    network: NetworkOpts,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
+
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
     #[arg(long = "debug.tip", help_heading = "Debug")]
     tip: Option<H256>,
 
-    #[clap(flatten)]
-    network: NetworkOpts,
-
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
+    /// Runs the sync only up to the specified block
+    #[arg(long = "debug.max-block", help_heading = "Debug")]
+    max_block: Option<u64>,
 }
 
 impl Command {
@@ -199,11 +203,18 @@ impl Command {
         let body_downloader = self.spawn_bodies_downloader(config, consensus, &fetch_client, db);
         let stage_conf = &config.stages;
 
-        let pipeline = Pipeline::builder()
+        let mut builder = Pipeline::builder();
+
+        if let Some(max_block) = self.max_block {
+            builder = builder.with_max_block(max_block)
+        }
+
+        let pipeline = builder
             .with_sync_state_updater(network.clone())
             .add_stages(
                 OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
                     TotalDifficultyStage {
+                        chain_spec: self.chain.clone(),
                         commit_threshold: stage_conf.total_difficulty.commit_threshold,
                     },
                 ),
@@ -212,7 +223,7 @@ impl Command {
                 OfflineStages::default()
                     .set(SenderRecoveryStage {
                         batch_size: stage_conf.sender_recovery.batch_size,
-                        commit_threshold: stage_conf.execution.commit_threshold,
+                        commit_threshold: stage_conf.sender_recovery.commit_threshold,
                     })
                     .set(ExecutionStage {
                         chain_spec: self.chain.clone(),

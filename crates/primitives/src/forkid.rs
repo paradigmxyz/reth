@@ -4,12 +4,13 @@
 
 #![deny(missing_docs)]
 
-use crate::{BlockNumber, H256};
+use crate::{BlockNumber, Head, H256};
 use crc::*;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::*;
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt,
     ops::{Add, AddAssign},
@@ -46,9 +47,12 @@ impl From<H256> for ForkHash {
     }
 }
 
-impl AddAssign<BlockNumber> for ForkHash {
-    fn add_assign(&mut self, block: BlockNumber) {
-        let blob = block.to_be_bytes();
+impl<T> AddAssign<T> for ForkHash
+where
+    T: Into<u64>,
+{
+    fn add_assign(&mut self, v: T) {
+        let blob = v.into().to_be_bytes();
         let digest = CRC_32_IEEE.digest_with_initial(u32::from_be_bytes(self.0));
         let value = digest.finalize();
         let mut digest = CRC_32_IEEE.digest_with_initial(value);
@@ -57,11 +61,47 @@ impl AddAssign<BlockNumber> for ForkHash {
     }
 }
 
-impl Add<BlockNumber> for ForkHash {
+impl<T> Add<T> for ForkHash
+where
+    T: Into<u64>,
+{
     type Output = Self;
-    fn add(mut self, block: BlockNumber) -> Self {
+    fn add(mut self, block: T) -> Self {
         self += block;
         self
+    }
+}
+
+// TODO: Move
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ForkFilterKey {
+    Block(BlockNumber),
+    Time(u64),
+}
+
+impl PartialOrd for ForkFilterKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ForkFilterKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (ForkFilterKey::Block(a), ForkFilterKey::Block(b)) => a.cmp(b),
+            (ForkFilterKey::Time(a), ForkFilterKey::Time(b)) => a.cmp(b),
+            (ForkFilterKey::Block(_), ForkFilterKey::Time(_)) => Ordering::Less,
+            _ => Ordering::Greater,
+        }
+    }
+}
+
+impl From<ForkFilterKey> for u64 {
+    fn from(value: ForkFilterKey) -> Self {
+        match value {
+            ForkFilterKey::Block(block) => block,
+            ForkFilterKey::Time(time) => time,
+        }
     }
 }
 
@@ -82,10 +122,10 @@ impl Add<BlockNumber> for ForkHash {
     Deserialize,
 )]
 pub struct ForkId {
-    /// CRC32 checksum of the all fork blocks from genesis.
+    /// CRC32 checksum of the all fork blocks and timestamps from genesis.
     pub hash: ForkHash,
-    /// Next upcoming fork block number, 0 if not yet known.
-    pub next: BlockNumber,
+    /// Next upcoming fork block number or timestamp, 0 if not yet known.
+    pub next: u64,
 }
 
 /// Reason for rejecting provided `ForkId`.
@@ -115,9 +155,17 @@ pub enum ValidationError {
 /// compatibility.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ForkFilter {
-    forks: BTreeMap<BlockNumber, ForkHash>,
+    /// The forks in the filter are keyed by `(timestamp, block)`. This ensures that block-based
+    /// forks (`time == 0`) are processed before time-based forks as required by
+    /// [EIP-6122][eip-6122].
+    ///
+    /// Time-based forks have their block number set to 0, allowing easy comparisons with a [Head];
+    /// a fork is active if both it's time and block number are less than or equal to [Head].
+    ///
+    /// [eip-6122]: https://eips.ethereum.org/EIPS/eip-6122
+    forks: BTreeMap<ForkFilterKey, ForkHash>,
 
-    head: BlockNumber,
+    head: Head,
 
     cache: Cache,
 }
@@ -125,22 +173,22 @@ pub struct ForkFilter {
 impl ForkFilter {
     /// Create the filter from provided head, genesis block hash, past forks and expected future
     /// forks.
-    pub fn new<F, B>(head: BlockNumber, genesis: H256, forks: F) -> Self
+    pub fn new<F>(head: Head, genesis: H256, forks: F) -> Self
     where
-        F: IntoIterator<Item = B>,
-        B: Into<BlockNumber>,
+        F: IntoIterator<Item = ForkFilterKey>,
     {
         let genesis_fork_hash = ForkHash::from(genesis);
-        let mut forks = forks.into_iter().map(Into::into).collect::<BTreeSet<_>>();
-        forks.remove(&0);
+        let mut forks = forks.into_iter().collect::<BTreeSet<_>>();
+        forks.remove(&ForkFilterKey::Time(0));
+        forks.remove(&ForkFilterKey::Block(0));
 
         let forks = forks
             .into_iter()
             .fold(
-                (BTreeMap::from([(0, genesis_fork_hash)]), genesis_fork_hash),
-                |(mut acc, base_hash), block| {
-                    let fork_hash = base_hash + block;
-                    acc.insert(block, fork_hash);
+                (BTreeMap::from([(ForkFilterKey::Block(0), genesis_fork_hash)]), genesis_fork_hash),
+                |(mut acc, base_hash), key| {
+                    let fork_hash = base_hash + u64::from(key);
+                    acc.insert(key, fork_hash);
                     (acc, fork_hash)
                 },
             )
@@ -151,15 +199,19 @@ impl ForkFilter {
         Self { forks, head, cache }
     }
 
-    fn set_head_priv(&mut self, head: BlockNumber) -> Option<ForkTransition> {
+    fn set_head_priv(&mut self, head: Head) -> Option<ForkTransition> {
         let recompute_cache = {
-            if head < self.cache.epoch_start {
-                true
-            } else if let Some(epoch_end) = self.cache.epoch_end {
-                head >= epoch_end
-            } else {
-                false
-            }
+            let head_in_past = match self.cache.epoch_start {
+                ForkFilterKey::Block(epoch_start_block) => head.number < epoch_start_block,
+                ForkFilterKey::Time(epoch_start_time) => head.timestamp < epoch_start_time,
+            };
+            let head_in_future = match self.cache.epoch_end {
+                Some(ForkFilterKey::Block(epoch_end_block)) => head.number >= epoch_end_block,
+                Some(ForkFilterKey::Time(epoch_end_time)) => head.timestamp >= epoch_end_time,
+                None => false,
+            };
+
+            head_in_past || head_in_future
         };
 
         let mut transition = None;
@@ -181,7 +233,7 @@ impl ForkFilter {
     /// Set the current head.
     ///
     /// If the update updates the current [`ForkId`] it returns a [`ForkTransition`]
-    pub fn set_head(&mut self, head: BlockNumber) -> Option<ForkTransition> {
+    pub fn set_head(&mut self, head: Head) -> Option<ForkTransition> {
         self.set_head_priv(head)
     }
 
@@ -207,8 +259,16 @@ impl ForkFilter {
                 return Ok(())
             }
 
+            // We check if this fork is time-based or block number-based
+            // NOTE: This is a bit hacky but I'm unsure how else we can figure out when to use
+            // timestamp vs when to use block number..
+            let head_block_or_time = match self.cache.epoch_start {
+                ForkFilterKey::Block(_) => self.head.number,
+                ForkFilterKey::Time(_) => self.head.timestamp,
+            };
+
             //... compare local head to FORK_NEXT.
-            return if self.head >= fork_id.next {
+            return if head_block_or_time >= fork_id.next {
                 // 1a) A remotely announced but remotely not passed block is already passed locally,
                 // disconnect, since the chains are incompatible.
                 Err(ValidationError::LocalIncompatibleOrStale {
@@ -225,10 +285,10 @@ impl ForkFilter {
         let mut it = self.cache.past.iter();
         while let Some((_, hash)) = it.next() {
             if *hash == fork_id.hash {
-                // ...and the remote FORK_NEXT matches with the locally following fork block number,
-                // connect.
-                if let Some((actual_fork_block, _)) = it.next() {
-                    return if *actual_fork_block == fork_id.next {
+                // ...and the remote FORK_NEXT matches with the locally following fork block number
+                // or timestamp, connect.
+                if let Some((actual_key, _)) = it.next() {
+                    return if u64::from(*actual_key) == fork_id.next {
                         Ok(())
                     } else {
                         Err(ValidationError::RemoteStale { local: self.current(), remote: fork_id })
@@ -267,28 +327,35 @@ pub struct ForkTransition {
 struct Cache {
     // An epoch is a period between forks.
     // When we progress from one fork to the next one we move to the next epoch.
-    epoch_start: BlockNumber,
-    epoch_end: Option<BlockNumber>,
-    past: Vec<(BlockNumber, ForkHash)>,
+    epoch_start: ForkFilterKey,
+    epoch_end: Option<ForkFilterKey>,
+    past: Vec<(ForkFilterKey, ForkHash)>,
     future: Vec<ForkHash>,
     fork_id: ForkId,
 }
 
 impl Cache {
     /// Compute cache.
-    fn compute_cache(forks: &BTreeMap<BlockNumber, ForkHash>, head: BlockNumber) -> Self {
+    fn compute_cache(forks: &BTreeMap<ForkFilterKey, ForkHash>, head: Head) -> Self {
         let mut past = Vec::with_capacity(forks.len());
         let mut future = Vec::with_capacity(forks.len());
 
-        let mut epoch_start = 0;
+        let mut epoch_start = ForkFilterKey::Block(0);
         let mut epoch_end = None;
-        for (block, hash) in forks {
-            if *block <= head {
-                epoch_start = *block;
-                past.push((*block, *hash));
+        for (key, hash) in forks {
+            let active = if let ForkFilterKey::Block(block) = key {
+                *block <= head.number
+            } else if let ForkFilterKey::Time(time) = key {
+                *time <= head.timestamp
+            } else {
+                unreachable!()
+            };
+            if active {
+                epoch_start = *key;
+                past.push((*key, *hash));
             } else {
                 if epoch_end.is_none() {
-                    epoch_end = Some(*block);
+                    epoch_end = Some(*key);
                 }
                 future.push(*hash);
             }
@@ -296,7 +363,7 @@ impl Cache {
 
         let fork_id = ForkId {
             hash: past.last().expect("there is always at least one - genesis - fork hash; qed").1,
-            next: epoch_end.unwrap_or(0),
+            next: epoch_end.unwrap_or(ForkFilterKey::Block(0)).into(),
         };
 
         Self { epoch_start, epoch_end, past, future, fork_id }
@@ -311,34 +378,40 @@ mod tests {
         H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
 
     // EIP test vectors.
-
     #[test]
     fn forkhash() {
         let mut fork_hash = ForkHash::from(GENESIS_HASH);
         assert_eq!(fork_hash.0, hex!("fc64ec04"));
 
-        fork_hash += 1_150_000;
+        fork_hash += 1_150_000u64;
         assert_eq!(fork_hash.0, hex!("97c2c34c"));
 
-        fork_hash += 1_920_000;
+        fork_hash += 1_920_000u64;
         assert_eq!(fork_hash.0, hex!("91d1f948"));
     }
 
     #[test]
     fn compatibility_check() {
         let mut filter = ForkFilter::new(
-            0,
+            Head { number: 0, ..Default::default() },
             GENESIS_HASH,
-            vec![1_150_000u64, 1_920_000, 2_463_000, 2_675_000, 4_370_000, 7_280_000],
+            vec![
+                ForkFilterKey::Block(1_150_000),
+                ForkFilterKey::Block(1_920_000),
+                ForkFilterKey::Block(2_463_000),
+                ForkFilterKey::Block(2_675_000),
+                ForkFilterKey::Block(4_370_000),
+                ForkFilterKey::Block(7_280_000),
+            ],
         );
 
         // Local is mainnet Petersburg, remote announces the same. No future fork is announced.
-        filter.set_head(7_987_396);
+        filter.set_head(Head { number: 7_987_396, ..Default::default() });
         assert_eq!(filter.validate(ForkId { hash: ForkHash(hex!("668db0af")), next: 0 }), Ok(()));
 
         // Local is mainnet Petersburg, remote announces the same. Remote also announces a next fork
         // at block 0xffffffff, but that is uncertain.
-        filter.set_head(7_987_396);
+        filter.set_head(Head { number: 7_987_396, ..Default::default() });
         assert_eq!(
             filter.validate(ForkId { hash: ForkHash(hex!("668db0af")), next: BlockNumber::MAX }),
             Ok(())
@@ -348,13 +421,13 @@ mod tests {
         // announces also Byzantium, but it's not yet aware of Petersburg (e.g. non updated
         // node before the fork). In this case we don't know if Petersburg passed yet or
         // not.
-        filter.set_head(7_279_999);
+        filter.set_head(Head { number: 7_279_999, ..Default::default() });
         assert_eq!(filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: 0 }), Ok(()));
 
         // Local is mainnet currently in Byzantium only (so it's aware of Petersburg), remote
         // announces also Byzantium, and it's also aware of Petersburg (e.g. updated node
         // before the fork). We don't know if Petersburg passed yet (will pass) or not.
-        filter.set_head(7_279_999);
+        filter.set_head(Head { number: 7_279_999, ..Default::default() });
         assert_eq!(
             filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: 7_280_000 }),
             Ok(())
@@ -364,7 +437,7 @@ mod tests {
         // announces also Byzantium, and it's also aware of some random fork (e.g.
         // misconfigured Petersburg). As neither forks passed at neither nodes, they may
         // mismatch, but we still connect for now.
-        filter.set_head(7_279_999);
+        filter.set_head(Head { number: 7_279_999, ..Default::default() });
         assert_eq!(
             filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: BlockNumber::MAX }),
             Ok(())
@@ -372,7 +445,7 @@ mod tests {
 
         // Local is mainnet Petersburg, remote announces Byzantium + knowledge about Petersburg.
         // Remote is simply out of sync, accept.
-        filter.set_head(7_987_396);
+        filter.set_head(Head { number: 7_987_396, ..Default::default() });
         assert_eq!(
             filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: 7_280_000 }),
             Ok(())
@@ -381,25 +454,25 @@ mod tests {
         // Local is mainnet Petersburg, remote announces Spurious + knowledge about Byzantium.
         // Remote is definitely out of sync. It may or may not need the Petersburg update,
         // we don't know yet.
-        filter.set_head(7_987_396);
+        filter.set_head(Head { number: 7_987_396, ..Default::default() });
         assert_eq!(
             filter.validate(ForkId { hash: ForkHash(hex!("3edd5b10")), next: 4_370_000 }),
             Ok(())
         );
 
         // Local is mainnet Byzantium, remote announces Petersburg. Local is out of sync, accept.
-        filter.set_head(7_279_999);
+        filter.set_head(Head { number: 7_279_999, ..Default::default() });
         assert_eq!(filter.validate(ForkId { hash: ForkHash(hex!("668db0af")), next: 0 }), Ok(()));
 
         // Local is mainnet Spurious, remote announces Byzantium, but is not aware of Petersburg.
         // Local out of sync. Local also knows about a future fork, but that is uncertain
         // yet.
-        filter.set_head(4_369_999);
+        filter.set_head(Head { number: 4_369_999, ..Default::default() });
         assert_eq!(filter.validate(ForkId { hash: ForkHash(hex!("a00bc324")), next: 0 }), Ok(()));
 
         // Local is mainnet Petersburg. remote announces Byzantium but is not aware of further
         // forks. Remote needs software update.
-        filter.set_head(7_987_396);
+        filter.set_head(Head { number: 7_987_396, ..Default::default() });
         let remote = ForkId { hash: ForkHash(hex!("a00bc324")), next: 0 };
         assert_eq!(
             filter.validate(remote),
@@ -408,7 +481,7 @@ mod tests {
 
         // Local is mainnet Petersburg, and isn't aware of more forks. Remote announces Petersburg +
         // 0xffffffff. Local needs software update, reject.
-        filter.set_head(7_987_396);
+        filter.set_head(Head { number: 7_987_396, ..Default::default() });
         let remote = ForkId { hash: ForkHash(hex!("5cddc0e1")), next: 0 };
         assert_eq!(
             filter.validate(remote),
@@ -417,7 +490,7 @@ mod tests {
 
         // Local is mainnet Byzantium, and is aware of Petersburg. Remote announces Petersburg +
         // 0xffffffff. Local needs software update, reject.
-        filter.set_head(7_279_999);
+        filter.set_head(Head { number: 7_279_999, ..Default::default() });
         let remote = ForkId { hash: ForkHash(hex!("5cddc0e1")), next: 0 };
         assert_eq!(
             filter.validate(remote),
@@ -425,7 +498,7 @@ mod tests {
         );
 
         // Local is mainnet Petersburg, remote is Rinkeby Petersburg.
-        filter.set_head(7_987_396);
+        filter.set_head(Head { number: 7_987_396, ..Default::default() });
         let remote = ForkId { hash: ForkHash(hex!("afec6b27")), next: 0 };
         assert_eq!(
             filter.validate(remote),
@@ -437,7 +510,7 @@ mod tests {
         // is incompatible.
         //
         // This case detects non-upgraded nodes with majority hash power (typical Ropsten mess).
-        filter.set_head(88_888_888);
+        filter.set_head(Head { number: 88_888_888, ..Default::default() });
         let remote = ForkId { hash: ForkHash(hex!("668db0af")), next: 88_888_888 };
         assert_eq!(
             filter.validate(remote),
@@ -446,7 +519,7 @@ mod tests {
 
         // Local is mainnet Byzantium. Remote is also in Byzantium, but announces Gopherium (non
         // existing fork) at block 7279999, before Petersburg. Local is incompatible.
-        filter.set_head(7_279_999);
+        filter.set_head(Head { number: 7_279_999, ..Default::default() });
         let remote = ForkId { hash: ForkHash(hex!("a00bc324")), next: 7_279_999 };
         assert_eq!(
             filter.validate(remote),
@@ -488,40 +561,44 @@ mod tests {
         let b1 = 1_150_000;
         let b2 = 1_920_000;
 
-        let h0 = ForkId { hash: ForkHash(hex!("fc64ec04")), next: b1 };
-        let h1 = ForkId { hash: ForkHash(hex!("97c2c34c")), next: b2 };
+        let h0 = ForkId { hash: ForkHash(hex!("fc64ec04")), next: b1.into() };
+        let h1 = ForkId { hash: ForkHash(hex!("97c2c34c")), next: b2.into() };
         let h2 = ForkId { hash: ForkHash(hex!("91d1f948")), next: 0 };
 
-        let mut fork_filter = ForkFilter::new(0, GENESIS_HASH, vec![b1, b2]);
+        let mut fork_filter = ForkFilter::new(
+            Head { number: 0, ..Default::default() },
+            GENESIS_HASH,
+            vec![ForkFilterKey::Block(b1), ForkFilterKey::Block(b2)],
+        );
 
-        assert!(fork_filter.set_head_priv(0).is_none());
+        assert!(fork_filter.set_head_priv(Head { number: 0, ..Default::default() }).is_none());
         assert_eq!(fork_filter.current(), h0);
 
-        assert!(fork_filter.set_head_priv(1).is_none());
+        assert!(fork_filter.set_head_priv(Head { number: 1, ..Default::default() }).is_none());
         assert_eq!(fork_filter.current(), h0);
 
         assert_eq!(
-            fork_filter.set_head_priv(b1 + 1).unwrap(),
+            fork_filter.set_head_priv(Head { number: b1 + 1, ..Default::default() }).unwrap(),
             ForkTransition { current: h1, past: h0 }
         );
         assert_eq!(fork_filter.current(), h1);
 
-        assert!(fork_filter.set_head_priv(b1).is_none());
+        assert!(fork_filter.set_head_priv(Head { number: b1, ..Default::default() }).is_none());
         assert_eq!(fork_filter.current(), h1);
 
         assert_eq!(
-            fork_filter.set_head_priv(b1 - 1).unwrap(),
+            fork_filter.set_head_priv(Head { number: b1 - 1, ..Default::default() }).unwrap(),
             ForkTransition { current: h0, past: h1 }
         );
         assert_eq!(fork_filter.current(), h0);
 
-        assert!(fork_filter.set_head_priv(b1).is_some());
+        assert!(fork_filter.set_head_priv(Head { number: b1, ..Default::default() }).is_some());
         assert_eq!(fork_filter.current(), h1);
 
-        assert!(fork_filter.set_head_priv(b2 - 1).is_none());
+        assert!(fork_filter.set_head_priv(Head { number: b2 - 1, ..Default::default() }).is_none());
         assert_eq!(fork_filter.current(), h1);
 
-        assert!(fork_filter.set_head_priv(b2).is_some());
+        assert!(fork_filter.set_head_priv(Head { number: b2, ..Default::default() }).is_some());
         assert_eq!(fork_filter.current(), h2);
     }
 }

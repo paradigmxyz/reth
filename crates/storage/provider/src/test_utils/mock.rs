@@ -128,7 +128,17 @@ impl BlockHashProvider for MockEthProvider {
 
 impl BlockProvider for MockEthProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
-        todo!()
+        let lock = self.headers.lock();
+        Ok(lock
+            .iter()
+            .max_by_key(|h| h.1.number)
+            .map(|(hash, header)| ChainInfo {
+                best_hash: *hash,
+                best_number: header.number,
+                last_finalized: None,
+                safe_finalized: None,
+            })
+            .expect("provider is empty"))
     }
 
     fn block(&self, id: BlockId) -> Result<Option<Block>> {

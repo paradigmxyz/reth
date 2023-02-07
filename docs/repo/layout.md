@@ -46,11 +46,11 @@ These crates are related to networking (p2p and RPC), as well as networking prot
 
 #### RPC
 
-- [`net/rpc-api`](../../crates/net/rpc-api): RPC traits
+- [`net/rpc-api`](../../crates/rpc/rpc-api): RPC traits
   - Supported transports: HTTP, WS, IPC
   - Supported namespaces: `eth_`, `engine_`, `debug_`
-- [`net/rpc`](../../crates/net/rpc): Implementation of all ETH JSON RPC traits defined in `rpc-api`.
-- [`net/rpc-types`](../../crates/net/rpc-types): Types relevant for the RPC endpoints above, grouped by namespace
+- [`net/rpc`](../../crates/rpc/rpc): Implementation of all ETH JSON RPC traits defined in `rpc-api`.
+- [`net/rpc-types`](../../crates/rpc/rpc-types): Types relevant for the RPC endpoints above, grouped by namespace
 
 #### Downloaders
 

@@ -16,7 +16,7 @@ serde = "1"
 # reth
 reth-codecs = { path = "../../storage/codecs" }
 reth-primitives = { path = "../../primitives" }
-reth-rlp = { path = "../../common/rlp", features = ["alloc", "derive", "std", "ethereum-types", "smol_str"] }
+reth-rlp = { path = "../../rlp", features = ["alloc", "derive", "std", "ethereum-types", "smol_str"] }
 
 # used for Chain and builders
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }

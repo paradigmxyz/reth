@@ -8,7 +8,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{ChainSpec, ForkFilter, NodeRecord, PeerId, MAINNET};
+use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET, U256};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
@@ -27,7 +27,7 @@ mod __reexport {
 pub use __reexport::*;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_ecies::util::pk2id;
-use reth_eth_wire::{BlockHashNumber, HelloMessage, Status};
+use reth_eth_wire::{HelloMessage, Status};
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
@@ -149,7 +149,7 @@ pub struct NetworkConfigBuilder {
     /// Sets the hello message for the p2p handshake in RLPx
     hello_message: Option<HelloMessage>,
     /// Head used to start set for the fork filter and status.
-    head: Option<BlockHashNumber>,
+    head: Option<Head>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -238,9 +238,21 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Disables Discv4 discovery.
+    pub fn no_discv4_discovery(mut self) -> Self {
+        self.discovery_v4_builder = None;
+        self
+    }
+
     /// Sets the dns discovery config to use.
     pub fn dns_discovery(mut self, config: DnsDiscoveryConfig) -> Self {
         self.dns_discovery_config = Some(config);
+        self
+    }
+
+    /// Disables DNS discovery
+    pub fn no_dns_discovery(mut self) -> Self {
+        self.dns_discovery_config = None;
         self
     }
 
@@ -258,9 +270,10 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// disables discovery.
+    /// Disables all discovery services.
     pub fn disable_discovery(&mut self) {
         self.discovery_v4_builder = None;
+        self.dns_discovery_config = None;
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
@@ -291,13 +304,18 @@ impl NetworkConfigBuilder {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
-        let head = head.unwrap_or(BlockHashNumber { hash: chain_spec.genesis_hash(), number: 0 });
+        let head = head.unwrap_or(Head {
+            hash: chain_spec.genesis_hash(),
+            number: 0,
+            total_difficulty: U256::ZERO,
+            timestamp: 0,
+        });
 
         // set the status
         let status = Status::spec_builder(&chain_spec, &head).build();
 
         // set a fork filter based on the chain spec and head
-        let fork_filter = chain_spec.fork_filter(head.number);
+        let fork_filter = chain_spec.fork_filter(head);
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
