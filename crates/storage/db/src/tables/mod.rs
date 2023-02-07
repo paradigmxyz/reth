@@ -18,7 +18,7 @@ use crate::{
 };
 use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSigned, TransitionId, TxHash, TxNumber, H256,
+    StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
 use self::models::{storage_sharded_key::StorageShardedKey, StoredBlockBody};
@@ -33,7 +33,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 25] = [
+pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -56,6 +56,8 @@ pub const TABLES: [(TableType, &str); 25] = [
     (TableType::DupSort, StorageChangeSet::const_name()),
     (TableType::Table, HashedAccount::const_name()),
     (TableType::DupSort, HashedStorage::const_name()),
+    (TableType::Table, AccountsTrie::const_name()),
+    (TableType::DupSort, StoragesTrie::const_name()),
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, Config::const_name()),
     (TableType::Table, SyncStage::const_name()),
@@ -269,6 +271,16 @@ dupsort!(
     /// This table is in preparation for merkelization and calculation of state root.
     /// Benefit for merklization is that hashed addresses/keys are sorted.
     ( HashedStorage ) H256 | [H256] StorageEntry
+);
+
+table!(
+    /// Stores the current state's Merkle Patricia Tree.
+    ( AccountsTrie ) H256 | Vec<u8>
+);
+
+dupsort!(
+    /// Stores the Merkle Patricia Trees of each [`Account`]'s storage.
+    ( StoragesTrie ) H256 | [H256] StorageTrieEntry
 );
 
 table!(

@@ -54,10 +54,12 @@ mod error;
 mod id;
 mod pipeline;
 mod stage;
+mod trie;
 mod util;
 
-#[cfg(test)]
-mod test_utils;
+#[allow(missing_docs)]
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 /// A re-export of common structs and traits.
 pub mod prelude;

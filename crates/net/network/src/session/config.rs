@@ -1,6 +1,9 @@
 //! Configuration types for [SessionManager](crate::session::SessionManager).
 
-use crate::session::{Direction, ExceedsSessionLimit};
+use crate::{
+    peers::{DEFAULT_MAX_PEERS_INBOUND, DEFAULT_MAX_PEERS_OUTBOUND},
+    session::{Direction, ExceedsSessionLimit},
+};
 use std::time::Duration;
 
 /// Default request timeout for a single request.
@@ -46,7 +49,9 @@ impl Default for SessionsConfig {
             // `buffer + num sessions`. Each session can therefore fit at least 1 message in the
             // channel. The buffer size is additional capacity. The channel is always drained on
             // `poll`.
-            session_event_buffer: 128,
+            // The default is twice the maximum number of available slots, if all slots are occupied
+            // the buffer will have capacity for 3 messages per session (average).
+            session_event_buffer: (DEFAULT_MAX_PEERS_OUTBOUND + DEFAULT_MAX_PEERS_INBOUND) * 2,
             limits: Default::default(),
             initial_internal_request_timeout: INITIAL_REQUEST_TIMEOUT,
             protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,

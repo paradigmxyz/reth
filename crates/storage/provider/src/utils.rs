@@ -4,7 +4,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{provider::Error as ProviderError, Result};
-use reth_primitives::SealedBlock;
+use reth_primitives::{SealedBlock, U256};
 
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.
 ///
@@ -24,6 +24,11 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     // Put header with canonical hashes.
     tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
+    tx.put::<tables::HeaderTD>(
+        block_num_hash,
+        if has_block_reward { U256::ZERO } else { U256::from(58_750_000_000_000_000_000_000u128) }
+            .into(),
+    )?;
 
     // insert body ommers data
     tx.put::<tables::BlockOmmers>(

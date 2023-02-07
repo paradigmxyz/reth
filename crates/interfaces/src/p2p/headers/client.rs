@@ -1,7 +1,7 @@
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::Future;
 pub use reth_eth_wire::BlockHeaders;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, H256, U256};
+use reth_primitives::{BlockHashOrNumber, Head, Header, HeadersDirection};
 use std::{fmt::Debug, pin::Pin};
 
 /// The header request struct to be sent to connected peers, which
@@ -43,5 +43,5 @@ pub trait HeadersClient: DownloadClient {
 /// The status updater for updating the status of the p2p node
 pub trait StatusUpdater: Send + Sync {
     /// Updates the status of the p2p node
-    fn update_status(&self, height: u64, hash: H256, total_difficulty: U256);
+    fn update_status(&self, head: Head);
 }

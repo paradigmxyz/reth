@@ -19,8 +19,9 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
+use reth_metrics_common::metered_sender::MeteredSender;
 use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
+use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
@@ -91,7 +92,7 @@ pub(crate) struct SessionManager {
     ///
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
-    active_session_tx: mpsc::Sender<ActiveSessionMessage>,
+    active_session_tx: MeteredSender<ActiveSessionMessage>,
     /// Receiver half that listens for [`ActiveSessionMessage`] produced by pending sessions.
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Used to measure inbound & outbound bandwidth across all managed streams
@@ -129,7 +130,7 @@ impl SessionManager {
             active_sessions: Default::default(),
             pending_sessions_tx,
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
-            active_session_tx,
+            active_session_tx: MeteredSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
             bandwidth_meter,
         }
@@ -175,15 +176,10 @@ impl SessionManager {
     ///
     /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
     /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
-    pub(crate) fn on_status_update(
-        &mut self,
-        height: u64,
-        hash: H256,
-        total_difficulty: U256,
-    ) -> Option<ForkTransition> {
-        self.status.blockhash = hash;
-        self.status.total_difficulty = total_difficulty;
-        self.fork_filter.set_head(height)
+    pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
+        self.status.blockhash = head.hash;
+        self.status.total_difficulty = head.total_difficulty;
+        self.fork_filter.set_head(head)
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -221,8 +217,10 @@ impl SessionManager {
             self.fork_filter.clone(),
         ));
 
-        let handle =
-            PendingSessionHandle { _disconnect_tx: disconnect_tx, direction: Direction::Incoming };
+        let handle = PendingSessionHandle {
+            disconnect_tx: Some(disconnect_tx),
+            direction: Direction::Incoming,
+        };
         self.pending_sessions.insert(session_id, handle);
         self.counter.inc_pending_inbound();
         Ok(session_id)
@@ -247,7 +245,7 @@ impl SessionManager {
         ));
 
         let handle = PendingSessionHandle {
-            _disconnect_tx: disconnect_tx,
+            disconnect_tx: Some(disconnect_tx),
             direction: Direction::Outgoing(remote_peer_id),
         };
         self.pending_sessions.insert(session_id, handle);
@@ -261,6 +259,23 @@ impl SessionManager {
     pub(crate) fn disconnect(&self, node: PeerId, reason: Option<DisconnectReason>) {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect(reason);
+        }
+    }
+
+    /// Initiates a shutdown of all sessions.
+    ///
+    /// It will trigger the disconnect on all the session tasks to gracefully terminate. The result
+    /// will be picked by the receiver.
+    pub(crate) fn disconnect_all(&self, reason: Option<DisconnectReason>) {
+        for (_, session) in self.active_sessions.iter() {
+            session.disconnect(reason);
+        }
+    }
+
+    /// Disconnects all pending sessions.
+    pub(crate) fn disconnect_all_pending(&mut self) {
+        for (_, session) in self.pending_sessions.iter_mut() {
+            session.disconnect();
         }
     }
 
@@ -397,11 +412,12 @@ impl SessionManager {
                     session_id,
                     commands_rx: ReceiverStream::new(commands_rx),
                     to_session: self.active_session_tx.clone(),
-                    request_tx: ReceiverStream::new(messages_rx).fuse(),
+                    pending_message_to_session: None,
+                    internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
                     queued_outgoing: Default::default(),
-                    received_requests: Default::default(),
+                    received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
                         self.initial_internal_request_timeout,
                     ),
@@ -817,6 +833,9 @@ async fn authenticate_stream(
     };
 
     // if the hello handshake was successful we can try status handshake
+    //
+    // Before trying status handshake, set up the version to shared_capability
+    let status = Status { version: p2p_stream.shared_capability().version(), ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
         Ok(stream_res) => stream_res,

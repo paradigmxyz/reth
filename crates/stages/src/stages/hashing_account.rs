@@ -2,7 +2,7 @@ use crate::{
     db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -56,8 +56,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
-        // AccountHashing table
-        if to_transition - from_transition > self.clean_threshold {
+        // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
+        // genesis accounts are not in changeset.
+        if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
             // clear table, load all accounts and hash it
             tx.clear::<tables::HashedAccount>()?;
             tx.commit()?;
@@ -90,6 +91,9 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 break
             }
         } else {
+            let mut plain_accounts = tx.cursor_read::<tables::PlainAccountState>()?;
+            let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>()?;
+
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
             tx.cursor_read::<tables::AccountChangeSet>()?
@@ -105,16 +109,19 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 // iterate over plain state and get newest value.
                 // Assumption we are okay to make is that plainstate represent
                 // `previous_stage_progress` state.
-                .map(|address| tx.get::<tables::PlainAccountState>(address).map(|a| (address, a)))
+                .map(|address| {
+                    plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v)))
+                })
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
-                .try_for_each(|(address, account)| {
+                .try_for_each(|(address, account)| -> Result<(), StageError> {
                     let hashed_address = keccak256(address);
                     if let Some(account) = account {
-                        tx.put::<tables::HashedAccount>(hashed_address, account)
-                    } else {
-                        tx.delete::<tables::HashedAccount>(hashed_address, None).map(|_| ())
+                        hashed_accounts.upsert(hashed_address, account)?
+                    } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                        hashed_accounts.delete_current()?;
                     }
+                    Ok(())
                 })?;
         }
 
@@ -133,6 +140,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+
+        let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>()?;
 
         // Aggregate all transition changesets and and make list of account that have been changed.
         tx.cursor_read::<tables::AccountChangeSet>()?
@@ -155,12 +164,13 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             .collect::<BTreeMap<_, _>>()
             .into_iter()
             // Apply values to HashedState (if Account is None remove it);
-            .try_for_each(|(hashed_address, account)| {
+            .try_for_each(|(hashed_address, account)| -> Result<(), StageError> {
                 if let Some(account) = account {
-                    tx.put::<tables::HashedAccount>(hashed_address, account)
-                } else {
-                    tx.delete::<tables::HashedAccount>(hashed_address, None).map(|_| ())
+                    hashed_accounts.upsert(hashed_address, account)?;
+                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                    hashed_accounts.delete_current()?;
                 }
+                Ok(())
             })?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -183,7 +193,7 @@ mod tests {
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
 
     #[tokio::test]
-    async fn execute_below_clean_threshold() {
+    async fn execute_clean_account_hashing() {
         let (previous_stage, stage_progress) = (20, 10);
         // Set up the runner
         let mut runner = AccountHashingTestRunner::default();

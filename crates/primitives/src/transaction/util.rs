@@ -4,7 +4,7 @@ pub(crate) mod secp256k1 {
     use super::*;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
-        Error, Message, Secp256k1,
+        Error, Message, SECP256K1,
     };
 
     /// secp256k1 signer recovery
@@ -12,8 +12,7 @@ pub(crate) mod secp256k1 {
         let sig =
             RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
 
-        let secp = Secp256k1::new();
-        let public = secp.recover_ecdsa(&Message::from_slice(&msg[..32])?, &sig)?;
+        let public = SECP256K1.recover_ecdsa(&Message::from_slice(&msg[..32])?, &sig)?;
         let hash = keccak256(&public.serialize_uncompressed()[1..]);
         Ok(Address::from_slice(&hash[12..]))
     }
