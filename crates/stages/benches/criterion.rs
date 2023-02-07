@@ -5,13 +5,13 @@ use criterion::{
 use reth_db::mdbx::{Env, WriteMap};
 use reth_primitives::H256;
 use reth_stages::{
-    stages::{SenderRecoveryStage, TransactionLookupStage},
+    stages::{SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::path::{Path, PathBuf};
 
-criterion_group!(benches, tx_lookup, senders);
+criterion_group!(benches, tx_lookup, senders, total_difficulty);
 criterion_main!(benches);
 
 fn senders(c: &mut Criterion) {
@@ -41,6 +41,18 @@ fn tx_lookup(c: &mut Criterion) {
     let num_blocks = 10_000;
     let stage = TransactionLookupStage::new(num_blocks);
     measure_stage(&mut group, stage, num_blocks, "TransactionLookup".to_string());
+}
+
+fn total_difficulty(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Stages");
+    group.measurement_time(std::time::Duration::from_millis(2000));
+    group.warm_up_time(std::time::Duration::from_millis(2000));
+    // don't need to run each stage for that many times
+    group.sample_size(10);
+
+    let num_blocks = 10_000;
+    let stage = TotalDifficultyStage::default();
+    measure_stage(&mut group, stage, num_blocks, "TotalDifficulty".to_string());
 }
 
 fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
