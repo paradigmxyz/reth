@@ -110,7 +110,19 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
 
         // insert all blocks
         tx.insert_blocks(blocks.iter(), None).unwrap();
-        tx.inner().commit().unwrap();
+
+        // // initialize TD
+        use reth_db::{
+            cursor::DbCursorRO,
+            tables,
+            transaction::{DbTx, DbTxMut},
+        };
+        tx.commit(|tx| {
+            let (head, _) =
+                tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default().into();
+            tx.put::<tables::HeaderTD>(head, reth_primitives::U256::from(0).into())
+        })
+        .unwrap();
     }
 
     path
