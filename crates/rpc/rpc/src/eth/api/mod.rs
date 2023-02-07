@@ -86,6 +86,18 @@ where
         self.client().convert_block_number(num)
     }
 
+    /// Returns the state at the given [BlockId] enum or the latest.
+    pub(crate) fn state_at_block_id_or_latest(
+        &self,
+        block_id: Option<BlockId>,
+    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+        if let Some(block_id) = block_id {
+            self.state_at_block_id(block_id)
+        } else {
+            self.latest_state()
+        }
+    }
+
     /// Returns the state at the given [BlockId] enum.
     pub(crate) fn state_at_block_id(
         &self,
@@ -125,6 +137,13 @@ where
         block_number: u64,
     ) -> Result<<Client as StateProviderFactory>::HistorySP<'_>> {
         self.client().history_by_block_number(block_number)
+    }
+
+    /// Returns the _latest_ state
+    pub(crate) fn latest_state(
+        &self,
+    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+        self.state_at_block_number(BlockNumber::Latest)
     }
 }
 
