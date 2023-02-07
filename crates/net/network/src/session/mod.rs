@@ -272,24 +272,12 @@ impl SessionManager {
     pub(crate) fn disconnect_incoming_connection(
         &mut self,
         stream: TcpStream,
-        remote_addr: SocketAddr,
         reason: DisconnectReason,
     ) {
-        let pending_events = self.pending_sessions_tx.clone();
-        let session_id = self.next_id();
         let secret_key = self.secret_key;
 
         self.spawn(async move {
-            if let Some(stream) = get_eciess_stream(
-                &pending_events,
-                stream,
-                session_id,
-                remote_addr,
-                secret_key,
-                Direction::Incoming,
-            )
-            .await
-            {
+            if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
                 let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
             }
         });
@@ -759,13 +747,20 @@ async fn authenticate(
     status: Status,
     fork_filter: ForkFilter,
 ) {
-    let stream =
-        match get_eciess_stream(&events, stream, session_id, remote_addr, secret_key, direction)
-            .await
-        {
-            Some(stream) => stream,
-            None => return,
-        };
+    let stream = match get_eciess_stream(stream, secret_key, direction).await {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = events
+                .send(PendingSessionEvent::EciesAuthError {
+                    remote_addr,
+                    session_id,
+                    error,
+                    direction,
+                })
+                .await;
+            return
+        }
+    };
 
     let unauthed = UnauthedP2PStream::new(stream);
 
@@ -800,32 +795,14 @@ async fn authenticate(
 /// Returns an [ECIESStream] if it can be built. If not, send a
 /// [PendingSessionEvent::EciesAuthError] and returns `None`
 async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
-    events: &mpsc::Sender<PendingSessionEvent>,
     stream: Io,
-    session_id: SessionId,
-    remote_addr: SocketAddr,
     secret_key: SecretKey,
     direction: Direction,
-) -> Option<ECIESStream<Io>> {
-    let eciess_stream = match direction {
+) -> Result<ECIESStream<Io>, ECIESError> {
+    match direction {
         Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
         Direction::Outgoing(remote_peer_id) => {
             ECIESStream::connect(stream, secret_key, remote_peer_id).await
-        }
-    };
-
-    match eciess_stream {
-        Ok(stream) => Some(stream),
-        Err(error) => {
-            let _ = events
-                .send(PendingSessionEvent::EciesAuthError {
-                    remote_addr,
-                    session_id,
-                    error,
-                    direction,
-                })
-                .await;
-            None
         }
     }
 }

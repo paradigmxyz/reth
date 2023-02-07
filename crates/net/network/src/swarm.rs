@@ -201,7 +201,6 @@ where
                             trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
                             self.sessions.disconnect_incoming_connection(
                                 stream,
-                                remote_addr,
                                 DisconnectReason::TooManyPeers,
                             );
                         }
