@@ -11,7 +11,7 @@ readme = "README.md"
 bytes = { version = "1.1" }
 hex = "0.4"
 thiserror = "1"
-serde = "1"
+serde = { version = "1", optional = true }
 
 # reth
 reth-codecs = { path = "../../storage/codecs" }
@@ -27,7 +27,7 @@ tokio-stream = "0.1.11"
 pin-project = "1.0"
 tracing = "0.1.37"
 snap = "1.0.5"
-smol_str = { version = "0.1", features = ["serde"] }
+smol_str = "0.1"
 metrics = "0.20.1"
 
 # arbitrary utils
@@ -52,10 +52,11 @@ proptest = { version = "1.0" }
 proptest-derive = "0.3"
 
 [features]
-default = []
+default = ["serde"]
+serde = ["dep:serde", "smol_str/serde"]
 arbitrary = ["reth-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 
 [[test]]
 name = "fuzz_roundtrip"
 path = "tests/fuzz_roundtrip.rs"
-required-features = ["arbitrary"]
+required-features = ["arbitrary", "serde"]

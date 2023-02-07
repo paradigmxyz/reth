@@ -63,10 +63,9 @@ secp256k1 = { version = "0.24", features = [
     "global-context",
     "rand-std",
     "recovery",
-    "serde",
 ] }
 
-enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"], optional = true }
+enr = { version = "0.7.0", features = ["rust-secp256k1"], optional = true }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
 tempfile = { version = "3.3", optional = true }
 
@@ -97,5 +96,5 @@ serial_test = "0.10"
 
 [features]
 default = ["serde"]
-serde = ["dep:serde", "dep:humantime-serde"]
+serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr?/serde"]
 test-utils = ["reth-provider/test-utils", "dep:enr", "dep:ethers-core", "dep:tempfile"]

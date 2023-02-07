@@ -3,13 +3,16 @@
 use bytes::Buf;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
-use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use thiserror::Error;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// RLPx disconnect reason.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DisconnectReason {
     /// Disconnect requested by the local node or remote peer.
     #[default]
