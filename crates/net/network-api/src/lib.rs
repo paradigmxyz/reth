@@ -10,18 +10,22 @@
 //! Provides abstractions for the reth-network crate.
 
 use async_trait::async_trait;
+use reth_eth_wire::DisconnectReason;
 use reth_primitives::{NodeRecord, PeerId, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+
+pub use error::NetworkError;
+pub use reputation::{Reputation, ReputationChangeKind};
 
 /// Network Error
 pub mod error;
 /// Reputation score
 pub mod reputation;
 
-pub use error::NetworkError;
-pub use reputation::{Reputation, ReputationChangeKind};
-use reth_eth_wire::DisconnectReason;
+#[cfg(feature = "test-utils")]
+/// Implementation of network traits for testing purposes.
+pub mod test_utils;
 
 /// Provides general purpose information about the network.
 #[async_trait]
