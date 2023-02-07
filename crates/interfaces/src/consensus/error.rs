@@ -112,4 +112,6 @@ pub enum CliqueError {
     InvalidVotingChain { expected: BlockNumber, received: BlockNumber },
     #[error("Unathorized signer {signer:?}")]
     UnauthorizedSigner { signer: Address },
+    #[error("Recent signer {signer:?}")]
+    RecentSigner { signer: Address },
 }
