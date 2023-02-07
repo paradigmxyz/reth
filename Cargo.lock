@@ -4552,7 +4552,6 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-types",
  "secp256k1 0.24.3",
- "serde",
  "test-fuzz",
  "thiserror",
  "tokio",
