@@ -7,11 +7,14 @@ use super::{
 use crate::SharedTransactions;
 use bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
-use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, sync::Arc};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// An `eth` protocol message, containing a message ID and payload.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ProtocolMessage {
     pub message_type: EthMessageID,
     pub message: EthMessage,
@@ -140,7 +143,8 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 ///
 ///  The newer `eth/66` is an efficiency upgrade on top of `eth/65`, introducing a request id to
 ///  correlate request-response message pairs. This allows for request multiplexing.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessage {
     /// Status is required for the protocol handshake
     Status(Status),
@@ -270,7 +274,8 @@ impl Encodable for EthBroadcastMessage {
 
 /// Represents message IDs for eth protocol messages.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessageID {
     Status = 0x00,
     NewBlockHashes = 0x01,
@@ -352,7 +357,8 @@ impl TryFrom<usize> for EthMessageID {
 /// This is used for all request-response style `eth` protocol messages.
 /// This can represent either a request or a response, since both include a message payload and
 /// request id.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RequestPair<T> {
     /// id for the contained request or response message
     pub request_id: u64,
