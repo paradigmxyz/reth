@@ -150,8 +150,8 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn get_code(&self, _address: Address, _block_number: Option<BlockId>) -> Result<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
+        EthApi::get_code(self, address, block_number).to_rpc_result()
     }
 
     async fn call(&self, _request: CallRequest, _block_number: Option<BlockId>) -> Result<Bytes> {
