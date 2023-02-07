@@ -11,10 +11,9 @@ use reth_interfaces::{
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use std::{
-    collections::HashSet,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 /// The wrapper around [FuturesUnordered] that keeps information
@@ -23,8 +22,6 @@ use std::{
 pub(crate) struct BodiesRequestQueue<B: BodiesClient> {
     /// Inner body request queue.
     inner: FuturesUnordered<BodiesRequestFuture<B>>,
-    /// The block numbers being requested.
-    block_numbers: HashSet<BlockNumber>,
     /// The downloader metrics.
     metrics: DownloaderMetrics,
     /// Last requested block number.
@@ -37,12 +34,7 @@ where
 {
     /// Create new instance of request queue.
     pub(crate) fn new(metrics: DownloaderMetrics) -> Self {
-        Self {
-            metrics,
-            inner: Default::default(),
-            block_numbers: Default::default(),
-            last_requested_block_number: None,
-        }
+        Self { metrics, inner: Default::default(), last_requested_block_number: None }
     }
 
     /// Returns `true` if the queue is empty.
@@ -58,7 +50,6 @@ where
     /// Clears the inner queue and related data.
     pub(crate) fn clear(&mut self) {
         self.inner.clear();
-        self.block_numbers.clear();
         self.last_requested_block_number.take();
     }
 
@@ -80,19 +71,11 @@ where
             })
             .or(self.last_requested_block_number);
 
-        // Set requested block numbers
-        self.block_numbers.extend(request.iter().map(|h| h.number));
-
         // Create request and push into the queue.
         self.inner.push(
             BodiesRequestFuture::new(client, consensus, priority, self.metrics.clone())
                 .with_headers(request),
         )
-    }
-
-    /// Check if the block number is currently in progress
-    pub(crate) fn contains_block(&self, number: BlockNumber) -> bool {
-        self.block_numbers.contains(&number)
     }
 }
 
@@ -103,13 +86,6 @@ where
     type Item = Vec<BlockResponse>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        let result = ready!(this.inner.poll_next_unpin(cx));
-        if let Some(ref response) = result {
-            response.iter().for_each(|block| {
-                this.block_numbers.remove(&block.block_number());
-            });
-        }
-        Poll::Ready(result)
+        self.get_mut().inner.poll_next_unpin(cx)
     }
 }
