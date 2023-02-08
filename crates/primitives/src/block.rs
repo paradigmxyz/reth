@@ -23,7 +23,7 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp, 10)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
