@@ -4,7 +4,6 @@ use crate::{
 };
 use futures_util::StreamExt;
 
-
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -99,10 +98,12 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             });
         }
 
+        drop(tx);
+
         let mut recovered_senders = UnboundedReceiverStream::new(rx);
 
         while let Some(recovered) = recovered_senders.next().await {
-            let (id,sender) = recovered?;
+            let (id, sender) = recovered?;
             senders_cursor.append(id, sender)?;
         }
 

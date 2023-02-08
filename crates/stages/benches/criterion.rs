@@ -117,8 +117,7 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
             transaction::{DbTx, DbTxMut},
         };
         tx.commit(|tx| {
-            let (head, _) =
-                tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
+            let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
             tx.put::<tables::HeaderTD>(head, reth_primitives::U256::from(0).into())
         })
         .unwrap();
