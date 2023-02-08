@@ -199,9 +199,11 @@ impl Default for RpcModuleBuilder<(), (), ()> {
 /// ```
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub enum RpcModuleConfig {
-    /// Use all available modules.
-    #[default]
+    /// Use _all_ available modules.
     All,
+    /// The default modules `eth`, `net`, `web3`
+    #[default]
+    Standard,
     /// Only use the configured modules.
     Selection(Vec<RethRpcModule>),
 }
@@ -209,6 +211,10 @@ pub enum RpcModuleConfig {
 // === impl RpcModuleConfig ===
 
 impl RpcModuleConfig {
+    /// The standard modules to instantiate by default `eth`, `net`, `web3`
+    pub const STANDARD_MODULES: [RethRpcModule; 3] =
+        [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
+
     /// Returns a selection of [RethRpcModule] with all [RethRpcModule::VARIANTS].
     pub fn all_modules() -> Vec<RethRpcModule> {
         RpcModuleConfig::try_from_selection(RethRpcModule::VARIANTS.iter().copied())
@@ -262,6 +268,7 @@ impl RpcModuleConfig {
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
             RpcModuleConfig::All => Box::new(Self::all_modules().into_iter()),
+            RpcModuleConfig::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             RpcModuleConfig::Selection(s) => Box::new(s.iter().copied()),
         }
     }
@@ -271,6 +278,7 @@ impl RpcModuleConfig {
         match self {
             RpcModuleConfig::All => Self::all_modules(),
             RpcModuleConfig::Selection(s) => s,
+            RpcModuleConfig::Standard => Self::STANDARD_MODULES.to_vec(),
         }
     }
 }
@@ -778,6 +786,12 @@ mod tests {
                 "trace" =>  RethRpcModule::Trace,
                 "web3" =>  RethRpcModule::Web3,
             );
+    }
+
+    #[test]
+    fn test_default_selection() {
+        let selection = RpcModuleConfig::Standard.into_selection();
+        assert_eq!(selection, vec![RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3,])
     }
 
     #[test]
