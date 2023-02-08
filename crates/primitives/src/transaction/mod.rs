@@ -658,7 +658,7 @@ impl TransactionSigned {
 
         let first_header = Header::decode(&mut data)?;
 
-        let transaction = if data[0] > 0x7f {
+        if data[0] > 0x7f {
             // legacy transaction
             let mut transaction = Transaction::Legacy(TxLegacy {
                 nonce: Decodable::decode(&mut data)?,
@@ -718,9 +718,7 @@ impl TransactionSigned {
             let hash = keccak256(&data[..first_header.payload_length]);
             let signed = TransactionSigned { transaction, hash, signature };
             Ok(signed)
-        };
-
-        transaction
+        }
     }
 }
 
