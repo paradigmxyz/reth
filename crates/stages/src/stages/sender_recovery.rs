@@ -86,7 +86,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         for entry in entries {
             let (tx_id, transaction) = entry?;
             let tx = tx.clone();
-            rayon::spawn(move || {
+            rayon::spawn_fifo(move || {
                 trace!(target: "sync::stages::sender_recovery", tx_id, hash = ?transaction.hash(), "Recovering sender");
                 let res = if let Some(signer) = transaction.recover_signer() {
                     Ok((tx_id, signer))
@@ -106,24 +106,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             let (id, sender) = recovered?;
             senders_cursor.append(id, sender)?;
         }
-
-        // for chunk in &entries.chunks(self.batch_size) {
-        //     let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
-        //     // Recover signers for the chunk in parallel
-        //     let recovered = transactions
-        //         .into_par_iter()
-        //         .map(|(tx_id, transaction)| {
-        //             trace!(target: "sync::stages::sender_recovery", tx_id, hash =
-        // ?transaction.hash(), "Recovering sender");             let signer =
-        //                 transaction.recover_signer().ok_or_else::<StageError, _>(|| {
-        //                     SenderRecoveryStageError::SenderRecovery { tx: tx_id }.into()
-        //                 })?;
-        //             Ok((tx_id, signer))
-        //         })
-        //         .collect::<Result<Vec<_>, StageError>>()?;
-        //     // Append the signers to the table
-        //     recovered.into_iter().try_for_each(|(id, sender)| senders_cursor.append(id,
-        // sender))?; }
 
         let done = !capped;
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, done, "Sync iteration finished");
