@@ -9,7 +9,6 @@
 
 use igd::aio::search_gateway;
 use pin_project_lite::pin_project;
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt,
     future::{poll_fn, Future},
@@ -21,10 +20,12 @@ use std::{
 };
 use tracing::warn;
 
+#[cfg(feature = "serde")]
+use serde_with::{DeserializeFromStr, SerializeDisplay};
+
 /// All builtin resolvers.
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, Default, Hash, SerializeDisplay, DeserializeFromStr,
-)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(SerializeDisplay, DeserializeFromStr))]
 pub enum NatResolver {
     /// Resolve with any available resolver.
     #[default]

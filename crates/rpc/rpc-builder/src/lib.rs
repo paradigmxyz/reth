@@ -199,9 +199,11 @@ impl Default for RpcModuleBuilder<(), (), ()> {
 /// ```
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub enum RpcModuleConfig {
-    /// Use all available modules.
-    #[default]
+    /// Use _all_ available modules.
     All,
+    /// The default modules `eth`, `net`, `web3`
+    #[default]
+    Standard,
     /// Only use the configured modules.
     Selection(Vec<RethRpcModule>),
 }
@@ -209,6 +211,10 @@ pub enum RpcModuleConfig {
 // === impl RpcModuleConfig ===
 
 impl RpcModuleConfig {
+    /// The standard modules to instantiate by default `eth`, `net`, `web3`
+    pub const STANDARD_MODULES: [RethRpcModule; 3] =
+        [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
+
     /// Returns a selection of [RethRpcModule] with all [RethRpcModule::VARIANTS].
     pub fn all_modules() -> Vec<RethRpcModule> {
         RpcModuleConfig::try_from_selection(RethRpcModule::VARIANTS.iter().copied())
@@ -262,6 +268,7 @@ impl RpcModuleConfig {
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
             RpcModuleConfig::All => Box::new(Self::all_modules().into_iter()),
+            RpcModuleConfig::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
             RpcModuleConfig::Selection(s) => Box::new(s.iter().copied()),
         }
     }
@@ -271,6 +278,7 @@ impl RpcModuleConfig {
         match self {
             RpcModuleConfig::All => Self::all_modules(),
             RpcModuleConfig::Selection(s) => s,
+            RpcModuleConfig::Standard => Self::STANDARD_MODULES.to_vec(),
         }
     }
 }
@@ -426,6 +434,21 @@ pub struct RpcServerConfig {
 /// === impl RpcServerConfig ===
 
 impl RpcServerConfig {
+    /// Creates a new config with only http set
+    pub fn http(config: ServerBuilder) -> Self {
+        Self::default().with_http(config)
+    }
+
+    /// Creates a new config with only ws set
+    pub fn ws(config: ServerBuilder) -> Self {
+        Self::default().with_ws(config)
+    }
+
+    /// Creates a new config with only ipc set
+    pub fn ipc(config: IpcServerBuilder) -> Self {
+        Self::default().with_ipc(config)
+    }
+
     /// Configures the http server
     pub fn with_http(mut self, config: ServerBuilder) -> Self {
         self.http_server_config = Some(config.http_only());
@@ -478,15 +501,23 @@ impl RpcServerConfig {
             .http_ws_addr
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_RPC_PORT)));
 
+        let mut local_addr = None;
+
         let http_server = if let Some(builder) = self.http_server_config {
             let server = builder.build(socket_addr).await?;
+            if local_addr.is_none() {
+                local_addr = server.local_addr().ok();
+            }
             Some(server)
         } else {
             None
         };
 
         let ws_server = if let Some(builder) = self.ws_server_config {
-            let server = builder.build(socket_addr).await?;
+            let server = builder.build(socket_addr).await.unwrap();
+            if local_addr.is_none() {
+                local_addr = server.local_addr().ok();
+            }
             Some(server)
         } else {
             None
@@ -502,7 +533,7 @@ impl RpcServerConfig {
             None
         };
 
-        Ok(RpcServer { http: http_server, ws: ws_server, ipc: ipc_server })
+        Ok(RpcServer { local_addr, http: http_server, ws: ws_server, ipc: ipc_server })
     }
 }
 
@@ -530,6 +561,21 @@ pub struct TransportRpcModuleConfig {
 // === impl TransportRpcModuleConfig ===
 
 impl TransportRpcModuleConfig {
+    /// Creates a new config with only http set
+    pub fn http(http: impl Into<RpcModuleConfig>) -> Self {
+        Self::default().with_http(http)
+    }
+
+    /// Creates a new config with only ws set
+    pub fn ws(ws: impl Into<RpcModuleConfig>) -> Self {
+        Self::default().with_ws(ws)
+    }
+
+    /// Creates a new config with only ipc set
+    pub fn ipc(ipc: impl Into<RpcModuleConfig>) -> Self {
+        Self::default().with_ipc(ipc)
+    }
+
     /// Sets the [RpcModuleConfig] for the http transport.
     pub fn with_http(mut self, http: impl Into<RpcModuleConfig>) -> Self {
         self.http = Some(http.into());
@@ -576,6 +622,8 @@ impl TransportRpcModules<()> {
 
 /// Container type for each transport ie. http, ws, and ipc server
 pub struct RpcServer {
+    /// The address of the http/ws server
+    local_addr: Option<SocketAddr>,
     /// http server
     http: Option<Server>,
     /// ws server
@@ -587,6 +635,11 @@ pub struct RpcServer {
 // === impl RpcServer ===
 
 impl RpcServer {
+    /// Returns the [`SocketAddr`] of the http/ws server if started.
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.local_addr
+    }
+
     /// Starts the configured server by spawning the servers on the tokio runtime.
     ///
     /// This returns an [RpcServerHandle] that's connected to the server task(s) until the server is
@@ -596,7 +649,8 @@ impl RpcServer {
         modules: TransportRpcModules<()>,
     ) -> Result<RpcServerHandle, RpcError> {
         let TransportRpcModules { http, ws, ipc } = modules;
-        let mut handle = RpcServerHandle { http: None, ws: None, ipc: None };
+        let mut handle =
+            RpcServerHandle { local_addr: self.local_addr, http: None, ws: None, ipc: None };
 
         // Start all servers
         if let Some((server, module)) =
@@ -636,6 +690,8 @@ impl std::fmt::Debug for RpcServer {
 #[derive(Clone)]
 #[must_use = "Server stop if dropped"]
 pub struct RpcServerHandle {
+    /// The address of the http/ws server
+    local_addr: Option<SocketAddr>,
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc: Option<ServerHandle>,
@@ -644,6 +700,11 @@ pub struct RpcServerHandle {
 // === impl RpcServerHandle ===
 
 impl RpcServerHandle {
+    /// Returns the [`SocketAddr`] of the http/ws server if started.
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.local_addr
+    }
+
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), RpcError> {
         if let Some(handle) = self.http {
@@ -659,6 +720,35 @@ impl RpcServerHandle {
         }
 
         Ok(())
+    }
+
+    /// Returns the url to the http server
+    pub fn http_url(&self) -> Option<String> {
+        self.local_addr.map(|addr| format!("http://{addr}"))
+    }
+
+    /// Returns the url to the ws server
+    pub fn ws_url(&self) -> Option<String> {
+        self.local_addr.map(|addr| format!("ws://{addr}"))
+    }
+
+    /// Returns a http client connected to the server.
+    pub fn http_client(&self) -> Option<jsonrpsee::http_client::HttpClient> {
+        let url = self.http_url()?;
+        let client = jsonrpsee::http_client::HttpClientBuilder::default()
+            .build(url)
+            .expect("Failed to create http client");
+        Some(client)
+    }
+
+    /// Returns a ws client connected to the server.
+    pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
+        let url = self.ws_url()?;
+        let client = jsonrpsee::ws_client::WsClientBuilder::default()
+            .build(url)
+            .await
+            .expect("Failed to create ws client");
+        Some(client)
     }
 }
 
@@ -696,6 +786,12 @@ mod tests {
                 "trace" =>  RethRpcModule::Trace,
                 "web3" =>  RethRpcModule::Web3,
             );
+    }
+
+    #[test]
+    fn test_default_selection() {
+        let selection = RpcModuleConfig::Standard.into_selection();
+        assert_eq!(selection, vec![RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3,])
     }
 
     #[test]

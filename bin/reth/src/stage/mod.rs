@@ -143,6 +143,7 @@ impl Command {
                         self.network.disable_discovery,
                         None,
                         self.nat,
+                        None,
                     )
                     .start_network()
                     .await?;

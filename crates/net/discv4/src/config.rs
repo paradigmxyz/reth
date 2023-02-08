@@ -8,14 +8,17 @@ use reth_net_common::ban_list::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_primitives::NodeRecord;
 use reth_rlp::Encodable;
-use secp256k1::serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// Configuration parameters that define the performance of the discovery network.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Discv4Config {
     /// Whether to enable the incoming packet filter. Default: false.
     pub enable_packet_filter: bool,
@@ -39,7 +42,7 @@ pub struct Discv4Config {
     /// The duration we set for neighbours responses
     pub neighbours_expiration: Duration,
     /// Provides a way to ban peers and ips.
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
     /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
     /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
@@ -137,7 +140,8 @@ impl Default for Discv4Config {
 }
 
 /// Builder type for [`Discv4Config`]
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Discv4ConfigBuilder {
     config: Discv4Config,
 }
