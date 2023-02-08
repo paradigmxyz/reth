@@ -176,25 +176,22 @@ impl TestTransaction {
         })
     }
 
+    /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
+    fn insert_header(tx: &mut Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
+        let key: BlockNumHash = header.num_hash().into();
+
+        tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+        tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
+        tx.put::<tables::Headers>(key, header.clone().unseal())
+    }
+
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
     /// that are supposed to be populated by the headers stage.
     pub fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        self.commit(|tx| {
-            let headers = headers.collect::<Vec<_>>();
-
-            for header in headers {
-                let key: BlockNumHash = header.num_hash().into();
-
-                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-                tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
-                tx.put::<tables::Headers>(key, header.clone().unseal())?;
-            }
-
-            Ok(())
-        })
+        self.commit(|tx| headers.into_iter().try_for_each(|header| Self::insert_header(tx, header)))
     }
 
     /// Inserts total difficulty of headers into the corresponding tables.
@@ -205,20 +202,12 @@ impl TestTransaction {
         I: Iterator<Item = &'a SealedHeader>,
     {
         self.commit(|tx| {
-            let headers = headers.collect::<Vec<_>>();
-
             let mut td = U256::ZERO;
-            for header in headers {
-                let key: BlockNumHash = header.num_hash().into();
-
+            headers.into_iter().try_for_each(|header| {
+                Self::insert_header(tx, header)?;
                 td += header.difficulty;
-                tx.put::<tables::HeaderTD>(header.num_hash().into(), td.into())?;
-                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-                tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
-                tx.put::<tables::Headers>(key, header.clone().unseal())?;
-            }
-
-            Ok(())
+                tx.put::<tables::HeaderTD>(header.num_hash().into(), td.into())
+            })
         })
     }
 
@@ -231,14 +220,9 @@ impl TestTransaction {
         self.commit(|tx| {
             let mut current_tx_id = tx_offset.unwrap_or_default();
 
-            for block in blocks {
+            blocks.into_iter().try_for_each(|block| {
+                Self::insert_header(tx, &block.header)?;
                 let key: BlockNumHash = block.num_hash().into();
-
-                // Insert into header tables.
-                tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
-                tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
-                tx.put::<tables::Headers>(key, block.header.clone().unseal())?;
-
                 // Insert into body tables.
                 tx.put::<tables::BlockBodies>(
                     key,
@@ -251,9 +235,8 @@ impl TestTransaction {
                     tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
                     current_tx_id += 1;
                 }
-            }
-
-            Ok(())
+                Ok(())
+            })
         })
     }
 }
