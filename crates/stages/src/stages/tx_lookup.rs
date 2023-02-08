@@ -83,7 +83,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
-        // If the last element is smaller than our first, then we can just append into the DB.
+        // If the last inserted element in the database is smaller than the first in our set, then we can just append into the DB.
         // This probably only ever happens during sync, on the first table insertion.
         let append = tx_list
             .first()
