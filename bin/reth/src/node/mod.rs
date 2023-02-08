@@ -25,7 +25,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{io, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -130,6 +130,10 @@ impl Command {
             res = pipeline.run(db.clone()) => res?,
             _ = tokio::signal::ctrl_c() => {},
         };
+
+        if !self.network.no_persist_peers {
+            dump_peers(self.network.peers_file.as_ref(), network).await?;
+        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -274,6 +278,16 @@ impl Command {
                 .build(fetch_client.clone(), consensus.clone(), db.clone()),
         )
     }
+}
+
+/// Dumps peers to `file_path` for persistence.
+async fn dump_peers(file_path: &Path, network: NetworkHandle) -> Result<(), io::Error> {
+    info!(target : "net::peers", file = %file_path.display(), "Saving current peers");
+    let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
+    let known_peers = network.peers_handle().all_peers().await;
+
+    serde_json::to_writer_pretty(writer, &known_peers)?;
+    Ok(())
 }
 
 /// The current high-level state of the node.

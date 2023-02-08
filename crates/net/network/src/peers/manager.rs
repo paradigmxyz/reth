@@ -16,7 +16,7 @@ use std::{
     fmt::Display,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
-    path::{Path, PathBuf},
+    path::Path,
     task::{Context, Poll},
     time::Duration,
 };
@@ -66,7 +66,7 @@ impl PeersHandle {
     }
 
     /// Returns all the currently connected peers and their reputations.
-    pub async fn all_peers(&self) -> Vec<(i32, NodeRecord)> {
+    pub async fn all_peers(&self) -> Vec<NodeRecord> {
         let (tx, rx) = oneshot::channel();
         self.send(PeerCommand::GetPeers(tx));
 
@@ -639,10 +639,7 @@ impl PeersManager {
                     }
                     PeerCommand::GetPeers(tx) => {
                         let _ = tx.send(
-                            self.peers
-                                .iter()
-                                .map(|(k, v)| (v.reputation, NodeRecord::new(v.addr, *k)))
-                                .collect(),
+                            self.peers.iter().map(|(k, v)| NodeRecord::new(v.addr, *k)).collect(),
                         );
                     }
                 }
@@ -669,17 +666,6 @@ impl PeersManager {
                 return Poll::Pending
             }
         }
-    }
-
-    /// Dumps peers to `file_path` for persistence.
-    fn dump_peers(&mut self, file_path: &PathBuf) -> Result<(), io::Error> {
-        info!(target : "net::peers", file = %file_path.display(), "Saving current peers");
-        let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
-        let known_peers: Vec<NodeRecord> =
-            self.peers.iter().map(|(k, v)| NodeRecord::new(v.addr, *k)).collect();
-
-        serde_json::to_writer_pretty(writer, &known_peers)?;
-        Ok(())
     }
 }
 
@@ -910,7 +896,7 @@ pub(crate) enum PeerCommand {
     /// Get information about a peer
     GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
     /// Get reputation and address information on all peers
-    GetPeers(oneshot::Sender<Vec<(i32, NodeRecord)>>),
+    GetPeers(oneshot::Sender<Vec<NodeRecord>>),
 }
 
 /// Actions the peer manager can trigger.
