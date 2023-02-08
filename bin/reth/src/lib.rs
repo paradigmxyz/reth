@@ -52,7 +52,7 @@ struct NetworkOpts {
 #[command(next_help_heading = "Rpc")]
 struct RpcServerOpts {
     /// Enable the HTTP-RPC server
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "false")]
     http: bool,
 
     /// Http server address to listen on
@@ -64,11 +64,11 @@ struct RpcServerOpts {
     http_port: Option<u16>,
 
     /// Rpc Modules to be configured for http server
-    #[arg(long = "http.api", value_delimiter = ',')]
+    #[arg(long = "http.api")]
     http_api: Option<RpcModuleConfig>,
 
     /// Enable the WS-RPC server
-    #[arg(long, default_value = "true")]
+    #[arg(long, default_value = "false")]
     ws: bool,
 
     /// Ws server address to listen on
@@ -80,7 +80,7 @@ struct RpcServerOpts {
     ws_port: Option<u16>,
 
     /// Rpc Modules to be configured for Ws server
-    #[arg(long = "ws.api", value_delimiter = ',')]
+    #[arg(long = "ws.api")]
     ws_api: Option<RpcModuleConfig>,
 
     /// Disable the IPC-RPC  server
