@@ -47,10 +47,7 @@ pub struct Block {
 impl Block {
     /// Create a new block response from a reth block, using the total difficulty to populate its
     /// field in the rpc response.
-    pub(crate) fn from_block_full(
-        block: RethBlock,
-        total_difficulty: U256,
-    ) -> Result<Self, BlockError> {
+    pub fn from_block_full(block: RethBlock, total_difficulty: U256) -> Result<Self, BlockError> {
         let block_hash = block.header.hash_slow();
         let header_length = block.header.length();
         let block_length = block.length();

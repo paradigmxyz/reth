@@ -15,8 +15,14 @@ where
         _full: bool,
     ) -> EthResult<Option<RichBlock>> {
         let block = self.client().block(BlockId::Hash(hash.0.into()))?;
-        // TODO: chain info total difficulty
-        todo!()
+        if let Some(_block) = block {
+            // TODO: GET TD FOR BLOCK - needs block provider? or header provider?
+            // let total_difficulty = todo!();
+            // let rich_block = Block::from_block_full(block, total_difficulty);
+            todo!()
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) async fn block_by_number(
@@ -25,7 +31,13 @@ where
         _full: bool,
     ) -> EthResult<Option<RichBlock>> {
         let block = self.client().block(BlockId::Number(number.into()))?;
-        // TODO: chain info total difficulty
-        todo!()
+        if let Some(_block) = block {
+            // TODO: GET TD FOR BLOCK - needs block provider? or header provider?
+            // let total_difficulty = todo!();
+            // let rich_block = Block::from_block_full(block, total_difficulty);
+            todo!()
+        } else {
+            Ok(None)
+        }
     }
 }
