@@ -1,7 +1,7 @@
 use reth_interfaces::Error;
 use reth_primitives::{
-    Account, Address, Header, Log, Transaction, TransactionKind, TransactionSigned, TxEip1559,
-    TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256,
+    Account, Address, Header, Transaction, TransactionKind, TransactionSigned, TxEip1559,
+    TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256, Log as RethLog
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -192,9 +192,9 @@ pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
             .any(|(revm_topic, reth_topic)| revm_topic.0 != reth_topic.0)
 }
 
-/// Into reth primitive [Log] from [revm::Log].
-pub fn into_reth_log(log: revm::Log) -> Log {
-    Log {
+/// Into reth primitive [Log] from [revm::primitives::Log].
+pub fn into_reth_log(log: Log) -> RethLog {
+    RethLog {
         address: H160(log.address.0),
         topics: log.topics.into_iter().map(|h| H256(h.0)).collect(),
         data: log.data.into(),

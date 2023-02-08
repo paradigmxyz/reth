@@ -376,7 +376,7 @@ where
             // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
             // \nENV:{:?}",transaction.hash(),transaction,evm.env);
 
-            let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
+            // let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
 
             // Fatal internal error.
             if let Err(revm::primitives::EVMError::Database(_)) = out {
@@ -391,8 +391,7 @@ where
             let is_success = if let Ok(ResultAndState { ref result, .. }) = out {
                 match &result {
                     Success { .. } => true,
-                    Revert { .. } => false,
-                    Halt => ,
+                    _ => false
                 }
             } else {
                 false
@@ -406,26 +405,35 @@ where
             // };
 
             // Add spent gas.
-            cumulative_gas_used += gas_used;
+            if let Ok(ResultAndState { ref result,  ..}) = out {
+                cumulative_gas_used += match &result {
+                    Success { gas_used, .. } => gas_used,
+                    Revert { gas_used, .. } => gas_used,
+                    Halt { gas_used, .. } => gas_used,
+                }
+            };
+            // cumulative_gas_used += gas_used;
 
-            // commit state
-            let (changeset, new_bytecodes) = self.commit_changes(state);
 
-            // Transform logs to reth format.
-            let logs: Vec<Log> = logs.into_iter().map(into_reth_log).collect();
+            if let Ok(ResultAndState {result: Success {logs, ..}, state}) = out {
+                // commit state
+                let (changeset, new_bytecodes) = self.commit_changes(state);
+                // Transform logs to reth format.
+                let logs: Vec<Log> = logs.into_iter().map(into_reth_log).collect();
 
-            // Push transaction changeset and calculte header bloom filter for receipt.
-            changesets.push(TransactionChangeSet {
-                receipt: Receipt {
-                    tx_type: transaction.tx_type(),
-                    success: is_success,
-                    cumulative_gas_used,
-                    bloom: logs_bloom(logs.iter()),
-                    logs,
-                },
-                changeset,
-                new_bytecodes,
-            })
+                // Push transaction changeset and calculate header bloom filter for receipt.
+                changesets.push(TransactionChangeSet {
+                    receipt: Receipt {
+                        tx_type: transaction.tx_type(),
+                        success: is_success,
+                        cumulative_gas_used,
+                        bloom: logs_bloom(logs.iter()),
+                        logs,
+                    },
+                    changeset,
+                    new_bytecodes,
+                })
+            }
         }
 
         // Check if gas used matches the value set in header.
