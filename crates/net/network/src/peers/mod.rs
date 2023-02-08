@@ -4,7 +4,7 @@ mod manager;
 mod reputation;
 
 pub(crate) use manager::{InboundConnectionError, PeerAction, PeersManager};
-pub use manager::{PeersConfig, PeersHandle};
+pub use manager::{Peer, PeersConfig, PeersHandle};
 pub use reputation::ReputationChangeWeights;
 pub use reth_network_api::PeerKind;
 

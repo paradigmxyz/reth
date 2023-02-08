@@ -14,8 +14,9 @@ use reth_primitives::{ForkId, NodeRecord, PeerId};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,
-    io,
+    io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
+    path::Path,
     task::{Context, Poll},
     time::Duration,
 };
@@ -25,7 +26,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -62,6 +63,14 @@ impl PeersHandle {
         self.send(PeerCommand::GetPeer(peer_id, tx));
 
         rx.await.unwrap_or(None)
+    }
+
+    /// Returns all peers in the peerset.
+    pub async fn all_peers(&self) -> Vec<NodeRecord> {
+        let (tx, rx) = oneshot::channel();
+        self.send(PeerCommand::GetPeers(tx));
+
+        rx.await.unwrap_or_default()
     }
 }
 
@@ -111,6 +120,7 @@ impl PeersManager {
             backoff_durations,
             trusted_nodes,
             connect_trusted_nodes_only,
+            basic_nodes,
             ..
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
@@ -119,10 +129,14 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
-        let mut peers = HashMap::with_capacity(trusted_nodes.len());
+        let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
 
         for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
             peers.entry(id).or_insert_with(|| Peer::trusted(SocketAddr::from((address, tcp_port))));
+        }
+
+        for NodeRecord { address, tcp_port, udp_port: _, id } in basic_nodes {
+            peers.entry(id).or_insert_with(|| Peer::new(SocketAddr::from((address, tcp_port))));
         }
 
         Self {
@@ -623,6 +637,11 @@ impl PeersManager {
                     PeerCommand::GetPeer(peer, tx) => {
                         let _ = tx.send(self.peers.get(&peer).cloned());
                     }
+                    PeerCommand::GetPeers(tx) => {
+                        let _ = tx.send(
+                            self.peers.iter().map(|(k, v)| NodeRecord::new(v.addr, *k)).collect(),
+                        );
+                    }
                 }
             }
 
@@ -876,6 +895,8 @@ pub(crate) enum PeerCommand {
     ReputationChange(PeerId, ReputationChangeKind),
     /// Get information about a peer
     GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
+    /// Get node information on all peers
+    GetPeers(oneshot::Sender<Vec<NodeRecord>>),
 }
 
 /// Actions the peer manager can trigger.
@@ -921,6 +942,9 @@ pub struct PeersConfig {
     pub trusted_nodes: HashSet<NodeRecord>,
     /// Connect to trusted nodes only?
     pub connect_trusted_nodes_only: bool,
+    /// Basic nodes to connect to.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub basic_nodes: HashSet<NodeRecord>,
     /// How long to ban bad peers.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub ban_duration: Duration,
@@ -948,6 +972,7 @@ impl Default for PeersConfig {
             backoff_durations: Default::default(),
             trusted_nodes: Default::default(),
             connect_trusted_nodes_only: false,
+            basic_nodes: Default::default(),
         }
     }
 }
@@ -991,6 +1016,30 @@ impl PeersConfig {
     pub fn with_connect_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
         self.connect_trusted_nodes_only = trusted_only;
         self
+    }
+
+    /// Nodes available at launch.
+    pub fn with_basic_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
+        self.basic_nodes = nodes;
+        self
+    }
+
+    /// Read from file nodes available at launch. Ignored if None.
+    pub fn with_basic_nodes_from_file(
+        self,
+        optional_file: Option<impl AsRef<Path>>,
+    ) -> Result<Self, io::Error> {
+        let Some(file_path) = optional_file else {
+            return Ok(self)
+        };
+        let reader = match std::fs::File::open(file_path.as_ref()) {
+            Ok(file) => std::io::BufReader::new(file),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
+            Err(e) => Err(e)?,
+        };
+        info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
+        let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
+        Ok(self.with_basic_nodes(nodes))
     }
 }
 

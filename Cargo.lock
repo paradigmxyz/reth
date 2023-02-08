@@ -4472,6 +4472,7 @@ dependencies = [
  "reth-transaction-pool",
  "secp256k1 0.24.3",
  "serde",
+ "serde_json",
  "serial_test",
  "tempfile",
  "thiserror",
