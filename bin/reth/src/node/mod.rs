@@ -297,10 +297,9 @@ impl Command {
 /// Dumps peers to `file_path` for persistence.
 async fn dump_peers(file_path: &Path, network: NetworkHandle) -> Result<(), io::Error> {
     info!(target : "net::peers", file = %file_path.display(), "Saving current peers");
-    let writer = std::io::BufWriter::new(std::fs::File::create(file_path)?);
     let known_peers = network.peers_handle().all_peers().await;
 
-    serde_json::to_writer_pretty(writer, &known_peers)?;
+    tokio::fs::write(file_path, serde_json::to_string_pretty(&known_peers)?).await?;
     Ok(())
 }
 
