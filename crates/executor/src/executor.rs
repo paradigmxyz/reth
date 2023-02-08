@@ -391,7 +391,7 @@ where
             let is_success = if let Ok(ResultAndState { ref result, .. }) = out {
                 match &result {
                     Success { .. } => true,
-                    _ => false
+                    _ => false,
                 }
             } else {
                 false
@@ -405,7 +405,7 @@ where
             // };
 
             // Add spent gas.
-            if let Ok(ResultAndState { ref result,  ..}) = out {
+            if let Ok(ResultAndState { ref result, .. }) = out {
                 cumulative_gas_used += match &result {
                     Success { gas_used, .. } => gas_used,
                     Revert { gas_used, .. } => gas_used,
@@ -414,8 +414,7 @@ where
             };
             // cumulative_gas_used += gas_used;
 
-
-            if let Ok(ResultAndState {result: Success {logs, ..}, state}) = out {
+            if let Ok(ResultAndState { result: Success { logs, .. }, state }) = out {
                 // commit state
                 let (changeset, new_bytecodes) = self.commit_changes(state);
                 // Transform logs to reth format.

@@ -1,7 +1,7 @@
 use reth_interfaces::Error;
 use reth_primitives::{
-    Account, Address, Header, Transaction, TransactionKind, TransactionSigned, TxEip1559,
-    TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256, Log as RethLog
+    Account, Address, Header, Log as RethLog, Transaction, TransactionKind, TransactionSigned,
+    TxEip1559, TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
