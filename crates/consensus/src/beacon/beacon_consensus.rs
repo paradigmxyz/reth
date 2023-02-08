@@ -1,6 +1,6 @@
 //! Consensus for ethereum network
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockNumber, ChainSpec, Header, SealedBlock, SealedHeader};
+use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader};
 use tokio::sync::watch;
 
 use crate::validation;
@@ -35,10 +35,6 @@ impl BeaconConsensus {
 }
 
 impl Consensus for BeaconConsensus {
-    fn seal_header(&self, header: Header) -> Result<SealedHeader, Error> {
-        Ok(header.seal_slow())
-    }
-
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.forkchoice_state_rx.clone()
     }

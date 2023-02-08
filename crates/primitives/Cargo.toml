@@ -89,6 +89,7 @@ criterion = "0.4.0"
 
 [features]
 default = []
+clique = []
 arbitrary = [
     "revm-interpreter/arbitrary",
     "dep:arbitrary",

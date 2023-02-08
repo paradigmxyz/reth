@@ -101,6 +101,26 @@ impl Header {
         keccak256(&out)
     }
 
+    #[cfg(any(test, feature = "clique"))]
+    /// Heavy function that will calculate hash of data according to clique consensus rules.
+    pub fn clique_hash_slow(&mut self) -> H256 {
+        let extra_data = std::mem::take(&mut self.extra_data);
+        let extra_data_len = extra_data.len();
+        let end_byte = extra_data_len - crate::constants::clique::EXTRA_SEAL;
+
+        // Set trimmed extra data on header.
+        self.extra_data = Bytes::from(&extra_data[..end_byte]);
+
+        // Calculate hash
+        let mut out = BytesMut::new();
+        self.encode(&mut out);
+        let hash = keccak256(&out);
+
+        // Reset the `extra_data` field
+        self.extra_data = extra_data;
+        hash
+    }
+
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
         self.ommers_hash == EMPTY_LIST_HASH && self.transactions_root == EMPTY_ROOT
@@ -114,12 +134,16 @@ impl Header {
     }
 
     /// Calculate hash and seal the Header so that it can't be changed.
-    ///
-    /// WARNING: This method naively encodes and calculates the hash of **all** header fields.
-    /// This might not be applicable to various consensus protocols.
     pub fn seal_slow(self) -> SealedHeader {
         let hash = self.hash_slow();
-        SealedHeader { header: self, hash }
+        self.seal(hash)
+    }
+
+    #[cfg(any(test, feature = "clique"))]
+    /// Calculate the hash of a clique header and seal the header so it can't be changed.
+    pub fn clique_seal_slow(mut self) -> SealedHeader {
+        let hash = self.clique_hash_slow();
+        self.seal(hash)
     }
 
     fn header_payload_length(&self) -> usize {
@@ -386,7 +410,10 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::{Bytes, Decodable, Encodable, Header, H256};
-    use crate::{Address, HeadersDirection, U256};
+    use crate::{
+        constants::clique::{EXTRA_SEAL, EXTRA_VANITY},
+        Address, HeadersDirection, U256,
+    };
     use ethers_core::utils::hex::{self, FromHex};
     use std::str::FromStr;
 
@@ -487,5 +514,29 @@ mod tests {
         let direction = HeadersDirection::Rising;
         direction.encode(&mut buf);
         assert_eq!(direction, HeadersDirection::decode(&mut buf.as_slice()).unwrap());
+    }
+
+    // Check that clique header hash calculation is correct.
+    // https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/clique_test.go#L114-L125
+    #[test]
+    fn clique_seal() {
+        let expected =
+            H256::from_str("bd3d1fa43fbc4c5bfcc91b179ec92e2861df3654de60468beb908ff805359e8f")
+                .unwrap();
+
+        let extra_data = Bytes::from(vec![0; EXTRA_VANITY + EXTRA_SEAL]);
+        let header = Header {
+            ommers_hash: H256::zero(),
+            state_root: H256::zero(),
+            transactions_root: H256::zero(),
+            receipts_root: H256::zero(),
+            base_fee_per_gas: Some(0),
+            extra_data: extra_data.clone(),
+            ..Default::default()
+        };
+
+        let sealed = header.clique_seal_slow();
+        assert_eq!(sealed.hash(), expected);
+        assert_eq!(sealed.extra_data, extra_data);
     }
 }

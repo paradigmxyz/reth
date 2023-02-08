@@ -8,7 +8,7 @@ readme = "README.md"
 
 [dependencies]
 # reth 
-reth-primitives = { path = "../primitives" }
+reth-primitives = { path = "../primitives", features = ["clique"] }
 reth-interfaces = { path = "../interfaces" }
 reth-provider = { path = "../storage/provider" }
 
@@ -19,5 +19,14 @@ tokio = { version = "1", features = ["sync"] }
 bytes = "1.2"
 
 [dev-dependencies]
+# reth
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-provider = { path = "../storage/provider", features = ["test-utils"] }
+
+# ethers
+ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
+
+# misc
+itertools = "0.10.5"
+assert_matches = "1.5.0"

@@ -1,15 +1,13 @@
 //! Implementation of clique voting snapshots.
 //! https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/snapshot.go
 
+use super::utils::recover_header_signer;
 use bytes::BufMut;
 use reth_interfaces::consensus::CliqueError;
-use reth_primitives::{Address, BlockHash, BlockNumber, Bytes, CliqueConfig, SealedHeader, H64};
-use std::collections::{hash_map::Entry, BTreeSet, HashMap};
-
-use super::{
-    constants::{NONCE_AUTH_VOTE, NONCE_DROP_VOTE},
-    utils::recover_header_signer,
+use reth_primitives::{
+    constants::clique::*, Address, BlockHash, BlockNumber, Bytes, CliqueConfig, SealedHeader, H64,
 };
+use std::collections::{hash_map::Entry, BTreeSet, HashMap};
 
 /// Vote represents a single vote that an authorized signer made to modify the
 /// list of authorizations.
@@ -257,5 +255,589 @@ impl Snapshot {
         self.number = header.number;
         self.hash = header.hash();
         Ok(())
+    }
+}
+
+// Snapshot voting tests.
+// https://github.com/ethereum/go-ethereum/blob/9842301376b4328421e8a6163f12766dfa6641f8/consensus/clique/snapshot_test.go
+#[cfg(test)]
+mod tests {
+    use crate::clique::utils::is_checkpoint_block;
+
+    use super::*;
+    use assert_matches::assert_matches;
+    use bytes::BytesMut;
+    use ethers_core::rand;
+    use ethers_signers::{LocalWallet, Signer};
+    use itertools::Itertools;
+    use reth_primitives::{Genesis, Header, H256, U256};
+    use std::collections::HashSet;
+
+    // Single signer, no votes cast
+    #[test]
+    fn single_signer_no_votes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A"])
+            .with_votes(vec![TestVote::empty("A")])
+            .with_expected_result(vec!["A"])
+            .run()
+    }
+
+    // Single signer, voting to add two others (only accept first, second needs 2 votes)
+    #[test]
+    fn single_signer_two_candidates() {
+        SnapshotTest::default()
+            .with_signers(vec!["A"])
+            .with_votes(vec![
+                TestVote::new("A", "B", true),
+                TestVote::empty("B"),
+                TestVote::new("A", "C", true),
+            ])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Two signers, voting to add three others (only accept first two, third needs 3 votes already)
+    #[test]
+    fn two_signers_three_candidates() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![
+                TestVote::new("A", "C", true),
+                TestVote::new("B", "C", true),
+                TestVote::new("A", "D", true),
+                TestVote::new("B", "D", true),
+                TestVote::empty("C"),
+                TestVote::new("A", "E", true),
+                TestVote::new("B", "E", true),
+            ])
+            .with_expected_result(vec!["A", "B", "C", "D"])
+            .run()
+    }
+
+    // Single signer, dropping itself
+    #[test]
+    fn one_signer_one_drop_vote() {
+        SnapshotTest::default()
+            .with_signers(vec!["A"])
+            .with_votes(vec![TestVote::new("A", "A", false)])
+            .with_expected_result(vec![])
+            .run()
+    }
+
+    // Two signers, actually needing mutual consent to drop either of them (not fulfilled)
+    #[test]
+    fn two_signers_removing_one_not_fulfilled() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![TestVote::new("A", "B", false)])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Two signers, actually needing mutual consent to drop either of them (fulfilled)
+    #[test]
+    fn two_signers_two_drop_votes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![TestVote::new("A", "B", false), TestVote::new("B", "B", false)])
+            .with_expected_result(vec!["A"])
+            .run()
+    }
+
+    // Three signers, two of them deciding to drop the third
+    #[test]
+    fn three_signers_two_drop_votes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C"])
+            .with_votes(vec![TestVote::new("A", "C", false), TestVote::new("B", "C", false)])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Four signers, consensus of two not being enough to drop anyone
+    #[test]
+    fn four_signers_two_drop_votes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C", "D"])
+            .with_votes(vec![TestVote::new("A", "C", false), TestVote::new("B", "C", false)])
+            .with_expected_result(vec!["A", "B", "C", "D"])
+            .run()
+    }
+
+    // Four signers, consensus of three already being enough to drop someone
+    #[test]
+    fn four_signers_three_drop_votes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C", "D"])
+            .with_votes(vec![
+                TestVote::new("A", "D", false),
+                TestVote::new("B", "D", false),
+                TestVote::new("C", "D", false),
+            ])
+            .with_expected_result(vec!["A", "B", "C"])
+            .run()
+    }
+
+    // Authorizations are counted once per signer per target
+    #[test]
+    fn two_signers_duplicate_vote() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![
+                TestVote::new("A", "C", true),
+                TestVote::empty("B"),
+                TestVote::new("A", "C", true),
+                TestVote::empty("B"),
+                TestVote::new("A", "C", true),
+            ])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Authorizing multiple accounts concurrently is permitted
+    #[test]
+    fn two_signers_concurrent_votes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![
+                TestVote::new("A", "C", true),
+                TestVote::empty("B"),
+                TestVote::new("A", "D", true),
+                TestVote::empty("B"),
+                TestVote::empty("A"),
+                TestVote::new("B", "D", true),
+                TestVote::empty("A"),
+                TestVote::new("B", "C", true),
+            ])
+            .with_expected_result(vec!["A", "B", "C", "D"])
+            .run()
+    }
+
+    // Deauthorizations are counted once per signer per target
+    #[test]
+    fn two_signers_duplicate_drop_vote() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![
+                TestVote::new("A", "B", false),
+                TestVote::empty("B"),
+                TestVote::new("A", "B", false),
+                TestVote::empty("B"),
+                TestVote::new("A", "B", false),
+            ])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Deauthorizing multiple accounts concurrently is permitted
+    #[test]
+    fn four_signers_concurrent_drop_votes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C", "D"])
+            .with_votes(vec![
+                TestVote::new("A", "C", false),
+                TestVote::empty("B"),
+                TestVote::empty("C"),
+                TestVote::new("A", "D", false),
+                TestVote::empty("B"),
+                TestVote::empty("C"),
+                TestVote::empty("A"),
+                TestVote::new("B", "D", false),
+                TestVote::new("C", "D", false),
+                TestVote::empty("A"),
+                TestVote::new("B", "C", false),
+            ])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Drop votes from deauthorized signers are discarded immediately
+    #[test]
+    fn three_signers_drop_vote_discarded() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C"])
+            .with_votes(vec![
+                TestVote::new("C", "B", false),
+                TestVote::new("A", "C", false),
+                TestVote::new("B", "C", false),
+                TestVote::new("A", "B", false),
+            ])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Votes from deauthorized signers are discarded immediately
+    #[test]
+    fn three_signers_vote_discarded() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C"])
+            .with_votes(vec![
+                TestVote::new("C", "D", true),
+                TestVote::new("A", "C", false),
+                TestVote::new("B", "C", false),
+                TestVote::new("A", "D", true),
+            ])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Cascading changes are not allowed, only the account being voted on may change
+    #[test]
+    fn four_signers_no_cascading_changes() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C", "D"])
+            .with_votes(vec![
+                TestVote::new("A", "C", false),
+                TestVote::empty("B"),
+                TestVote::empty("C"),
+                TestVote::new("A", "D", false),
+                TestVote::new("B", "C", false),
+                TestVote::empty("C"),
+                TestVote::empty("A"),
+                TestVote::new("B", "D", false),
+                TestVote::new("C", "D", false),
+            ])
+            .with_expected_result(vec!["A", "B", "C"])
+            .run()
+    }
+
+    // Changes reaching consensus out of bounds (via a deauth) execute on touch
+    #[test]
+    fn four_signers_cascading_changes_on_touch() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C", "D"])
+            .with_votes(vec![
+                TestVote::new("A", "C", false),
+                TestVote::empty("B"),
+                TestVote::empty("C"),
+                TestVote::new("A", "D", false),
+                TestVote::new("B", "C", false),
+                TestVote::empty("C"),
+                TestVote::empty("A"),
+                TestVote::new("B", "D", false),
+                TestVote::new("C", "D", false),
+                TestVote::empty("A"),
+                TestVote::new("C", "C", true),
+            ])
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    // Changes reaching consensus out of bounds (via a deauth) may go out of consensus on first
+    // touch
+    #[test]
+    fn four_signers_cascading_changes_on_touch_discarded() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C", "D"])
+            .with_votes(vec![
+                TestVote::new("A", "C", false),
+                TestVote::empty("B"),
+                TestVote::empty("C"),
+                TestVote::new("A", "D", false),
+                TestVote::new("B", "C", false),
+                TestVote::empty("C"),
+                TestVote::empty("A"),
+                TestVote::new("B", "D", false),
+                TestVote::new("C", "D", false),
+                TestVote::empty("A"),
+                TestVote::new("B", "C", true),
+            ])
+            .with_expected_result(vec!["A", "B", "C"])
+            .run()
+    }
+
+    // Ensure that pending votes don't survive authorization status changes. This
+    // corner case can only appear if a signer is quickly added, removed and then
+    // re-added (or the inverse), while one of the original voters dropped. If a
+    // past vote is left cached in the system somewhere, this will interfere with
+    // the final signer outcome.
+    #[test]
+    fn five_signers_pending_votes_discarded() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C", "D", "E"])
+            .with_votes(vec![
+                // Authorize F, 3 votes needed
+                TestVote::new("A", "F", true),
+                TestVote::new("B", "F", true),
+                TestVote::new("C", "F", true),
+                // Deauthorize F, 4 votes needed (leave A's previous vote "unchanged")
+                TestVote::new("D", "F", false),
+                TestVote::new("E", "F", false),
+                TestVote::new("B", "F", false),
+                TestVote::new("C", "F", false),
+                // Almost authorize F, 2/3 votes needed
+                TestVote::new("D", "F", true),
+                TestVote::new("E", "F", true),
+                // Deauthorize A, 3 votes needed
+                TestVote::new("B", "A", false),
+                TestVote::new("C", "A", false),
+                TestVote::new("D", "A", false),
+                // Finish authorizing F, 3/3 votes needed
+                TestVote::new("B", "F", true),
+            ])
+            .with_expected_result(vec!["B", "C", "D", "E", "F"])
+            .run()
+    }
+
+    // Epoch transitions reset all votes to allow chain checkpointing
+    #[test]
+    fn two_signers_votes_reset_on_epoch_transition() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![
+                TestVote::new("A", "C", true),
+                TestVote::empty("B"),
+                TestVote::checkpoint("A", vec!["A", "B"]),
+                TestVote::new("B", "C", true),
+            ])
+            .with_epoch(3)
+            .with_expected_result(vec!["A", "B"])
+            .run()
+    }
+
+    type SignerLabel = String;
+
+    #[derive(Debug, Clone)]
+    enum TestVote {
+        Empty(
+            // Label of the signer who voted.
+            SignerLabel,
+        ),
+        Checkpoint(
+            // Label of the signer who voted.
+            SignerLabel,
+            // The collection of expected signer labels at this block
+            Vec<SignerLabel>,
+        ),
+        Auth(
+            // Label of the signer who voted.
+            SignerLabel,
+            // Label of the signer for whom the vote was cast.
+            SignerLabel,
+            // Flag indicating whether the vote is authorizing.
+            bool,
+        ),
+    }
+
+    impl TestVote {
+        fn new(signer: &str, subject: &str, authorizing: bool) -> Self {
+            Self::Auth(signer.to_owned(), subject.to_owned(), authorizing)
+        }
+
+        fn empty(signer: &str) -> Self {
+            Self::Empty(signer.to_owned())
+        }
+
+        fn checkpoint(signer: &str, signers: Vec<&str>) -> Self {
+            Self::Checkpoint(signer.to_owned(), signers.into_iter().map(str::to_owned).collect())
+        }
+
+        fn signer_label(&self) -> &SignerLabel {
+            match self {
+                TestVote::Auth(signer, _, _) |
+                TestVote::Checkpoint(signer, _) |
+                TestVote::Empty(signer) => signer,
+            }
+        }
+    }
+
+    struct SnapshotTest {
+        accounts: HashMap<SignerLabel, LocalWallet>,
+        config: CliqueConfig,
+        signers: HashSet<SignerLabel>,
+        votes: Vec<TestVote>,
+        expected_result: Vec<SignerLabel>,
+    }
+
+    impl Default for SnapshotTest {
+        fn default() -> Self {
+            Self {
+                accounts: HashMap::default(),
+                votes: Vec::default(),
+                signers: Default::default(),
+                expected_result: Vec::default(),
+                config: CliqueConfig { period: 1, epoch: EPOCH_LENGTH },
+            }
+        }
+    }
+
+    impl SnapshotTest {
+        fn with_signers(mut self, signers: Vec<&str>) -> Self {
+            for signer in signers {
+                self.ensure_account_exists(signer);
+                self.signers.insert(signer.to_owned());
+            }
+            self
+        }
+
+        fn with_votes(mut self, votes: Vec<TestVote>) -> Self {
+            for vote in votes {
+                match &vote {
+                    TestVote::Auth(signer, subject, _) => {
+                        self.ensure_account_exists(signer);
+                        self.ensure_account_exists(subject);
+                    }
+                    TestVote::Checkpoint(signer, _) | TestVote::Empty(signer) => {
+                        self.ensure_account_exists(signer)
+                    }
+                }
+                self.votes.push(vote);
+            }
+            self
+        }
+
+        fn with_epoch(mut self, epoch: u64) -> Self {
+            self.config.epoch = epoch;
+            self
+        }
+
+        fn with_expected_result(mut self, expected: Vec<&str>) -> Self {
+            for account in expected {
+                self.ensure_account_exists(account);
+                self.expected_result.push(account.to_owned());
+            }
+            self
+        }
+
+        // Generate random private key for a label if it doesn't exist yet.
+        fn ensure_account_exists(&mut self, label: &str) {
+            self.accounts
+                .entry(label.to_owned())
+                .or_insert(LocalWallet::new(&mut rand::thread_rng()));
+        }
+
+        fn get_account(&self, label: &str) -> &LocalWallet {
+            self.accounts.get(label).expect("must exist")
+        }
+
+        fn get_account_address(&self, label: &str) -> Address {
+            Address::from(self.get_account(label).address().as_fixed_bytes())
+        }
+
+        fn get_sorted_signers(&self) -> Vec<Address> {
+            self.signers.iter().map(|label| self.get_account_address(label)).sorted().collect()
+        }
+
+        fn genesis(&self) -> SealedHeader {
+            // Construct genesis block
+            let mut extra_data = BytesMut::with_capacity(
+                EXTRA_VANITY + self.signers.len() * Address::len_bytes() + EXTRA_SEAL,
+            );
+            extra_data.put_bytes(0, EXTRA_VANITY);
+            for signer in self.get_sorted_signers() {
+                extra_data.put(signer.as_bytes());
+            }
+            extra_data.put_bytes(0, EXTRA_SEAL);
+
+            let mut genesis = Genesis::default();
+            genesis.extra_data = extra_data.freeze().into();
+            Header::from(genesis).clique_seal_slow()
+        }
+
+        fn construct_clique_header(
+            &self,
+            number: BlockNumber,
+            parent: H256,
+            vote: &TestVote,
+        ) -> SealedHeader {
+            let mut header = Header::default();
+            header.mix_hash = rand::random();
+            header.number = number;
+            header.parent_hash = parent;
+            header.difficulty = U256::from(DIFF_INTURN);
+            if let TestVote::Auth(_, subject, authorizing) = vote {
+                header.beneficiary = self.get_account_address(subject);
+                header.nonce =
+                    H64::from(if *authorizing { NONCE_AUTH_VOTE } else { NONCE_DROP_VOTE })
+                        .to_low_u64_ne();
+            }
+
+            // Set extra data for sigining
+            header.extra_data = match vote {
+                TestVote::Checkpoint(_, expected) => {
+                    let mut checkpoint_extra_data = BytesMut::with_capacity(
+                        EXTRA_VANITY + EXTRA_SEAL + expected.len() * Address::len_bytes(),
+                    );
+                    checkpoint_extra_data.put_bytes(0, EXTRA_VANITY);
+                    expected.iter().map(|label| self.get_account_address(label)).sorted().for_each(
+                        |address| {
+                            checkpoint_extra_data.put(address.as_slice());
+                        },
+                    );
+                    checkpoint_extra_data.put_bytes(0, EXTRA_SEAL);
+                    checkpoint_extra_data.freeze().into()
+                }
+                _ => {
+                    let shallow_extra_data_len = EXTRA_VANITY + EXTRA_SEAL;
+                    let mut shallow_extra_data = BytesMut::with_capacity(shallow_extra_data_len);
+                    shallow_extra_data.put_bytes(0, shallow_extra_data_len);
+                    shallow_extra_data.freeze().into()
+                }
+            };
+
+            // Get header hash and sign it
+            let hash = header.clique_hash_slow();
+            let mut signature = self
+                .get_account(&vote.signer_label())
+                .sign_hash(ethers_core::types::H256::from_slice(hash.as_bytes()));
+            signature.v -= 27; // TODO:
+
+            // Construct and set extra data with extra seal (signature)
+            let mut extra_data_with_seal =
+                BytesMut::from(&header.extra_data[..header.extra_data.len() - EXTRA_SEAL]);
+            extra_data_with_seal.put(&signature.to_vec()[..]);
+            header.extra_data = extra_data_with_seal.freeze().into();
+
+            header.seal(hash)
+        }
+
+        fn run(self) {
+            let genesis = self.genesis();
+
+            // Generate random headers
+            let mut headers = Vec::with_capacity(self.votes.len());
+            for (idx, vote) in self.votes.iter().enumerate() {
+                let header = self.construct_clique_header(
+                    idx as u64 + 1,
+                    headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(genesis.hash()),
+                    &vote,
+                );
+                headers.push(header);
+            }
+
+            let signers =
+                self.signers.iter().map(|label| self.get_account_address(label)).collect();
+            let mut snapshot = Snapshot {
+                config: self.config.clone(),
+                hash: genesis.hash(),
+                number: 0,
+                signers,
+                recents: Default::default(),
+                tally: Default::default(),
+                votes: Default::default(),
+            };
+
+            // TODO: apply
+            for header in headers {
+                let result = snapshot.apply(&header);
+                assert_matches!(result, Ok(()));
+                assert_eq!(snapshot.number, header.number);
+                assert_eq!(snapshot.hash, header.hash());
+                if is_checkpoint_block(&self.config, header.number) {
+                    assert_eq!(
+                        snapshot.signers_bytes(),
+                        Bytes::from(
+                            &header.extra_data[EXTRA_VANITY..header.extra_data.len() - EXTRA_SEAL]
+                        )
+                    );
+                }
+            }
+
+            assert_eq!(
+                snapshot.signers,
+                self.expected_result.iter().map(|label| self.get_account_address(label)).collect()
+            );
+        }
     }
 }

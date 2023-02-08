@@ -308,10 +308,6 @@ impl StatusUpdater for TestStatusUpdater {
 
 #[async_trait::async_trait]
 impl Consensus for TestConsensus {
-    fn seal_header(&self, header: Header) -> Result<SealedHeader, consensus::Error> {
-        Ok(header.seal_slow())
-    }
-
     fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
         self.channel.1.clone()
     }

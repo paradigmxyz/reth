@@ -1,6 +1,6 @@
 use super::Error;
 use async_trait::async_trait;
-use reth_primitives::{BlockNumber, Header, SealedBlock, SealedHeader};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::fmt::Debug;
 use tokio::sync::watch::Receiver;
@@ -9,9 +9,6 @@ use tokio::sync::watch::Receiver;
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {
-    /// Calculate header hash and seal the Header so that it can't be changed.
-    fn seal_header(&self, header: Header) -> Result<SealedHeader, Error>;
-
     /// Get a receiver for the fork choice state
     fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
 

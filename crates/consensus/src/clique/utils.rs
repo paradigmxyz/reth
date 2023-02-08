@@ -1,8 +1,9 @@
 //! Utility methods for clique consensus.
-
-use super::constants::EXTRA_SEAL;
 use reth_interfaces::consensus::CliqueError;
-use reth_primitives::{recovery::secp256k1, Address, BlockNumber, CliqueConfig, SealedHeader};
+use reth_primitives::{
+    constants::clique::EXTRA_SEAL, recovery::secp256k1, Address, BlockNumber, CliqueConfig,
+    SealedHeader,
+};
 
 /// Recover the account from signed header per clique consensus rules.
 pub fn recover_header_signer(header: &SealedHeader) -> Result<Address, CliqueError> {

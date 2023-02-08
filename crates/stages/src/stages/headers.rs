@@ -287,7 +287,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_interfaces::{
-            consensus::{Consensus, ForkchoiceState},
+            consensus::ForkchoiceState,
             p2p::headers::downloader::HeaderDownloader,
             test_utils::{
                 generators::{random_header, random_header_range},
@@ -382,7 +382,7 @@ mod tests {
                                 // validate the header
                                 let header = tx.get::<tables::Headers>(key)?;
                                 assert!(header.is_some());
-                                let header = self.consensus.seal_header(header.unwrap()).unwrap();
+                                let header = header.unwrap().seal_slow();
                                 assert_eq!(header.hash(), hash);
                             }
                             Ok(())

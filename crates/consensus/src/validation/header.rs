@@ -212,13 +212,13 @@ pub fn validate_eip_1559_base_fee(
 pub mod clique {
     use super::*;
     use crate::clique::{
-        constants::*,
         snapshot::Snapshot,
         utils::{is_checkpoint_block, recover_header_signer},
     };
     use reth_interfaces::consensus::{CliqueError, Error};
     use reth_primitives::{
-        Address, Bytes, ChainSpec, CliqueConfig, SealedHeader, EMPTY_OMMER_ROOT, H64, U256,
+        constants::clique::*, Address, Bytes, ChainSpec, CliqueConfig, SealedHeader,
+        EMPTY_OMMER_ROOT, H64, U256,
     };
     use std::time::SystemTime;
 

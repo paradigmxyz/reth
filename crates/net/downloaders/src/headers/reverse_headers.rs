@@ -199,12 +199,7 @@ where
         let mut validated = Vec::with_capacity(headers.len());
 
         for parent in headers {
-            let parent =
-                self.consensus.seal_header(parent).map_err(|error| HeadersResponseError {
-                    request: request.clone(),
-                    peer_id: Some(peer_id),
-                    error: error.into(),
-                })?;
+            let parent = parent.seal_slow();
 
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -300,13 +295,7 @@ where
                     })
                 }
 
-                let target = self.consensus.seal_header(headers.remove(0)).map_err(|error| {
-                    HeadersResponseError {
-                        request: request.clone(),
-                        peer_id: Some(peer_id),
-                        error: error.into(),
-                    }
-                })?;
+                let target = headers.remove(0).seal_slow();
 
                 if target.hash() != sync_target_hash {
                     return Err(HeadersResponseError {

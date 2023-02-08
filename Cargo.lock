@@ -4044,7 +4044,11 @@ dependencies = [
 name = "reth-consensus"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "bytes",
+ "ethers-core",
+ "ethers-signers",
+ "itertools 0.10.5",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
