@@ -65,7 +65,7 @@ impl PeersHandle {
         rx.await.unwrap_or(None)
     }
 
-    /// Returns all the currently connected peers and their reputations.
+    /// Returns all peers in the peerset.
     pub async fn all_peers(&self) -> Vec<NodeRecord> {
         let (tx, rx) = oneshot::channel();
         self.send(PeerCommand::GetPeers(tx));
@@ -895,7 +895,7 @@ pub(crate) enum PeerCommand {
     ReputationChange(PeerId, ReputationChangeKind),
     /// Get information about a peer
     GetPeer(PeerId, oneshot::Sender<Option<Peer>>),
-    /// Get reputation and address information on all peers
+    /// Get node information on all peers
     GetPeers(oneshot::Sender<Vec<NodeRecord>>),
 }
 
