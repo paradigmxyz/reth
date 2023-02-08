@@ -19,6 +19,12 @@ pub(crate) enum EthApiError {
     InvalidTransactionSignature,
     #[error(transparent)]
     PoolError(GethTxPoolError),
+    #[error("Unknown block number")]
+    // TODO return -32602 here
+    UnknownBlockNumber,
+    /// Other internal error
+    #[error(transparent)]
+    Internal(#[from] reth_interfaces::Error),
 }
 
 impl_to_rpc_result!(EthApiError);

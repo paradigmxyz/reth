@@ -20,8 +20,11 @@ use reth_eth_wire::{
     DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics_common::metered_sender::MeteredSender;
-use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, PeerId, H256, U256};
+use reth_net_common::{
+    bandwidth_meter::{BandwidthMeter, MeteredStream},
+    stream::HasRemoteAddr,
+};
+use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
 use reth_tasks::TaskExecutor;
 use secp256k1::SecretKey;
 use std::{
@@ -33,6 +36,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
+    io::{AsyncRead, AsyncWrite},
     net::TcpStream,
     sync::{mpsc, oneshot},
 };
@@ -176,15 +180,10 @@ impl SessionManager {
     ///
     /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
     /// active [`ForkId`](ForkId). See also [`ForkFilter::set_head`].
-    pub(crate) fn on_status_update(
-        &mut self,
-        height: u64,
-        hash: H256,
-        total_difficulty: U256,
-    ) -> Option<ForkTransition> {
-        self.status.blockhash = hash;
-        self.status.total_difficulty = total_difficulty;
-        self.fork_filter.set_head(height)
+    pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
+        self.status.blockhash = head.hash;
+        self.status.total_difficulty = head.total_difficulty;
+        self.fork_filter.set_head(head)
     }
 
     /// An incoming TCP connection was received. This starts the authentication process to turn this
@@ -265,6 +264,21 @@ impl SessionManager {
         if let Some(session) = self.active_sessions.get(&node) {
             session.disconnect(reason);
         }
+    }
+
+    /// Sends a disconnect message to the peer with the given [DisconnectReason].
+    pub(crate) fn disconnect_incoming_connection(
+        &mut self,
+        stream: TcpStream,
+        reason: DisconnectReason,
+    ) {
+        let secret_key = self.secret_key;
+
+        self.spawn(async move {
+            if let Ok(stream) = get_eciess_stream(stream, secret_key, Direction::Incoming).await {
+                let _ = UnauthedP2PStream::new(stream).send_disconnect(reason).await;
+            }
+        });
     }
 
     /// Initiates a shutdown of all sessions.
@@ -418,11 +432,11 @@ impl SessionManager {
                     commands_rx: ReceiverStream::new(commands_rx),
                     to_session: self.active_session_tx.clone(),
                     pending_message_to_session: None,
-                    request_tx: ReceiverStream::new(messages_rx).fuse(),
+                    internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
                     queued_outgoing: Default::default(),
-                    received_requests: Default::default(),
+                    received_requests_from_remote: Default::default(),
                     internal_request_timeout_interval: tokio::time::interval(
                         self.initial_internal_request_timeout,
                     ),
@@ -749,38 +763,21 @@ async fn authenticate(
     status: Status,
     fork_filter: ForkFilter,
 ) {
-    let stream = match direction {
-        Direction::Incoming => match ECIESStream::incoming(stream, secret_key).await {
-            Ok(stream) => stream,
-            Err(error) => {
-                let _ = events
-                    .send(PendingSessionEvent::EciesAuthError {
-                        remote_addr,
-                        session_id,
-                        error,
-                        direction,
-                    })
-                    .await;
-                return
-            }
-        },
-        Direction::Outgoing(remote_peer_id) => {
-            match ECIESStream::connect(stream, secret_key, remote_peer_id).await {
-                Ok(stream) => stream,
-                Err(error) => {
-                    let _ = events
-                        .send(PendingSessionEvent::EciesAuthError {
-                            remote_addr,
-                            session_id,
-                            error,
-                            direction,
-                        })
-                        .await;
-                    return
-                }
-            }
+    let stream = match get_eciess_stream(stream, secret_key, direction).await {
+        Ok(stream) => stream,
+        Err(error) => {
+            let _ = events
+                .send(PendingSessionEvent::EciesAuthError {
+                    remote_addr,
+                    session_id,
+                    error,
+                    direction,
+                })
+                .await;
+            return
         }
     };
+
     let unauthed = UnauthedP2PStream::new(stream);
 
     let auth = authenticate_stream(
@@ -807,6 +804,21 @@ async fn authenticate(
         }
         Either::Right((res, _)) => {
             let _ = events.send(res).await;
+        }
+    }
+}
+
+/// Returns an [ECIESStream] if it can be built. If not, send a
+/// [PendingSessionEvent::EciesAuthError] and returns `None`
+async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
+    stream: Io,
+    secret_key: SecretKey,
+    direction: Direction,
+) -> Result<ECIESStream<Io>, ECIESError> {
+    match direction {
+        Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
+        Direction::Outgoing(remote_peer_id) => {
+            ECIESStream::connect(stream, secret_key, remote_peer_id).await
         }
     }
 }

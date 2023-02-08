@@ -12,7 +12,6 @@ use reth_primitives::{
     Address, ChainInfo, H256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
-use reth_rpc_types::Transaction;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
@@ -49,20 +48,20 @@ pub trait EthApiSpec: Send + Sync {
 /// or in other network handlers (for example ipc).
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
-pub struct EthApi<Pool, Client, Network> {
+pub struct EthApi<Client, Pool, Network> {
     /// All nested fields bundled together.
-    inner: Arc<EthApiInner<Pool, Client, Network>>,
+    inner: Arc<EthApiInner<Client, Pool, Network>>,
 }
 
-impl<Pool, Client, Network> EthApi<Pool, Client, Network> {
+impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Arc<Client>, pool: Pool, network: Network) -> Self {
+    pub fn new(client: Client, pool: Pool, network: Network) -> Self {
         let inner = EthApiInner { client, pool, network, signers: Default::default() };
         Self { inner: Arc::new(inner) }
     }
 
     /// Returns the inner `Client`
-    pub(crate) fn client(&self) -> &Arc<Client> {
+    pub(crate) fn client(&self) -> &Client {
         &self.inner.client
     }
 
@@ -79,12 +78,24 @@ impl<Pool, Client, Network> EthApi<Pool, Client, Network> {
 
 // === State access helpers ===
 
-impl<Pool, Client, Network> EthApi<Pool, Client, Network>
+impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
 {
     fn convert_block_number(&self, num: BlockNumber) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
+    }
+
+    /// Returns the state at the given [BlockId] enum or the latest.
+    pub(crate) fn state_at_block_id_or_latest(
+        &self,
+        block_id: Option<BlockId>,
+    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+        if let Some(block_id) = block_id {
+            self.state_at_block_id(block_id)
+        } else {
+            self.latest_state()
+        }
     }
 
     /// Returns the state at the given [BlockId] enum.
@@ -127,12 +138,19 @@ where
     ) -> Result<<Client as StateProviderFactory>::HistorySP<'_>> {
         self.client().history_by_block_number(block_number)
     }
+
+    /// Returns the _latest_ state
+    pub(crate) fn latest_state(
+        &self,
+    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+        self.state_at_block_number(BlockNumber::Latest)
+    }
 }
 
 #[async_trait]
-impl<Pool, Client, Network> EthApiSpec for EthApi<Pool, Client, Network>
+impl<Client, Pool, Network> EthApiSpec for EthApi<Client, Pool, Network>
 where
-    Pool: TransactionPool<Transaction = Transaction> + Clone + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,
     Network: NetworkInfo + 'static,
 {
@@ -160,11 +178,11 @@ where
 }
 
 /// Container type `EthApi`
-struct EthApiInner<Pool, Client, Network> {
+struct EthApiInner<Client, Pool, Network> {
     /// The transaction pool.
     pool: Pool,
     /// The client that can interact with the chain.
-    client: Arc<Client>,
+    client: Client,
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers

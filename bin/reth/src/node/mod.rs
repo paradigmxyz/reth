@@ -20,6 +20,7 @@ use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
+use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     prelude::*,
@@ -68,17 +69,17 @@ pub struct Command {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     metrics: Option<SocketAddr>,
 
-    /// Set the chain tip manually for testing purposes.
-    ///
-    /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip", help_heading = "Debug")]
-    tip: Option<H256>,
-
     #[clap(flatten)]
     network: NetworkOpts,
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
+
+    /// Set the chain tip manually for testing purposes.
+    ///
+    /// NOTE: This is a temporary flag
+    #[arg(long = "debug.tip", help_heading = "Debug")]
+    tip: Option<H256>,
 
     /// Runs the sync only up to the specified block
     #[arg(long = "debug.max-block", help_heading = "Debug")]
@@ -116,6 +117,18 @@ impl Command {
         let network = netconf.start_network().await?;
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+
+        // TODO(mattsse): cleanup, add cli args
+        let _rpc_server = reth_rpc_builder::launch(
+            ShareableDatabase::new(db.clone()),
+            reth_transaction_pool::test_utils::testing_pool(),
+            network.clone(),
+            TransportRpcModuleConfig::default()
+                .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
+            RpcServerConfig::default().with_http(Default::default()),
+        )
+        .await?;
+        info!(target: "reth::cli", "Started RPC server");
 
         let mut pipeline = self.build_pipeline(&config, &network, &consensus, &db).await?;
 
@@ -223,6 +236,7 @@ impl Command {
             .add_stages(
                 OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
                     TotalDifficultyStage {
+                        chain_spec: self.chain.clone(),
                         commit_threshold: stage_conf.total_difficulty.commit_threshold,
                     },
                 ),

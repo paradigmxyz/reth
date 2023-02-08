@@ -18,7 +18,7 @@ macro_rules! stage_test_suite {
                 assert_matches::assert_matches!(result, Ok(_));
 
                 // Validate the stage execution
-                assert!(runner.validate_execution(input, result.unwrap().ok()).is_ok(), "execution validation");
+                assert_matches::assert_matches!(runner.validate_execution(input, result.unwrap().ok()),Ok(_), "execution validation");
             }
 
             // Run the complete stage execution flow.
@@ -47,7 +47,7 @@ macro_rules! stage_test_suite {
                 );
 
                 // Validate the stage execution
-                assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+                assert_matches::assert_matches!(runner.validate_execution(input, result.ok()),Ok(_), "execution validation");
             }
 
             // Check that unwind does not panic on no new entries within the input range.
@@ -70,7 +70,7 @@ macro_rules! stage_test_suite {
                 );
 
                 // Validate the stage unwind
-                assert!(runner.validate_unwind(input).is_ok(), "unwind validation");
+                assert_matches::assert_matches!(runner.validate_unwind(input),Ok(_), "unwind validation");
             }
 
             // Run complete execute and unwind flow.
@@ -97,7 +97,7 @@ macro_rules! stage_test_suite {
                     Ok(ExecOutput { done, stage_progress })
                         if done && stage_progress == previous_stage
                 );
-                assert!(runner.validate_execution(execute_input, result.ok()).is_ok(), "execution validation");
+                assert_matches::assert_matches!(runner.validate_execution(execute_input, result.ok()),Ok(_), "execution validation");
 
 
                 // Run stage unwind
@@ -115,7 +115,7 @@ macro_rules! stage_test_suite {
                 );
 
                 // Validate the stage unwind
-                assert!(runner.validate_unwind(unwind_input).is_ok(), "unwind validation");
+                assert_matches::assert_matches!(runner.validate_unwind(unwind_input),Ok(_), "unwind validation");
             }
         }
     };
@@ -156,7 +156,7 @@ macro_rules! stage_test_suite_ext {
                 );
 
                 // Validate the stage execution
-                assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+                assert_matches::assert_matches!(runner.validate_execution(input, result.ok()),Ok(_), "execution validation");
             }
         }
     };

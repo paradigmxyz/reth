@@ -5,7 +5,7 @@ use reth_primitives::H256;
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::RichBlock;
 
-impl<Pool, Client, Network> EthApi<Pool, Client, Network>
+impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
 {

@@ -9,7 +9,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    Status,
+    DisconnectReason, Status,
 };
 use reth_primitives::PeerId;
 use reth_provider::BlockProvider;
@@ -205,10 +205,11 @@ where
                             trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
                         }
                         InboundConnectionError::ExceedsLimit(limit) => {
-                            // We currently don't have additional capacity to establish a session
-                            // from an incoming connection, so we drop
-                            // the connection.
-                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
+                            self.sessions.disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
                     return None

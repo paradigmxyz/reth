@@ -17,15 +17,21 @@ pub use latest::{LatestStateProvider, LatestStateProviderRef};
 /// A common provider that fetches data from a database.
 ///
 /// This provider implements most provider or provider factory traits.
-pub struct ShareableDatabase<DB: Database> {
+pub struct ShareableDatabase<DB> {
     /// Database
     db: Arc<DB>,
 }
 
-impl<DB: Database> ShareableDatabase<DB> {
+impl<DB> ShareableDatabase<DB> {
     /// create new database provider
     pub fn new(db: Arc<DB>) -> Self {
         Self { db }
+    }
+}
+
+impl<DB> Clone for ShareableDatabase<DB> {
+    fn clone(&self) -> Self {
+        Self { db: Arc::clone(&self.db) }
     }
 }
 

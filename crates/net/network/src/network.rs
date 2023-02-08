@@ -13,7 +13,7 @@ use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, NetworkStatus, PeerKind, Peers, PeersInfo, ReputationChangeKind,
 };
-use reth_primitives::{NodeRecord, PeerId, TransactionSigned, TxHash, H256, U256};
+use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, TxHash, H256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -124,8 +124,8 @@ impl NetworkHandle {
     }
 
     /// Update the status of the node.
-    pub fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
-        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
+    pub fn update_status(&self, head: Head) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { head });
     }
 
     /// Announce a block over devp2p
@@ -236,8 +236,8 @@ impl NetworkInfo for NetworkHandle {
 
 impl StatusUpdater for NetworkHandle {
     /// Update the status of the node.
-    fn update_status(&self, height: u64, hash: H256, total_difficulty: U256) {
-        self.send_message(NetworkHandleMessage::StatusUpdate { height, hash, total_difficulty });
+    fn update_status(&self, head: Head) {
+        self.send_message(NetworkHandleMessage::StatusUpdate { head });
     }
 }
 
@@ -305,7 +305,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Returns the client that can be used to interact with the network.
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
-    StatusUpdate { height: u64, hash: H256, total_difficulty: U256 },
+    StatusUpdate { head: Head },
     /// Get the currenet status
     GetStatus(oneshot::Sender<NetworkStatus>),
     /// Get PeerInfo from all the peers
