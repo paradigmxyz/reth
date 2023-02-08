@@ -42,51 +42,55 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
 
-        if !*this.done {
+        'outer: loop {
+            // try to drain buffered items
+            while let Some(maybe_next) = this.pending.peek_mut() {
+                match (maybe_next.0).cmp(&*this.next) {
+                    Ordering::Less => {
+                        PeekMut::pop(maybe_next);
+                        continue
+                    }
+                    Ordering::Equal => {
+                        let next = PeekMut::pop(maybe_next);
+                        *this.next = *this.next + Key::one();
+                        return Poll::Ready(Some(Ok(next.into())))
+                    }
+                    Ordering::Greater => {
+                        if *this.done {
+                            let next = PeekMut::pop(maybe_next);
+                            return Poll::Ready(Some(Ok(next.into())))
+                        }
+                        break
+                    }
+                }
+            }
+
+            if *this.done {
+                return Poll::Ready(None)
+            }
+
             loop {
                 match this.stream.as_mut().poll_next(cx) {
                     Poll::Pending => break,
                     Poll::Ready(item) => match item {
                         Some(Ok((k, v))) => {
+                            if k == *this.next {
+                                *this.next = *this.next + Key::one();
+                                return Poll::Ready(Some(Ok((k, v))))
+                            }
                             this.pending.push(OrderedItem(k, v));
                         }
                         Some(err @ Err(_)) => return Poll::Ready(Some(err)),
                         None => {
                             *this.done = true;
-                            break
+                            continue 'outer
                         }
                     },
                 }
             }
-        }
 
-        // try to drain buffered items
-        while let Some(maybe_next) = this.pending.peek_mut() {
-            match (maybe_next.0).cmp(&*this.next) {
-                Ordering::Less => {
-                    PeekMut::pop(maybe_next);
-                    continue
-                }
-                Ordering::Equal => {
-                    let next = PeekMut::pop(maybe_next);
-                    *this.next = *this.next + Key::one();
-                    return Poll::Ready(Some(Ok(next.into())))
-                }
-                Ordering::Greater => {
-                    if *this.done {
-                        let next = PeekMut::pop(maybe_next);
-                        return Poll::Ready(Some(Ok(next.into())))
-                    }
-                    break
-                }
-            }
+            return Poll::Pending
         }
-
-        if *this.done {
-            return Poll::Ready(None)
-        }
-
-        Poll::Pending
     }
 }
 
