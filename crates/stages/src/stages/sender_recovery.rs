@@ -16,6 +16,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
+use crate::stages::stream::SequentialPairStream;
 
 const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 
@@ -97,10 +98,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 let _ = tx.send(res);
             });
         }
-
         drop(tx);
 
-        let mut recovered_senders = UnboundedReceiverStream::new(rx);
+        let mut recovered_senders = SequentialPairStream::new(start_tx_index, UnboundedReceiverStream::new(rx));
 
         while let Some(recovered) = recovered_senders.next().await {
             let (id, sender) = recovered?;
