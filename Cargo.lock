@@ -4097,7 +4097,6 @@ dependencies = [
  "modular-bitfield",
  "proptest",
  "proptest-derive",
- "revm-interpreter",
  "revm-primitives",
  "serde",
  "test-fuzz",

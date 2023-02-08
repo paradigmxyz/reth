@@ -13,7 +13,7 @@ scale = ["codecs-derive/scale"]
 postcard = ["codecs-derive/postcard"]
 no_codec = ["codecs-derive/no_codec"]
 arbitrary = [
-    "revm-interpreter/arbitrary",
+    "revm-primitives/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
@@ -31,9 +31,9 @@ proptest = { version = "1.0", optional = true }
 proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
-revm-interpreter = {version = "1.0.0", features = [
+revm-primitives = {version = "1.0.0", features = [
     "serde",
-    "arbitrary",
+    "arbitrary"
 ] }
 
 serde = "1.0"
