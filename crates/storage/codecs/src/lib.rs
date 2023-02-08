@@ -273,7 +273,7 @@ impl Compact for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm_interpreter::primitives::B160;
+    use revm_primitives::B160;
 
     pub type Address = B160;
 
