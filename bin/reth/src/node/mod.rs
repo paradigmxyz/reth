@@ -123,6 +123,7 @@ impl Command {
 
         self.start_metrics_endpoint()?;
 
+        debug!(target: "reth::cli", chainspec=serde_json::to_string(&self.chain)?, "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
 
         match &self.import {
@@ -318,6 +319,7 @@ impl Command {
         let mut builder = Pipeline::builder();
 
         if let Some(max_block) = self.max_block {
+            debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
             builder = builder.with_max_block(max_block)
         }
 
