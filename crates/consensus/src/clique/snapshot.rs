@@ -279,7 +279,7 @@ mod tests {
         SnapshotTest::default()
             .with_signers(vec!["A"])
             .with_votes(vec![TestVote::empty("A")])
-            .with_expected_result(vec!["A"])
+            .with_expected_singers(vec!["A"])
             .run()
     }
 
@@ -293,7 +293,7 @@ mod tests {
                 TestVote::empty("B"),
                 TestVote::new("A", "C", true),
             ])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -311,7 +311,7 @@ mod tests {
                 TestVote::new("A", "E", true),
                 TestVote::new("B", "E", true),
             ])
-            .with_expected_result(vec!["A", "B", "C", "D"])
+            .with_expected_singers(vec!["A", "B", "C", "D"])
             .run()
     }
 
@@ -321,7 +321,7 @@ mod tests {
         SnapshotTest::default()
             .with_signers(vec!["A"])
             .with_votes(vec![TestVote::new("A", "A", false)])
-            .with_expected_result(vec![])
+            .with_expected_singers(vec![])
             .run()
     }
 
@@ -331,7 +331,7 @@ mod tests {
         SnapshotTest::default()
             .with_signers(vec!["A", "B"])
             .with_votes(vec![TestVote::new("A", "B", false)])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -341,7 +341,7 @@ mod tests {
         SnapshotTest::default()
             .with_signers(vec!["A", "B"])
             .with_votes(vec![TestVote::new("A", "B", false), TestVote::new("B", "B", false)])
-            .with_expected_result(vec!["A"])
+            .with_expected_singers(vec!["A"])
             .run()
     }
 
@@ -351,7 +351,7 @@ mod tests {
         SnapshotTest::default()
             .with_signers(vec!["A", "B", "C"])
             .with_votes(vec![TestVote::new("A", "C", false), TestVote::new("B", "C", false)])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -361,7 +361,7 @@ mod tests {
         SnapshotTest::default()
             .with_signers(vec!["A", "B", "C", "D"])
             .with_votes(vec![TestVote::new("A", "C", false), TestVote::new("B", "C", false)])
-            .with_expected_result(vec!["A", "B", "C", "D"])
+            .with_expected_singers(vec!["A", "B", "C", "D"])
             .run()
     }
 
@@ -375,7 +375,7 @@ mod tests {
                 TestVote::new("B", "D", false),
                 TestVote::new("C", "D", false),
             ])
-            .with_expected_result(vec!["A", "B", "C"])
+            .with_expected_singers(vec!["A", "B", "C"])
             .run()
     }
 
@@ -391,7 +391,7 @@ mod tests {
                 TestVote::empty("B"),
                 TestVote::new("A", "C", true),
             ])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -410,7 +410,7 @@ mod tests {
                 TestVote::empty("A"),
                 TestVote::new("B", "C", true),
             ])
-            .with_expected_result(vec!["A", "B", "C", "D"])
+            .with_expected_singers(vec!["A", "B", "C", "D"])
             .run()
     }
 
@@ -426,7 +426,7 @@ mod tests {
                 TestVote::empty("B"),
                 TestVote::new("A", "B", false),
             ])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -448,7 +448,7 @@ mod tests {
                 TestVote::empty("A"),
                 TestVote::new("B", "C", false),
             ])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -463,7 +463,7 @@ mod tests {
                 TestVote::new("B", "C", false),
                 TestVote::new("A", "B", false),
             ])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -478,7 +478,7 @@ mod tests {
                 TestVote::new("B", "C", false),
                 TestVote::new("A", "D", true),
             ])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -498,7 +498,7 @@ mod tests {
                 TestVote::new("B", "D", false),
                 TestVote::new("C", "D", false),
             ])
-            .with_expected_result(vec!["A", "B", "C"])
+            .with_expected_singers(vec!["A", "B", "C"])
             .run()
     }
 
@@ -520,7 +520,7 @@ mod tests {
                 TestVote::empty("A"),
                 TestVote::new("C", "C", true),
             ])
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
             .run()
     }
 
@@ -543,7 +543,7 @@ mod tests {
                 TestVote::empty("A"),
                 TestVote::new("B", "C", true),
             ])
-            .with_expected_result(vec!["A", "B", "C"])
+            .with_expected_singers(vec!["A", "B", "C"])
             .run()
     }
 
@@ -576,7 +576,7 @@ mod tests {
                 // Finish authorizing F, 3/3 votes needed
                 TestVote::new("B", "F", true),
             ])
-            .with_expected_result(vec!["B", "C", "D", "E", "F"])
+            .with_expected_singers(vec!["B", "C", "D", "E", "F"])
             .run()
     }
 
@@ -592,7 +592,49 @@ mod tests {
                 TestVote::new("B", "C", true),
             ])
             .with_epoch(3)
-            .with_expected_result(vec!["A", "B"])
+            .with_expected_singers(vec!["A", "B"])
+            .run()
+    }
+
+    // An unauthorized signer should not be able to sign blocks
+    #[test]
+    fn unauthorized_signer_error() {
+        SnapshotTest::default()
+            .with_signers(vec!["A"])
+            .with_votes(vec![TestVote::empty("B")])
+            .with_expected_error(|t| CliqueError::UnauthorizedSigner {
+                signer: t.get_account_address("B"),
+            })
+            .run()
+    }
+
+    // An authorized signer that signed recently should not be able to sign again
+    #[test]
+    fn recent_signer_error() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B"])
+            .with_votes(vec![TestVote::empty("A"), TestVote::empty("A")])
+            .with_expected_error(|t| CliqueError::RecentSigner {
+                signer: t.get_account_address("A"),
+            })
+            .run()
+    }
+
+    // Recent signatures should not reset on checkpoint blocks imported in a batch
+    #[test]
+    fn recent_signers_persist_on_checkpoints() {
+        SnapshotTest::default()
+            .with_signers(vec!["A", "B", "C"])
+            .with_votes(vec![
+                TestVote::empty("A"),
+                TestVote::empty("B"),
+                TestVote::checkpoint("A", vec!["A", "B", "C"]),
+                TestVote::empty("A"),
+            ])
+            .with_expected_error(|t| CliqueError::RecentSigner {
+                signer: t.get_account_address("A"),
+            })
+            .with_epoch(3)
             .run()
     }
 
@@ -647,7 +689,7 @@ mod tests {
         config: CliqueConfig,
         signers: HashSet<SignerLabel>,
         votes: Vec<TestVote>,
-        expected_result: Vec<SignerLabel>,
+        expected_result: Result<Vec<SignerLabel>, CliqueError>,
     }
 
     impl Default for SnapshotTest {
@@ -656,7 +698,7 @@ mod tests {
                 accounts: HashMap::default(),
                 votes: Vec::default(),
                 signers: Default::default(),
-                expected_result: Vec::default(),
+                expected_result: Ok(Vec::default()),
                 config: CliqueConfig { period: 1, epoch: EPOCH_LENGTH },
             }
         }
@@ -692,11 +734,18 @@ mod tests {
             self
         }
 
-        fn with_expected_result(mut self, expected: Vec<&str>) -> Self {
-            for account in expected {
+        fn with_expected_singers(mut self, signers: Vec<&str>) -> Self {
+            let mut labels = Vec::with_capacity(signers.len());
+            for account in signers {
                 self.ensure_account_exists(account);
-                self.expected_result.push(account.to_owned());
+                labels.push(account.to_owned());
             }
+            self.expected_result = Ok(labels);
+            self
+        }
+
+        fn with_expected_error<F: Fn(&Self) -> CliqueError>(mut self, error_fn: F) -> Self {
+            self.expected_result = Err(error_fn(&self));
             self
         }
 
@@ -805,6 +854,7 @@ mod tests {
                 );
                 headers.push(header);
             }
+            let last_header = headers.pop().expect("not empty");
 
             let signers =
                 self.signers.iter().map(|label| self.get_account_address(label)).collect();
@@ -818,7 +868,7 @@ mod tests {
                 votes: Default::default(),
             };
 
-            // TODO: apply
+            // Start applying snapshots for every header but last
             for header in headers {
                 let result = snapshot.apply(&header);
                 assert_matches!(result, Ok(()));
@@ -834,10 +884,23 @@ mod tests {
                 }
             }
 
-            assert_eq!(
-                snapshot.signers,
-                self.expected_result.iter().map(|label| self.get_account_address(label)).collect()
-            );
+            // Apply the last header and check against the expected result
+            let result = snapshot.apply(&last_header);
+            match &self.expected_result {
+                Ok(expected_signers) => {
+                    assert_eq!(result, Ok(()));
+                    assert_eq!(
+                        snapshot.signers,
+                        expected_signers
+                            .iter()
+                            .map(|label| self.get_account_address(label))
+                            .collect()
+                    );
+                }
+                Err(error) => {
+                    assert_eq!(result, Err(error.clone()))
+                }
+            }
         }
     }
 }
