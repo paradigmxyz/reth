@@ -2,10 +2,14 @@ use criterion::{
     async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
     BenchmarkGroup, Criterion,
 };
-use reth_db::mdbx::{Env, WriteMap};
-use reth_primitives::H256;
+use itertools::concat;
+use reth_db::{
+    mdbx::{Env, WriteMap},
+    transaction::DbTx,
+};
+use reth_primitives::{StorageEntry, H256};
 use reth_stages::{
-    stages::{SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
+    stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
@@ -16,28 +20,37 @@ criterion_main!(benches);
 
 fn senders(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-
+    group.measurement_time(std::time::Duration::from_millis(2000));
+    group.warm_up_time(std::time::Duration::from_millis(2000));
     // don't need to run each stage for that many times
     group.sample_size(10);
 
     for batch in [1000usize, 10_000, 100_000, 250_000] {
         let num_blocks = 10_000;
         let mut stage = SenderRecoveryStage::default();
+        stage.batch_size = batch;
         stage.commit_threshold = num_blocks;
-        let label = format!("SendersRecovery-batch-{batch}");
-        measure_stage(&mut group, stage, num_blocks, label);
+        let label = format!("SendersRecovery-batch-{}", batch);
+
+        let path = txs_testdata(num_blocks as usize);
+
+        measure_stage(&mut group, stage, path, label);
     }
 }
 
 fn tx_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-
+    group.measurement_time(std::time::Duration::from_millis(2000));
+    group.warm_up_time(std::time::Duration::from_millis(2000));
     // don't need to run each stage for that many times
     group.sample_size(10);
 
     let num_blocks = 10_000;
     let stage = TransactionLookupStage::new(num_blocks);
-    measure_stage(&mut group, stage, num_blocks, "TransactionLookup".to_string());
+
+    let path = txs_testdata(num_blocks as usize);
+
+    measure_stage(&mut group, stage, path, "TransactionLookup".to_string());
 }
 
 fn total_difficulty(c: &mut Criterion) {
@@ -49,16 +62,38 @@ fn total_difficulty(c: &mut Criterion) {
 
     let num_blocks = 10_000;
     let stage = TotalDifficultyStage::default();
-    measure_stage(&mut group, stage, num_blocks, "TotalDifficulty".to_string());
+
+    let path = txs_testdata(num_blocks);
+
+    measure_stage(&mut group, stage, path, "TotalDifficulty".to_string());
+}
+
+fn merkle(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Stages");
+    group.measurement_time(std::time::Duration::from_secs(5));
+    group.warm_up_time(std::time::Duration::from_secs(5));
+    // don't need to run each stage for that many times
+    group.sample_size(10);
+
+    let num_blocks = 10_000;
+
+    let path = accs_testdata(num_blocks);
+
+    let num_blocks = 10_000;
+
+    let stage = MerkleStage::Both { clean_threshold: 10_001 };
+    measure_stage(&mut group, stage, path, "MerkleStage-incremental".to_string());
+
+    let stage = MerkleStage::Both { clean_threshold: 0 };
+    measure_stage(&mut group, stage, path, "MerkleStage-fullhash".to_string());
 }
 
 fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
     group: &mut BenchmarkGroup<WallTime>,
     stage: S,
-    num_blocks: u64,
+    path: PathBuf,
     label: String,
 ) {
-    let path = txs_testdata(num_blocks as usize);
     let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
@@ -81,14 +116,16 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
             |_| async {
                 let mut stage = stage.clone();
                 let mut db_tx = tx.inner();
-                stage.execute(&mut db_tx, input).await.unwrap();
+                stage.execute(&mut db_tx, input.clone()).await.unwrap();
                 db_tx.commit().unwrap();
             },
         )
     });
 }
 
-use reth_interfaces::test_utils::generators::random_block_range;
+use reth_interfaces::test_utils::generators::{
+    random_block_range, random_eoa_account_range, random_transition,
+};
 
 // Helper for generating testdata for the sender recovery stage and tx lookup stages (512MB).
 // Returns the path to the database file and the number of blocks written.
@@ -115,10 +152,69 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
             transaction::{DbTx, DbTxMut},
         };
         tx.commit(|tx| {
-            let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
+            let (head, _) =
+                tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default().into();
             tx.put::<tables::HeaderTD>(head, reth_primitives::U256::from(0).into())
         })
         .unwrap();
+    }
+
+    path
+}
+
+fn accs_testdata(num_blocks: usize) -> PathBuf {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("accs-bench");
+    let txs_range = 100..150;
+
+    let key_range = 0..300;
+
+    let n_eoa = 131;
+    let n_contract = 31;
+
+    if !path.exists() {
+        // create the dirs
+        std::fs::create_dir_all(&path).unwrap();
+        println!("Transactions testdata not found, generating to {:?}", path.display());
+        let tx = TestTransaction::new(&path);
+
+        let accounts: BTreeMap<_, _> = concat([
+            random_eoa_account_range(&mut (0..n_eoa)),
+            random_contract_account_range(&mut (0..n_contract)),
+        ]);
+        let addresses = accounts.iter().map(|(k, _)| *k).collect();
+
+        // insert starting accounts
+        tx.insert_accounts_and_storages(
+            accounts.iter().map(|(addr, acc)| (addr, (acc, std::iter::empty()))),
+        );
+
+        let blocks = random_block_range(0..num_blocks as u64 + 1, H256::zero(), txs_range);
+
+        // insert all blocks
+        tx.insert_blocks(blocks.iter(), None).unwrap();
+
+        // TODO: insert account and storage changes
+        tx.commit(|tx| {
+            let storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+            blocks.into_iter().try_for_each(|block| {
+                let (addr, new_entry) = random_transition(addresses, key_range);
+                let old_entry = storage_cursor
+                    .seek_by_key_subkey(addr, new_entry.key)?
+                    .and_then(|entry| {
+                        if entry.key != new_entry.key {
+                            None
+                        } else {
+                            storage_cursor.delete_current()?;
+                            Some(entry)
+                        }
+                    })
+                    .unwrap_or(StorageEntry { value: U256::ZERO, ..new_entry });
+
+                Ok(())
+            })
+        })
+
+        // TODO: insert hashed accounts and storage
     }
 
     path
