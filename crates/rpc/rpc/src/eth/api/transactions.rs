@@ -51,7 +51,6 @@ mod tests {
     use reth_transaction_pool::test_utils::testing_pool;
 
     use crate::EthApi;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn send_raw_transaction() {
@@ -59,7 +58,7 @@ mod tests {
 
         let pool = testing_pool();
 
-        let eth_api = EthApi::new(Arc::new(noop_provider), pool.clone(), ());
+        let eth_api = EthApi::new(noop_provider, pool.clone(), ());
 
         let tx_1 = Bytes::from(hex!("f88b8212b085028fa6ae00830f424094aad593da0c8116ef7d2d594dd6a63241bccfc26c80a48318b64b000000000000000000000000641c5d790f862a58ec7abcfd644c0442e9c201b32aa0a6ef9e170bca5ffb7ac05433b13b7043de667fbb0b4a5e45d3b54fb2d6efcc63a0037ec2c05c3d60c5f5f78244ce0a3859e3a18a36c61efb061b383507d3ce19d2"));
 
