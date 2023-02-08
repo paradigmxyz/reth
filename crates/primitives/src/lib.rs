@@ -67,9 +67,6 @@ pub type BlockHash = H256;
 pub type BlockNumber = u64;
 /// An Ethereum address.
 pub type Address = H160;
-// TODO(onbjerg): Is this not the same as [BlockHash]?
-/// BlockId is Keccak hash of the header
-pub type BlockID = H256;
 /// A transaction hash is a kecack hash of an RLP encoded signed transaction.
 pub type TxHash = H256;
 /// The sequence number of all existing transactions.
