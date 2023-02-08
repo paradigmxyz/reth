@@ -17,6 +17,7 @@ use revm::{
     EVM,
 };
 use std::collections::BTreeMap;
+use tracing::trace;
 
 /// Main block executor
 pub struct Executor<'a, DB>
@@ -67,6 +68,9 @@ where
                 ..Default::default()
             },
         );
+
+        trace!(?spec_id, "Initializing block environment");
+
         self.evm.env.cfg.chain_id = U256::from(self.chain_spec.chain().id());
         self.evm.env.cfg.spec_id = spec_id;
         self.evm.env.cfg.perf_all_precompiles_have_balance = false;

@@ -123,7 +123,7 @@ impl Command {
 
         self.start_metrics_endpoint()?;
 
-        debug!(target: "reth::cli", chainspec=serde_json::to_string(&self.chain)?, "Initializing genesis");
+        debug!(target: "reth::cli", chainspec=?self.chain, "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
 
         match &self.import {
