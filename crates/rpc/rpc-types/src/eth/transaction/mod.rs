@@ -1,12 +1,12 @@
 mod receipt;
 mod request;
-mod typed;
 mod signature;
+mod typed;
 
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
-pub use typed::*;
 pub use signature::Signature;
+pub use typed::*;
 
 use reth_primitives::{
     rpc::transaction::eip2930::AccessListItem, Address, Bytes, H256, U128, U256, U64,

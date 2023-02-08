@@ -1,6 +1,6 @@
 //! Signature related RPC values
 use reth_primitives::U256;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Container type for all signature fields in RPC
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
