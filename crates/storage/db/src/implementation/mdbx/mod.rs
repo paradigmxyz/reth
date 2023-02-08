@@ -570,7 +570,7 @@ mod tests {
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
-            let mut walker = cursor.walk_dup(key, H256::from_low_u64_be(1)).unwrap();
+            let mut walker = cursor.walk_dup(Some(key), Some(H256::from_low_u64_be(1))).unwrap();
             assert_eq!(
                 (key, value11),
                 walker
@@ -608,8 +608,7 @@ mod tests {
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
-            let first = cursor.first().unwrap().unwrap();
-            let mut walker = cursor.walk_dup(first.0, first.1.key).unwrap();
+            let mut walker = cursor.walk_dup(None, None).unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
             assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());

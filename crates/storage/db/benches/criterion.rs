@@ -264,9 +264,7 @@ where
 
             black_box({
                 let mut cursor = tx.cursor_dup_read::<T>().expect("cursor");
-                let walker = cursor
-                    .walk_dup(input.first().unwrap().0.clone(), T::SubKey::default())
-                    .unwrap();
+                let walker = cursor.walk_dup(None, Some(T::SubKey::default())).unwrap();
                 for element in walker {
                     element.unwrap();
                 }

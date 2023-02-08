@@ -78,8 +78,8 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
     /// table.
     fn walk_dup<'cursor>(
         &'cursor mut self,
-        key: T::Key,
-        subkey: T::SubKey,
+        key: Option<T::Key>,
+        subkey: Option<T::SubKey>,
     ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;

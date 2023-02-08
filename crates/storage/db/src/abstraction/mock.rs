@@ -184,8 +184,8 @@ impl<'tx, T: DupSort> DbDupCursorRO<'tx, T> for CursorMock {
 
     fn walk_dup<'cursor>(
         &'cursor mut self,
-        _key: <T>::Key,
-        _subkey: <T as DupSort>::SubKey,
+        _key: Option<<T>::Key>,
+        _subkey: Option<<T as DupSort>::SubKey>,
     ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,

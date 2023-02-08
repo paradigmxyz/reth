@@ -11,7 +11,7 @@ use crate::{
     tables::utils::*,
     Error,
 };
-use reth_libmdbx::{self, TransactionKind, WriteFlags, RO, RW};
+use reth_libmdbx::{self, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 
 /// Alias type for a `(key, value)` result coming from a cursor.
 pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
@@ -156,20 +156,50 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
             .transpose()
     }
 
-    /// Returns an iterator starting at a key greater or equal than `start_key` of a DUPSORT table.
+    /// Depending on its arguments, returns an iterator starting at:
+    /// - Some(key), Some(subkey): a `key` item whose data is >= than `subkey`
+    /// - Some(key), None: first item of a specified `key`
+    /// - None, Some(subkey): like first case, but in the first key
+    /// - None, None: first item in the table
+    /// of a DUPSORT table.
     fn walk_dup<'cursor>(
         &'cursor mut self,
-        key: T::Key,
-        subkey: T::SubKey,
+        key: Option<T::Key>,
+        subkey: Option<T::SubKey>,
     ) -> Result<DupWalker<'cursor, 'tx, T, Self>, Error> {
-        // encode key and decode it after.
-        let key = key.encode().as_ref().to_vec();
+        let start = match (key, subkey) {
+            (Some(key), Some(subkey)) => {
+                // encode key and decode it after.
+                let key = key.encode().as_ref().to_vec();
 
-        let start = self
-            .inner
-            .get_both_range(key.as_ref(), subkey.encode().as_ref())
-            .map_err(|e| Error::Read(e.into()))?
-            .map(|val| decoder::<T>((Cow::Owned(key), val)));
+                self.inner
+                    .get_both_range(key.as_ref(), subkey.encode().as_ref())
+                    .map_err(|e| Error::Read(e.into()))?
+                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+            }
+            (Some(key), None) => {
+                let key = key.encode().as_ref().to_vec();
+
+                self.inner
+                    .set(key.as_ref())
+                    .map_err(|e| Error::Read(e.into()))?
+                    .map(|val| decoder::<T>((Cow::Owned(key), val)))
+            }
+            (None, Some(subkey)) => {
+                if let Some((key, _)) = self.first()? {
+                    let key = key.encode().as_ref().to_vec();
+
+                    self.inner
+                        .get_both_range(key.as_ref(), subkey.encode().as_ref())
+                        .map_err(|e| Error::Read(e.into()))?
+                        .map(|val| decoder::<T>((Cow::Owned(key), val)))
+                } else {
+                    let err_code = MDBXError::to_err_code(&MDBXError::NotFound);
+                    Some(Err(Error::Read(err_code)))
+                }
+            }
+            (None, None) => self.first().transpose(),
+        };
 
         Ok(DupWalker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
     }
