@@ -1,7 +1,7 @@
 use futures_util::stream::Stream;
 use num_traits::One;
 use std::{
-    cmp::{Ordering},
+    cmp::Ordering,
     collections::{binary_heap::PeekMut, BinaryHeap},
     ops::Add,
     pin::Pin,
