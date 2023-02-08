@@ -4098,6 +4098,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "revm-interpreter",
+ "revm-primitives",
  "serde",
  "test-fuzz",
 ]
@@ -4520,8 +4521,8 @@ dependencies = [
  "reth-codecs",
  "reth-rlp",
  "reth-rlp-derive",
- "revm",
  "revm-interpreter",
+ "revm-primitives",
  "secp256k1 0.24.3",
  "serde",
  "serde_json",
