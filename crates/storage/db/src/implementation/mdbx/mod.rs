@@ -40,11 +40,11 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 
 impl<E: EnvironmentKind> Database for Env<E> {
     fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::InitTransaction(e.into()))?))
+        Ok(Tx::new(self.inner.begin_ro_txn().map_err(Error::InitTransaction)?))
     }
 
     fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?))
+        Ok(Tx::new(self.inner.begin_rw_txn().map_err(Error::InitTransaction)?))
     }
 }
 
@@ -74,7 +74,7 @@ impl<E: EnvironmentKind> Env<E> {
                     ..Default::default()
                 })
                 .open(path)
-                .map_err(|e| Error::DatabaseLocation(e.into()))?,
+                .map_err(Error::DatabaseLocation)?,
         };
 
         Ok(env)
@@ -82,7 +82,7 @@ impl<E: EnvironmentKind> Env<E> {
 
     /// Creates all the defined tables, if necessary.
     pub fn create_tables(&self) -> Result<(), Error> {
-        let tx = self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?;
+        let tx = self.inner.begin_rw_txn().map_err(Error::InitTransaction)?;
 
         for (table_type, table) in TABLES {
             let flags = match table_type {
@@ -90,10 +90,10 @@ impl<E: EnvironmentKind> Env<E> {
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags).map_err(|e| Error::TableCreation(e.into()))?;
+            tx.create_db(Some(table), flags).map_err(Error::TableCreation)?;
         }
 
-        tx.commit().map_err(|e| Error::Commit(e.into()))?;
+        tx.commit().map_err(Error::Commit)?;
 
         Ok(())
     }

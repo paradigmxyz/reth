@@ -37,10 +37,8 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         Ok(Cursor {
             inner: self
                 .inner
-                .cursor(
-                    &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::InitCursor(e.into()))?,
-                )
-                .map_err(|e| Error::InitCursor(e.into()))?,
+                .cursor(&self.inner.open_db(Some(T::NAME)).map_err(Error::InitCursor)?)
+                .map_err(Error::InitCursor)?,
             table: T::NAME,
             _dbi: PhantomData,
         })
@@ -70,18 +68,15 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
 
     fn commit(self) -> Result<bool, Error> {
         let start = Instant::now();
-        let result = self.inner.commit().map_err(|e| Error::Commit(e.into()));
+        let result = self.inner.commit().map_err(Error::Commit);
         histogram!("tx.commit", start.elapsed());
         result
     }
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {
         self.inner
-            .get(
-                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Read(e.into()))?,
-                key.encode().as_ref(),
-            )
-            .map_err(|e| Error::Read(e.into()))?
+            .get(&self.inner.open_db(Some(T::NAME)).map_err(Error::Read)?, key.encode().as_ref())
+            .map_err(Error::Read)?
             .map(decode_one::<T>)
             .transpose()
     }
@@ -91,12 +86,12 @@ impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(
-                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Write(e.into()))?,
+                &self.inner.open_db(Some(T::NAME)).map_err(Error::Write)?,
                 &key.encode(),
                 &value.compress(),
                 WriteFlags::UPSERT,
             )
-            .map_err(|e| Error::Write(e.into()))
+            .map_err(Error::Write)
     }
 
     fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error> {
@@ -108,18 +103,14 @@ impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
         };
 
         self.inner
-            .del(
-                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Delete(e.into()))?,
-                key.encode(),
-                data,
-            )
-            .map_err(|e| Error::Delete(e.into()))
+            .del(&self.inner.open_db(Some(T::NAME)).map_err(Error::Delete)?, key.encode(), data)
+            .map_err(Error::Delete)
     }
 
     fn clear<T: Table>(&self) -> Result<(), Error> {
         self.inner
-            .clear_db(&self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Delete(e.into()))?)
-            .map_err(|e| Error::Delete(e.into()))?;
+            .clear_db(&self.inner.open_db(Some(T::NAME)).map_err(Error::Delete)?)
+            .map_err(Error::Delete)?;
 
         Ok(())
     }
