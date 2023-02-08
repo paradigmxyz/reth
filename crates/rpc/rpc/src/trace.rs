@@ -15,6 +15,17 @@ use std::collections::HashSet;
 #[non_exhaustive]
 pub struct TraceApi {}
 
+// === impl TraceApi ===
+
+impl TraceApi {
+    /// Create a new instance of the [TraceApi]
+    #[allow(clippy::new_without_default)]
+    // TODO add necessary types
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
 #[async_trait]
 impl TraceApiServer for TraceApi {
     async fn call(

@@ -15,10 +15,10 @@ reth-provider = { path = "../../crates/storage/provider", features = ["test-util
 reth-staged-sync = { path = "../../crates/staged-sync" }
 reth-stages = { path = "../../crates/stages"}
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
-reth-transaction-pool = { path = "../../crates/transaction-pool" }
+reth-transaction-pool = { path = "../../crates/transaction-pool", features = ["test-utils"] }
 reth-consensus = { path = "../../crates/consensus" }
 reth-executor = { path = "../../crates/executor" }
-# reth-rpc = {path = "../../crates/rpc/rpc"}
+reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rlp = { path = "../../crates/rlp" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-network-api = {path = "../../crates/net/network-api" }

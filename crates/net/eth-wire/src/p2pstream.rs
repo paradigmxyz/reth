@@ -11,7 +11,6 @@ use metrics::counter;
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     io,
@@ -20,6 +19,9 @@ use std::{
     time::Duration,
 };
 use tokio_stream::Stream;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// [`MAX_PAYLOAD_SIZE`] is the maximum size of an uncompressed message payload.
 /// This is defined in [EIP-706](https://eips.ethereum.org/EIPS/eip-706).
@@ -615,7 +617,8 @@ pub fn set_capability_offsets(
 
 /// This represents only the reserved `p2p` subprotocol messages.
 #[derive_arbitrary(rlp)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum P2PMessage {
     /// The first packet sent over the connection, and sent once by both sides.
     Hello(HelloMessage),
@@ -747,7 +750,8 @@ impl TryFrom<u8> for P2PMessageID {
 
 /// RLPx `p2p` protocol version
 #[derive_arbitrary(rlp)]
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ProtocolVersion {
     /// `p2p` version 4
     V4 = 4,

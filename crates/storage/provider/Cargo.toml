@@ -16,7 +16,6 @@ reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-db = { path = "../db" }
 
 # codecs
-serde = { version = "1.0.*", default-features = false }
 postcard = { version = "1.0.2", features = ["alloc"] }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 

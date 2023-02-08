@@ -10,7 +10,7 @@ use reth_rlp::Decodable;
 use reth_rpc_types::TransactionRequest;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
-impl<Pool, Client, Network> EthApi<Pool, Client, Network>
+impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + 'static,

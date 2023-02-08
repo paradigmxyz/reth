@@ -19,8 +19,14 @@ mod net;
 mod trace;
 mod web3;
 
-pub use self::{
-    admin::AdminApiServer, debug::DebugApiServer, engine::EngineApiServer, eth::EthApiServer,
-    eth_filter::EthFilterApiServer, eth_pubsub::EthPubSubApiServer, net::NetApiServer,
-    trace::TraceApiServer, web3::Web3ApiServer,
-};
+/// re-export of all server traits
+pub use servers::*;
+
+/// Aggregates all server traits.
+pub mod servers {
+    pub use crate::{
+        admin::AdminApiServer, debug::DebugApiServer, engine::EngineApiServer, eth::EthApiServer,
+        eth_filter::EthFilterApiServer, eth_pubsub::EthPubSubApiServer, net::NetApiServer,
+        trace::TraceApiServer, web3::Web3ApiServer,
+    };
+}
