@@ -652,15 +652,33 @@ impl TransactionSigned {
         initial_tx
     }
 
+    /// Decodes a eip2718 transaction where tx is [id, rlp(typedtx)]
     pub fn decode_enveloped(&self, tx: Bytes) -> Result<Self, DecodeError> {
         let mut data = tx.as_ref();
 
+        let first_header = Header::decode(&mut data)?;
+
         let transaction = if data[0] > 0x7f {
             // legacy transaction
-            todo!()
-        } else {
-            let first_header = Header::decode(&mut data)?;
+            let mut transaction = Transaction::Legacy(TxLegacy {
+                nonce: Decodable::decode(&mut data)?,
+                gas_price: Decodable::decode(&mut data)?,
+                gas_limit: Decodable::decode(&mut data)?,
+                to: Decodable::decode(&mut data)?,
+                value: Decodable::decode(&mut data)?,
+                input: Bytes(Decodable::decode(&mut data)?),
+                chain_id: None,
+            });
+            let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(&mut data)?;
+            if let Some(id) = extracted_id {
+                transaction.set_chain_id(id);
+            }
 
+            let tx_length = first_header.payload_length + first_header.length();
+            let hash = keccak256(&data[..tx_length]);
+            let signed = TransactionSigned { transaction, hash, signature };
+            Ok(signed)
+        } else {
             let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
             data.advance(1);
             // decode the list header for the rest of the transaction
