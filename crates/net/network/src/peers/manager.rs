@@ -106,6 +106,10 @@ pub(crate) struct PeersManager {
     backoff_durations: PeerBackoffDurations,
     /// If non-trusted peers should be connected to
     connect_trusted_nodes_only: bool,
+    /// Maximum number of attempts to connect to a peer before it is removed from the peer set.
+    /// For example if a peer is permanently down, remove it after `max_backoff_attempts` from the
+    /// peer set
+    max_backoff_attempts: u32,
 }
 
 impl PeersManager {
@@ -121,6 +125,7 @@ impl PeersManager {
             trusted_nodes,
             connect_trusted_nodes_only,
             basic_nodes,
+            max_backoff_attempts,
             ..
         } = config;
         let (manager_tx, handle_rx) = mpsc::unbounded_channel();
@@ -155,6 +160,7 @@ impl PeersManager {
             ban_duration,
             backoff_durations,
             connect_trusted_nodes_only,
+            max_backoff_attempts,
         }
     }
 
@@ -399,13 +405,13 @@ impl PeersManager {
         } else {
             let mut backoff_until = None;
 
-            if let Some(mut peer) = self.peers.get_mut(peer_id) {
+            if let Entry::Occupied(mut entry) = self.peers.entry(*peer_id) {
                 let reputation_change = if let Some(kind) = err.should_backoff() {
                     // Increment peer.backoff_counter
-                    peer.backoff_counter += 1;
+                    entry.get_mut().backoff_counter += 1;
 
                     let backoff_time =
-                        self.backoff_durations.backoff_until(kind, peer.backoff_counter);
+                        self.backoff_durations.backoff_until(kind, entry.get().backoff_counter);
 
                     backoff_until = Some(backoff_time);
 
@@ -417,10 +423,20 @@ impl PeersManager {
                     self.reputation_weights.change(reputation_change)
                 };
 
-                self.connection_info.decr_state(peer.state);
-                peer.state = PeerConnectionState::Idle;
-                peer.reputation = peer.reputation.saturating_add(reputation_change.as_i32());
+                self.connection_info.decr_state(entry.get().state);
+
+                // check if peer exhausted all retries
+                if entry.get().backoff_counter > self.max_backoff_attempts {
+                    trace!(target: "net::peers", ?peer_id, "remove peer after {} unsuccessful attempts", self.max_backoff_attempts);
+                    entry.remove();
+                    backoff_until = None;
+                } else {
+                    entry.get_mut().state = PeerConnectionState::Idle;
+                    entry.get_mut().reputation =
+                        entry.get().reputation.saturating_add(reputation_change.as_i32());
+                }
             }
+
             if let Some(backoff_until) = backoff_until {
                 self.backoff_peer_until(*peer_id, backoff_until);
             }
@@ -958,6 +974,10 @@ pub struct PeersConfig {
     /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
     /// [`DisconnectReason::TooManyPeers`].
     pub backoff_durations: PeerBackoffDurations,
+    /// Maximum number of attempts to connect to a peer before it is removed from the peer set.
+    /// For example if a peer is permanently down, remove it after `max_backoff_attempts` from the
+    /// peer set
+    pub max_backoff_attempts: u32,
 }
 
 impl Default for PeersConfig {
@@ -973,6 +993,9 @@ impl Default for PeersConfig {
             trusted_nodes: Default::default(),
             connect_trusted_nodes_only: false,
             basic_nodes: Default::default(),
+            // remove the peer after 5 unsuccessful attempts, peer is considered no longer
+            // available.
+            max_backoff_attempts: 5,
         }
     }
 }

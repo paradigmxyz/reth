@@ -195,9 +195,10 @@ impl SessionError for io::Error {
             // these usually happen when the remote instantly drops the connection, for example
             // if the previous connection isn't properly cleaned up yet and the peer is temp.
             // banned.
-            ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset | ErrorKind::BrokenPipe => {
-                Some(BackoffKind::Low)
-            }
+            ErrorKind::ConnectionRefused |
+            ErrorKind::ConnectionReset |
+            ErrorKind::BrokenPipe |
+            ErrorKind::TimedOut => Some(BackoffKind::Low),
             _ => Some(BackoffKind::Medium),
         }
     }
@@ -206,6 +207,13 @@ impl SessionError for io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_unreachable() {
+        let connection_err = tokio::net::TcpStream::connect("0.0.0.0:1").await.unwrap_err();
+        assert_eq!(connection_err.kind(), ErrorKind::ConnectionRefused);
+        assert!(connection_err.should_backoff().is_some());
+    }
 
     #[test]
     fn test_is_fatal_disconnect() {
