@@ -142,10 +142,8 @@ impl Decodable for BlockHashOrNumber {
 /// A Block Identifier
 /// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md>
 pub enum BlockId {
-    /// A block hash
-    Hash(H256),
-    /// A block hash and a bool that defines if it's is canonical
-    HashReqCanonical((H256, bool)),
+    /// A block hash and an optional bool that defines if it's canonical
+    Hash(BlockHashCanonical),
     /// A block number
     Number(BlockNumberOrTag),
 }
@@ -163,14 +161,20 @@ impl From<BlockNumberOrTag> for BlockId {
 }
 
 impl From<H256> for BlockId {
-    fn from(hash: H256) -> Self {
-        BlockId::Hash(hash)
+    fn from(block_hash: H256) -> Self {
+        BlockId::Hash(BlockHashCanonical { block_hash, require_canonical: None })
     }
 }
 
-impl From<(H256, bool)> for BlockId {
-    fn from(hash_canonical: (H256, bool)) -> Self {
-        BlockId::HashReqCanonical(hash_canonical)
+impl From<(H256, Option<bool>)> for BlockId {
+    fn from(hash_can: (H256, Option<bool>)) -> Self {
+        BlockId::Hash(BlockHashCanonical { block_hash: hash_can.0, require_canonical: hash_can.1 })
+    }
+}
+
+impl From<BlockHashCanonical> for BlockId {
+    fn from(hash_can: BlockHashCanonical) -> Self {
+        BlockId::Hash(hash_can)
     }
 }
 
@@ -180,15 +184,12 @@ impl Serialize for BlockId {
         S: Serializer,
     {
         match *self {
-            BlockId::Hash(ref x) => {
+            BlockId::Hash(BlockHashCanonical { ref block_hash, ref require_canonical }) => {
                 let mut s = serializer.serialize_struct("BlockIdEip1898", 1)?;
-                s.serialize_field("blockHash", &format!("{x:?}"))?;
-                s.end()
-            }
-            BlockId::HashReqCanonical((ref x, ref c)) => {
-                let mut s = serializer.serialize_struct("BlockIdEip1898", 1)?;
-                s.serialize_field("blockHash", &format!("{x:?}"))?;
-                s.serialize_field("requireCanonical", &format!("{c:?}"))?;
+                s.serialize_field("blockHash", &format!("{block_hash:?}"))?;
+                if let Some(require_canonical) = require_canonical {
+                    s.serialize_field("requireCanonical", &format!("{require_canonical:?}"))?;
+                }
                 s.end()
             }
             BlockId::Number(ref num) => num.serialize(serializer),
@@ -222,49 +223,30 @@ impl<'de> Deserialize<'de> for BlockId {
                 A: MapAccess<'de>,
             {
                 let mut number = None;
-                let mut hash = None;
-                let mut hash_canonical = None;
+                let mut block_hash = None;
+                let mut require_canonical = None;
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "blockNumber" => {
-                            if number.is_some() || hash.is_some() {
+                            if number.is_some() || block_hash.is_some() {
                                 return Err(serde::de::Error::duplicate_field("blockNumber"))
                             }
-                            number = Some(BlockId::Number(map.next_value::<BlockNumberOrTag>()?))
+                            number = Some(map.next_value::<BlockNumberOrTag>()?)
                         }
                         "blockHash" => {
-                            if number.is_some() || hash.is_some() {
+                            if number.is_some() || block_hash.is_some() {
                                 return Err(serde::de::Error::duplicate_field("blockHash"))
                             }
 
-                            if let Some(BlockId::HashReqCanonical((block_hash, canonical))) =
-                                hash_canonical
-                            {
-                                if !block_hash.is_zero() {
-                                    return Err(serde::de::Error::duplicate_field("blockHash"))
-                                }
-
-                                hash_canonical = Some(BlockId::HashReqCanonical((
-                                    map.next_value::<H256>()?,
-                                    canonical,
-                                )));
-                            } else {
-                                hash = Some(BlockId::Hash(map.next_value::<H256>()?))
-                            }
+                            block_hash = Some(map.next_value::<H256>()?);
                         }
                         "requireCanonical" => {
-                            if number.is_some() || hash_canonical.is_some() {
+                            if number.is_some() || require_canonical.is_some() {
                                 return Err(serde::de::Error::duplicate_field("requireCanonical"))
                             }
 
-                            let tuple = if let Some(BlockId::Hash(block_hash)) = hash {
-                                hash = None;
-                                (block_hash, map.next_value::<bool>()?)
-                            } else {
-                                (H256::zero(), map.next_value::<bool>()?)
-                            };
-                            hash_canonical = Some(BlockId::HashReqCanonical(tuple));
+                            require_canonical = Some(map.next_value::<bool>()?)
                         }
                         key => {
                             return Err(serde::de::Error::unknown_field(
@@ -275,11 +257,15 @@ impl<'de> Deserialize<'de> for BlockId {
                     }
                 }
 
-                number.or(hash).or(hash_canonical).ok_or_else(|| {
-                    serde::de::Error::custom(
+                if let Some(number) = number {
+                    Ok(BlockId::Number(number))
+                } else if let Some(block_hash) = block_hash {
+                    Ok(BlockId::Hash(BlockHashCanonical { block_hash, require_canonical }))
+                } else {
+                    Err(serde::de::Error::custom(
                         "Expected `blockNumber` or `blockHash` with `requireCanonical` optionally",
-                    )
-                })
+                    ))
+                }
             }
         }
 
@@ -404,4 +390,13 @@ impl fmt::Display for BlockNumberOrTag {
             BlockNumberOrTag::Pending => f.write_str("pending"),
         }
     }
+}
+
+/// A block hash and an optional bool that defines if it's canonical
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BlockHashCanonical {
+    /// A block hash
+    block_hash: H256,
+    /// Whether the block must be a canonical block
+    require_canonical: Option<bool>,
 }
