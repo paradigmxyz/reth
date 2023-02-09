@@ -119,19 +119,6 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         let block_number =
             tx.get::<tables::HeaderNumbers>(block_hash)?.ok_or(Error::BlockHash { block_hash })?;
 
-        // check if block is canonical or not. Only canonical blocks have changesets.
-        let canonical_block_hash = tx
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(Error::BlockCanonical { block_number, block_hash })?;
-        if canonical_block_hash != block_hash {
-            return Err(Error::NonCanonicalBlock {
-                block_number,
-                received_hash: block_hash,
-                expected_hash: canonical_block_hash,
-            }
-            .into())
-        }
-
         // get transition id
         let transition = tx
             .get::<tables::BlockTransitionIndex>(block_number)?

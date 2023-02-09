@@ -12,8 +12,6 @@ pub enum Error {
     BlockBody { block_number: BlockNumber },
     #[error("Block transition id does not exist for block #{block_number}")]
     BlockTransition { block_number: BlockNumber },
-    #[error("Block number {block_number} from block hash #{block_hash} does not exist in canonical chain")]
-    BlockCanonical { block_number: BlockNumber, block_hash: BlockHash }, // TODO: ???
     #[error("Block number {block_number} with hash #{received_hash:?} is not canonical block. Canonical block hash is #{expected_hash:?}")]
     NonCanonicalBlock {
         block_number: BlockNumber,
