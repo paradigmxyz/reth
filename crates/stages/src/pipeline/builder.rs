@@ -1,4 +1,4 @@
-use crate::{pipeline::QueuedStage, Pipeline, Stage, StageSet};
+use crate::{Pipeline, Stage, StageSet};
 use reth_db::database::Database;
 use reth_interfaces::sync::{NoopSyncStateUpdate, SyncStateUpdater};
 use reth_primitives::BlockNumber;
@@ -30,7 +30,7 @@ where
     where
         S: Stage<DB> + 'static,
     {
-        self.pipeline.stages.push(QueuedStage { stage: Box::new(stage) });
+        self.pipeline.stages.push(Box::new(stage));
         self
     }
 
@@ -43,7 +43,7 @@ where
     /// [`StageSetBuilder`][crate::StageSetBuilder].
     pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
         for stage in set.builder().build() {
-            self.pipeline.stages.push(QueuedStage { stage });
+            self.pipeline.stages.push(stage);
         }
         self
     }
