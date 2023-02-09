@@ -554,7 +554,7 @@ async fn test_shutdown() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
-    let mut net = Testnet::create(1).await;
+    let net = Testnet::create(1).await;
     let (reth_p2p, reth_disc) = unused_tcp_udp();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config = PeersConfig::default().with_max_inbound(0);
@@ -566,7 +566,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
         .build(Arc::new(NoopProvider::default()));
     let network = NetworkManager::new(config).await.unwrap();
 
-    let mut other_peer_handle = net.handles().next().unwrap();
+    let other_peer_handle = net.handles().next().unwrap();
 
     let handle = network.handle().clone();
 
@@ -575,10 +575,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     tokio::task::spawn(network);
     let _handle = net.spawn();
 
-    // create NetworkEventStream to get the next session established event easily
-    let mut events = other_peer_handle.event_listener();
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
-    while let ev = events.next().await {
-        println!("{ev:?}");
-    }
+    assert_eq!(handle.num_connected_peers(), 0);
 }
