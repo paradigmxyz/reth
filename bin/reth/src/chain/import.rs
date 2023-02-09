@@ -1,42 +1,33 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     node::{handle_events, NodeEvent},
-    prometheus_exporter,
-    utils::{chainspec::genesis_value_parser, init::init_db, parse_socket_address},
-    NetworkOpts,
+    utils::{chainspec::genesis_value_parser, init::init_db},
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{stream::select as stream_select, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{
-    bodies, bodies::bodies::BodiesDownloaderBuilder, headers,
+    bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
-        headers::{client::HeadersClient, downloader::HeaderDownloader},
-    },
     sync::SyncStateUpdater,
 };
-use reth_net_nat::NatResolver;
-use reth_network::{NetworkConfig, NetworkEvent};
-use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, H256};
-use reth_provider::ShareableDatabase;
-use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
+
+use reth_primitives::ChainSpec;
+
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::select;
-use tracing::{debug, info, warn};
+use std::sync::Arc;
+
+use tracing::{debug, info};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
@@ -83,14 +74,14 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(mut self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config = self.load_config()?;
+        let config: Config = self.load_config()?;
         info!(target: "reth::cli", path = %self.db, "Configuration loaded");
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
@@ -153,11 +144,11 @@ impl ImportCommand {
                 config.stages.bodies.downloader_min_concurrent_requests..=
                     config.stages.bodies.downloader_max_concurrent_requests,
             )
-            .build(file_client.clone(), consensus.clone(), db.clone())
+            .build(file_client.clone(), consensus.clone(), db)
             .as_task();
 
         let mut pipeline = Pipeline::builder()
-            .with_sync_state_updater(file_client.clone())
+            .with_sync_state_updater(file_client)
             .add_stages(
                 OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
                     TotalDifficultyStage {

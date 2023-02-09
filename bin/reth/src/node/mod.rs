@@ -13,11 +13,7 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
-use reth_downloaders::{
-    bodies::{self, bodies::BodiesDownloaderBuilder},
-    headers,
-    test_utils::FileClient,
-};
+use reth_downloaders::{bodies::bodies::BodiesDownloaderBuilder, headers};
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
