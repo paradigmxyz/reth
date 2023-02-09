@@ -1,3 +1,4 @@
+//! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
     Address, Block as RethBlock, Bloom, Bytes, Header as RethHeader, H256, H64, U256,
