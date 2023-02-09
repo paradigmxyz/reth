@@ -5,7 +5,7 @@ use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
-    NetworkOpts,
+    NetworkOpts, RpcServerOpts,
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -84,6 +84,9 @@ pub struct Command {
     /// Runs the sync only up to the specified block
     #[arg(long = "debug.max-block", help_heading = "Debug")]
     max_block: Option<u64>,
+
+    #[clap(flatten)]
+    rpc: RpcServerOpts,
 }
 
 impl Command {
