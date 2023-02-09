@@ -362,7 +362,6 @@ impl ECIES {
         buf
     }
 
-    // TODO: document more
     /// Write an `ack` message to the given buffer.
     pub fn write_ack(&mut self, out: &mut BytesMut) {
         let unencrypted = self.create_ack_unencrypted();
@@ -415,7 +414,6 @@ impl ECIES {
         Ok(())
     }
 
-    // TODO: document
     fn setup_frame(&mut self, incoming: bool) {
         let mut hasher = Keccak256::new();
         for el in &if incoming {
@@ -470,7 +468,6 @@ impl ECIES {
         out
     }
 
-    // TODO: document
     pub fn write_header(&mut self, out: &mut BytesMut, size: usize) {
         let mut buf = [0u8; 8];
         BigEndian::write_uint(&mut buf, size as u64, 3);

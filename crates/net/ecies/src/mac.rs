@@ -10,8 +10,6 @@ use typenum::U16;
 
 pub type HeaderBytes = GenericArray<u8, U16>;
 
-// TODO: documentation / better specification
-// TODO: prove or disprove unforgeability
 /// [`Ethereum MAC`](https://github.com/ethereum/devp2p/blob/master/rlpx.md#mac) state.
 ///
 /// The ethereum MAC is a cursed MAC construction.
