@@ -30,7 +30,7 @@ macro_rules! impl_postcard {
 
             impl Decode for $name {
                 fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, Error> {
-                    from_bytes(&value.into()).map_err(Error::Decode)
+                    from_bytes(&value.into()).map_err(|e| Error::Decode(e.into()))
                 }
             }
         )+

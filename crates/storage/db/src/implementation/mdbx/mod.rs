@@ -40,11 +40,11 @@ impl<'a, E: EnvironmentKind> DatabaseGAT<'a> for Env<E> {
 
 impl<E: EnvironmentKind> Database for Env<E> {
     fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
-        Ok(Tx::new(self.inner.begin_ro_txn().map_err(Error::InitTransaction)?))
+        Ok(Tx::new(self.inner.begin_ro_txn().map_err(|e| Error::InitTransaction(e.into()))?))
     }
 
     fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
-        Ok(Tx::new(self.inner.begin_rw_txn().map_err(Error::InitTransaction)?))
+        Ok(Tx::new(self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?))
     }
 }
 
@@ -74,7 +74,7 @@ impl<E: EnvironmentKind> Env<E> {
                     ..Default::default()
                 })
                 .open(path)
-                .map_err(Error::DatabaseLocation)?,
+                .map_err(|e| Error::DatabaseLocation(e.into()))?,
         };
 
         Ok(env)
@@ -82,7 +82,7 @@ impl<E: EnvironmentKind> Env<E> {
 
     /// Creates all the defined tables, if necessary.
     pub fn create_tables(&self) -> Result<(), Error> {
-        let tx = self.inner.begin_rw_txn().map_err(Error::InitTransaction)?;
+        let tx = self.inner.begin_rw_txn().map_err(|e| Error::InitTransaction(e.into()))?;
 
         for (table_type, table) in TABLES {
             let flags = match table_type {
@@ -90,10 +90,10 @@ impl<E: EnvironmentKind> Env<E> {
                 TableType::DupSort => DatabaseFlags::DUP_SORT,
             };
 
-            tx.create_db(Some(table), flags).map_err(Error::TableCreation)?;
+            tx.create_db(Some(table), flags).map_err(|e| Error::TableCreation(e.into()))?;
         }
 
-        tx.commit().map_err(Error::Commit)?;
+        tx.commit().map_err(|e| Error::Commit(e.into()))?;
 
         Ok(())
     }
@@ -355,10 +355,7 @@ mod tests {
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         // INSERT (failure)
-        assert_eq!(
-            cursor.insert(key_to_insert, H256::zero()),
-            Err(Error::Write(reth_libmdbx::Error::KeyExist))
-        );
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(Error::Write(-30799)));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         tx.commit().expect(ERROR_COMMIT);
@@ -447,10 +444,7 @@ mod tests {
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(
-            cursor.append(key_to_append, H256::zero()),
-            Err(Error::Write(reth_libmdbx::Error::KeyMismatch))
-        );
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(-30418)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
         tx.commit().expect(ERROR_COMMIT);
 
@@ -490,14 +484,14 @@ mod tests {
                 transition_id,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(reth_libmdbx::Error::KeyMismatch))
+            Err(Error::Write(-30418))
         );
         assert_eq!(
             cursor.append(
                 transition_id - 1,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(reth_libmdbx::Error::KeyMismatch))
+            Err(Error::Write(-30418))
         );
         assert_eq!(
             cursor.append(

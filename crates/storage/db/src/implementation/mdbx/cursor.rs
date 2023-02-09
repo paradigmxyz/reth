@@ -40,7 +40,7 @@ pub struct Cursor<'tx, K: TransactionKind, T: Table> {
 #[macro_export]
 macro_rules! decode {
     ($v:expr) => {
-        $v.map_err(Error::Read)?.map(decoder::<T>).transpose()
+        $v.map_err(|e| Error::Read(e.into()))?.map(decoder::<T>).transpose()
     };
 }
 
@@ -83,7 +83,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         let start = self
             .inner
             .set_range(start_key.encode().as_ref())
-            .map_err(Error::Read)?
+            .map_err(|e| Error::Read(e.into()))?
             .map(decoder::<T>);
 
         Ok(Walker::new(self, start))
@@ -99,7 +99,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         let start = self
             .inner
             .set_range(range.start.encode().as_ref())
-            .map_err(Error::Read)?
+            .map_err(|e| Error::Read(e.into()))?
             .map(decoder::<T>);
 
         Ok(RangeWalker::new(self, start, range.end))
@@ -116,7 +116,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
             let start = self
                 .inner
                 .set_range(start_key.encode().as_ref())
-                .map_err(Error::Read)?
+                .map_err(|e| Error::Read(e.into()))?
                 .map(decoder::<T>);
 
             return Ok(ReverseWalker::new(self, start))
@@ -140,7 +140,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
-        self.inner.next_dup().map_err(Error::Read)?.map(decode_value::<T>).transpose()
+        self.inner.next_dup().map_err(|e| Error::Read(e.into()))?.map(decode_value::<T>).transpose()
     }
 
     fn seek_by_key_subkey(
@@ -150,7 +150,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
     ) -> ValueOnlyResult<T> {
         self.inner
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
-            .map_err(Error::Read)?
+            .map_err(|e| Error::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
     }
@@ -167,7 +167,7 @@ impl<'tx, K: TransactionKind, T: DupSort> DbDupCursorRO<'tx, T> for Cursor<'tx, 
         let start = self
             .inner
             .get_both_range(key.as_ref(), subkey.encode().as_ref())
-            .map_err(Error::Read)?
+            .map_err(|e| Error::Read(e.into()))?
             .map(|val| decoder::<T>((Cow::Owned(key), val)));
 
         Ok(DupWalker::<'cursor, 'tx, T, Self> { cursor: self, start, _tx_phantom: PhantomData {} })
@@ -181,13 +181,13 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
         // Default `WriteFlags` is UPSERT
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::UPSERT)
-            .map_err(Error::Write)
+            .map_err(|e| Error::Write(e.into()))
     }
 
     fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::NO_OVERWRITE)
-            .map_err(Error::Write)
+            .map_err(|e| Error::Write(e.into()))
     }
 
     /// Appends the data to the end of the table. Consequently, the append operation
@@ -195,22 +195,22 @@ impl<'tx, T: Table> DbCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::APPEND)
-            .map_err(Error::Write)
+            .map_err(|e| Error::Write(e.into()))
     }
 
     fn delete_current(&mut self) -> Result<(), Error> {
-        self.inner.del(WriteFlags::CURRENT).map_err(Error::Delete)
+        self.inner.del(WriteFlags::CURRENT).map_err(|e| Error::Delete(e.into()))
     }
 }
 
 impl<'tx, T: DupSort> DbDupCursorRW<'tx, T> for Cursor<'tx, RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), Error> {
-        self.inner.del(WriteFlags::NO_DUP_DATA).map_err(Error::Delete)
+        self.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| Error::Delete(e.into()))
     }
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
             .put(key.encode().as_ref(), value.compress().as_ref(), WriteFlags::APPEND_DUP)
-            .map_err(Error::Write)
+            .map_err(|e| Error::Write(e.into()))
     }
 }
