@@ -142,10 +142,9 @@ impl Command {
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
-        tokio::select! {
-            res = pipeline.run(db.clone()) => res?,
-            _ = tokio::signal::ctrl_c() => {},
-        };
+        pipeline.run(db.clone()).await?;
+
+        // TODO: this is where we'd handle graceful shutdown by listening to ctrl-c
 
         if !self.network.no_persist_peers {
             dump_peers(self.network.peers_file.as_ref(), network).await?;
