@@ -175,8 +175,13 @@ impl Command {
         // building network downloaders using the fetch client
         let fetch_client = Arc::new(network.fetch_client().await?);
 
-        let header_downloader = self.spawn_headers_downloader(config, consensus, &fetch_client);
-        let body_downloader = self.spawn_bodies_downloader(config, consensus, &fetch_client, &db);
+        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
+            .build(consensus.clone(), fetch_client.clone())
+            .as_task();
+
+        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
+            .build(fetch_client.clone(), consensus.clone(), db.clone())
+            .as_task();
 
         let mut pipeline = self
             .build_pipeline(config, header_downloader, body_downloader, network.clone(), consensus)
@@ -295,35 +300,6 @@ impl Command {
             .build();
 
         Ok(pipeline)
-    }
-
-    fn spawn_headers_downloader<H>(
-        &self,
-        config: &Config,
-        consensus: &Arc<dyn Consensus>,
-        fetch_client: &Arc<H>,
-    ) -> reth_downloaders::headers::task::TaskDownloader
-    where
-        H: HeadersClient + 'static,
-    {
-        ReverseHeadersDownloaderBuilder::from(config.stages.headers)
-            .build(consensus.clone(), fetch_client.clone())
-            .as_task()
-    }
-
-    fn spawn_bodies_downloader<B>(
-        &self,
-        config: &Config,
-        consensus: &Arc<dyn Consensus>,
-        fetch_client: &Arc<B>,
-        db: &Arc<Env<WriteMap>>,
-    ) -> reth_downloaders::bodies::task::TaskDownloader
-    where
-        B: BodiesClient + 'static,
-    {
-        BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(fetch_client.clone(), consensus.clone(), db.clone())
-            .as_task()
     }
 }
 
