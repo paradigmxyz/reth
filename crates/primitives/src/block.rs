@@ -23,7 +23,10 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive_arbitrary(rlp, 10)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,
