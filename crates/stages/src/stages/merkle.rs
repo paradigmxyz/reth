@@ -98,7 +98,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(stage_progress)?;
         let to_transition = tx.get_block_transition(previous_stage_progress)?;
 
-        let block_root = tx.get_header_by_num(previous_stage_progress)?.state_root;
+        let block_root = tx.get_header(previous_stage_progress)?.state_root;
 
         let trie_root = if from_transition == to_transition {
             block_root
@@ -110,7 +110,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
-            let current_root = tx.get_header_by_num(stage_progress)?.state_root;
+            let current_root = tx.get_header(stage_progress)?.state_root;
             let loader = DBTrieLoader::default();
             loader
                 .update_root(tx, current_root, from_transition..to_transition)
@@ -140,7 +140,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let target_root = tx.get_header_by_num(input.unwind_to)?.state_root;
+        let target_root = tx.get_header(input.unwind_to)?.state_root;
 
         // If the merkle stage fails to execute, the trie changes weren't commited
         // and the root stayed the same
@@ -150,7 +150,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         let loader = DBTrieLoader::default();
-        let current_root = tx.get_header_by_num(input.stage_progress)?.state_root;
+        let current_root = tx.get_header(input.stage_progress)?.state_root;
 
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
@@ -174,7 +174,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-        models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
+        models::{AccountBeforeTx, StoredBlockBody},
         tables,
         transaction::{DbTx, DbTxMut},
     };
@@ -297,8 +297,6 @@ mod tests {
             for progress in blocks.iter() {
                 // Insert last progress data
                 self.tx.commit(|tx| {
-                    let key: BlockNumHash = (progress.number, progress.hash()).into();
-
                     let body = StoredBlockBody {
                         start_tx_id: tx_id,
                         tx_count: progress.body.len() as u64,
@@ -341,20 +339,20 @@ mod tests {
                         Ok(())
                     })?;
 
-                    tx.put::<tables::BlockTransitionIndex>(key.number(), transition_id)?;
-                    tx.put::<tables::BlockBodies>(key, body)
+                    tx.put::<tables::BlockTransitionIndex>(progress.number, transition_id)?;
+                    tx.put::<tables::BlockBodies>(progress.number, body)
                 })?;
             }
 
             self.insert_accounts(&accounts)?;
             self.insert_storages(&storages)?;
 
-            let last_numhash = self.tx.inner().get_block_numhash(end - 1).unwrap();
+            let last_block_number = end - 1;
             let root = self.state_root()?;
             self.tx.commit(|tx| {
-                let mut last_header = tx.get::<tables::Headers>(last_numhash)?.unwrap();
+                let mut last_header = tx.get::<tables::Headers>(last_block_number)?.unwrap();
                 last_header.state_root = root;
-                tx.put::<tables::Headers>(last_numhash, last_header)
+                tx.put::<tables::Headers>(last_block_number, last_header)
             })?;
 
             Ok(blocks)
@@ -540,7 +538,7 @@ mod tests {
         fn check_root(&self, previous_stage_progress: u64) -> Result<(), TestRunnerError> {
             if previous_stage_progress != 0 {
                 let block_root =
-                    self.tx.inner().get_header_by_num(previous_stage_progress).unwrap().state_root;
+                    self.tx.inner().get_header(previous_stage_progress).unwrap().state_root;
                 let root = DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap();
                 assert_eq!(block_root, root);
             }

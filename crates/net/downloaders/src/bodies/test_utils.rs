@@ -50,7 +50,7 @@ pub(crate) fn insert_headers(db: &Env<WriteMap>, headers: &[SealedHeader]) {
     db.update(|tx| -> Result<(), db::Error> {
         for header in headers {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-            tx.put::<tables::Headers>(header.num_hash().into(), header.clone().unseal())?;
+            tx.put::<tables::Headers>(header.number, header.clone().unseal())?;
         }
         Ok(())
     })

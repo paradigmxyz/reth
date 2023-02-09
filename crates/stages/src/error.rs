@@ -1,6 +1,6 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{consensus, db::Error as DbError, executor, p2p::error::DownloadError};
-use reth_primitives::{BlockNumber, TxNumber, H256};
+use reth_primitives::{BlockNumber, TxNumber};
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -78,12 +78,10 @@ pub enum DatabaseIntegrityError {
         number: BlockNumber,
     },
     /// A header is missing from the database.
-    #[error("No header for block #{number} ({hash:?})")]
+    #[error("No header for block #{number}")]
     Header {
         /// The block number key
         number: BlockNumber,
-        /// The block hash key
-        hash: H256,
     },
     /// A ommers are missing.
     #[error("Block ommers not found for block #{number}")]

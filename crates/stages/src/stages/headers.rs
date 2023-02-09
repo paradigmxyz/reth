@@ -6,7 +6,6 @@ use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::blocks::BlockNumHash,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -14,7 +13,7 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_primitives::{BlockNumber, Header, SealedHeader};
+use reth_primitives::{BlockNumber, SealedHeader};
 use std::sync::Arc;
 use tracing::*;
 
@@ -85,18 +84,18 @@ where
 
         // Construct head
         let (_, head) = header_cursor
-            .seek_exact((head_num, head_hash).into())?
-            .ok_or(DatabaseIntegrityError::Header { number: head_num, hash: head_hash })?;
+            .seek_exact(head_num)?
+            .ok_or(DatabaseIntegrityError::Header { number: head_num })?;
         let local_head = SealedHeader::new(head, head_hash);
 
         // Look up the next header
         let next_header = cursor
             .next()?
-            .map(|(next_num, next_hash)| -> Result<Header, StageError> {
+            .map(|(next_num, next_hash)| -> Result<SealedHeader, StageError> {
                 let (_, next) = header_cursor
-                    .seek_exact((next_num, next_hash).into())?
-                    .ok_or(DatabaseIntegrityError::Header { number: next_num, hash: next_hash })?;
-                Ok(next)
+                    .seek_exact(next_num)?
+                    .ok_or(DatabaseIntegrityError::Header { number: next_num })?;
+                Ok(SealedHeader::new(next, next_hash))
             })
             .transpose()?;
 
@@ -105,7 +104,7 @@ where
         // progress, then there is a gap in the database and we should start downloading in
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
-            Some(header) if stage_progress + 1 != header.number => SyncTarget::Gap(header.seal()),
+            Some(header) if stage_progress + 1 != header.number => SyncTarget::Gap(header),
             None => SyncTarget::Tip(self.next_fork_choice_state().await.head_block_hash),
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
@@ -146,15 +145,15 @@ where
                 continue
             }
 
-            let block_hash = header.hash();
-            let key: BlockNumHash = (header.number, block_hash).into();
+            let header_hash = header.hash();
+            let header_number = header.number;
             let header = header.unseal();
             latest = Some(header.number);
 
             // NOTE: HeaderNumbers are not sorted and can't be inserted with cursor.
-            tx.put::<tables::HeaderNumbers>(block_hash, header.number)?;
-            cursor_header.insert(key, header)?;
-            cursor_canonical.insert(key.number(), key.hash())?;
+            tx.put::<tables::HeaderNumbers>(header_hash, header_number)?;
+            cursor_header.insert(header_number, header)?;
+            cursor_canonical.insert(header_number, header_hash)?;
         }
         Ok(latest)
     }
@@ -235,7 +234,7 @@ where
             input.unwind_to + 1,
         )?;
         tx.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        tx.unwind_table_by_num_hash::<tables::Headers>(input.unwind_to)?;
+        tx.unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -279,7 +278,6 @@ mod tests {
             ExecInput, ExecOutput, UnwindInput,
         };
         use reth_db::{
-            models::blocks::BlockNumHash,
             tables,
             transaction::{DbTx, DbTxMut},
         };
@@ -343,9 +341,7 @@ mod tests {
                 let head = random_header(start, None);
                 self.tx.insert_headers(std::iter::once(&head))?;
                 // patch td table for `update_head` call
-                self.tx.commit(|tx| {
-                    tx.put::<tables::HeaderTD>(head.num_hash().into(), U256::ZERO.into())
-                })?;
+                self.tx.commit(|tx| tx.put::<tables::HeaderTD>(head.number, U256::ZERO.into()))?;
 
                 // use previous progress as seed size
                 let end = input.previous_stage.map(|(_, num)| num).unwrap_or_default() + 1;
@@ -374,13 +370,12 @@ mod tests {
                                 let hash = tx
                                     .get::<tables::CanonicalHeaders>(block_num)?
                                     .expect("no header hash");
-                                let key: BlockNumHash = (block_num, hash).into();
 
                                 // validate the header number
                                 assert_eq!(tx.get::<tables::HeaderNumbers>(hash)?, Some(block_num));
 
                                 // validate the header
-                                let header = tx.get::<tables::Headers>(key)?;
+                                let header = tx.get::<tables::Headers>(block_num)?;
                                 assert!(header.is_some());
                                 let header = header.unwrap().seal();
                                 assert_eq!(header.hash(), hash);
@@ -443,7 +438,7 @@ mod tests {
                 self.tx
                     .ensure_no_entry_above_by_value::<tables::HeaderNumbers, _>(block, |val| val)?;
                 self.tx.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
-                self.tx.ensure_no_entry_above::<tables::Headers, _>(block, |key| key.number())?;
+                self.tx.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
                 Ok(())
             }
         }
@@ -512,7 +507,7 @@ mod tests {
         // Checkpoint and no gap
         tx.put::<tables::CanonicalHeaders>(head.number, head.hash())
             .expect("failed to write canonical");
-        tx.put::<tables::Headers>(head.num_hash().into(), head.clone().unseal())
+        tx.put::<tables::Headers>(head.number, head.clone().unseal())
             .expect("failed to write header");
 
         let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
@@ -522,7 +517,7 @@ mod tests {
         // Checkpoint and gap
         tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
             .expect("failed to write canonical");
-        tx.put::<tables::Headers>(gap_tip.num_hash().into(), gap_tip.clone().unseal())
+        tx.put::<tables::Headers>(gap_tip.number, gap_tip.clone().unseal())
             .expect("failed to write header");
 
         let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
@@ -532,7 +527,7 @@ mod tests {
         // Checkpoint and gap closed
         tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
             .expect("failed to write canonical");
-        tx.put::<tables::Headers>(gap_fill.num_hash().into(), gap_fill.clone().unseal())
+        tx.put::<tables::Headers>(gap_fill.number, gap_fill.clone().unseal())
             .expect("failed to write header");
 
         assert_matches!(
