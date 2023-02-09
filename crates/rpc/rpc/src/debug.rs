@@ -1,4 +1,4 @@
-use crate::result::internal_rpc_err;
+use crate::{result::internal_rpc_err, EthApiSpec};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{rpc::BlockId, Bytes, H256};
@@ -9,23 +9,25 @@ use reth_rpc_types::RichBlock;
 ///
 /// This type provides the functionality for handling `debug` related requests.
 #[non_exhaustive]
-pub struct DebugApi {
-    // TODO: add proper handler when implementing functions
+pub struct DebugApi<Eth> {
+    /// The implementation of `eth` API
+    eth: Eth,
 }
 
 // === impl DebugApi ===
 
-impl DebugApi {
+impl<Eth> DebugApi<Eth> {
     /// Create a new instance of the [DebugApi]
-    #[allow(clippy::new_without_default)]
-    // TODO add necessary types
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(eth: Eth) -> Self {
+        Self { eth }
     }
 }
 
 #[async_trait]
-impl DebugApiServer for DebugApi {
+impl<Eth> DebugApiServer for DebugApi<Eth>
+where
+    Eth: EthApiSpec + 'static,
+{
     async fn raw_header(&self, _block_id: BlockId) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -34,6 +36,7 @@ impl DebugApiServer for DebugApi {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Returns the bytes of the transaction for the given hash.
     async fn raw_transaction(&self, _hash: H256) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -47,7 +50,7 @@ impl DebugApiServer for DebugApi {
     }
 }
 
-impl std::fmt::Debug for DebugApi {
+impl<Eth> std::fmt::Debug for DebugApi<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
