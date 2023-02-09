@@ -258,6 +258,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         self.dump_table_with_range::<tables::HeaderTD>(&mut output_db, from, to)?;
         self.dump_table_with_range::<tables::Headers>(&mut output_db, from, to)?;
         self.dump_table_with_range::<tables::BlockBodies>(&mut output_db, from, to)?;
+        self.dump_table_with_range::<tables::BlockTransitionIndex>(&mut output_db, from - 1, to)?;
 
         // Find range of transactions that need to be copied over
         let (from_tx, to_tx) = self.db.view(|read_tx| {
