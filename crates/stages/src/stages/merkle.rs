@@ -180,7 +180,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_interfaces::test_utils::generators::{
-        random_block, random_block_range, random_contract_account_range,
+        random_block, random_block_range, random_contract_account_range, random_transition,
     };
     use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
     use std::collections::BTreeMap;
@@ -276,12 +276,16 @@ mod tests {
             let end = input.previous_stage_progress() + 1;
 
             let n_accounts = 31;
-            let mut accounts = random_contract_account_range(&mut (0..n_accounts));
+            let mut accounts = random_contract_account_range(&mut (0..n_accounts))
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
+            let addresses = accounts.iter().map(|(addr, _)| *addr).collect_vec();
 
             let SealedBlock { header, body, ommers } =
                 random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
-            header.state_root = self.generate_initial_trie(&accounts)?;
+            header.state_root =
+                self.generate_initial_trie(accounts.iter().map(|(k, v)| (*k, *v)))?;
             let sealed_head = SealedBlock { header: header.seal(), body, ommers };
 
             let head_hash = sealed_head.hash();
@@ -310,27 +314,22 @@ mod tests {
                         tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
                         tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
 
+                        let (address, new_entry) = random_transition(&addresses, 0..125, 1..125);
+
                         // seed account changeset
-                        let (addr, prev_acc) = accounts
-                            .get_mut(rand::random::<usize>() % n_accounts as usize)
-                            .unwrap();
-                        let acc_before_tx =
-                            AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
+                        let prev_acc = accounts.get_mut(&address).unwrap();
+                        let acc_before_tx = AccountBeforeTx { address, info: Some(*prev_acc) };
 
                         tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
 
                         prev_acc.nonce += 1;
                         prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
 
-                        let new_entry = StorageEntry {
-                            key: keccak256([rand::random::<u8>()]),
-                            value: U256::from(rand::random::<u8>() % 30 + 1),
-                        };
-                        let storage = storages.entry(*addr).or_default();
+                        let storage = storages.entry(address).or_default();
                         let old_value = storage.entry(new_entry.key).or_default();
 
                         tx.put::<tables::StorageChangeSet>(
-                            (transition_id, *addr).into(),
+                            (transition_id, address).into(),
                             StorageEntry { key: new_entry.key, value: *old_value },
                         )?;
 
@@ -485,10 +484,10 @@ mod tests {
 
         pub(crate) fn generate_initial_trie(
             &self,
-            accounts: &[(Address, Account)],
+            accounts: impl IntoIterator<Item = (Address, Account)>,
         ) -> Result<H256, TestRunnerError> {
             self.tx.insert_accounts_and_storages(
-                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, std::iter::empty()))),
             )?;
 
             let loader = DBTrieLoader::default();

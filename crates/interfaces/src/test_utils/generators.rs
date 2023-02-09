@@ -174,14 +174,14 @@ pub fn random_transition(
     valid_addresses: &Vec<Address>,
     key_range: std::ops::Range<u64>,
     value_range: std::ops::Range<u64>,
-) -> (Address, U256, StorageEntry) {
+) -> (Address, StorageEntry) {
     let mut rng = rand::thread_rng();
     let address =
         valid_addresses.choose(&mut rng).map_or_else(|| H160::random_using(&mut rng), |v| *v);
     let transfer = U256::from(rng.gen::<u64>());
     let key = H256::from_low_u64_be(key_range.sample_single(&mut rng));
     let value = U256::from(value_range.sample_single(&mut rng));
-    (address, transfer, StorageEntry { key, value })
+    (address, StorageEntry { key, value })
 }
 
 /// Generate random Externaly Owned Account (EOA account without contract).
