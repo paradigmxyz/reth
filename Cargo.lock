@@ -4332,6 +4332,7 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-rpc-types",
+ "revm-primitives",
  "secp256k1 0.24.3",
  "thiserror",
  "tokio",
