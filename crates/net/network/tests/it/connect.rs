@@ -551,3 +551,31 @@ async fn test_shutdown() {
     let (_peer, reason) = listener0.next_session_closed().await.unwrap();
     assert_eq!(reason, Some(DisconnectReason::DisconnectRequested));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
+    let net = Testnet::create(1).await;
+    let (reth_p2p, reth_disc) = unused_tcp_udp();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let peers_config = PeersConfig::default().with_max_inbound(0);
+
+    let config = NetworkConfigBuilder::new(secret_key)
+        .listener_addr(reth_p2p)
+        .discovery_addr(reth_disc)
+        .peer_config(peers_config)
+        .build(Arc::new(NoopProvider::default()));
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let other_peer_handle = net.handles().next().unwrap();
+
+    let handle = network.handle().clone();
+
+    other_peer_handle.add_peer(*handle.peer_id(), handle.local_addr());
+
+    tokio::task::spawn(network);
+    let _handle = net.spawn();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    assert_eq!(handle.num_connected_peers(), 0);
+}
