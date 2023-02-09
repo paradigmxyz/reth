@@ -21,7 +21,7 @@ use std::net::IpAddr;
 use reth_rpc_builder::RpcModuleConfig;
 pub use reth_staged_sync::utils;
 
-use clap::{Args};
+use clap::Args;
 use reth_primitives::NodeRecord;
 
 /// Parameters for configuring the network more granularity via CLI
@@ -103,24 +103,23 @@ struct RpcServerOpts {
     ipcpath: Option<String>,
 }
 
-
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
     use super::*;
+    use clap::Parser;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
         #[clap(flatten)]
-        args: T
+        args: T,
     }
 
     #[test]
     fn test_rpc_server_opts_parser() {
-       let opts = CommandParser::<RpcServerOpts>::parse_from([
-            "reth", "--http.api", "eth,admin,debug"
-            ]).args;
+        let opts =
+            CommandParser::<RpcServerOpts>::parse_from(["reth", "--http.api", "eth,admin,debug"])
+                .args;
 
         let apis = opts.http_api.unwrap();
         let expected = RpcModuleConfig::try_from_selection(["eth", "admin", "debug"]).unwrap();
