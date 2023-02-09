@@ -346,20 +346,86 @@ mod tests {
             .expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
-        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
-
         let key_to_insert = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
         // INSERT
-        cursor.seek_exact(1).unwrap();
         assert_eq!(cursor.insert(key_to_insert, H256::zero()), Ok(()));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         // INSERT (failure)
         assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(Error::Write(4294936497)));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
+
+        tx.commit().expect(ERROR_COMMIT);
+
+        // Confirm the result
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        tx.commit().expect(ERROR_COMMIT);
+    }
+
+    #[test]
+    fn db_cursor_insert_wherever_cursor_is() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        // PUT
+        vec![0, 1, 3, 5, 7, 9]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+
+        // INSERT (cursor starts at last)
+        cursor.last().unwrap();
+        assert_eq!(cursor.current(), Ok(Some((9, H256::zero()))));
+
+        for pos in (2..=8).step_by(2) {
+            assert_eq!(cursor.insert(pos, H256::zero()), Ok(()));
+            assert_eq!(cursor.current(), Ok(Some((pos, H256::zero()))));
+        }
+        tx.commit().expect(ERROR_COMMIT);
+
+        // Confirm the result
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        tx.commit().expect(ERROR_COMMIT);
+    }
+
+    #[test]
+    fn db_cursor_append() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 2, 3, 4]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        // APPEND
+        let key_to_append = 5;
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Ok(()));
+        tx.commit().expect(ERROR_COMMIT);
+
+        // Confirm the result
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        tx.commit().expect(ERROR_COMMIT);
     }
 
     #[test]
@@ -378,9 +444,16 @@ mod tests {
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        cursor.seek_exact(1).unwrap();
         assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(4294936878)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
+        tx.commit().expect(ERROR_COMMIT);
+
+        // Confirm the result
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        assert_eq!(res, vec![0, 1, 3, 4, 5]);
+        tx.commit().expect(ERROR_COMMIT);
     }
 
     #[test]

@@ -270,7 +270,7 @@ mod tests {
     use ethers_core::rand;
     use ethers_signers::{LocalWallet, Signer};
     use itertools::Itertools;
-    use reth_primitives::{Genesis, Header, H256, U256};
+    use reth_primitives::{Header, H256, U256};
     use std::collections::HashSet;
 
     // Single signer, no votes cast
@@ -779,9 +779,9 @@ mod tests {
             }
             extra_data.put_bytes(0, EXTRA_SEAL);
 
-            let mut genesis = Genesis::default();
+            let mut genesis = Header::default();
             genesis.extra_data = extra_data.freeze().into();
-            Header::from(genesis).clique_seal_slow()
+            genesis.clique_seal_slow()
         }
 
         fn construct_clique_header(

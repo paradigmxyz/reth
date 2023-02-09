@@ -2,7 +2,7 @@
 use reth_interfaces::{consensus::Error, Result as RethResult};
 use reth_primitives::{
     constants::{EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR, EIP1559_ELASTICITY_MULTIPLIER},
-    proofs, Header, SealedBlock, SealedHeader,
+    proofs, Header, SealedBlock,
 };
 use reth_provider::HeaderProvider;
 

@@ -9,7 +9,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    Status,
+    DisconnectReason, Status,
 };
 use reth_primitives::PeerId;
 use reth_provider::BlockProvider;
@@ -69,6 +69,8 @@ pub(crate) struct Swarm<C> {
     sessions: SessionManager,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<C>,
+    /// Tracks the connection state of the node
+    net_connection_state: NetworkConnectionState,
 }
 
 // === impl Swarm ===
@@ -82,8 +84,9 @@ where
         incoming: ConnectionListener,
         sessions: SessionManager,
         state: NetworkState<C>,
+        net_connection_state: NetworkConnectionState,
     ) -> Self {
-        Self { incoming, sessions, state }
+        Self { incoming, sessions, state, net_connection_state }
     }
 
     /// Access to the state.
@@ -189,6 +192,10 @@ where
                 return Some(SwarmEvent::TcpListenerClosed { remote_addr: address })
             }
             ListenerEvent::Incoming { stream, remote_addr } => {
+                // Reject incoming connection if node is shutting down.
+                if self.is_shutting_down() {
+                    return None
+                }
                 // ensure we can handle an incoming connection from this address
                 if let Err(err) =
                     self.state_mut().peers_mut().on_incoming_pending_session(remote_addr.ip())
@@ -198,10 +205,11 @@ where
                             trace!(target: "net", ?remote_addr, "The incoming ip address is in the ban list");
                         }
                         InboundConnectionError::ExceedsLimit(limit) => {
-                            // We currently don't have additional capacity to establish a session
-                            // from an incoming connection, so we drop
-                            // the connection.
-                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; dropping connection");
+                            trace!(target: "net", %limit, ?remote_addr, "Exceeded incoming connection limit; disconnecting");
+                            self.sessions.disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
                     return None
@@ -244,6 +252,10 @@ where
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
             StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+                // Don't try to connect to peer if node is shutting down
+                if self.is_shutting_down() {
+                    return None
+                }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
                     self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
@@ -258,6 +270,17 @@ where
             }
         }
         None
+    }
+
+    /// Set network connection state to `ShuttingDown`
+    pub(crate) fn on_shutdown_requested(&mut self) {
+        self.net_connection_state = NetworkConnectionState::ShuttingDown;
+    }
+
+    /// Checks if the node's network connection state is 'ShuttingDown'
+    #[inline]
+    fn is_shutting_down(&self) -> bool {
+        matches!(self.net_connection_state, NetworkConnectionState::ShuttingDown)
     }
 }
 
@@ -393,4 +416,13 @@ pub(crate) enum SwarmEvent {
     },
     /// Failed to establish a tcp stream to the given address/node
     OutgoingConnectionError { remote_addr: SocketAddr, peer_id: PeerId, error: io::Error },
+}
+
+/// Represents the state of the connection of the node. If shutting down,
+/// new connections won't be established.
+#[derive(Default)]
+pub(crate) enum NetworkConnectionState {
+    #[default]
+    Active,
+    ShuttingDown,
 }

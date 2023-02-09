@@ -3,7 +3,7 @@ use super::calculate_next_block_base_fee;
 use reth_interfaces::consensus::Error;
 use reth_primitives::{
     constants::{EIP1559_ELASTICITY_MULTIPLIER, EIP1559_INITIAL_BASE_FEE, GAS_LIMIT_BOUND_DIVISOR},
-    ChainSpec, Hardfork, SealedHeader, EMPTY_OMMER_ROOT, U256,
+    ChainSpec, Hardfork, SealedHeader,
 };
 use std::time::SystemTime;
 
@@ -34,28 +34,10 @@ pub fn validate_header_standalone(
     }
 
     // Check if base fee is set.
-    if chain_spec.fork_active(Hardfork::London, header.number) && header.base_fee_per_gas.is_none()
+    if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
+        header.base_fee_per_gas.is_none()
     {
         return Err(Error::BaseFeeMissing)
-    }
-
-    // EIP-3675: Upgrade consensus to Proof-of-Stake:
-    // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
-    if Some(header.number) >= chain_spec.paris_status().block_number() {
-        if header.difficulty != U256::ZERO {
-            return Err(Error::TheMergeDifficultyIsNotZero)
-        }
-
-        if header.nonce != 0 {
-            return Err(Error::TheMergeNonceIsNotZero)
-        }
-
-        if header.ommers_hash != EMPTY_OMMER_ROOT {
-            return Err(Error::TheMergeOmmerRootIsNotEmpty)
-        }
-
-        // mixHash is used instead of difficulty inside EVM
-        // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
     }
 
     Ok(())
@@ -93,9 +75,11 @@ pub fn validate_header_regarding_parent(
     }
 
     // difficulty check is done by consensus.
-    if chain_spec.paris_status().block_number() > Some(child.number) {
-        // TODO how this needs to be checked? As ice age did increment it by some formula
-    }
+    // TODO(onbjerg): Unsure what the check here is supposed to be, but it should be moved to
+    // [BeaconConsensus].
+    // if chain_spec.paris_status().block_number() > Some(child.number) {
+    //    // TODO how this needs to be checked? As ice age did increment it by some formula
+    // }
 
     // Validate gas limit increase/decrease.
     validate_gas_limit_difference(child, parent, chain_spec)?;
@@ -152,7 +136,7 @@ pub fn validate_gas_limit_difference(
 
     // By consensus, gas_limit is multiplied by elasticity (*2) on
     // on exact block that hardfork happens.
-    if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
+    if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
         parent_gas_limit = parent.gas_limit * EIP1559_ELASTICITY_MULTIPLIER;
     }
 
@@ -180,32 +164,29 @@ pub fn validate_eip_1559_base_fee(
     parent: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), Error> {
-    if !chain_spec.fork_active(Hardfork::London, child.number) {
-        return match child.base_fee_per_gas {
-            Some(_) => Err(Error::UnexpectedBaseFee),
-            None => Ok(()),
-        }
-    }
-
-    if chain_spec.fork_active(Hardfork::London, child.number) {
+    if chain_spec.fork(Hardfork::London).active_at_block(child.number) {
         let base_fee = child.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?;
 
-        let expected_base_fee = if chain_spec.fork_block(Hardfork::London) == Some(child.number) {
-            EIP1559_INITIAL_BASE_FEE
-        } else {
-            // This BaseFeeMissing will not happen as previous blocks are checked to have them.
-            calculate_next_block_base_fee(
-                parent.gas_used,
-                parent.gas_limit,
-                parent.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?,
-            )
-        };
+        let expected_base_fee =
+            if chain_spec.fork(Hardfork::London).transitions_at_block(child.number) {
+                EIP1559_INITIAL_BASE_FEE
+            } else {
+                // This BaseFeeMissing will not happen as previous blocks are checked to have them.
+                calculate_next_block_base_fee(
+                    parent.gas_used,
+                    parent.gas_limit,
+                    parent.base_fee_per_gas.ok_or(Error::BaseFeeMissing)?,
+                )
+            };
         if expected_base_fee != base_fee {
             return Err(Error::BaseFeeDiff { expected: expected_base_fee, got: base_fee })
         }
+        Ok(())
+    } else if child.base_fee_per_gas.is_some() {
+        Err(Error::UnexpectedBaseFee)
+    } else {
+        Ok(())
     }
-
-    Ok(())
 }
 
 /// Methods for validating clique headers

@@ -9,12 +9,12 @@ description = "Commonly used types in reth."
 
 [dependencies]
 # reth
-reth-rlp = { path = "../common/rlp", features = [
+reth-rlp = { path = "../rlp", features = [
     "std",
     "derive",
     "ethereum-types",
 ] }
-reth-rlp-derive = { path = "../common/rlp-derive" }
+reth-rlp-derive = { path = "../rlp/rlp-derive" }
 reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
 revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a05fb262d87c78ee52d400e6c0f4708d4c527f32", features = [

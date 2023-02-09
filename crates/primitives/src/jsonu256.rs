@@ -9,6 +9,12 @@ use std::{fmt, str::FromStr};
 #[derive(Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct JsonU256(pub U256);
 
+impl From<JsonU256> for U256 {
+    fn from(value: JsonU256) -> Self {
+        value.0
+    }
+}
+
 impl Serialize for JsonU256 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -67,6 +73,15 @@ impl<'a> Visitor<'a> for JsonU256Visitor {
     {
         self.visit_str(value.as_ref())
     }
+}
+
+/// Supports parsing `U256` numbers as strings via [JsonU256]
+pub fn deserialize_json_u256<'de, D>(deserializer: D) -> Result<U256, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num = JsonU256::deserialize(deserializer)?;
+    Ok(num.into())
 }
 
 #[cfg(test)]

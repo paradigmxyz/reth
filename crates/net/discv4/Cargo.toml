@@ -12,8 +12,8 @@ Ethereum network discovery
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
-reth-rlp = { path = "../../common/rlp", features = ["enr"] }
-reth-rlp-derive = { path = "../../common/rlp-derive" }
+reth-rlp = { path = "../../rlp", features = ["enr"] }
+reth-rlp-derive = { path = "../../rlp/rlp-derive" }
 reth-net-common = { path = "../common" }
 reth-net-nat = { path = "../nat" }
 
@@ -39,7 +39,7 @@ thiserror = "1.0"
 hex = "0.4"
 rand = { version = "0.8", optional = true }
 generic-array = "0.14"
-serde = "1.0"
+serde = { version = "1.0", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
@@ -47,4 +47,6 @@ tokio = { version = "1", features = ["macros"] }
 reth-tracing = { path = "../../tracing" }
 
 [features]
-test-utils = ["rand"]
+default = ["serde"]
+test-utils = ["dep:rand"]
+serde = ["dep:serde"]

@@ -2,23 +2,16 @@
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Bytes, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
 #[derive_arbitrary(rlp)]
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GetNodeData(pub Vec<H256>);
 
 /// The response to [`GetNodeData`], containing the state tree nodes or contract bytecode
@@ -27,17 +20,8 @@ pub struct GetNodeData(pub Vec<H256>);
 /// Not all nodes are guaranteed to be returned by the peer.
 /// This message was removed in `eth/67`.
 #[derive_arbitrary(rlp)]
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]

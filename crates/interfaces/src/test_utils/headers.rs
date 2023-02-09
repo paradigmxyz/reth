@@ -1,6 +1,6 @@
 //! Testing support for headers related interfaces.
 use crate::{
-    consensus::{self, Consensus},
+    consensus::{self, Consensus, Error},
     p2p::{
         download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
@@ -14,8 +14,8 @@ use crate::{
 use futures::{future, Future, FutureExt, Stream, StreamExt};
 use reth_eth_wire::BlockHeaders;
 use reth_primitives::{
-    BlockHash, BlockNumber, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
-    WithPeerId, H256,
+    BlockHash, BlockNumber, Head, Header, HeadersDirection, PeerId, SealedBlock, SealedHeader,
+    WithPeerId, H256, U256,
 };
 use reth_rpc_types::engine::ForkchoiceState;
 use std::{
@@ -156,7 +156,7 @@ impl Stream for TestDownload {
             }
 
             let empty = SealedHeader::default();
-            if let Err(error) = this.consensus.validate_header(&empty, &empty) {
+            if let Err(error) = this.consensus.pre_validate_header(&empty, &empty) {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
@@ -303,7 +303,7 @@ impl TestConsensus {
 pub struct TestStatusUpdater;
 
 impl StatusUpdater for TestStatusUpdater {
-    fn update_status(&self, _height: u64, _hash: H256, _total_difficulty: reth_primitives::U256) {}
+    fn update_status(&self, _: Head) {}
 }
 
 #[async_trait::async_trait]
@@ -312,11 +312,19 @@ impl Consensus for TestConsensus {
         self.channel.1.clone()
     }
 
-    fn validate_header(
+    fn pre_validate_header(
         &self,
-        _header: &SealedHeader,
-        _parent: &SealedHeader,
-    ) -> Result<(), consensus::Error> {
+        header: &SealedHeader,
+        parent: &SealedHeader,
+    ) -> Result<(), Error> {
+        if self.fail_validation() {
+            Err(consensus::Error::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_header(&self, header: &SealedHeader, total_difficulty: U256) -> Result<(), Error> {
         if self.fail_validation() {
             Err(consensus::Error::BaseFeeMissing)
         } else {
@@ -331,7 +339,8 @@ impl Consensus for TestConsensus {
             Ok(())
         }
     }
-    fn has_block_reward(&self, _block_num: BlockNumber) -> bool {
+
+    fn has_block_reward(&self, _: U256) -> bool {
         true
     }
 }

@@ -1,6 +1,6 @@
 //! Consensus for ethereum network
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, SealedHeader};
+use reth_primitives::{ChainSpec, Hardfork, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256};
 use tokio::sync::watch;
 
 use crate::validation;
@@ -39,15 +39,41 @@ impl Consensus for BeaconConsensus {
         self.forkchoice_state_rx.clone()
     }
 
-    fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {
+    fn pre_validate_header(
+        &self,
+        header: &SealedHeader,
+        parent: &SealedHeader,
+    ) -> Result<(), Error> {
         validation::validate_header_standalone(header, &self.chain_spec)?;
         validation::validate_header_regarding_parent(parent, header, &self.chain_spec)?;
 
-        if Some(header.number) < self.chain_spec.paris_status().block_number() {
+        Ok(())
+    }
+
+    fn validate_header(&self, header: &SealedHeader, total_difficulty: U256) -> Result<(), Error> {
+        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty) {
+            // EIP-3675: Upgrade consensus to Proof-of-Stake:
+            // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
+            if header.difficulty != U256::ZERO {
+                return Err(Error::TheMergeDifficultyIsNotZero)
+            }
+
+            if header.nonce != 0 {
+                return Err(Error::TheMergeNonceIsNotZero)
+            }
+
+            if header.ommers_hash != EMPTY_OMMER_ROOT {
+                return Err(Error::TheMergeOmmerRootIsNotEmpty)
+            }
+
+            // mixHash is used instead of difficulty inside EVM
+            // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
+        } else {
             // TODO Consensus checks for old blocks:
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
         }
+
         Ok(())
     }
 
@@ -55,7 +81,22 @@ impl Consensus for BeaconConsensus {
         validation::validate_block_standalone(block)
     }
 
-    fn has_block_reward(&self, block_num: BlockNumber) -> bool {
-        Some(block_num) < self.chain_spec.paris_status().block_number()
+    fn has_block_reward(&self, total_difficulty: U256) -> bool {
+        !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use reth_interfaces::consensus::Consensus;
+    use reth_primitives::{ChainSpecBuilder, U256};
+
+    use super::BeaconConsensus;
+
+    #[test]
+    fn test_has_block_reward_before_paris() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let (consensus, _) = BeaconConsensus::builder().build(chain_spec);
+        assert!(consensus.has_block_reward(U256::ZERO));
     }
 }

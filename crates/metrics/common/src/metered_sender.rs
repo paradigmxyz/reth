@@ -9,7 +9,7 @@ use tokio::sync::mpsc::{
 };
 
 /// Network throughput metrics
-#[derive(Metrics)]
+#[derive(Clone, Metrics)]
 #[metrics(dynamic = true)]
 struct MeteredSenderMetrics {
     /// Number of messages sent
@@ -19,6 +19,7 @@ struct MeteredSenderMetrics {
 }
 
 /// Manages updating the network throughput metrics for a metered stream
+#[derive(Debug)]
 pub struct MeteredSender<T> {
     /// The [`Sender`] that this wraps around
     sender: Sender<T>,
@@ -34,7 +35,7 @@ impl<T> MeteredSender<T> {
 
     /// Calls the underlying [`Sender`]'s `try_send`, incrementing the appropriate
     /// metrics depending on the result.
-    pub fn try_send(&mut self, message: T) -> Result<(), TrySendError<T>> {
+    pub fn try_send(&self, message: T) -> Result<(), TrySendError<T>> {
         match self.sender.try_send(message) {
             Ok(()) => {
                 self.metrics.messages_sent.increment(1);
@@ -60,5 +61,11 @@ impl<T> MeteredSender<T> {
                 Err(error)
             }
         }
+    }
+}
+
+impl<T> Clone for MeteredSender<T> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
     }
 }

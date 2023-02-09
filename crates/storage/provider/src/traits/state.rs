@@ -2,7 +2,9 @@ use super::AccountProvider;
 use crate::BlockHashProvider;
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
-use reth_primitives::{Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, H256};
+use reth_primitives::{
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, H256, KECCAK_EMPTY,
+};
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&)]
@@ -12,6 +14,29 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>;
+
+    /// Get account code by its address.
+    ///
+    /// Returns `None` if the account doesn't exist or account is not a contract
+    fn account_code(&self, addr: Address) -> Result<Option<Bytes>> {
+        // Get basic account information
+        // Returns None if acc doesn't exist
+        let acc = match self.basic_account(addr)? {
+            Some(acc) => acc,
+            None => return Ok(None),
+        };
+
+        if let Some(code_hash) = acc.bytecode_hash {
+            if code_hash == KECCAK_EMPTY {
+                return Ok(None)
+            }
+            // Get the code from the code hash
+            return self.bytecode_by_hash(code_hash)
+        }
+
+        // Return `None` if no code hash is set
+        Ok(None)
+    }
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given

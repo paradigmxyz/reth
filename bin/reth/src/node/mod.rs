@@ -20,13 +20,13 @@ use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
+use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::select;
+use std::{io, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -69,17 +69,21 @@ pub struct Command {
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     metrics: Option<SocketAddr>,
 
+    #[clap(flatten)]
+    network: NetworkOpts,
+
+    #[arg(long, default_value = "any")]
+    nat: NatResolver,
+
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
     #[arg(long = "debug.tip", help_heading = "Debug")]
     tip: Option<H256>,
 
-    #[clap(flatten)]
-    network: NetworkOpts,
-
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
+    /// Runs the sync only up to the specified block
+    #[arg(long = "debug.max-block", help_heading = "Debug")]
+    max_block: Option<u64>,
 }
 
 impl Command {
@@ -111,7 +115,20 @@ impl Command {
         info!(target: "reth::cli", "Connecting to P2P network");
         let netconf = self.load_network_config(&config, &db);
         let network = netconf.start_network().await?;
+
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+
+        // TODO(mattsse): cleanup, add cli args
+        let _rpc_server = reth_rpc_builder::launch(
+            ShareableDatabase::new(db.clone()),
+            reth_transaction_pool::test_utils::testing_pool(),
+            network.clone(),
+            TransportRpcModuleConfig::default()
+                .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
+            RpcServerConfig::default().with_http(Default::default()),
+        )
+        .await?;
+        info!(target: "reth::cli", "Started RPC server");
 
         let mut pipeline = self.build_pipeline(&config, &network, &consensus, &db).await?;
 
@@ -122,7 +139,14 @@ impl Command {
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
-        pipeline.run(db.clone()).await?;
+        tokio::select! {
+            res = pipeline.run(db.clone()) => res?,
+            _ = tokio::signal::ctrl_c() => {},
+        };
+
+        if !self.network.no_persist_peers {
+            dump_peers(self.network.peers_file.as_ref(), network).await?;
+        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -177,12 +201,14 @@ impl Command {
         config: &Config,
         db: &Arc<Env<WriteMap>>,
     ) -> NetworkConfig<ShareableDatabase<Env<WriteMap>>> {
+        let peers_file = (!self.network.no_persist_peers).then_some(&self.network.peers_file);
         config.network_config(
             db.clone(),
             self.chain.clone(),
             self.network.disable_discovery,
             self.network.bootnodes.clone(),
             self.nat,
+            peers_file.map(|f| f.as_ref().to_path_buf()),
         )
     }
 
@@ -199,11 +225,18 @@ impl Command {
         let body_downloader = self.spawn_bodies_downloader(config, consensus, &fetch_client, db);
         let stage_conf = &config.stages;
 
-        let pipeline = Pipeline::builder()
+        let mut builder = Pipeline::builder();
+
+        if let Some(max_block) = self.max_block {
+            builder = builder.with_max_block(max_block)
+        }
+
+        let pipeline = builder
             .with_sync_state_updater(network.clone())
             .add_stages(
                 OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
                     TotalDifficultyStage {
+                        chain_spec: self.chain.clone(),
                         commit_threshold: stage_conf.total_difficulty.commit_threshold,
                     },
                 ),
@@ -212,7 +245,7 @@ impl Command {
                 OfflineStages::default()
                     .set(SenderRecoveryStage {
                         batch_size: stage_conf.sender_recovery.batch_size,
-                        commit_threshold: stage_conf.execution.commit_threshold,
+                        commit_threshold: stage_conf.sender_recovery.commit_threshold,
                     })
                     .set(ExecutionStage {
                         chain_spec: self.chain.clone(),
@@ -261,6 +294,15 @@ impl Command {
     }
 }
 
+/// Dumps peers to `file_path` for persistence.
+async fn dump_peers(file_path: &Path, network: NetworkHandle) -> Result<(), io::Error> {
+    info!(target : "net::peers", file = %file_path.display(), "Saving current peers");
+    let known_peers = network.peers_handle().all_peers().await;
+
+    tokio::fs::write(file_path, serde_json::to_string_pretty(&known_peers)?).await?;
+    Ok(())
+}
+
 /// The current high-level state of the node.
 #[derive(Default)]
 struct NodeState {
@@ -300,7 +342,7 @@ async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        select! {
+        tokio::select! {
             Some(event) = events.next() => {
                 match event {
                     NodeEvent::Network(NetworkEvent::SessionEstablished { peer_id, status, .. }) => {

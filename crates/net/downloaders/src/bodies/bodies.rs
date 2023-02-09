@@ -253,81 +253,29 @@ where
     /// If there are any bodies between the range start and last queued body that have not been
     /// downloaded or are not in progress, they will be re-requested.
     fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
-        if range.is_empty() {
-            tracing::warn!(target: "downloaders::bodies", "New download range is empty");
-            return Ok(())
-        }
+        // Check if the range is valid.
+        let is_valid = !range.is_empty();
+        if is_valid {
+            // Check if the provided range is the subset of the existing range.
+            let is_current_range_subset =
+                self.download_range.contains(&range.start) && range.end == self.download_range.end;
+            if is_current_range_subset {
+                tracing::trace!(target: "downloaders::bodies", ?range, "Download range already in progress");
+                // The current range already includes requested.
+                return Ok(())
+            }
 
-        tracing::trace!(target: "downloaders::bodies", ?range, "Setting new download range");
-
-        // Drain queued bodies.
-        let queued_bodies = std::mem::take(&mut self.queued_bodies)
-            .into_iter()
-            .filter(|b| range.contains(&b.block_number()))
-            .collect::<Vec<_>>();
-        tracing::trace!(target: "downloaders::bodies", len = queued_bodies.len(), "Evicted bodies from the queue");
-
-        // Dispatch requests for missing bodies
-        if let Some(latest_queued) = self.latest_queued_block_number {
-            if range.start <= latest_queued {
-                // Retrieve the range for checking whether the block has been downloaded.
-                // Since `queued_bodies` is a sorted contiguous collection of block responses,
-                // construct the range instead of iterating the array each time looking for the
-                // block number.
-                let queued_bodies_range = match (queued_bodies.first(), queued_bodies.last()) {
-                    (Some(first), Some(last)) => first.block_number()..last.block_number() + 1,
-                    _ => Range::default(),
-                };
-
-                let mut requests = Vec::<RangeInclusive<BlockNumber>>::default();
-                for num in range.start..=latest_queued {
-                    // Check if block has been downloaded or is currently in progress
-                    if queued_bodies_range.contains(&num) ||
-                        self.buffered_responses.iter().any(|r| r.block_range().contains(&num)) ||
-                        self.in_progress_queue.contains_block(num)
-                    {
-                        continue
-                    }
-
-                    match requests.last().map(|range| *range.end()) {
-                        // Extend the last range if contiguous
-                        Some(range_end) if range_end + 1 == num => {
-                            let range = requests.pop().unwrap();
-                            requests.push(*range.start()..=num);
-                        }
-                        // Push the new request range
-                        Some(_) | None => requests.push(num..=num),
-                    };
-                }
-
-                for range in requests {
-                    let headers = self
-                        .query_headers(
-                            *range.start()..*range.end() + 1,
-                            range.clone().count() as u64,
-                        )?
-                        .ok_or(DownloadError::MissingHeader { block_number: *range.start() })?;
-
-                    // Dispatch contiguous request.
-                    self.in_progress_queue.push_new_request(
-                        Arc::clone(&self.client),
-                        Arc::clone(&self.consensus),
-                        headers,
-                        Priority::High,
-                    );
-                }
+            // Check if the provided range is the next expected range.
+            let is_next_range = range.start >= self.download_range.end;
+            if is_next_range {
+                // New range received.
+                tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
+                self.download_range = range;
+                return Ok(())
             }
         }
 
-        // Put queued bodies into the buffer
-        if !queued_bodies.is_empty() {
-            self.buffered_responses.push(OrderedBodiesResponse(queued_bodies));
-        }
-
-        self.download_range = range;
-        self.latest_queued_block_number = None;
-        tracing::trace!(target: "downloaders::bodies", range = ?self.download_range, "New download range set");
-        Ok(())
+        Err(DownloadError::InvalidBodyRange { range })
     }
 }
 
@@ -550,8 +498,10 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_interfaces::test_utils::TestConsensus;
-    use std::sync::Arc;
+    use reth_eth_wire::BlockBody;
+    use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
+    use reth_primitives::H256;
+    use std::{collections::HashMap, sync::Arc};
 
     // Check that the blocks are emitted in order of block number, not in order of
     // first-downloaded
@@ -580,6 +530,41 @@ mod tests {
         assert_eq!(client.times_requested(), 1);
     }
 
+    // Check that the number of times requested equals to the number of headers divided by request
+    // limit.
+    #[tokio::test]
+    async fn requests_correct_number_of_times() {
+        // Generate some random blocks
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let blocks = random_block_range(0..200, H256::zero(), 1..2);
+
+        let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
+        let bodies = blocks
+            .into_iter()
+            .map(|block| {
+                (
+                    block.hash(),
+                    BlockBody {
+                        transactions: block.body,
+                        ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        insert_headers(&db, &headers);
+
+        let request_limit = 10;
+        let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_request_limit(request_limit)
+            .build(client.clone(), Arc::new(TestConsensus::default()), db);
+        downloader.set_download_range(0..200).expect("failed to set download range");
+
+        let _ = downloader.collect::<Vec<_>>().await;
+        assert_eq!(client.times_requested(), 20);
+    }
+
     // Check that bodies are returned in correct order
     // after resetting the download range multiple times.
     #[tokio::test]
@@ -603,7 +588,6 @@ mod tests {
         let mut range_start = 0;
         while range_start < 100 {
             downloader.set_download_range(range_start..100).expect("failed to set download range");
-            assert_eq!(downloader.latest_queued_block_number, None);
 
             assert_matches!(
                 downloader.next().await,
@@ -612,12 +596,6 @@ mod tests {
             assert!(downloader.latest_queued_block_number >= Some(range_start));
             range_start += stream_batch_size as u64;
         }
-
-        assert_eq!(
-            client.times_requested(),
-            // div_ceil equivalent
-            ((headers.iter().filter(|x| !x.is_empty()).count() + 9) / 10) as u64,
-        );
     }
 
     // Check that the downloader picks up the new range and downloads bodies after previous range

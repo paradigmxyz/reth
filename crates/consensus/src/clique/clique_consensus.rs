@@ -2,7 +2,7 @@
 use super::snapshot::Snapshot;
 use crate::validation::clique;
 use reth_interfaces::consensus::{Consensus, Error, ForkchoiceState};
-use reth_primitives::{BlockNumber, ChainSpec, CliqueConfig, SealedBlock, SealedHeader};
+use reth_primitives::{ChainSpec, CliqueConfig, SealedBlock, SealedHeader, U256};
 use tokio::sync::watch;
 
 /// Implementation of Clique proof-of-authority consensus protocol.
@@ -31,7 +31,11 @@ impl Consensus for CliqueConsensus {
         todo!()
     }
 
-    fn validate_header(&self, header: &SealedHeader, parent: &SealedHeader) -> Result<(), Error> {
+    fn pre_validate_header(
+        &self,
+        header: &SealedHeader,
+        parent: &SealedHeader,
+    ) -> Result<(), Error> {
         clique::validate_header_standalone(header, &self.config)?;
         clique::validate_header_regarding_parent(parent, header, &self.config, &self.chain_spec)?;
 
@@ -42,11 +46,19 @@ impl Consensus for CliqueConsensus {
         Ok(())
     }
 
-    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error> {
+    fn validate_header(
+        &self,
+        _header: &SealedHeader,
+        _total_difficulty: U256,
+    ) -> Result<(), Error> {
         todo!()
     }
 
-    fn has_block_reward(&self, block_num: BlockNumber) -> bool {
+    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), Error> {
+        todo!()
+    }
+
+    fn has_block_reward(&self, _total_difficulty: U256) -> bool {
         todo!()
     }
 }

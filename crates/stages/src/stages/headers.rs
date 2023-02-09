@@ -14,7 +14,7 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_primitives::{BlockNumber, Header, SealedHeader};
+use reth_primitives::{BlockNumber, SealedHeader};
 use std::sync::Arc;
 use tracing::*;
 

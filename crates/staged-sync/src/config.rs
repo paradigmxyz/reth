@@ -1,5 +1,5 @@
 //! Configuration files.
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use reth_db::database::Database;
 use reth_discv4::Discv4Config;
@@ -31,10 +31,13 @@ impl Config {
         disable_discovery: bool,
         bootnodes: Option<Vec<NodeRecord>>,
         nat_resolution_method: reth_net_nat::NatResolver,
+        peers_file: Option<PathBuf>,
     ) -> NetworkConfig<ShareableDatabase<DB>> {
-        let peer_config = reth_network::PeersConfig::default()
-            .with_trusted_nodes(self.peers.trusted_nodes.clone())
-            .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
+        let peer_config = self
+            .peers
+            .clone()
+            .with_basic_nodes_from_file(peers_file)
+            .unwrap_or_else(|_| self.peers.clone());
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
         NetworkConfigBuilder::new(rng_secret_key())
@@ -101,6 +104,7 @@ pub struct BodiesConfig {
     /// The maximum number of block bodies returned at once from the stream
     pub downloader_stream_batch_size: usize,
     /// Maximum amount of received bodies to buffer internally.
+    /// The response contains multiple bodies.
     pub downloader_max_buffered_responses: usize,
     /// The minimum number of requests to send concurrently.
     pub downloader_min_concurrent_requests: usize,
@@ -113,7 +117,7 @@ impl Default for BodiesConfig {
         Self {
             downloader_request_limit: 200,
             downloader_stream_batch_size: 10000,
-            downloader_max_buffered_responses: 30000,
+            downloader_max_buffered_responses: 1000,
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
