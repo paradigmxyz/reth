@@ -393,7 +393,10 @@ where
         }
         let methods: Methods = match namespace {
             RethRpcModule::Admin => AdminApi::new(self.network.clone()).into_rpc().into(),
-            RethRpcModule::Debug => DebugApi::new().into_rpc().into(),
+            RethRpcModule::Debug => {
+                let eth_api = self.eth_api();
+                DebugApi::new(eth_api).into_rpc().into()
+            }
             RethRpcModule::Eth => self.eth_api().into_rpc().into(),
             RethRpcModule::Net => {
                 let eth_api = self.eth_api();

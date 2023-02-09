@@ -12,7 +12,7 @@ use reth_primitives::{
     Address, ChainInfo, TransactionSigned, H256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
-use reth_rpc_types::Transaction;
+
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 

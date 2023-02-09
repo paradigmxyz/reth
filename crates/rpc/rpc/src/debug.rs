@@ -26,7 +26,7 @@ impl<Eth> DebugApi<Eth> {
 #[async_trait]
 impl<Eth> DebugApiServer for DebugApi<Eth>
 where
-    Eth: EthApiSpec,
+    Eth: EthApiSpec + 'static,
 {
     async fn raw_header(&self, _block_id: BlockId) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
@@ -37,7 +37,7 @@ where
     }
 
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, hash: H256) -> Result<Bytes> {
+    async fn raw_transaction(&self, _hash: H256) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -50,7 +50,7 @@ where
     }
 }
 
-impl std::fmt::Debug for DebugApi {
+impl<Eth> std::fmt::Debug for DebugApi<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
