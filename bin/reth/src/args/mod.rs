@@ -1,7 +1,9 @@
 //! Parameters for configuring the rpc more granularity via CLI
 
 /// NetworkArg struct
-pub mod network_args;
+mod network_args;
+pub use network_args::NetworkArgs;
 
 /// RpcServerArg struct
-pub mod rpc_server_args;
+mod rpc_server_args;
+pub use rpc_server_args::RpcServerArgs;

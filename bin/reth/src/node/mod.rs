@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    args::{network_args::NetworkArgs, rpc_server_args::RpcServerArgs},
+    args::{NetworkArgs, RpcServerArgs},
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},

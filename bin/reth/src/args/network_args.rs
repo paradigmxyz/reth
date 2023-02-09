@@ -1,8 +1,6 @@
-// ! Rust Ethereum (reth) binary executable.
+//! clap [Args](clap::Args) for network related arguments.
 
 use crate::dirs::{KnownPeersPath, PlatformPath};
-pub use reth_staged_sync::utils;
-
 use clap::Args;
 use reth_primitives::NodeRecord;
 
@@ -23,7 +21,7 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub trusted_only: bool,
 
-    /// Bootnodes to connect to initially.
+    /// Nodes to bootstrap network discovery.
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]

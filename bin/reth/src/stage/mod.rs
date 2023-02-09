@@ -2,7 +2,7 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::network_args::NetworkArgs,
+    args::NetworkArgs,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db},
