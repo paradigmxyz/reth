@@ -81,6 +81,21 @@ impl Consensus for BeaconConsensus {
     }
 
     fn has_block_reward(&self, total_difficulty: U256) -> bool {
-        self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty)
+        !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use reth_interfaces::consensus::Consensus;
+    use reth_primitives::{ChainSpecBuilder, U256};
+
+    use super::BeaconConsensus;
+
+    #[test]
+    fn test_has_block_reward_before_paris() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let (consensus, _) = BeaconConsensus::builder().build(chain_spec);
+        assert!(consensus.has_block_reward(U256::ZERO));
     }
 }
