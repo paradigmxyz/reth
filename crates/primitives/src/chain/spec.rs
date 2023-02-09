@@ -260,6 +260,37 @@ impl From<EthersGenesis> for ChainSpec {
     }
 }
 
+/// A helper type for compatibility with geth's config
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum AllGenesisFormats {
+    /// The geth genesis format
+    Geth(EthersGenesis),
+    /// The reth genesis format
+    Reth(ChainSpec),
+}
+
+impl From<EthersGenesis> for AllGenesisFormats {
+    fn from(genesis: EthersGenesis) -> Self {
+        Self::Geth(genesis)
+    }
+}
+
+impl From<ChainSpec> for AllGenesisFormats {
+    fn from(genesis: ChainSpec) -> Self {
+        Self::Reth(genesis)
+    }
+}
+
+impl From<AllGenesisFormats> for ChainSpec {
+    fn from(genesis: AllGenesisFormats) -> Self {
+        match genesis {
+            AllGenesisFormats::Geth(genesis) => genesis.into(),
+            AllGenesisFormats::Reth(genesis) => genesis,
+        }
+    }
+}
+
 /// A helper to build custom chain specs
 #[derive(Debug, Default)]
 pub struct ChainSpecBuilder {

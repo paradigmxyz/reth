@@ -1,4 +1,5 @@
 use super::file_codec::BlockFileCodec;
+use itertools::Either;
 use reth_eth_wire::{BlockBody, RawBlockBody};
 use reth_interfaces::{
     p2p::{
@@ -30,7 +31,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
-use tracing::warn;
+use tracing::{trace, warn};
 
 /// Front-end API for fetching chain data from a file.
 ///
@@ -94,24 +95,27 @@ impl FileClient {
         // use with_capacity to make sure the internal buffer contains the entire file
         let mut stream = FramedRead::with_capacity(&reader[..], BlockFileCodec, file_len as usize);
 
-        let mut block_num = 0;
         while let Some(block_res) = stream.next().await {
             let block = block_res?;
             let block_hash = block.header.hash_slow();
 
             // add to the internal maps
-            headers.insert(block_num, block.header.clone());
-            hash_to_number.insert(block_hash, block_num);
+            headers.insert(block.header.number, block.header.clone());
+            hash_to_number.insert(block_hash, block.header.number);
             bodies.insert(
                 block_hash,
                 BlockBody { transactions: block.transactions, ommers: block.ommers },
             );
-
-            // update block num
-            block_num += 1;
         }
 
+        trace!(blocks = headers.len(), "Initialized file client");
+
         Ok(Self { headers, hash_to_number, bodies, is_syncing: Arc::new(Default::default()) })
+    }
+
+    /// Get the tip hash of the chain.
+    pub fn tip(&self) -> Option<H256> {
+        self.headers.get(&(self.headers.len() as u64 - 1)).map(|h| h.hash_slow())
     }
 
     /// Use the provided bodies as the file client's block body buffer.
@@ -140,24 +144,39 @@ impl HeadersClient for FileClient {
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the header
         let mut headers = Vec::new();
+        trace!(target : "downloaders::file", request=?request, "Getting headers");
 
         let start_num = match request.start {
             BlockHashOrNumber::Hash(hash) => match self.hash_to_number.get(&hash) {
                 Some(num) => *num,
-                None => return Box::pin(async move { Err(RequestError::BadResponse) }),
+                None => {
+                    warn!(%hash, "Could not find starting block number for requested header hash");
+                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                }
             },
             BlockHashOrNumber::Number(num) => num,
         };
 
-        let range = match request.direction {
-            HeadersDirection::Rising => start_num..=start_num + 1 - request.limit,
-            HeadersDirection::Falling => start_num + 1 - request.limit..=start_num,
+        let range = if request.limit == 1 {
+            Either::Left(start_num..start_num + 1)
+        } else {
+            match request.direction {
+                HeadersDirection::Rising => Either::Left(start_num..start_num + request.limit),
+                HeadersDirection::Falling => {
+                    Either::Right((start_num - request.limit + 1..=start_num).rev())
+                }
+            }
         };
+
+        trace!(target : "downloaders::file", range=?range, "Getting headers with range");
 
         for block_number in range {
             match self.headers.get(&block_number).cloned() {
                 Some(header) => headers.push(header),
-                None => return Box::pin(async move { Err(RequestError::BadResponse) }),
+                None => {
+                    warn!(number=%block_number, "Could not find header");
+                    return Box::pin(async move { Err(RequestError::BadResponse) })
+                }
             }
         }
 
