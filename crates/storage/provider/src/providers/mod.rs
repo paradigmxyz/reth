@@ -8,11 +8,11 @@ use reth_interfaces::Result;
 use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
 use std::sync::Arc;
 
-mod historical;
-pub use historical::{HistoricalStateProvider, HistoricalStateProviderRef};
-
-mod latest;
-pub use latest::{LatestStateProvider, LatestStateProviderRef};
+mod state;
+pub use state::{
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    latest::{LatestStateProvider, LatestStateProviderRef},
+};
 
 /// A common provider that fetches data from a database.
 ///
