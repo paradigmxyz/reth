@@ -91,6 +91,17 @@ where
         Ok(success)
     }
 
+    /// Drops the current inner transaction and open a new one.
+    pub fn drop(&mut self) -> Result<(), Error> {
+        let success = if let Some(tx) = self.tx.take() {
+            drop(tx);
+        };
+
+        self.tx = Some(self.db.tx_mut()?);
+
+        Ok(())
+    }
+
     /// Open a new inner transaction.
     pub fn open(&mut self) -> Result<(), Error> {
         self.tx = Some(self.db.tx_mut()?);

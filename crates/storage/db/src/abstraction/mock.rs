@@ -63,6 +63,10 @@ impl<'a> DbTx<'a> for TxMock {
         todo!()
     }
 
+    fn drop(self) {
+        todo!()
+    }
+
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error> {
         todo!()
     }

@@ -4,15 +4,18 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::{Result, WrapErr};
 use reth_db::{
-    cursor::{DbCursorRO, Walker},
-    database::Database,
-    table::Table,
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, Walker},
+    database::{Database, DatabaseGAT},
+    models::BlockNumHash,
+    table::{DupSort, Table},
     tables,
-    transaction::DbTx,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use std::collections::BTreeMap;
+use reth_staged_sync::utils::init::init_db;
+use reth_stages::{stages::ExecutionStage, Stage, StageId, UnwindInput};
+use std::{collections::BTreeMap, ops::DerefMut};
 use tracing::{error, info};
 
 /// DB List TUI
@@ -52,6 +55,8 @@ pub enum Subcommands {
     },
     /// Deletes all database entries
     Drop,
+    /// Deletes all database entries
+    Out,
 }
 
 #[derive(Parser, Debug)]
@@ -181,6 +186,9 @@ impl Command {
             Subcommands::Drop => {
                 tool.drop(&self.db)?;
             }
+            Subcommands::Out => {
+                tool.out(49790, 49810, &self.db).await?;
+            }
         }
 
         Ok(())
@@ -236,5 +244,149 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         info!(target: "reth::cli", "Dropping db at {}", path);
         std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
+    }
+
+    async fn out(&mut self, from: u64, to: u64, output_path: &PlatformPath<DbPath>) -> Result<()> {
+        let output_path: String = "hello".to_string();
+        info!(target: "reth::cli", "Creating separate db at {}", output_path);
+        assert!(from < to, "FROM block should be bigger than TO block.");
+
+        let mut output_db = init_db(output_path)?;
+
+        // Copy input tables
+        self.dump_table_with_range::<tables::CanonicalHeaders>(&mut output_db, from, to)?;
+        self.dump_table_with_range::<tables::HeaderTD>(&mut output_db, from, to)?;
+        self.dump_table_with_range::<tables::Headers>(&mut output_db, from, to)?;
+        self.dump_table_with_range::<tables::BlockBodies>(&mut output_db, from, to)?;
+
+        // Find range of transactions that need to be copied over
+        let (from_tx, to_tx) = self.db.view(|read_tx| {
+            let mut read_cursor = read_tx.cursor_read::<tables::BlockBodies>()?;
+            let (_, from_block) = read_cursor.seek(from.into())?.ok_or(eyre::eyre!("error"))?;
+            let (_, to_block) = read_cursor.seek(to.into())?.ok_or(eyre::eyre!("error"))?;
+
+            Ok::<(u64, u64), eyre::ErrReport>((
+                from_block.start_tx_id,
+                to_block.start_tx_id + to_block.tx_count,
+            ))
+        })??;
+        self.dump_table_with_range::<tables::Transactions>(&mut output_db, from_tx, to_tx)?;
+        self.dump_table_with_range::<tables::TxSenders>(&mut output_db, from_tx, to_tx)?;
+
+        // Find the latest block to unwind from
+        let (tip_block_number, _) = self
+            .db
+            .view(|tx| tx.cursor_read::<tables::BlockTransitionIndex>()?.last())??
+            .expect("some");
+
+        // Unwind to FROM block, we can get the PlainState safely
+        let mut tx = reth_stages::Transaction::new(self.db)?;
+
+        let mut exec_stage = ExecutionStage::default();
+        exec_stage
+            .unwind(
+                &mut tx,
+                UnwindInput {
+                    unwind_to: from,
+                    stage_progress: dbg!(tip_block_number),
+                    bad_block: None,
+                },
+            )
+            .await?;
+
+        let inner_tx = tx.deref_mut();
+
+        Self::dump_dupsort::<tables::PlainStorageState>(&output_db, inner_tx)?;
+        Self::dump_table::<tables::PlainAccountState>(&output_db, inner_tx)?;
+        Self::dump_table::<tables::Bytecodes>(&output_db, inner_tx)?;
+
+        // We don't want to actually commit these changes to our original database.
+        tx.drop()?;
+
+        // Try to re-execute the stage without comitting
+        {
+            let mut tx = reth_stages::Transaction::new(&output_db)?;
+
+            let mut exec_stage = ExecutionStage::default();
+            exec_stage
+                .execute(
+                    &mut tx,
+                    reth_stages::ExecInput {
+                        previous_stage: Some((StageId("Another"), to)),
+                        stage_progress: Some(from - 1),
+                    },
+                )
+                .await?;
+            tx.drop()?;
+        }
+
+        Ok(())
+    }
+
+    fn dump_table_with_range<T: Table>(
+        &mut self,
+        output_db: &mut reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+        from: u64,
+        to: u64,
+    ) -> eyre::Result<()>
+    where
+        <T as reth_db::table::Table>::Key: From<u64>,
+    {
+        output_db.update(|write_tx| {
+            let mut write_cursor = write_tx.cursor_write::<T>()?;
+
+            self.db.view(|read_tx| {
+                let mut read_cursor = read_tx.cursor_read::<T>()?;
+
+                for row in read_cursor.walk(from.into())?.take((to - from) as usize) {
+                    let (key, value) = row?;
+                    write_cursor.append(key, value)?;
+                }
+
+                Ok::<(), eyre::ErrReport>(())
+            })
+        })??
+    }
+
+    fn dump_table<T: Table>(
+        output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+        inner_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+    ) -> eyre::Result<()> {
+        output_db.update(|write_tx| {
+            let mut read_cursor = inner_tx.cursor_read::<T>()?;
+            let mut write_cursor = write_tx.cursor_write::<T>()?;
+
+            let start_walker = read_cursor.first().transpose();
+            let mut walker = Walker::new(&mut read_cursor, start_walker);
+            while let Some(v) = walker.next() {
+                let (k, v) = v?;
+                write_cursor.append(k, v)?;
+            }
+            Ok::<(), eyre::ErrReport>(())
+        })?
+    }
+
+    fn dump_dupsort<T: DupSort>(
+        output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+        inner_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+    ) -> eyre::Result<()>
+    where
+        <T as reth_db::table::Table>::Key: Default,
+        <T as reth_db::table::DupSort>::SubKey: Default,
+    {
+        output_db.update(|write_tx| {
+            let mut read_cursor = inner_tx.cursor_dup_read::<T>()?;
+            let mut write_cursor = write_tx.cursor_dup_write::<T>()?;
+
+            if let Some((first_key, _)) = read_cursor.first()? {
+                let mut walker = read_cursor.walk_dup(first_key, T::SubKey::default())?;
+                while let Some(v) = walker.next() {
+                    let (k, v) = v?;
+                    write_cursor.append_dup(k, v)?;
+                }
+            }
+
+            Ok::<(), eyre::ErrReport>(())
+        })?
     }
 }

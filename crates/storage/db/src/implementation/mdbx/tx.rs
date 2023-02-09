@@ -75,6 +75,10 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
         result
     }
 
+    fn drop(self) {
+        drop(self.inner)
+    }
+
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {
         self.inner
             .get(
