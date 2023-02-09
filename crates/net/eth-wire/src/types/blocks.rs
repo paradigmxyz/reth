@@ -1,7 +1,9 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256, Block};
+use reth_primitives::{
+    Block, BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256,
+};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]

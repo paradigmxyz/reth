@@ -1,6 +1,6 @@
 //! Types for broadcasting new data.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{TransactionSigned, H256, U128, Block};
+use reth_primitives::{Block, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use std::sync::Arc;
 

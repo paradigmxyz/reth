@@ -6,7 +6,9 @@ use std::ops::Deref;
 
 /// Ethereum full block.
 #[derive_arbitrary(rlp, 25)]
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 pub struct Block {
     /// Block header.
     pub header: Header,
