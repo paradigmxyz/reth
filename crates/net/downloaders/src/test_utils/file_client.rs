@@ -1,6 +1,6 @@
 use super::file_codec::BlockFileCodec;
 use itertools::Either;
-use reth_eth_wire::{BlockBody, RawBlockBody};
+use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     p2p::{
         bodies::client::{BodiesClient, BodiesFut},
@@ -104,7 +104,7 @@ impl FileClient {
             hash_to_number.insert(block_hash, block.header.number);
             bodies.insert(
                 block_hash,
-                BlockBody { transactions: block.transactions, ommers: block.ommers },
+                BlockBody { transactions: block.body, ommers: block.ommers },
             );
         }
 
