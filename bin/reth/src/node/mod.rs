@@ -15,14 +15,11 @@ use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::{self, reverse_headers::ReverseHeadersDownloaderBuilder},
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::{
-        bodies::{client::BodiesClient, downloader::BodyDownloader},
-        headers::{client::HeadersClient, downloader::HeaderDownloader},
-    },
+    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
     sync::SyncStateUpdater,
 };
 use reth_net_nat::NatResolver;
