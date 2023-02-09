@@ -128,20 +128,11 @@ impl ImportCommand {
     where
         C: Consensus + 'static,
     {
-        let header_downloader = ReverseHeadersDownloaderBuilder::default()
-            .request_limit(config.stages.headers.downloader_batch_size)
-            .stream_batch_size(config.stages.headers.commit_threshold as usize)
+        let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(consensus.clone(), file_client.clone())
             .as_task();
 
-        let body_downloader = BodiesDownloaderBuilder::default()
-            .with_stream_batch_size(config.stages.bodies.downloader_stream_batch_size)
-            .with_request_limit(config.stages.bodies.downloader_request_limit)
-            .with_max_buffered_responses(config.stages.bodies.downloader_max_buffered_responses)
-            .with_concurrent_requests_range(
-                config.stages.bodies.downloader_min_concurrent_requests..=
-                    config.stages.bodies.downloader_max_concurrent_requests,
-            )
+        let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), db)
             .as_task();
 

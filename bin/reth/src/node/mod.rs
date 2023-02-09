@@ -13,7 +13,10 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
-use reth_downloaders::{bodies::bodies::BodiesDownloaderBuilder, headers};
+use reth_downloaders::{
+    bodies::bodies::BodiesDownloaderBuilder,
+    headers::{self, reverse_headers::ReverseHeadersDownloaderBuilder},
+};
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
@@ -303,10 +306,7 @@ impl Command {
     where
         H: HeadersClient + 'static,
     {
-        let headers_conf = &config.stages.headers;
-        headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
-            .request_limit(headers_conf.downloader_batch_size)
-            .stream_batch_size(headers_conf.commit_threshold as usize)
+        ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(consensus.clone(), fetch_client.clone())
             .as_task()
     }
@@ -321,15 +321,7 @@ impl Command {
     where
         B: BodiesClient + 'static,
     {
-        let bodies_conf = &config.stages.bodies;
-        BodiesDownloaderBuilder::default()
-            .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
-            .with_request_limit(bodies_conf.downloader_request_limit)
-            .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
-            .with_concurrent_requests_range(
-                bodies_conf.downloader_min_concurrent_requests..=
-                    bodies_conf.downloader_max_concurrent_requests,
-            )
+        BodiesDownloaderBuilder::from(config.stages.bodies)
             .build(fetch_client.clone(), consensus.clone(), db.clone())
             .as_task()
     }
