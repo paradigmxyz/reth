@@ -164,23 +164,18 @@ pub fn random_block_range(
     blocks
 }
 
-/// Generate a range of random blocks.
-///
-/// The parent hash of the first block
-/// in the result will be equal to `head`.
-///
-/// See [random_block] for considerations when validating the generated blocks.
+/// Generate a random storage change.
 pub fn random_transition(
     valid_addresses: &Vec<Address>,
     key_range: std::ops::Range<u64>,
-    value_range: std::ops::Range<u64>,
 ) -> (Address, StorageEntry) {
     let mut rng = rand::thread_rng();
     let address =
         valid_addresses.choose(&mut rng).map_or_else(|| H160::random_using(&mut rng), |v| *v);
-    let transfer = U256::from(rng.gen::<u64>());
+
     let key = H256::from_low_u64_be(key_range.sample_single(&mut rng));
-    let value = U256::from(value_range.sample_single(&mut rng));
+    let value = U256::from(rng.gen::<u64>());
+
     (address, StorageEntry { key, value })
 }
 

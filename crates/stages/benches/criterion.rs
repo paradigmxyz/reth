@@ -4,7 +4,10 @@ use criterion::{
 };
 use itertools::concat;
 use reth_db::{
+    cursor::DbCursorRO,
     mdbx::{Env, WriteMap},
+    models::BlockNumHash,
+    tables,
     transaction::DbTx,
 };
 use reth_primitives::{StorageEntry, H256};
@@ -20,17 +23,14 @@ criterion_main!(benches);
 
 fn senders(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(2000));
-    group.warm_up_time(std::time::Duration::from_millis(2000));
     // don't need to run each stage for that many times
     group.sample_size(10);
 
     for batch in [1000usize, 10_000, 100_000, 250_000] {
         let num_blocks = 10_000;
         let mut stage = SenderRecoveryStage::default();
-        stage.batch_size = batch;
         stage.commit_threshold = num_blocks;
-        let label = format!("SendersRecovery-batch-{}", batch);
+        let label = format!("SendersRecovery-batch-{batch}");
 
         let path = txs_testdata(num_blocks as usize);
 
@@ -40,8 +40,6 @@ fn senders(c: &mut Criterion) {
 
 fn tx_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(2000));
-    group.warm_up_time(std::time::Duration::from_millis(2000));
     // don't need to run each stage for that many times
     group.sample_size(10);
 
@@ -70,8 +68,6 @@ fn total_difficulty(c: &mut Criterion) {
 
 fn merkle(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_secs(5));
-    group.warm_up_time(std::time::Duration::from_secs(5));
     // don't need to run each stage for that many times
     group.sample_size(10);
 
@@ -88,7 +84,7 @@ fn merkle(c: &mut Criterion) {
     measure_stage(&mut group, stage, path, "MerkleStage-fullhash".to_string());
 }
 
-fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
+fn measure_stage<S: Clone + Stage<Env<WriteMap>>>(
     group: &mut BenchmarkGroup<WallTime>,
     stage: S,
     path: PathBuf,
@@ -97,6 +93,13 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
     let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
+    let (BlockNumHash((num_blocks, _)), _) = tx
+        .inner()
+        .cursor_read::<tables::Headers>()
+        .unwrap()
+        .last()
+        .unwrap()
+        .expect("Headers table should not be empty");
     input.previous_stage = Some((StageId("Another"), num_blocks));
 
     group.bench_function(label, move |b| {

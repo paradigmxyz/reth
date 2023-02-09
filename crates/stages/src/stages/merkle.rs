@@ -34,7 +34,7 @@ pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
 /// - [`AccountHashingStage`][crate::stages::AccountHashingStage]
 /// - [`StorageHashingStage`][crate::stages::StorageHashingStage]
 /// - [`MerkleStage::Execution`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
     Execution {
@@ -45,7 +45,9 @@ pub enum MerkleStage {
     /// The unwind portion of the merkle stage.
     Unwind,
 
-    #[cfg(test)]
+    /// Able to execute and unwind. Used for tests
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
     Both { clean_threshold: u64 },
 }
 
@@ -68,7 +70,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         match self {
             MerkleStage::Execution { .. } => MERKLE_EXECUTION,
             MerkleStage::Unwind => MERKLE_UNWIND,
-            #[cfg(test)]
+            #[cfg(feature = "test-utils")]
             MerkleStage::Both { .. } => unreachable!(),
         }
     }
@@ -88,7 +90,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 })
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
-            #[cfg(test)]
+            #[cfg(feature = "test-utils")]
             MerkleStage::Both { clean_threshold } => *clean_threshold,
         };
 
@@ -314,7 +316,7 @@ mod tests {
                         tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
                         tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
 
-                        let (address, new_entry) = random_transition(&addresses, 0..125, 1..125);
+                        let (address, new_entry) = random_transition(&addresses, 0..125);
 
                         // seed account changeset
                         let prev_acc = accounts.get_mut(&address).unwrap();
