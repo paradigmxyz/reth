@@ -15,6 +15,7 @@ pub mod prometheus_exporter;
 pub mod stage;
 pub mod test_eth_chain;
 pub mod test_vectors;
+use dirs::{KnownPeersPath, PlatformPath};
 use std::net::IpAddr;
 
 use reth_rpc_builder::RpcModuleConfig;
@@ -45,6 +46,16 @@ struct NetworkOpts {
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
     bootnodes: Option<Vec<NodeRecord>>,
+
+    /// The path to the known peers file. Connected peers are
+    /// dumped to this file on node shutdown, and read on startup.
+    /// Cannot be used with --no-persist-peers
+    #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
+    peers_file: PlatformPath<KnownPeersPath>,
+
+    /// Do not persist peers. Cannot be used with --peers-file
+    #[arg(long, verbatim_doc_comment, conflicts_with = "peers_file")]
+    no_persist_peers: bool,
 }
 
 /// Parameters for configuring the rpc more granularity via CLI

@@ -26,8 +26,7 @@ use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::select;
+use std::{io, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 /// Start the node
@@ -119,6 +118,7 @@ impl Command {
         info!(target: "reth::cli", "Connecting to P2P network");
         let netconf = self.load_network_config(&config, &db);
         let network = netconf.start_network().await?;
+
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         // TODO(mattsse): cleanup, add cli args
@@ -142,7 +142,14 @@ impl Command {
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
-        pipeline.run(db.clone()).await?;
+        tokio::select! {
+            res = pipeline.run(db.clone()) => res?,
+            _ = tokio::signal::ctrl_c() => {},
+        };
+
+        if !self.network.no_persist_peers {
+            dump_peers(self.network.peers_file.as_ref(), network).await?;
+        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -197,12 +204,14 @@ impl Command {
         config: &Config,
         db: &Arc<Env<WriteMap>>,
     ) -> NetworkConfig<ShareableDatabase<Env<WriteMap>>> {
+        let peers_file = (!self.network.no_persist_peers).then_some(&self.network.peers_file);
         config.network_config(
             db.clone(),
             self.chain.clone(),
             self.network.disable_discovery,
             self.network.bootnodes.clone(),
             self.nat,
+            peers_file.map(|f| f.as_ref().to_path_buf()),
         )
     }
 
@@ -288,6 +297,15 @@ impl Command {
     }
 }
 
+/// Dumps peers to `file_path` for persistence.
+async fn dump_peers(file_path: &Path, network: NetworkHandle) -> Result<(), io::Error> {
+    info!(target : "net::peers", file = %file_path.display(), "Saving current peers");
+    let known_peers = network.peers_handle().all_peers().await;
+
+    tokio::fs::write(file_path, serde_json::to_string_pretty(&known_peers)?).await?;
+    Ok(())
+}
+
 /// The current high-level state of the node.
 #[derive(Default)]
 struct NodeState {
@@ -327,7 +345,7 @@ async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        select! {
+        tokio::select! {
             Some(event) = events.next() => {
                 match event {
                     NodeEvent::Network(NetworkEvent::SessionEstablished { peer_id, status, .. }) => {

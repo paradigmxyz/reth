@@ -1,5 +1,5 @@
 //! Configuration files.
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use reth_db::database::Database;
 use reth_discv4::Discv4Config;
@@ -31,10 +31,13 @@ impl Config {
         disable_discovery: bool,
         bootnodes: Option<Vec<NodeRecord>>,
         nat_resolution_method: reth_net_nat::NatResolver,
+        peers_file: Option<PathBuf>,
     ) -> NetworkConfig<ShareableDatabase<DB>> {
-        let peer_config = reth_network::PeersConfig::default()
-            .with_trusted_nodes(self.peers.trusted_nodes.clone())
-            .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
+        let peer_config = self
+            .peers
+            .clone()
+            .with_basic_nodes_from_file(peers_file)
+            .unwrap_or_else(|_| self.peers.clone());
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
         NetworkConfigBuilder::new(rng_secret_key())

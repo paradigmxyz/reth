@@ -46,7 +46,7 @@ where
         Ok(true)
     }
 
-    fn subscribe(
+    fn subscribe_peer_events(
         &self,
         _subscription_sink: jsonrpsee::SubscriptionSink,
     ) -> jsonrpsee::types::SubscriptionResult {
