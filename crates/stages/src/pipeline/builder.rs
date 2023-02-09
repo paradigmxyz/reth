@@ -30,7 +30,7 @@ where
     where
         S: Stage<DB> + 'static,
     {
-        self.pipeline.stages.push(QueuedStage { stage: Box::new(stage) });
+        self.pipeline.stages.push(QueuedStage { inner: Box::new(stage) });
         self
     }
 
@@ -43,7 +43,7 @@ where
     /// [`StageSetBuilder`][crate::StageSetBuilder].
     pub fn add_stages<Set: StageSet<DB>>(mut self, set: Set) -> Self {
         for stage in set.builder().build() {
-            self.pipeline.stages.push(QueuedStage { stage });
+            self.pipeline.stages.push(QueuedStage { inner: stage });
         }
         self
     }
