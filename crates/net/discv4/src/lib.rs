@@ -523,6 +523,8 @@ impl Discv4Service {
     }
 
     /// Returns the ENR of this service.
+    ///
+    /// Note: this will include the external address if resolved.
     pub fn local_enr(&self) -> NodeRecord {
         self.local_node_record
     }
@@ -844,6 +846,14 @@ impl Discv4Service {
 
         let key = kad_key(record.id);
 
+        // See also <https://github.com/ethereum/devp2p/blob/master/discv4.md#ping-packet-0x01>:
+        // > If no communication with the sender of this ping has occurred within the last 12h, a
+        // > ping should be sent in addition to pong in order to receive an endpoint proof.
+        //
+        // Note: we only mark if the node is absent because the `last 12h` condition is handled by
+        // the ping interval
+        let mut was_absent = false;
+
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => entry.value_mut().update_with_enr(ping.enr_sq),
             kbucket::Entry::Pending(mut entry, _) => entry.value().update_with_enr(ping.enr_sq),
@@ -855,16 +865,21 @@ impl Discv4Service {
                     node,
                     NodeStatus {
                         direction: ConnectionDirection::Incoming,
-                        state: ConnectionState::Connected,
+                        // mark as disconnected until endpoint proof established on pong
+                        state: ConnectionState::Disconnected,
                     },
                 );
-                self.notify(DiscoveryUpdate::Added(record));
+
+                // unknown node, send ping
+                was_absent = true;
+
                 None
             }
             kbucket::Entry::SelfEntry => return,
         };
 
-        // send the pong
+        // send the pong first, but the PONG and optionally PING don't need to be send in a
+        // particular order
         let msg = Message::Pong(Pong {
             to: ping.from,
             echo: hash,
@@ -873,18 +888,23 @@ impl Discv4Service {
         });
         self.send_packet(msg, remote_addr);
 
-        // Request ENR if included in the ping
-        match (ping.enr_sq, old_enr) {
-            (Some(new), Some(old)) => {
-                if new > old {
+        // if node was absent also send a ping to establish the endpoint proof from our end
+        if was_absent {
+            self.try_ping(record, PingReason::Initial);
+        } else {
+            // Request ENR if included in the ping
+            match (ping.enr_sq, old_enr) {
+                (Some(new), Some(old)) => {
+                    if new > old {
+                        self.send_enr_request(record);
+                    }
+                }
+                (Some(_), None) => {
                     self.send_enr_request(record);
                 }
-            }
-            (Some(_), None) => {
-                self.send_enr_request(record);
-            }
-            _ => {}
-        };
+                _ => {}
+            };
+        }
     }
 
     // Guarding function for [`Self::send_ping`] that applies pre-checks
@@ -2066,6 +2086,83 @@ mod tests {
         let _handle = service.spawn();
         discv4.send_lookup_self();
         let _ = discv4.lookup_self().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_check_ping_pong() {
+        reth_tracing::init_test_tracing();
+
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service_1) = create_discv4_with_config(config.clone()).await;
+        let (_discv4, mut service_2) = create_discv4_with_config(config).await;
+
+        service_1.local_enr_mut().address = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        service_2.local_enr_mut().address = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        // send ping from 1 -> 2
+
+        service_1.add_node(service_2.local_node_record);
+
+        // wait for the processed ping
+        let event = poll_fn(|cx| service_2.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Ping);
+
+        // node is now in the table but not connected yet
+        let key1 = kad_key(*service_1.local_peer_id());
+        match service_2.kbuckets.entry(&key1) {
+            kbucket::Entry::Present(_entry, status) => {
+                assert!(!status.is_connected());
+            }
+            _ => unreachable!(),
+        }
+
+        // we now wait for PONG
+        let event = poll_fn(|cx| service_1.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Pong);
+
+        // endpoint is proven
+        let key2 = kad_key(*service_2.local_peer_id());
+        match service_1.kbuckets.entry(&key2) {
+            kbucket::Entry::Present(_entry, status) => {
+                assert!(status.is_connected());
+            }
+            _ => unreachable!(),
+        }
+
+        // we now wait for the PING initiated by 2
+        let event = poll_fn(|cx| service_1.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Ping);
+
+        // we now wait for PONG
+        let event = poll_fn(|cx| service_2.poll(cx)).await;
+
+        // Since the endpoint was already proven from 1 POV it can already send a FindNode so the
+        // next event is either the PONG or Find Node
+        match event {
+            Discv4Event::FindNode => {
+                // since we support enr in the ping it may also request the enr
+                let event = poll_fn(|cx| service_2.poll(cx)).await;
+                match event {
+                    Discv4Event::EnrRequest => {
+                        let event = poll_fn(|cx| service_2.poll(cx)).await;
+                        assert_eq!(event, Discv4Event::Pong);
+                    }
+                    Discv4Event::Pong => {}
+                    _ => {
+                        unreachable!()
+                    }
+                }
+            }
+            Discv4Event::Pong => {}
+            _ => unreachable!(),
+        }
+
+        // endpoint is proven
+        match service_2.kbuckets.entry(&key1) {
+            kbucket::Entry::Present(_entry, status) => {
+                assert!(status.is_connected());
+            }
+            _ => unreachable!(),
+        }
     }
 
     #[test]
