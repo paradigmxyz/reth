@@ -118,6 +118,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
         self.listeners.new_listener()
     }
 
+    /// Registers progress metrics for each registered stage
     fn register_metrics(&mut self, db: Arc<DB>) {
         for stage in &self.stages {
             let stage_id = stage.id();
