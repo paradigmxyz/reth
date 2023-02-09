@@ -1,7 +1,7 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as RethBlock, Bloom, Bytes, Header as RethHeader, H256, H64, U256,
+    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as RethHeader, H256, H64, U256,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -46,9 +46,12 @@ pub struct Block {
 }
 
 impl Block {
-    /// Create a new block response from a reth block, using the total difficulty to populate its
-    /// field in the rpc response.
-    pub fn from_block_full(block: RethBlock, total_difficulty: U256) -> Result<Self, BlockError> {
+    /// Create a new block response from a [primitive block](reth_primitives::Block), using the
+    /// total difficulty to populate its field in the rpc response.
+    pub fn from_block_full(
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+    ) -> Result<Self, BlockError> {
         let block_hash = block.header.hash_slow();
         let header_length = block.header.length();
         let block_length = block.length();

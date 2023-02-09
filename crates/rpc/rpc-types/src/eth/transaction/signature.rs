@@ -1,5 +1,5 @@
 //! Signature related RPC values
-use reth_primitives::{Signature as CoreSignature, U256};
+use reth_primitives::{Signature as PrimitiveSignature, U256};
 use serde::{Deserialize, Serialize};
 
 /// Container type for all signature fields in RPC
@@ -19,7 +19,7 @@ impl Signature {
     /// the give chain id to compute the signature's recovery id.
     ///
     /// If the chain id is `Some`, the recovery id is computed according to [EIP-155](https://eips.ethereum.org/EIPS/eip-155).
-    pub fn from_primitive_signature(signature: CoreSignature, chain_id: Option<u64>) -> Self {
+    pub fn from_primitive_signature(signature: PrimitiveSignature, chain_id: Option<u64>) -> Self {
         Self { r: signature.r, s: signature.s, v: U256::from(signature.v(chain_id)) }
     }
 }

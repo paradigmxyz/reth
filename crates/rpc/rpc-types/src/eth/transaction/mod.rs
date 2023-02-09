@@ -10,8 +10,8 @@ pub use typed::*;
 
 use reth_primitives::{
     rpc::transaction::eip2930::AccessListItem, Address, BlockNumber, Bytes,
-    Transaction as RethTransaction, TransactionKind, TransactionSignedEcRecovered, TxType, H256,
-    U128, U256, U64,
+    Transaction as PrimitiveTransaction, TransactionKind, TransactionSignedEcRecovered, TxType,
+    H256, U128, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,8 +69,11 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    /// Create a new rpc transction result, using the given block hash, number, and tx index fields
-    /// to populate the corresponing fields in the rpc result.
+    /// Create a new rpc transaction result for a mined transaction, using the given block hash,
+    /// number, and tx index fields to populate the corresponing fields in the rpc result.
+    ///
+    /// The block hash, number, and tx index fields should be from the original block where the
+    /// transaction was mined.
     pub(crate) fn from_recovered_with_block_context(
         tx: TransactionSignedEcRecovered,
         block_hash: H256,
@@ -84,10 +87,8 @@ impl Transaction {
         tx
     }
 
-    /// Create a new rpc transaction result from a signed and recovered transaction, setting
+    /// Create a new rpc transaction result for a pending signed transaction, setting block
     /// environment related fields to `None`.
-    ///
-    /// Sets the sender public key to `None` as well.
     pub(crate) fn from_recovered(tx: TransactionSignedEcRecovered) -> Self {
         let signer = tx.signer();
         let signed_tx = tx.into_signed();
@@ -105,8 +106,8 @@ impl Transaction {
 
         let chain_id = signed_tx.chain_id().map(U64::from);
         let access_list = match &signed_tx.transaction {
-            RethTransaction::Legacy(_) => None,
-            RethTransaction::Eip2930(tx) => Some(
+            PrimitiveTransaction::Legacy(_) => None,
+            PrimitiveTransaction::Eip2930(tx) => Some(
                 tx.access_list
                     .0
                     .iter()
@@ -116,7 +117,7 @@ impl Transaction {
                     })
                     .collect(),
             ),
-            RethTransaction::Eip1559(tx) => Some(
+            PrimitiveTransaction::Eip1559(tx) => Some(
                 tx.access_list
                     .0
                     .iter()
