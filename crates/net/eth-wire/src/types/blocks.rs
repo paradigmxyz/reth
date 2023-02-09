@@ -1,8 +1,9 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
-use super::RawBlockBody;
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256};
+use reth_primitives::{
+    Block, BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256,
+};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
@@ -80,11 +81,11 @@ pub struct BlockBody {
 }
 
 impl BlockBody {
-    /// Create a [`RawBlockBody`] from the body and its header.
-    pub fn create_block(&self, header: &Header) -> RawBlockBody {
-        RawBlockBody {
+    /// Create a [`Block`](reth_primitives::Block) from the body and its header.
+    pub fn create_block(&self, header: &Header) -> Block {
+        Block {
             header: header.clone(),
-            transactions: self.transactions.clone(),
+            body: self.transactions.clone(),
             ommers: self.ommers.clone(),
         }
     }
