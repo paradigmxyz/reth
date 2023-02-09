@@ -93,9 +93,9 @@ where
 
     /// Drops the current inner transaction and open a new one.
     pub fn drop(&mut self) -> Result<(), Error> {
-        let success = if let Some(tx) = self.tx.take() {
+        if let Some(tx) = self.tx.take() {
             drop(tx);
-        };
+        }
 
         self.tx = Some(self.db.tx_mut()?);
 

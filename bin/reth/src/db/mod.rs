@@ -4,9 +4,9 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::{Result, WrapErr};
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, Walker},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, Walker},
     database::{Database, DatabaseGAT},
-    models::BlockNumHash,
+    mdbx::{Env, WriteMap},
     table::{DupSort, Table},
     tables,
     transaction::{DbTx, DbTxMut},
@@ -187,7 +187,8 @@ impl Command {
                 tool.drop(&self.db)?;
             }
             Subcommands::Out => {
-                tool.out(49790, 49810, &self.db).await?;
+                // tool.out(49790, 49810, &self.db).await?;
+                tool.out(49794, 49796, &self.db).await?;
             }
         }
 
@@ -280,31 +281,35 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             .view(|tx| tx.cursor_read::<tables::BlockTransitionIndex>()?.last())??
             .expect("some");
 
-        // Unwind to FROM block, we can get the PlainState safely
-        let mut tx = reth_stages::Transaction::new(self.db)?;
+        // Dry-run an unwind to FROM block, so we can get the PlainStorageState and
+        // PlainAccountState safely. There might be some state dependency from an address
+        // which hasn't been changed in the given range.
+        {
+            let mut unwind_tx = reth_stages::Transaction::new(self.db)?;
+            let mut exec_stage = ExecutionStage::default();
 
-        let mut exec_stage = ExecutionStage::default();
-        exec_stage
-            .unwind(
-                &mut tx,
-                UnwindInput {
-                    unwind_to: from,
-                    stage_progress: dbg!(tip_block_number),
-                    bad_block: None,
-                },
-            )
-            .await?;
+            exec_stage
+                .unwind(
+                    &mut unwind_tx,
+                    UnwindInput {
+                        unwind_to: from,
+                        stage_progress: dbg!(tip_block_number),
+                        bad_block: None,
+                    },
+                )
+                .await?;
 
-        let inner_tx = tx.deref_mut();
+            let unwind_inner_tx = unwind_tx.deref_mut();
 
-        Self::dump_dupsort::<tables::PlainStorageState>(&output_db, inner_tx)?;
-        Self::dump_table::<tables::PlainAccountState>(&output_db, inner_tx)?;
-        Self::dump_table::<tables::Bytecodes>(&output_db, inner_tx)?;
+            Self::dump_dupsort::<tables::PlainStorageState>(&output_db, unwind_inner_tx)?;
+            Self::dump_table::<tables::PlainAccountState>(&output_db, unwind_inner_tx)?;
+            Self::dump_table::<tables::Bytecodes>(&output_db, unwind_inner_tx)?;
 
-        // We don't want to actually commit these changes to our original database.
-        tx.drop()?;
+            // We don't want to actually commit these changes to our original database.
+            unwind_tx.drop()?;
+        }
 
-        // Try to re-execute the stage without comitting
+        // Try to re-execute the stage without committing
         {
             let mut tx = reth_stages::Transaction::new(&output_db)?;
 
@@ -326,7 +331,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     fn dump_table_with_range<T: Table>(
         &mut self,
-        output_db: &mut reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+        output_db: &mut Env<WriteMap>,
         from: u64,
         to: u64,
     ) -> eyre::Result<()>
@@ -334,14 +339,14 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         <T as reth_db::table::Table>::Key: From<u64>,
     {
         output_db.update(|write_tx| {
-            let mut write_cursor = write_tx.cursor_write::<T>()?;
+            let mut cursor_destination = write_tx.cursor_write::<T>()?;
 
             self.db.view(|read_tx| {
-                let mut read_cursor = read_tx.cursor_read::<T>()?;
+                let mut cursor_source = read_tx.cursor_read::<T>()?;
 
-                for row in read_cursor.walk(from.into())?.take((to - from) as usize) {
+                for row in cursor_source.walk(from.into())?.take((to - from) as usize) {
                     let (key, value) = row?;
-                    write_cursor.append(key, value)?;
+                    cursor_destination.append(key, value)?;
                 }
 
                 Ok::<(), eyre::ErrReport>(())
@@ -351,17 +356,17 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     fn dump_table<T: Table>(
         output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
-        inner_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        source_db_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
     ) -> eyre::Result<()> {
         output_db.update(|write_tx| {
-            let mut read_cursor = inner_tx.cursor_read::<T>()?;
-            let mut write_cursor = write_tx.cursor_write::<T>()?;
+            let mut cursor_source = source_db_tx.cursor_read::<T>()?;
+            let mut cursor_destination = write_tx.cursor_write::<T>()?;
 
-            let start_walker = read_cursor.first().transpose();
-            let mut walker = Walker::new(&mut read_cursor, start_walker);
+            let start_walker = cursor_source.first().transpose();
+            let mut walker = Walker::new(&mut cursor_source, start_walker);
             while let Some(v) = walker.next() {
                 let (k, v) = v?;
-                write_cursor.append(k, v)?;
+                cursor_destination.append(k, v)?;
             }
             Ok::<(), eyre::ErrReport>(())
         })?
@@ -369,21 +374,21 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
     fn dump_dupsort<T: DupSort>(
         output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
-        inner_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        source_db_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
     ) -> eyre::Result<()>
     where
         <T as reth_db::table::Table>::Key: Default,
         <T as reth_db::table::DupSort>::SubKey: Default,
     {
         output_db.update(|write_tx| {
-            let mut read_cursor = inner_tx.cursor_dup_read::<T>()?;
-            let mut write_cursor = write_tx.cursor_dup_write::<T>()?;
+            let mut cursor_source = source_db_tx.cursor_dup_read::<T>()?;
+            let mut cursor_destination = write_tx.cursor_dup_write::<T>()?;
 
-            if let Some((first_key, _)) = read_cursor.first()? {
-                let mut walker = read_cursor.walk_dup(first_key, T::SubKey::default())?;
+            if let Some((first_key, _)) = cursor_source.first()? {
+                let mut walker = cursor_source.walk_dup(first_key, T::SubKey::default())?;
                 while let Some(v) = walker.next() {
                     let (k, v) = v?;
-                    write_cursor.append_dup(k, v)?;
+                    cursor_destination.append_dup(k, v)?;
                 }
             }
 
