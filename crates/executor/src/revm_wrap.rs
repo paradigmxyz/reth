@@ -180,7 +180,7 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: 
     }
 }
 
-/// Check equality between [`reth_primitives::Log`] and [`revm::Log`]
+/// Check equality between [`reth_primitives::Log`] and [`revm::primitives::Log`]
 pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
     revm_log.topics.len() == reth_log.topics.len() &&
         revm_log.address.0 == reth_log.address.0 &&
@@ -201,7 +201,7 @@ pub fn into_reth_log(log: Log) -> RethLog {
     }
 }
 
-/// Create reth primitive [Account] from [revm::AccountInfo].
+/// Create reth primitive [Account] from [revm::primitives::AccountInfo].
 /// Check if revm bytecode hash is [KECCAK_EMPTY] and put None to reth [Account]
 pub fn to_reth_acc(revm_acc: &AccountInfo) -> Account {
     let code_hash = revm_acc.code_hash;

@@ -4304,7 +4304,6 @@ dependencies = [
  "reth-provider",
  "reth-rlp",
  "revm",
- "revm-interpreter",
  "rlp",
  "sha3",
  "thiserror",
@@ -4521,7 +4520,6 @@ dependencies = [
  "reth-codecs",
  "reth-rlp",
  "reth-rlp-derive",
- "revm-interpreter",
  "revm-primitives",
  "secp256k1 0.24.3",
  "serde",
@@ -4579,7 +4577,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
- "revm-interpreter",
+ "revm-primitives",
  "rlp",
  "secp256k1 0.24.3",
  "smol_str",
@@ -4820,13 +4818,9 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db1b86f1d21d1852b40ec8ac9b6d31ac8a7c000875155809d41ce68f6369dc56"
 dependencies = [
- "arbitrary",
  "derive_more",
  "enumn",
- "proptest",
- "proptest-derive",
  "revm-primitives",
- "serde",
  "sha3",
 ]
 

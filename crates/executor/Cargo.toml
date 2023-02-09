@@ -15,7 +15,6 @@ reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
 revm = { version = "3.0.0"}
-revm-interpreter = "1.0.0"
 # remove from reth and reexport from revm
 hashbrown = "0.13"
 
