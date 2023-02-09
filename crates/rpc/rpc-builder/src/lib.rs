@@ -69,8 +69,9 @@ use std::{
     collections::HashMap,
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
 };
-use strum::{AsRefStr, EnumString, EnumVariantNames, VariantNames};
+use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 
 /// The default port for the http/ws server
 pub const DEFAULT_RPC_PORT: u16 = 8545;
@@ -290,6 +291,16 @@ where
 {
     fn from(value: I) -> Self {
         RpcModuleConfig::Selection(value.into_iter().map(Into::into).collect())
+    }
+}
+
+impl FromStr for RpcModuleConfig {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let modules = s.split(',');
+
+        RpcModuleConfig::try_from_selection(modules)
     }
 }
 
