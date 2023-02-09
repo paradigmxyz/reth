@@ -20,10 +20,10 @@ use std::net::IpAddr;
 use reth_rpc_builder::RpcModuleConfig;
 pub use reth_staged_sync::utils;
 
-use clap::{value_parser, Arg, Args, Command};
+use clap::{Args};
 use reth_primitives::NodeRecord;
 
-/// Parameters for configuring the network more granularly via CLI
+/// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Networking")]
 struct NetworkOpts {
@@ -47,7 +47,7 @@ struct NetworkOpts {
     bootnodes: Option<Vec<NodeRecord>>,
 }
 
-/// Parameters for configuring the network more granularly via CLI
+/// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]
 #[command(next_help_heading = "Rpc")]
 struct RpcServerOpts {
@@ -92,30 +92,25 @@ struct RpcServerOpts {
     ipcpath: Option<String>,
 }
 
-impl RpcServerOpts {
-    fn parse_from(input: Vec<&str>) -> Option<RpcServerOpts> {
-        let cmd = Command::new("reth").arg(
-            Arg::new("http_api").long("http.api").value_parser(value_parser!(RpcModuleConfig)),
-        );
-
-        let mut server_opts = RpcServerOpts::default();
-
-        if let Some(api) = cmd.get_matches_from(input).get_one::<RpcModuleConfig>("http_api") {
-            server_opts.http_api = Some(api.clone());
-        };
-
-        Some(server_opts)
-    }
-}
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
     use super::*;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[clap(flatten)]
+        args: T
+    }
 
     #[test]
     fn test_rpc_server_opts_parser() {
-        let opts =
-            RpcServerOpts::parse_from(vec!["reth", "--http.api", "eth,admin,debug"]).unwrap();
+       let opts = CommandParser::<RpcServerOpts>::parse_from([
+            "reth", "--http.api", "eth,admin,debug"
+            ]).args;
+
         let apis = opts.http_api.unwrap();
         let expected = RpcModuleConfig::try_from_selection(["eth", "admin", "debug"]).unwrap();
 
