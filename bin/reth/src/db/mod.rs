@@ -313,7 +313,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
                     &mut tx,
                     reth_stages::ExecInput {
                         previous_stage: Some((StageId("Another"), to)),
-                        stage_progress: Some(from - 1),
+                        stage_progress: Some(from),
                     },
                 )
                 .await?;
