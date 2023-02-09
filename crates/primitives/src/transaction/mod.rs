@@ -555,6 +555,25 @@ impl TransactionSigned {
         Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
     }
 
+    /// Returns the enveloped encoded transactions.
+    ///
+    /// See also [TransactionSigned::encode_enveloped]
+    pub fn envelope_encoded(&self) -> bytes::Bytes {
+        let mut buf = BytesMut::new();
+        self.encode_enveloped(&mut buf);
+        buf.freeze()
+    }
+
+    /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
+    /// This format is also referred to as "binary" encoding.
+    ///
+    /// For legacy transactions, it encodes the RLP of the transaction into the buffer: `rlp(tx)`
+    /// For EIP-2718 typed it encodes the type of the transaction followed by the rlp of the
+    /// transaction: `type` + `rlp(tx)`
+    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+        self.encode_inner(out, false)
+    }
+
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2728 does not require rlp header
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
@@ -1137,5 +1156,15 @@ mod tests {
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
         assert_eq!(signed_tx.hash(), hash, "Expected same hash");
         assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
+    }
+
+    #[test]
+    fn test_envelop_encode() {
+        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
+        let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
+        let decoded = TransactionSigned::decode(&mut &input[..]).unwrap();
+
+        let encoded = decoded.envelope_encoded();
+        assert_eq!(encoded, input);
     }
 }
