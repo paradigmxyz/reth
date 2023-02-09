@@ -82,14 +82,6 @@ pub struct Command {
     #[arg(long, default_value = "any")]
     nat: NatResolver,
 
-    /// The path to a block file for import.
-    /// When specified, this syncs RLP encoded blocks from a file.
-    ///
-    /// The online stages (headers and bodies) are replaced by a file import, after which the
-    /// remaining stages are executed.
-    #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment)]
-    import: Option<PlatformPath<ConfigPath>>,
-
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag

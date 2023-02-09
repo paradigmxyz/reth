@@ -5,7 +5,6 @@ use crate::{
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
-use fdlimit::raise_fd_limit;
 use futures::{Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
@@ -69,17 +68,13 @@ pub struct ImportCommand {
     /// The online stages (headers and bodies) are replaced by a file import, after which the
     /// remaining stages are executed.
     #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment)]
-    blocks: PlatformPath<ConfigPath>,
+    path: PlatformPath<ConfigPath>,
 }
 
 impl ImportCommand {
     /// Execute `import` command
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
-
-        // Raise the fd limit of the process.
-        // Does not do anything on windows.
-        raise_fd_limit();
 
         let config: Config = self.load_config()?;
         info!(target: "reth::cli", path = %self.db, "Configuration loaded");
@@ -117,6 +112,7 @@ impl ImportCommand {
         info!(target: "reth::cli", "Starting sync pipeline");
         pipeline.run(db.clone()).await?;
 
+        info!(target: "reth::cli", "Finishing up");
         Ok(())
     }
 
