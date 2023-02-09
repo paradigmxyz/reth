@@ -9,9 +9,9 @@ pub use signature::Signature;
 pub use typed::*;
 
 use reth_primitives::{
-    rpc::transaction::eip2930::AccessListItem, rpc_utils::get_contract_address, Address,
-    BlockNumber, Bytes, Transaction as RethTransaction, TransactionKind,
-    TransactionSignedEcRecovered, TxType, H256, U128, U256, U64,
+    rpc::transaction::eip2930::AccessListItem, Address, BlockNumber, Bytes,
+    Transaction as RethTransaction, TransactionKind, TransactionSignedEcRecovered, TxType, H256,
+    U128, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
@@ -103,14 +103,7 @@ impl Transaction {
             TxType::EIP1559 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
         };
 
-        let creates = match signed_tx.kind() {
-            TransactionKind::Create => {
-                Some(get_contract_address(signer.0, U256::from(signed_tx.nonce())).0.into())
-            }
-            TransactionKind::Call(_) => None,
-        };
-
-        let chain_id = signed_tx.chain_id().map(|id| U64::from(*id));
+        let chain_id = signed_tx.chain_id().map(|id| U64::from(id));
         let access_list = match &signed_tx.transaction {
             RethTransaction::Legacy(_) => None,
             RethTransaction::Eip2930(tx) => Some(
@@ -147,15 +140,15 @@ impl Transaction {
             gas_price,
             max_fee_per_gas,
             max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),
+            signature: Some(Signature::from_primitive_signature(
+                signed_tx.signature().clone(),
+                signed_tx.chain_id(),
+            )),
             gas: U256::from(signed_tx.gas_limit()),
             input: signed_tx.input().clone(),
-            creates,
             chain_id,
-            v: U256::from(signed_tx.signature.v(chain_id.map(|id| id.as_u64()))),
-            r: signed_tx.signature.r,
-            s: signed_tx.signature.s,
             access_list,
-            transaction_type: Some(U256::from(signed_tx.tx_type() as u8)),
+            transaction_type: Some(U64::from(signed_tx.tx_type() as u8)),
         }
     }
 }
