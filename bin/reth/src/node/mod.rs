@@ -23,7 +23,7 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
 };
 use reth_net_nat::NatResolver;
-use reth_network::{NetworkConfig, NetworkEvent};
+use reth_network::{NetworkConfig, NetworkEvent, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
@@ -118,7 +118,32 @@ impl Command {
         debug!(target: "reth::cli", chainspec=?self.chain, "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let (mut pipeline, events) = self.build_networked_pipeline(&mut config, db.clone()).await?;
+        let consensus = self.init_consensus()?;
+        info!(target: "reth::cli", "Consensus engine initialized");
+
+        self.init_trusted_nodes(&mut config);
+
+        info!(target: "reth::cli", "Connecting to P2P network");
+        let netconf = self.load_network_config(&config, &db);
+        let network = netconf.start_network().await?;
+
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+
+        // TODO(mattsse): cleanup, add cli args
+        let _rpc_server = reth_rpc_builder::launch(
+            ShareableDatabase::new(db.clone()),
+            reth_transaction_pool::test_utils::testing_pool(),
+            network.clone(),
+            TransportRpcModuleConfig::default()
+                .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
+            RpcServerConfig::default().with_http(Default::default()),
+        )
+        .await?;
+        info!(target: "reth::cli", "Started RPC server");
+
+        let (mut pipeline, events) = self
+            .build_networked_pipeline(&mut config, network.clone(), &consensus, db.clone())
+            .await?;
 
         tokio::spawn(handle_events(events));
 
@@ -139,40 +164,19 @@ impl Command {
     async fn build_networked_pipeline(
         &self,
         config: &mut Config,
+        network: NetworkHandle,
+        consensus: &Arc<dyn Consensus>,
         db: Arc<Env<WriteMap>>,
     ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
     {
-        let consensus = self.init_consensus()?;
-        info!(target: "reth::cli", "Consensus engine initialized");
-
-        self.init_trusted_nodes(config);
-
-        info!(target: "reth::cli", "Connecting to P2P network");
-        let netconf = self.load_network_config(config, &db);
-        let network = netconf.start_network().await?;
-
-        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
-
-        // TODO(mattsse): cleanup, add cli args
-        let _rpc_server = reth_rpc_builder::launch(
-            ShareableDatabase::new(db.clone()),
-            reth_transaction_pool::test_utils::testing_pool(),
-            network.clone(),
-            TransportRpcModuleConfig::default()
-                .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
-            RpcServerConfig::default().with_http(Default::default()),
-        )
-        .await?;
-        info!(target: "reth::cli", "Started RPC server");
-
-        // building network downloaders
+        // building network downloaders using the fetch client
         let fetch_client = Arc::new(network.fetch_client().await?);
 
-        let header_downloader = self.spawn_headers_downloader(config, &consensus, &fetch_client);
-        let body_downloader = self.spawn_bodies_downloader(config, &consensus, &fetch_client, &db);
+        let header_downloader = self.spawn_headers_downloader(config, consensus, &fetch_client);
+        let body_downloader = self.spawn_bodies_downloader(config, consensus, &fetch_client, &db);
 
         let mut pipeline = self
-            .build_pipeline(config, header_downloader, body_downloader, network.clone(), &consensus)
+            .build_pipeline(config, header_downloader, body_downloader, network.clone(), consensus)
             .await?;
 
         let events = stream_select(
