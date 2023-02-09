@@ -2149,7 +2149,7 @@ mod tests {
                     Discv4Event::Pong => {}
                     _ => {
                         unreachable!()
-                    },
+                    }
                 }
             }
             Discv4Event::Pong => {}
