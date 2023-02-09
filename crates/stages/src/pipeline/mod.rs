@@ -77,7 +77,7 @@ pub use set::*;
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
 pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
-    stages: Vec<QueuedStage<DB>>,
+    stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
     listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
@@ -101,10 +101,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
 impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
-            .field(
-                "stages",
-                &self.stages.iter().map(|stage| stage.inner.id()).collect::<Vec<StageId>>(),
-            )
+            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
             .finish()
     }
@@ -123,7 +120,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
     fn register_metrics(&mut self, db: Arc<DB>) {
         for stage in &self.stages {
-            let stage_id = stage.inner.id();
+            let stage_id = stage.id();
             self.metrics.stage_checkpoint(
                 stage_id,
                 db.view(|tx| stage_id.get_progress(tx).ok().flatten().unwrap_or_default())
@@ -163,8 +160,8 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     async fn run_loop(&mut self, db: &DB) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
-            let queued_stage = &self.stages[stage_index];
-            let stage_id = queued_stage.inner.id();
+            let stage = &self.stages[stage_index];
+            let stage_id = stage.id();
 
             // Update sync state
             if let Some(ref updater) = self.sync_state_updater {
@@ -216,7 +213,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
         let mut tx = Transaction::new(db)?;
 
-        for QueuedStage { inner: stage, .. } in unwind_pipeline {
+        for stage in unwind_pipeline {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
@@ -262,7 +259,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
         stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
         let stage = &mut self.stages[stage_index];
-        let stage_id = stage.inner.id();
+        let stage_id = stage.id();
         let mut made_progress = false;
         loop {
             let mut tx = Transaction::new(db)?;
@@ -288,7 +285,6 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 .notify(PipelineEvent::Running { stage_id, stage_progress: prev_progress });
 
             match stage
-                .inner
                 .execute(&mut tx, ExecInput { previous_stage, stage_progress: prev_progress })
                 .await
             {
@@ -416,10 +412,7 @@ impl PipelineProgress {
 }
 
 /// A container for a queued stage.
-struct QueuedStage<DB: Database> {
-    /// The actual stage to execute.
-    inner: Box<dyn Stage<DB>>,
-}
+pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
 
 #[cfg(test)]
 mod tests {
