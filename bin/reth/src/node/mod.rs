@@ -20,7 +20,7 @@ use reth_network::{FetchClient, NetworkConfig, NetworkEvent, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
-use reth_rpc_builder::{RethRpcModule, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
+use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     prelude::*,

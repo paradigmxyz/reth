@@ -290,7 +290,7 @@ impl FromStr for RpcModuleConfig {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let modules = s.split(',').collect::<Vec<&str>>();
+        let modules = s.split(',');
 
         RpcModuleConfig::try_from_selection(modules)
     }

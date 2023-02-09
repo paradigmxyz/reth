@@ -17,10 +17,10 @@ pub mod test_eth_chain;
 pub mod test_vectors;
 use std::net::IpAddr;
 
-use reth_rpc_builder::{RethRpcModule, RpcModuleConfig};
+use reth_rpc_builder::RpcModuleConfig;
 pub use reth_staged_sync::utils;
 
-use clap::Args;
+use clap::{value_parser, Arg, Args, Command};
 use reth_primitives::NodeRecord;
 
 /// Parameters for configuring the network more granularly via CLI
@@ -48,11 +48,11 @@ struct NetworkOpts {
 }
 
 /// Parameters for configuring the network more granularly via CLI
-#[derive(Debug, Args)]
+#[derive(Debug, Args, PartialEq, Default)]
 #[command(next_help_heading = "Rpc")]
 struct RpcServerOpts {
     /// Enable the HTTP-RPC server
-    #[arg(long, default_value = "false")]
+    #[arg(long)]
     http: bool,
 
     /// Http server address to listen on
@@ -68,7 +68,7 @@ struct RpcServerOpts {
     http_api: Option<RpcModuleConfig>,
 
     /// Enable the WS-RPC server
-    #[arg(long, default_value = "false")]
+    #[arg(long)]
     ws: bool,
 
     /// Ws server address to listen on
@@ -84,10 +84,41 @@ struct RpcServerOpts {
     ws_api: Option<RpcModuleConfig>,
 
     /// Disable the IPC-RPC  server
-    #[arg(long, default_value = "true")]
+    #[arg(long)]
     ipcdisable: bool,
 
     /// Filename for IPC socket/pipe within the datadir
     #[arg(long)]
     ipcpath: Option<String>,
+}
+
+impl RpcServerOpts {
+    fn parse_from(input: Vec<&str>) -> Option<RpcServerOpts> {
+        let cmd = Command::new("reth").arg(
+            Arg::new("http_api").long("http.api").value_parser(value_parser!(RpcModuleConfig)),
+        );
+
+        let mut server_opts = RpcServerOpts::default();
+
+        if let Some(api) = cmd.get_matches_from(input).get_one::<RpcModuleConfig>("http_api") {
+            server_opts.http_api = Some(api.clone());
+        };
+
+        Some(server_opts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rpc_server_opts_parser() {
+        let opts =
+            RpcServerOpts::parse_from(vec!["reth", "--http.api", "eth,admin,debug"]).unwrap();
+        let apis = opts.http_api.unwrap();
+        let expected = RpcModuleConfig::try_from_selection(["eth", "admin", "debug"]).unwrap();
+
+        assert_eq!(apis, expected);
+    }
 }
