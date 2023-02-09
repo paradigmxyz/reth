@@ -1,10 +1,9 @@
 //! Error variants for the `eth_` namespace.
 
-use jsonrpsee::{
-    core::Error as RpcError,
-    types::error::{CallError, ErrorCode},
-};
+use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
 use reth_transaction_pool::error::PoolError;
+
+use crate::result::{internal_rpc_err, rpc_err};
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
@@ -34,12 +33,9 @@ impl From<EthApiError> for RpcError {
     fn from(value: EthApiError) -> Self {
         match value {
             EthApiError::UnknownBlockNumber => {
-                RpcError::Call(CallError::Custom(ErrorCode::InvalidParams.into()))
+                rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
             }
-            EthApiError::Internal(_) => {
-                RpcError::Call(CallError::Custom(ErrorCode::InternalError.into()))
-            }
-            err => RpcError::Call(CallError::from_std_error(err)),
+            err => internal_rpc_err(err.to_string()),
         }
     }
 }
