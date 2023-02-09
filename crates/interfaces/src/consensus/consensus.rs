@@ -1,6 +1,6 @@
 use super::Error;
 use async_trait::async_trait;
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
+use reth_primitives::{SealedBlock, SealedHeader, U256};
 use reth_rpc_types::engine::ForkchoiceState;
 use std::fmt::Debug;
 use tokio::sync::watch::Receiver;
