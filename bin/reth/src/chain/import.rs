@@ -146,7 +146,6 @@ impl ImportCommand {
             .add_stages(
                 OfflineStages::default()
                     .set(SenderRecoveryStage {
-                        batch_size: config.stages.sender_recovery.batch_size,
                         commit_threshold: config.stages.sender_recovery.commit_threshold,
                     })
                     .set(ExecutionStage {
