@@ -11,8 +11,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
-use std::{borrow::Borrow, path::Path, sync::Arc};
+use reth_primitives::{
+    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
+};
+use std::{borrow::Borrow, collections::BTreeMap, path::Path, sync::Arc};
 
 use crate::db::Transaction;
 
@@ -236,6 +238,31 @@ impl TestTransaction {
                     current_tx_id += 1;
                 }
                 Ok(())
+            })
+        })
+    }
+
+    /// Insert collection of ([Address], [Account]) into corresponding tables.
+    pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (Address, (Account, S))>,
+        S: IntoIterator<Item = StorageEntry>,
+    {
+        self.commit(|tx| {
+            accounts.into_iter().try_for_each(|(address, (account, storage))| {
+                let hashed_address = keccak256(address);
+
+                // Insert into account tables.
+                tx.put::<tables::PlainAccountState>(address, account)?;
+                tx.put::<tables::HashedAccount>(hashed_address, account)?;
+
+                // Insert into storage tables.
+                storage.into_iter().filter(|e| e.value != U256::ZERO).try_for_each(|entry| {
+                    let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
+
+                    tx.put::<tables::PlainStorageState>(address, entry)?;
+                    tx.put::<tables::HashedStorage>(hashed_address, hashed_entry)
+                })
             })
         })
     }

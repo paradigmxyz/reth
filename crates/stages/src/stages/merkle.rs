@@ -172,6 +172,7 @@ mod tests {
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
+    use itertools::Itertools;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
         models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
@@ -346,8 +347,20 @@ mod tests {
                 })?;
             }
 
-            self.insert_accounts(&accounts)?;
-            self.insert_storages(&storages)?;
+            self.tx.insert_accounts_and_storages(accounts.iter().map(|(addr, acc)| {
+                (
+                    *addr,
+                    (
+                        *acc,
+                        storages
+                            .entry(*addr)
+                            .or_default()
+                            .iter()
+                            .map(|(&key, &value)| StorageEntry { key, value })
+                            .collect_vec(),
+                    ),
+                )
+            }))?;
 
             let last_numhash = self.tx.inner().get_block_numhash(end - 1).unwrap();
             let root = self.state_root()?;
@@ -474,7 +487,9 @@ mod tests {
             &self,
             accounts: &[(Address, Account)],
         ) -> Result<H256, TestRunnerError> {
-            self.insert_accounts(accounts)?;
+            self.tx.insert_accounts_and_storages(
+                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+            )?;
 
             let loader = DBTrieLoader::default();
 
@@ -484,57 +499,6 @@ mod tests {
             tx.commit()?;
 
             Ok(root)
-        }
-
-        pub(crate) fn insert_accounts(
-            &self,
-            accounts: &[(Address, Account)],
-        ) -> Result<(), TestRunnerError> {
-            for (addr, acc) in accounts.iter() {
-                self.tx.commit(|tx| {
-                    tx.put::<tables::PlainAccountState>(*addr, *acc)?;
-                    tx.put::<tables::HashedAccount>(keccak256(addr), *acc)?;
-                    Ok(())
-                })?;
-            }
-
-            Ok(())
-        }
-
-        fn insert_storages(
-            &self,
-            storages: &BTreeMap<Address, BTreeMap<H256, U256>>,
-        ) -> Result<(), TestRunnerError> {
-            self.tx
-                .commit(|tx| {
-                    storages.iter().try_for_each(|(&addr, storage)| {
-                        storage.iter().try_for_each(|(&key, &value)| {
-                            let entry = StorageEntry { key, value };
-                            tx.put::<tables::PlainStorageState>(addr, entry)
-                        })
-                    })?;
-                    storages
-                        .iter()
-                        .map(|(addr, storage)| {
-                            (
-                                keccak256(addr),
-                                storage
-                                    .iter()
-                                    .filter(|(_, &value)| value != U256::ZERO)
-                                    .map(|(key, value)| (keccak256(key), value)),
-                            )
-                        })
-                        .collect::<BTreeMap<_, _>>()
-                        .into_iter()
-                        .try_for_each(|(addr, storage)| {
-                            storage.into_iter().try_for_each(|(key, &value)| {
-                                let entry = StorageEntry { key, value };
-                                tx.put::<tables::HashedStorage>(addr, entry)
-                            })
-                        })?;
-                    Ok(())
-                })
-                .map_err(|e| e.into())
         }
 
         fn check_root(&self, previous_stage_progress: u64) -> Result<(), TestRunnerError> {

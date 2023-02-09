@@ -1,7 +1,7 @@
-use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
+use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
-    TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
+    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, StorageEntry,
+    Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
 
@@ -162,6 +162,26 @@ pub fn random_block_range(
         ));
     }
     blocks
+}
+
+/// Generate a range of random blocks.
+///
+/// The parent hash of the first block
+/// in the result will be equal to `head`.
+///
+/// See [random_block] for considerations when validating the generated blocks.
+pub fn random_transition(
+    valid_addresses: &Vec<Address>,
+    key_range: std::ops::Range<u64>,
+    value_range: std::ops::Range<u64>,
+) -> (Address, U256, StorageEntry) {
+    let mut rng = rand::thread_rng();
+    let address =
+        valid_addresses.choose(&mut rng).map_or_else(|| H160::random_using(&mut rng), |v| *v);
+    let transfer = U256::from(rng.gen::<u64>());
+    let key = H256::from_low_u64_be(key_range.sample_single(&mut rng));
+    let value = U256::from(value_range.sample_single(&mut rng));
+    (address, transfer, StorageEntry { key, value })
 }
 
 /// Generate random Externaly Owned Account (EOA account without contract).
