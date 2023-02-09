@@ -28,6 +28,7 @@ tokio = { version = "1.21.2", features = ["sync"] }
 tokio-stream = "0.1.10"
 async-trait = "0.1.57"
 futures-util = "0.3.25"
+pin-project = "1.0.12"
 
 # observability
 tracing = "0.1.36"
@@ -39,6 +40,7 @@ thiserror = "1.0.37"
 aquamarine = "0.2.1"
 itertools = "0.10.5"
 rayon = "1.6.0"
+num-traits = "0.2.15"
 
 # trie
 cita_trie = "4.0.0"

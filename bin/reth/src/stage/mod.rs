@@ -170,10 +170,7 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Senders => {
-                let mut stage = SenderRecoveryStage {
-                    batch_size: config.stages.sender_recovery.batch_size,
-                    commit_threshold: num_blocks,
-                };
+                let mut stage = SenderRecoveryStage { commit_threshold: num_blocks };
 
                 // Unwind first
                 if !self.skip_unwind {

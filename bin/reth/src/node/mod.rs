@@ -286,7 +286,6 @@ impl Command {
             .add_stages(
                 OfflineStages::default()
                     .set(SenderRecoveryStage {
-                        batch_size: stage_conf.sender_recovery.batch_size,
                         commit_threshold: stage_conf.sender_recovery.commit_threshold,
                     })
                     .set(ExecutionStage {
