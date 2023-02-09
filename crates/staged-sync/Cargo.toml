@@ -19,6 +19,7 @@ reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 reth-discv4 = { path = "../../crates/net/discv4" }
 reth-network-api = { path = "../../crates/net/network-api" }
 reth-network = { path = "../../crates/net/network", features = ["serde"] }
+reth-downloaders = { path = "../../crates/net/downloaders" }
 reth-primitives = { path = "../../crates/primitives" }
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
 reth-net-nat = { path = "../../crates/net/nat" }
