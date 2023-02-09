@@ -2,10 +2,10 @@
 //!
 //! Stage debugging tool
 use crate::{
+    args::network_args,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db},
-    NetworkOpts,
 };
 use reth_consensus::beacon::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
