@@ -93,7 +93,7 @@ impl Block {
             size: Some(U256::from(header_length)),
         };
 
-        let mut transactions = Vec::new();
+        let mut transactions = Vec::with_capacity(block.body.len());
         for (idx, tx) in block.body.iter().enumerate() {
             let signed_tx = tx.clone().into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
             transactions.push(Transaction::from_recovered_with_block_context(
