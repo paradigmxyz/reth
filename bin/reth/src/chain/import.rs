@@ -63,7 +63,6 @@ pub struct ImportCommand {
     chain: ChainSpec,
 
     /// The path to a block file for import.
-    /// When specified, this syncs RLP encoded blocks from a file.
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
     /// remaining stages are executed.
