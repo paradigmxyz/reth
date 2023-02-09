@@ -3,6 +3,10 @@ use std::{path::PathBuf, sync::Arc};
 
 use reth_db::database::Database;
 use reth_discv4::Discv4Config;
+use reth_downloaders::{
+    bodies::bodies::BodiesDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+};
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, NetworkConfigBuilder, PeersConfig,
@@ -82,6 +86,15 @@ impl Default for HeadersConfig {
     }
 }
 
+impl From<HeadersConfig> for ReverseHeadersDownloaderBuilder {
+    fn from(config: HeadersConfig) -> Self {
+        ReverseHeadersDownloaderBuilder::default()
+            .request_limit(config.downloader_batch_size)
+            .stream_batch_size(config.commit_threshold as usize)
+            .with_retries(config.downloader_retries)
+    }
+}
+
 /// Total difficulty stage configuration
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct TotalDifficultyConfig {
@@ -121,6 +134,19 @@ impl Default for BodiesConfig {
             downloader_min_concurrent_requests: 5,
             downloader_max_concurrent_requests: 100,
         }
+    }
+}
+
+impl From<BodiesConfig> for BodiesDownloaderBuilder {
+    fn from(config: BodiesConfig) -> Self {
+        BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(config.downloader_stream_batch_size)
+            .with_request_limit(config.downloader_request_limit)
+            .with_max_buffered_responses(config.downloader_max_buffered_responses)
+            .with_concurrent_requests_range(
+                config.downloader_min_concurrent_requests..=
+                    config.downloader_max_concurrent_requests,
+            )
     }
 }
 
