@@ -151,7 +151,7 @@ where
     }
 
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
-        EthApi::get_code(self, address, block_number).to_rpc_result()
+        EthApi::get_code(self, address, block_number).map_err(Into::into)
     }
 
     async fn call(&self, _request: CallRequest, _block_number: Option<BlockId>) -> Result<Bytes> {
@@ -216,7 +216,7 @@ where
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
-        EthApi::send_raw_transaction(self, tx).await.to_rpc_result()
+        EthApi::send_raw_transaction(self, tx).await.map_err(Into::into)
     }
 
     async fn sign(&self, _address: Address, _message: Bytes) -> Result<Bytes> {
