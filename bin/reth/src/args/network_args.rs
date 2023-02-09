@@ -1,9 +1,6 @@
 // ! Rust Ethereum (reth) binary executable.
 
 use crate::dirs::{KnownPeersPath, PlatformPath};
-use std::net::IpAddr;
-
-use reth_rpc_builder::RpcModuleConfig;
 pub use reth_staged_sync::utils;
 
 use clap::Args;

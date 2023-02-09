@@ -2,7 +2,7 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::network_args,
+    args::network_args::NetworkArgs,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db},
@@ -83,7 +83,7 @@ pub struct Command {
     skip_unwind: bool,
 
     #[clap(flatten)]
-    network: NetworkOpts,
+    network: NetworkArgs,
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,

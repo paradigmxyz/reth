@@ -7,7 +7,6 @@ use reth_rpc_builder::RpcModuleConfig;
 pub use reth_staged_sync::utils;
 
 use clap::Args;
-use reth_primitives::NodeRecord;
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]

@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    args::{network_args, rpc_server_args},
+    args::{network_args::NetworkArgs, rpc_server_args::RpcServerArgs},
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     utils::{chainspec::chain_spec_value_parser, init::init_db, parse_socket_address},
@@ -70,7 +70,7 @@ pub struct Command {
     metrics: Option<SocketAddr>,
 
     #[clap(flatten)]
-    network: NetworkOpts,
+    network: NetworkArgs,
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
@@ -86,7 +86,7 @@ pub struct Command {
     max_block: Option<u64>,
 
     #[clap(flatten)]
-    rpc: RpcServerOpts,
+    rpc: RpcServerArgs,
 }
 
 impl Command {
