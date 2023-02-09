@@ -13,7 +13,11 @@ use fdlimit::raise_fd_limit;
 use futures::{stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
-use reth_downloaders::{bodies, headers, test_utils::FileClient};
+use reth_downloaders::{
+    bodies::{self, bodies::BodiesDownloaderBuilder},
+    headers,
+    test_utils::FileClient,
+};
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
@@ -107,7 +111,7 @@ pub struct Command {
 impl Command {
     /// Execute `node` command
     // TODO: RPC
-    pub async fn execute(mut self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
         // Raise the fd limit of the process.
@@ -126,50 +130,19 @@ impl Command {
         debug!(target: "reth::cli", chainspec=?self.chain, "Initializing genesis");
         init_genesis(db.clone(), self.chain.clone())?;
 
-        match &self.import {
-            Some(import_path) => {
-                // create a new FileClient
-                info!(target: "reth::cli", "Importing chain file");
-                let file_client = Arc::new(FileClient::new(&import_path).await?);
+        let (mut pipeline, events) = self.build_networked_pipeline(&mut config, db.clone()).await?;
 
-                // override the tip
-                self.tip = Some(file_client.tip().expect("file client has no tip"));
-                info!(target: "reth::cli", "Chain file imported");
+        tokio::spawn(handle_events(events));
 
-                let consensus = self.init_consensus()?;
-                info!(target: "reth::cli", "Consensus engine initialized");
+        // Run pipeline
+        info!(target: "reth::cli", "Starting sync pipeline");
+        pipeline.run(db.clone()).await?;
 
-                // override the max block
-                self.max_block = Some(0);
+        // TODO: this is where we'd handle graceful shutdown by listening to ctrl-c
 
-                let (mut pipeline, events) =
-                    self.build_import_pipeline(config, db.clone(), &consensus, file_client).await?;
-
-                tokio::spawn(handle_events(events));
-
-                // Run pipeline
-                info!(target: "reth::cli", "Starting sync pipeline");
-                pipeline.run(db.clone()).await?;
-
-                // TODO: this is where we'd handle graceful shutdown by listening to ctrl-c
-            }
-            None => {
-                let (mut pipeline, events) =
-                    self.build_networked_pipeline(&mut config, db.clone()).await?;
-
-                tokio::spawn(handle_events(events));
-
-                // Run pipeline
-                info!(target: "reth::cli", "Starting sync pipeline");
-                pipeline.run(db.clone()).await?;
-
-                // TODO: this is where we'd handle graceful shutdown by listening to ctrl-c
-
-                if !self.network.no_persist_peers {
-                    dump_peers(self.network.peers_file.as_ref(), network).await?;
-                }
-            }
-        };
+        if !self.network.no_persist_peers {
+            dump_peers(self.network.peers_file.as_ref(), network).await?;
+        }
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -218,26 +191,6 @@ impl Command {
             network.event_listener().map(Into::into),
             pipeline.events().map(Into::into),
         );
-        Ok((pipeline, events))
-    }
-
-    async fn build_import_pipeline(
-        &self,
-        config: Config,
-        db: Arc<Env<WriteMap>>,
-        consensus: &Arc<dyn Consensus>,
-        file_client: Arc<FileClient>,
-    ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
-    {
-        let header_downloader = self.spawn_headers_downloader(&config, consensus, &file_client);
-        let body_downloader = self.spawn_bodies_downloader(&config, consensus, &file_client, &db);
-
-        let mut pipeline = self
-            .build_pipeline(&config, header_downloader, body_downloader, file_client, consensus)
-            .await?;
-
-        let events = pipeline.events().map(Into::into);
-
         Ok((pipeline, events))
     }
 
@@ -359,12 +312,11 @@ impl Command {
         H: HeadersClient + 'static,
     {
         let headers_conf = &config.stages.headers;
-        headers::task::TaskDownloader::spawn(
-            headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
-                .request_limit(headers_conf.downloader_batch_size)
-                .stream_batch_size(headers_conf.commit_threshold as usize)
-                .build(consensus.clone(), fetch_client.clone()),
-        )
+        headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
+            .request_limit(headers_conf.downloader_batch_size)
+            .stream_batch_size(headers_conf.commit_threshold as usize)
+            .build(consensus.clone(), fetch_client.clone())
+            .as_task()
     }
 
     fn spawn_bodies_downloader<B>(
@@ -378,17 +330,16 @@ impl Command {
         B: BodiesClient + 'static,
     {
         let bodies_conf = &config.stages.bodies;
-        bodies::task::TaskDownloader::spawn(
-            bodies::bodies::BodiesDownloaderBuilder::default()
-                .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
-                .with_request_limit(bodies_conf.downloader_request_limit)
-                .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
-                .with_concurrent_requests_range(
-                    bodies_conf.downloader_min_concurrent_requests..=
-                        bodies_conf.downloader_max_concurrent_requests,
-                )
-                .build(fetch_client.clone(), consensus.clone(), db.clone()),
-        )
+        BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
+            .with_request_limit(bodies_conf.downloader_request_limit)
+            .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
+            .with_concurrent_requests_range(
+                bodies_conf.downloader_min_concurrent_requests..=
+                    bodies_conf.downloader_max_concurrent_requests,
+            )
+            .build(fetch_client.clone(), consensus.clone(), db.clone())
+            .as_task()
     }
 }
 
