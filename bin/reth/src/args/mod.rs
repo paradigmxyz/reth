@@ -1,3 +1,5 @@
+//! Parameters for configuring the rpc more granularity via CLI
+
 /// NetworkArg struct
 pub mod network_args;
 
