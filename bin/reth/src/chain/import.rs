@@ -16,16 +16,13 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     sync::SyncStateUpdater,
 };
-
 use reth_primitives::ChainSpec;
-
 use reth_staged_sync::{utils::init::init_genesis, Config};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
 };
 use std::sync::Arc;
-
 use tracing::{debug, info};
 
 /// Syncs RLP encoded blocks from a file.
