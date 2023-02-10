@@ -276,12 +276,11 @@ pub mod clique {
         }
 
         // Ensure that the block's difficulty is meaningful (may not be correct at this point)
-        if header.number > 0 {
-            if header.difficulty != U256::from(DIFF_INTURN) ||
-                header.difficulty != U256::from(DIFF_NOTURN)
-            {
-                return Err(CliqueError::Difficulty { difficulty: header.difficulty }.into())
-            }
+        if header.number > 0 &&
+            header.difficulty != U256::from(DIFF_INTURN) &&
+            header.difficulty != U256::from(DIFF_NOTURN)
+        {
+            return Err(CliqueError::Difficulty { difficulty: header.difficulty }.into())
         }
 
         Ok(())
@@ -352,9 +351,9 @@ pub mod clique {
         let inturn = snapshot
             .is_signer_inturn(&signer, header.number)
             .ok_or(CliqueError::UnauthorizedSigner { signer })?;
-        if inturn && header.difficulty != U256::from(DIFF_INTURN) {
-            return Err(CliqueError::Difficulty { difficulty: header.difficulty }.into())
-        } else if header.difficulty != U256::from(DIFF_NOTURN) {
+        if (inturn && header.difficulty != U256::from(DIFF_INTURN)) ||
+            header.difficulty != U256::from(DIFF_NOTURN)
+        {
             return Err(CliqueError::Difficulty { difficulty: header.difficulty }.into())
         }
 
