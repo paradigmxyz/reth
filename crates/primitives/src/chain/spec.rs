@@ -83,6 +83,14 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     ]),
 });
 
+/// The Dev spec
+pub static DEV: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain: Chain::dev(),
+    genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
+        .expect("Can't deserialize Sepolia genesis json"),
+    hardforks: BTreeMap::new(),
+});
+
 /// An Ethereum chain specification.
 ///
 /// A chain specification describes:

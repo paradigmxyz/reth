@@ -8,7 +8,7 @@ use std::{fmt, str::FromStr};
 // The chain spec module.
 mod spec;
 pub use spec::{
-    AllGenesisFormats, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA,
+    AllGenesisFormats, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA, DEV,
 };
 
 // The chain info module.
@@ -39,6 +39,11 @@ impl Chain {
     /// Returns the sepolia chain.
     pub const fn sepolia() -> Self {
         Chain::Named(ethers_core::types::Chain::Sepolia)
+    }
+
+    /// Returns the dev chain.
+    pub const fn dev() -> Self {
+        Chain::Named(ethers_core::types::Chain::Dev)
     }
 
     /// The id of the chain

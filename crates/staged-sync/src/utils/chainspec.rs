@@ -1,4 +1,4 @@
-use reth_primitives::{AllGenesisFormats, ChainSpec, GOERLI, MAINNET, SEPOLIA};
+use reth_primitives::{AllGenesisFormats, ChainSpec, GOERLI, MAINNET, SEPOLIA, DEV};
 use std::path::PathBuf;
 
 /// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
@@ -8,6 +8,7 @@ pub fn chain_spec_value_parser(s: &str) -> Result<ChainSpec, eyre::Error> {
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
+        "dev" => DEV.clone(),
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             serde_json::from_str(&raw)?
@@ -22,6 +23,7 @@ pub fn genesis_value_parser(s: &str) -> Result<ChainSpec, eyre::Error> {
         "mainnet" => MAINNET.clone(),
         "goerli" => GOERLI.clone(),
         "sepolia" => SEPOLIA.clone(),
+        "dev" => DEV.clone(),
         _ => {
             let raw = std::fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
             let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;

@@ -68,7 +68,7 @@ mod tests {
     use super::init_genesis;
     use reth_db::mdbx::test_utils::create_test_rw_db;
     use reth_primitives::{
-        GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
+        GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS, DEV, DEV_GENESIS,
     };
 
     #[test]
@@ -96,5 +96,14 @@ mod tests {
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS);
+    }
+
+    #[test]
+    fn success_init_genesis_dev() {
+        let db = create_test_rw_db();
+        let genesis_hash = init_genesis(db, DEV.clone()).unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, DEV_GENESIS);
     }
 }

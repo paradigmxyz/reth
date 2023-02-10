@@ -130,7 +130,7 @@ impl Command {
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         // TODO(mattsse): cleanup, add cli args
-        let _rpc_server = reth_rpc_builder::launch(
+        let rpc_server = reth_rpc_builder::launch(
             ShareableDatabase::new(db.clone()),
             reth_transaction_pool::test_utils::testing_pool(),
             network.clone(),
@@ -140,6 +140,14 @@ impl Command {
         )
         .await?;
         info!(target: "reth::cli", "Started RPC server");
+
+        if let Some(uri) = rpc_server.http_url() {
+            info!(target: "reth::cli", local_addr = %uri, "RPC http server")
+        }
+
+        if let Some(uri) = rpc_server.ws_url() {
+            info!(target: "reth::cli", local_addr = %uri, "RPC ws server")
+        }
 
         let (mut pipeline, events) = self
             .build_networked_pipeline(&mut config, network.clone(), &consensus, db.clone())
