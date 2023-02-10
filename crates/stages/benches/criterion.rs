@@ -127,7 +127,7 @@ fn measure_stage<S: Clone + Stage<Env<WriteMap>>>(
 }
 
 use reth_interfaces::test_utils::generators::{
-    random_block_range, random_eoa_account_range, random_transition,
+    random_block_range, random_eoa_account_range, random_storage_entry,
 };
 
 // Helper for generating testdata for the sender recovery stage and tx lookup stages (512MB).
@@ -180,7 +180,7 @@ fn accs_testdata(num_blocks: usize) -> PathBuf {
         println!("Transactions testdata not found, generating to {:?}", path.display());
         let tx = TestTransaction::new(&path);
 
-        let accounts: BTreeMap<_, _> = concat([
+        let accounts: BTreeMap<Address, Account> = concat([
             random_eoa_account_range(&mut (0..n_eoa)),
             random_contract_account_range(&mut (0..n_contract)),
         ]);
@@ -196,11 +196,26 @@ fn accs_testdata(num_blocks: usize) -> PathBuf {
         // insert all blocks
         tx.insert_blocks(blocks.iter(), None).unwrap();
 
+        let transitions = random_transition_range(blocks.iter(), accounts);
+
+        transition_id = 0;
         // TODO: insert account and storage changes
         tx.commit(|tx| {
             let storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
             blocks.into_iter().try_for_each(|block| {
-                let (addr, new_entry) = random_transition(addresses, key_range);
+                tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
+
+                let (addr, new_entry) = random_storage_entry(addresses, key_range);
+
+                // modify account
+                let prev_acc = accounts.get_mut(&address).unwrap();
+                let acc_before_tx = AccountBeforeTx { address, info: Some(*prev_acc) };
+
+                prev_acc.nonce += 1;
+                prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
+
+                tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
+
                 let old_entry = storage_cursor
                     .seek_by_key_subkey(addr, new_entry.key)?
                     .and_then(|entry| {
@@ -213,6 +228,7 @@ fn accs_testdata(num_blocks: usize) -> PathBuf {
                     })
                     .unwrap_or(StorageEntry { value: U256::ZERO, ..new_entry });
 
+                transition_id += 1;
                 Ok(())
             })
         })

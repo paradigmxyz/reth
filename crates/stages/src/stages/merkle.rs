@@ -46,7 +46,7 @@ pub enum MerkleStage {
     Unwind,
 
     /// Able to execute and unwind. Used for tests
-    #[cfg(feature = "test-utils")]
+    #[cfg(any(test, feature = "test-utils"))]
     #[allow(missing_docs)]
     Both { clean_threshold: u64 },
 }
@@ -70,7 +70,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         match self {
             MerkleStage::Execution { .. } => MERKLE_EXECUTION,
             MerkleStage::Unwind => MERKLE_UNWIND,
-            #[cfg(feature = "test-utils")]
+            #[cfg(any(test, feature = "test-utils"))]
             MerkleStage::Both { .. } => unreachable!(),
         }
     }
@@ -90,7 +90,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 })
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
-            #[cfg(feature = "test-utils")]
+            #[cfg(any(test, feature = "test-utils"))]
             MerkleStage::Both { clean_threshold } => *clean_threshold,
         };
 
@@ -182,7 +182,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_interfaces::test_utils::generators::{
-        random_block, random_block_range, random_contract_account_range, random_transition,
+        random_block, random_block_range, random_contract_account_range, random_storage_entry,
     };
     use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
     use std::collections::BTreeMap;
@@ -316,7 +316,7 @@ mod tests {
                         tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
                         tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
 
-                        let (address, new_entry) = random_transition(&addresses, 0..125);
+                        let (address, new_entry) = random_storage_entry(&addresses, 0..125);
 
                         // seed account changeset
                         let prev_acc = accounts.get_mut(&address).unwrap();
