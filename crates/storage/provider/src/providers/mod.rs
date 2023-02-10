@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 mod state;
 pub use state::{
+    chain::ChainState,
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
