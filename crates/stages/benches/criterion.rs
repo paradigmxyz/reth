@@ -16,7 +16,10 @@ use reth_interfaces::test_utils::generators::{
 };
 use reth_primitives::{Account, Address, H256};
 use reth_stages::{
-    stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
+    stages::{
+        AccountHashingStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TotalDifficultyStage, TransactionLookupStage,
+    },
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
@@ -41,7 +44,7 @@ fn senders(c: &mut Criterion) {
 
         let path = txs_testdata(num_blocks as usize);
 
-        measure_stage(&mut group, stage, path, label);
+        measure_stage(&mut group, stage_unwind, stage, path, label);
     }
 }
 
@@ -55,7 +58,7 @@ fn tx_lookup(c: &mut Criterion) {
 
     let path = txs_testdata(num_blocks as usize);
 
-    measure_stage(&mut group, stage, path, "TransactionLookup".to_string());
+    measure_stage(&mut group, stage_unwind, stage, path, "TransactionLookup".to_string());
 }
 
 fn total_difficulty(c: &mut Criterion) {
@@ -70,7 +73,7 @@ fn total_difficulty(c: &mut Criterion) {
 
     let path = txs_testdata(num_blocks);
 
-    measure_stage(&mut group, stage, path, "TotalDifficulty".to_string());
+    measure_stage(&mut group, stage_unwind, stage, path, "TotalDifficulty".to_string());
 }
 
 fn merkle(c: &mut Criterion) {
@@ -83,18 +86,60 @@ fn merkle(c: &mut Criterion) {
     let path = txs_testdata(num_blocks);
 
     let stage = MerkleStage::Both { clean_threshold: 10_001 };
-    measure_stage(&mut group, stage, path.clone(), "MerkleStage-incremental".to_string());
+    measure_stage(&mut group, unwind_hashes, stage, path.clone(), "Merkle-incremental".to_string());
 
     let stage = MerkleStage::Both { clean_threshold: 0 };
-    measure_stage(&mut group, stage, path, "MerkleStage-fullhash".to_string());
+    measure_stage(&mut group, unwind_hashes, stage, path, "Merkle-fullhash".to_string());
 }
 
-fn measure_stage<S: Clone + Stage<Env<WriteMap>>>(
+fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
+    stage: S,
+    tx: &TestTransaction,
+    _exec_input: ExecInput,
+) {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let mut stage = stage.clone();
+        let mut db_tx = tx.inner();
+
+        // Clear previous run
+        stage.unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+
+        db_tx.commit().unwrap();
+    });
+}
+
+fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
+    stage: S,
+    tx: &TestTransaction,
+    exec_input: ExecInput,
+) {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let mut stage = stage.clone();
+        let mut db_tx = tx.inner();
+
+        StorageHashingStage::default().unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+        AccountHashingStage::default().unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+
+        // Clear previous run
+        stage.unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+
+        AccountHashingStage::default().execute(&mut db_tx, exec_input).await.unwrap();
+        StorageHashingStage::default().execute(&mut db_tx, exec_input).await.unwrap();
+
+        db_tx.commit().unwrap();
+    });
+}
+
+fn measure_stage<S, F>(
     group: &mut BenchmarkGroup<WallTime>,
+    setup: F,
     stage: S,
     path: PathBuf,
     label: String,
-) {
+) where
+    S: Clone + Stage<Env<WriteMap>>,
+    F: Fn(S, &TestTransaction, ExecInput),
+{
     let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
@@ -111,15 +156,7 @@ fn measure_stage<S: Clone + Stage<Env<WriteMap>>>(
         b.to_async(FuturesExecutor).iter_with_setup(
             || {
                 // criterion setup does not support async, so we have to use our own runtime
-                tokio::runtime::Runtime::new().unwrap().block_on(async {
-                    let mut stage = stage.clone();
-                    let mut db_tx = tx.inner();
-
-                    // Clear previous run
-                    stage.unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
-
-                    db_tx.commit().unwrap();
-                });
+                setup(stage.clone(), &tx, input.clone())
             },
             |_| async {
                 let mut stage = stage.clone();
