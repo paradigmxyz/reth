@@ -173,7 +173,7 @@ impl Command {
         let fetch_client = Arc::new(network.fetch_client().await?);
 
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
-            .build(consensus.clone(), fetch_client.clone())
+            .build(fetch_client.clone(), consensus.clone())
             .as_task();
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)

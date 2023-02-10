@@ -32,8 +32,8 @@
 //! # use reth_stages::sets::DefaultStages;
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
-//! #    consensus.clone(),
-//! #    Arc::new(TestHeadersClient::default())
+//! #    Arc::new(TestHeadersClient::default()),
+//! #    consensus.clone()
 //! # );
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::zero(), vec![]).into()) }),
