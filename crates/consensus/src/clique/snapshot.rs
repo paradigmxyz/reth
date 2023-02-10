@@ -285,7 +285,7 @@ mod tests {
     use ethers_core::rand;
     use ethers_signers::{LocalWallet, Signer};
     use itertools::Itertools;
-    use reth_primitives::{Chain, ChainSpecBuilder, Genesis, Header, H256, U256};
+    use reth_primitives::{Chain, Genesis, Header, H256, U256};
     use std::collections::HashSet;
 
     // Single signer, no votes cast
