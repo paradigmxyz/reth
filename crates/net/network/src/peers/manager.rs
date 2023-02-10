@@ -1239,7 +1239,7 @@ mod test {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
         let backoff_durations =
-            PeerBackoffDurations { low: Duration::from_secs(3), ..Default::default() };
+            PeerBackoffDurations { low: Duration::from_millis(200), ..Default::default() };
         let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr, None);
@@ -1302,8 +1302,11 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
-        let backoff_durations =
-            PeerBackoffDurations { high: Duration::from_secs(3), ..Default::default() };
+        let backoff_durations = PeerBackoffDurations {
+            high: Duration::from_millis(200),
+            low: Duration::from_millis(200),
+            ..Default::default()
+        };
         let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr, None);

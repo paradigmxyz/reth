@@ -10,12 +10,12 @@ use reth_primitives::{
 };
 use std::{ops::Range, sync::Arc};
 
-mod historical;
-pub use historical::{HistoricalStateProvider, HistoricalStateProviderRef};
-
-mod latest;
-pub use latest::{LatestStateProvider, LatestStateProviderRef};
+mod state;
 use reth_db::{cursor::DbCursorRO, models::BlockNumHash};
+pub use state::{
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    latest::{LatestStateProvider, LatestStateProviderRef},
+};
 
 /// A common provider that fetches data from a database.
 ///
