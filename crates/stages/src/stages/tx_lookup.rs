@@ -66,14 +66,37 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                 .unwrap_or_default()
         });
 
-        // Collect tranasctions for each body and insert the reverse lookup for hash -> tx_id.
+        // Collect transactions for each body
+        let mut tx_list = vec![];
         for body_entry in bodies {
             let (_, body) = body_entry?;
             let transactions = tx_cursor.walk(body.start_tx_id)?.take(body.tx_count as usize);
 
             for tx_entry in transactions {
                 let (id, transaction) = tx_entry?;
-                tx.put::<tables::TxHashNumber>(transaction.hash(), id)?;
+                tx_list.push((transaction.hash(), id));
+            }
+        }
+
+        // Sort before inserting the reverse lookup for hash -> tx_id.
+        tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
+
+        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+
+        // If the last inserted element in the database is smaller than the first in our set, then
+        // we can just append into the DB. This probably only ever happens during sync, on
+        // the first table insertion.
+        let append = tx_list
+            .first()
+            .zip(txhash_cursor.last()?)
+            .map(|((first, _), (last, _))| &last < first)
+            .unwrap_or_default();
+
+        for (tx_hash, id) in tx_list {
+            if append {
+                txhash_cursor.append(tx_hash, id)?;
+            } else {
+                txhash_cursor.insert(tx_hash, id)?;
             }
         }
 

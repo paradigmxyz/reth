@@ -1,10 +1,14 @@
 use crate::{
-    db::Transaction, error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    db::Transaction, error::*, util::opt, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput,
 };
+use metrics::Gauge;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+use reth_metrics_derive::Metrics;
 use reth_primitives::BlockNumber;
 use std::{
+    collections::HashMap,
     fmt::{Debug, Formatter},
     ops::Deref,
     sync::Arc,
@@ -16,13 +20,11 @@ mod builder;
 mod ctrl;
 mod event;
 mod set;
-mod state;
 
 pub use builder::*;
 use ctrl::*;
 pub use event::*;
 pub use set::*;
-use state::*;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -75,10 +77,12 @@ use state::*;
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
 /// request an unwind manually (see [Pipeline::unwind]).
 pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
-    stages: Vec<QueuedStage<DB>>,
+    stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
     listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
+    progress: PipelineProgress,
+    metrics: Metrics,
 }
 
 impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
@@ -88,6 +92,8 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
             max_block: None,
             listeners: PipelineEventListeners::default(),
             sync_state_updater: None,
+            progress: PipelineProgress::default(),
+            metrics: Metrics::default(),
         }
     }
 }
@@ -95,10 +101,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
 impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
-            .field(
-                "stages",
-                &self.stages.iter().map(|stage| stage.stage.id()).collect::<Vec<StageId>>(),
-            )
+            .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
             .finish()
     }
@@ -115,21 +118,31 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
         self.listeners.new_listener()
     }
 
+    /// Registers progress metrics for each registered stage
+    fn register_metrics(&mut self, db: Arc<DB>) {
+        for stage in &self.stages {
+            let stage_id = stage.id();
+            self.metrics.stage_checkpoint(
+                stage_id,
+                db.view(|tx| stage_id.get_progress(tx).ok().flatten().unwrap_or_default())
+                    .ok()
+                    .unwrap_or_default(),
+            );
+        }
+    }
+
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
     pub async fn run(&mut self, db: Arc<DB>) -> Result<(), PipelineError> {
+        self.register_metrics(db.clone());
+
         loop {
-            let mut state = PipelineState {
-                listeners: self.listeners.clone(),
-                max_block: self.max_block,
-                ..Default::default()
-            };
-            let next_action = self.run_loop(&mut state, db.as_ref()).await?;
+            let next_action = self.run_loop(db.as_ref()).await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
             if next_action.should_continue() &&
-                state
+                self.progress
                     .minimum_progress
                     .zip(self.max_block)
                     .map_or(false, |(progress, target)| progress >= target)
@@ -145,19 +158,15 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
-    async fn run_loop(
-        &mut self,
-        state: &mut PipelineState,
-        db: &DB,
-    ) -> Result<ControlFlow, PipelineError> {
-        let mut pipeline_progress = PipelineProgress::default();
+    async fn run_loop(&mut self, db: &DB) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
-        for queued_stage in self.stages.iter_mut() {
-            let stage_id = queued_stage.stage.id();
+        for stage_index in 0..self.stages.len() {
+            let stage = &self.stages[stage_index];
+            let stage_id = stage.id();
 
             // Update sync state
             if let Some(ref updater) = self.sync_state_updater {
-                let state = pipeline_progress.current_sync_state(stage_id.is_downloading_stage());
+                let state = self.progress.current_sync_state(stage_id.is_downloading_stage());
                 updater.update_sync_state(state);
             }
 
@@ -166,14 +175,14 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 stage = %stage_id,
                 "Executing stage"
             );
-            let next = queued_stage
-                .execute(state, previous_stage, db)
+            let next = self
+                .execute_stage_to_completion(db, previous_stage, stage_index)
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
             match next {
                 ControlFlow::NoProgress => {} // noop
-                ControlFlow::Continue { progress } => pipeline_progress.update(progress),
+                ControlFlow::Continue { progress } => self.progress.update(progress),
                 ControlFlow::Unwind { target, bad_block } => {
                     // reset the sync state
                     if let Some(ref updater) = self.sync_state_updater {
@@ -188,7 +197,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 Some((stage_id, db.view(|tx| stage_id.get_progress(tx))??.unwrap_or_default()));
         }
 
-        Ok(pipeline_progress.next_ctrl())
+        Ok(self.progress.next_ctrl())
     }
 
     /// Unwind the stages to the target block.
@@ -205,7 +214,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
         let mut tx = Transaction::new(db)?;
 
-        for QueuedStage { stage, .. } in unwind_pipeline {
+        for stage in unwind_pipeline {
             let stage_id = stage.id();
             let span = info_span!("Unwinding", stage = %stage_id);
             let _enter = span.enter();
@@ -226,6 +235,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 match output {
                     Ok(unwind_output) => {
                         stage_progress = unwind_output.stage_progress;
+                        self.metrics.stage_checkpoint(stage_id, stage_progress);
                         stage_id.save_progress(tx.deref(), stage_progress)?;
 
                         self.listeners
@@ -242,51 +252,15 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
         tx.commit()?;
         Ok(())
     }
-}
 
-#[derive(Debug, Default)]
-struct PipelineProgress {
-    progress: Option<u64>,
-}
-
-impl PipelineProgress {
-    fn update(&mut self, progress: u64) {
-        self.progress = Some(progress);
-    }
-
-    /// Create a sync state from pipeline progress.
-    fn current_sync_state(&self, downloading: bool) -> SyncState {
-        match self.progress {
-            Some(progress) if downloading => SyncState::Downloading { target_block: progress },
-            Some(progress) => SyncState::Executing { target_block: progress },
-            None => SyncState::Idle,
-        }
-    }
-
-    /// Get next control flow step
-    fn next_ctrl(&self) -> ControlFlow {
-        match self.progress {
-            Some(progress) => ControlFlow::Continue { progress },
-            None => ControlFlow::NoProgress,
-        }
-    }
-}
-
-/// A container for a queued stage.
-struct QueuedStage<DB: Database> {
-    /// The actual stage to execute.
-    stage: Box<dyn Stage<DB>>,
-}
-
-impl<DB: Database> QueuedStage<DB> {
-    /// Execute the stage.
-    async fn execute<'tx>(
+    async fn execute_stage_to_completion(
         &mut self,
-        state: &mut PipelineState,
-        previous_stage: Option<(StageId, BlockNumber)>,
         db: &DB,
+        previous_stage: Option<(StageId, BlockNumber)>,
+        stage_index: usize,
     ) -> Result<ControlFlow, PipelineError> {
-        let stage_id = self.stage.id();
+        let stage = &mut self.stages[stage_index];
+        let stage_id = stage.id();
         let mut made_progress = false;
         loop {
             let mut tx = Transaction::new(db)?;
@@ -294,7 +268,7 @@ impl<DB: Database> QueuedStage<DB> {
             let prev_progress = stage_id.get_progress(tx.deref())?;
 
             let stage_reached_max_block = prev_progress
-                .zip(state.max_block)
+                .zip(self.max_block)
                 .map_or(false, |(prev_progress, target)| prev_progress >= target);
             if stage_reached_max_block {
                 warn!(
@@ -302,18 +276,16 @@ impl<DB: Database> QueuedStage<DB> {
                     stage = %stage_id,
                     "Stage reached maximum block, skipping."
                 );
-                state.listeners.notify(PipelineEvent::Skipped { stage_id });
+                self.listeners.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress)
             }
 
-            state
-                .listeners
+            self.listeners
                 .notify(PipelineEvent::Running { stage_id, stage_progress: prev_progress });
 
-            match self
-                .stage
+            match stage
                 .execute(&mut tx, ExecInput { previous_stage, stage_progress: prev_progress })
                 .await
             {
@@ -326,14 +298,13 @@ impl<DB: Database> QueuedStage<DB> {
                         %done,
                         "Stage made progress"
                     );
+                    self.metrics.stage_checkpoint(stage_id, stage_progress);
                     stage_id.save_progress(tx.deref(), stage_progress)?;
 
-                    state.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
+                    self.listeners.notify(PipelineEvent::Ran { stage_id, result: out.clone() });
 
                     // TODO: Make the commit interval configurable
                     tx.commit()?;
-
-                    state.record_progress_outliers(stage_progress);
 
                     if done {
                         return Ok(if made_progress {
@@ -344,7 +315,7 @@ impl<DB: Database> QueuedStage<DB> {
                     }
                 }
                 Err(err) => {
-                    state.listeners.notify(PipelineEvent::Error { stage_id });
+                    self.listeners.notify(PipelineEvent::Error { stage_id });
 
                     return if let StageError::Validation { block, error } = err {
                         warn!(
@@ -384,6 +355,66 @@ impl<DB: Database> QueuedStage<DB> {
     }
 }
 
+#[derive(Metrics)]
+#[metrics(scope = "sync")]
+struct StageMetrics {
+    /// The block number of the last commit for a stage.
+    checkpoint: Gauge,
+}
+
+#[derive(Default)]
+struct Metrics {
+    checkpoints: HashMap<StageId, StageMetrics>,
+}
+
+impl Metrics {
+    fn stage_checkpoint(&mut self, stage_id: StageId, progress: u64) {
+        self.checkpoints
+            .entry(stage_id)
+            .or_insert_with(|| StageMetrics::new_with_labels(&[("stage", stage_id.to_string())]))
+            .checkpoint
+            .set(progress as f64);
+    }
+}
+
+#[derive(Debug, Default)]
+struct PipelineProgress {
+    /// The progress of the current stage
+    pub(crate) progress: Option<BlockNumber>,
+    /// The maximum progress achieved by any stage during the execution of the pipeline.
+    pub(crate) maximum_progress: Option<BlockNumber>,
+    /// The minimum progress achieved by any stage during the execution of the pipeline.
+    pub(crate) minimum_progress: Option<BlockNumber>,
+}
+
+impl PipelineProgress {
+    fn update(&mut self, progress: BlockNumber) {
+        self.progress = Some(progress);
+        self.minimum_progress = opt::min(self.minimum_progress, progress);
+        self.maximum_progress = opt::max(self.maximum_progress, progress);
+    }
+
+    /// Create a sync state from pipeline progress.
+    fn current_sync_state(&self, downloading: bool) -> SyncState {
+        match self.progress {
+            Some(progress) if downloading => SyncState::Downloading { target_block: progress },
+            Some(progress) => SyncState::Executing { target_block: progress },
+            None => SyncState::Idle,
+        }
+    }
+
+    /// Get next control flow step
+    fn next_ctrl(&self) -> ControlFlow {
+        match self.progress {
+            Some(progress) => ControlFlow::Continue { progress },
+            None => ControlFlow::NoProgress,
+        }
+    }
+}
+
+/// A container for a queued stage.
+pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,6 +424,47 @@ mod tests {
     use reth_interfaces::{consensus, sync::NoopSyncStateUpdate};
     use tokio_stream::StreamExt;
     use utils::TestStage;
+
+    #[test]
+    fn record_progress_calculates_outliers() {
+        let mut progress = PipelineProgress::default();
+
+        progress.update(10);
+        assert_eq!(progress.minimum_progress, Some(10));
+        assert_eq!(progress.maximum_progress, Some(10));
+
+        progress.update(20);
+        assert_eq!(progress.minimum_progress, Some(10));
+        assert_eq!(progress.maximum_progress, Some(20));
+
+        progress.update(1);
+        assert_eq!(progress.minimum_progress, Some(1));
+        assert_eq!(progress.maximum_progress, Some(20));
+    }
+
+    #[test]
+    fn sync_states() {
+        let mut progress = PipelineProgress::default();
+
+        // no progress, so we're idle
+        assert_eq!(progress.current_sync_state(false), SyncState::Idle);
+        assert_eq!(progress.current_sync_state(true), SyncState::Idle);
+
+        // progress and downloading/executing
+        progress.update(1);
+        assert_eq!(progress.current_sync_state(true), SyncState::Downloading { target_block: 1 });
+        assert_eq!(progress.current_sync_state(false), SyncState::Executing { target_block: 1 });
+    }
+
+    #[test]
+    fn progress_ctrl_flow() {
+        let mut progress = PipelineProgress::default();
+
+        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress);
+
+        progress.update(1);
+        assert_eq!(progress.next_ctrl(), ControlFlow::Continue { progress: 1 });
+    }
 
     /// Runs a simple pipeline.
     #[tokio::test]
