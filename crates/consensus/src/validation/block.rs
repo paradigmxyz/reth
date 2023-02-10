@@ -23,6 +23,13 @@ pub fn validate_block_standalone(block: &SealedBlock) -> Result<(), Error> {
         })
     }
 
+    validate_block_transaction_root(block)?;
+
+    Ok(())
+}
+
+/// Compute and validate transaction root.
+pub fn validate_block_transaction_root(block: &SealedBlock) -> Result<(), Error> {
     // Check transaction root
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let transaction_root = proofs::calculate_transaction_root(block.body.iter());

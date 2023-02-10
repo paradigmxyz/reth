@@ -1,11 +1,12 @@
 //! Implementation of clique voting snapshots.
 //! https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/snapshot.go
 
-use super::utils::recover_header_signer;
+use super::utils::{extract_checkpoint_signers, recover_header_signer};
 use bytes::BufMut;
 use reth_interfaces::consensus::CliqueError;
 use reth_primitives::{
-    constants::clique::*, Address, BlockHash, BlockNumber, Bytes, CliqueConfig, SealedHeader, H64,
+    constants::clique::*, Address, BlockHash, BlockNumber, Bytes, ChainSpec, CliqueConfig,
+    SealedHeader, H64,
 };
 use std::collections::{hash_map::Entry, BTreeSet, HashMap};
 
@@ -15,8 +16,6 @@ use std::collections::{hash_map::Entry, BTreeSet, HashMap};
 pub struct Vote {
     /// Authorized signer that cast this vote
     signer: Address,
-    /// Block number the vote was cast in (expire old votes)
-    block: BlockNumber,
     /// Account being voted on to change its authorization
     address: Address,
     /// Whether to authorize or deauthorize the voted account
@@ -31,7 +30,7 @@ impl Vote {
             NONCE_DROP_VOTE => false,
             _ => return Err(CliqueError::InvalidVote { nonce: header.nonce }),
         };
-        Ok(Self { address: header.beneficiary, block: header.number, authorize, signer })
+        Ok(Self { address: header.beneficiary, authorize, signer })
     }
 
     /// Check if the other vote is the same
@@ -80,7 +79,7 @@ pub struct Snapshot {
     /// Block hash where the snapshot was created
     hash: BlockHash,
     /// Set of authorized signers at this moment
-    signers: BTreeSet<Address>, // TODO: make sure this is ordered asc
+    signers: BTreeSet<Address>,
     // Set of recent signers for spam protections
     recents: HashMap<BlockNumber, Address>,
     /// List of votes cast in chronological order
@@ -92,6 +91,22 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Create new genesis snapshot.
+    pub fn new(chain_spec: &ChainSpec) -> Result<Self, CliqueError> {
+        let config = chain_spec.clique.clone().ok_or(CliqueError::Config)?;
+        let hash = chain_spec.genesis_hash();
+        let signers = extract_checkpoint_signers(chain_spec.genesis.extra_data.clone())?;
+        Ok(Self {
+            config,
+            signers,
+            hash,
+            number: 0,
+            recents: Default::default(),
+            tally: Default::default(),
+            votes: Default::default(),
+        })
+    }
+
     /// Check if the address is an authorized signer.
     pub fn is_authorized_signer(&self, signer: &Address) -> bool {
         self.signers.contains(signer)
@@ -270,7 +285,7 @@ mod tests {
     use ethers_core::rand;
     use ethers_signers::{LocalWallet, Signer};
     use itertools::Itertools;
-    use reth_primitives::{Header, H256, U256};
+    use reth_primitives::{Chain, ChainSpecBuilder, Genesis, Header, H256, U256};
     use std::collections::HashSet;
 
     // Single signer, no votes cast
@@ -768,7 +783,7 @@ mod tests {
             self.signers.iter().map(|label| self.get_account_address(label)).sorted().collect()
         }
 
-        fn genesis(&self) -> SealedHeader {
+        fn genesis(&self) -> Genesis {
             // Construct genesis block
             let mut extra_data = BytesMut::with_capacity(
                 EXTRA_VANITY + self.signers.len() * Address::len_bytes() + EXTRA_SEAL,
@@ -779,9 +794,7 @@ mod tests {
             }
             extra_data.put_bytes(0, EXTRA_SEAL);
 
-            let mut genesis = Header::default();
-            genesis.extra_data = extra_data.freeze().into();
-            genesis.clique_seal_slow()
+            Genesis { extra_data: extra_data.freeze().into(), ..Default::default() }
         }
 
         fn construct_clique_header(
@@ -843,30 +856,29 @@ mod tests {
 
         fn run(self) {
             let genesis = self.genesis();
+            let chainspec = ChainSpec::builder()
+                .chain(Chain::Id(3))
+                .genesis(genesis)
+                .clique(self.config.clone())
+                .build();
 
             // Generate random headers
             let mut headers = Vec::with_capacity(self.votes.len());
             for (idx, vote) in self.votes.iter().enumerate() {
                 let header = self.construct_clique_header(
                     idx as u64 + 1,
-                    headers.last().map(|h: &SealedHeader| h.hash()).unwrap_or(genesis.hash()),
+                    headers
+                        .last()
+                        .map(|h: &SealedHeader| h.hash())
+                        .unwrap_or(chainspec.genesis_hash()),
                     &vote,
                 );
                 headers.push(header);
             }
             let last_header = headers.pop().expect("not empty");
 
-            let signers =
-                self.signers.iter().map(|label| self.get_account_address(label)).collect();
-            let mut snapshot = Snapshot {
-                config: self.config.clone(),
-                hash: genesis.hash(),
-                number: 0,
-                signers,
-                recents: Default::default(),
-                tally: Default::default(),
-                votes: Default::default(),
-            };
+            let mut snapshot =
+                Snapshot::new(&chainspec).expect("failed to create snapshot from genesis");
 
             // Start applying snapshots for every header but last
             for header in headers {

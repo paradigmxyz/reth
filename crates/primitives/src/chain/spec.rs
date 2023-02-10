@@ -146,7 +146,12 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> H256 {
-        self.genesis_header().hash_slow() // TODO: why?
+        let mut header = self.genesis_header();
+        if self.clique.is_some() {
+            header.clique_hash_slow()
+        } else {
+            header.hash_slow() // TODO: why?
+        }
     }
 
     /// Returns the forks in this specification and their activation conditions.

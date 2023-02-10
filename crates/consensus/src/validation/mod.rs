@@ -8,6 +8,7 @@ mod transaction;
 
 pub use block::{
     calculate_next_block_base_fee, validate_block_regarding_chain, validate_block_standalone,
+    validate_block_transaction_root,
 };
 pub use header::{
     clique, validate_eip_1559_base_fee, validate_gas_limit_difference, validate_header_consistency,

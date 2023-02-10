@@ -88,6 +88,8 @@ pub enum Error {
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum CliqueError {
+    #[error("Clique config is missing")]
+    Config,
     #[error("Beneficiary in checkpoint block non-zero: {beneficiary}")]
     CheckpointBeneficiary { beneficiary: Address },
     #[error("Vote nonce in checkpoint block non-zero: {nonce}")]
