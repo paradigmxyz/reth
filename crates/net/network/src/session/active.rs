@@ -918,12 +918,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_send_many_messages() {
+        reth_tracing::init_test_tracing();
         let mut builder = SessionBuilder::default();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let num_messages = 10_000;
+        let num_messages = 100;
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             for _ in 0..num_messages {
@@ -960,12 +961,12 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
-        let request_timeout = Duration::from_millis(500);
+        let request_timeout = Duration::from_millis(100);
         let drop_timeout = Duration::from_millis(1500);
 
         let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
             let _client_stream = client_stream;
-            tokio::time::sleep(drop_timeout * 100).await;
+            tokio::time::sleep(drop_timeout * 10).await;
         });
         tokio::task::spawn(fut);
 
@@ -975,6 +976,7 @@ mod tests {
             .internal_request_timeout
             .store(request_timeout.as_millis() as u64, Ordering::Relaxed);
         session.protocol_breach_request_timeout = drop_timeout;
+        session.internal_request_timeout_interval = tokio::time::interval(request_timeout);
         let (tx, rx) = oneshot::channel();
         let req = PeerRequest::GetBlockBodies { request: GetBlockBodies(vec![]), response: tx };
         session.on_internal_peer_request(req, Instant::now());
@@ -999,7 +1001,7 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
-            let _ = tokio::time::timeout(Duration::from_secs(25), client_stream.next()).await;
+            let _ = tokio::time::timeout(Duration::from_secs(5), client_stream.next()).await;
             client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
         });
 

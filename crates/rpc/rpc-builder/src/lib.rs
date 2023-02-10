@@ -69,8 +69,9 @@ use std::{
     collections::HashMap,
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
 };
-use strum::{AsRefStr, EnumString, EnumVariantNames, VariantNames};
+use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 
 /// The default port for the http/ws server
 pub const DEFAULT_RPC_PORT: u16 = 8545;
@@ -293,6 +294,16 @@ where
     }
 }
 
+impl FromStr for RpcModuleConfig {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let modules = s.split(',');
+
+        RpcModuleConfig::try_from_selection(modules)
+    }
+}
+
 /// Represents RPC modules that are supported by reth
 #[derive(
     Debug, Clone, Copy, Eq, PartialEq, Hash, AsRefStr, EnumVariantNames, EnumString, Deserialize,
@@ -382,7 +393,10 @@ where
         }
         let methods: Methods = match namespace {
             RethRpcModule::Admin => AdminApi::new(self.network.clone()).into_rpc().into(),
-            RethRpcModule::Debug => DebugApi::new().into_rpc().into(),
+            RethRpcModule::Debug => {
+                let eth_api = self.eth_api();
+                DebugApi::new(eth_api).into_rpc().into()
+            }
             RethRpcModule::Eth => self.eth_api().into_rpc().into(),
             RethRpcModule::Net => {
                 let eth_api = self.eth_api();

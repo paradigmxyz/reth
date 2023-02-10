@@ -9,9 +9,10 @@ use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Address, ChainInfo, H256, U64,
+    Address, ChainInfo, TransactionSigned, H256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
+
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
@@ -36,6 +37,9 @@ pub trait EthApiSpec: Send + Sync {
 
     /// Returns a list of addresses owned by client.
     fn accounts(&self) -> Vec<Address>;
+
+    /// Returns the transaction by hash
+    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<TransactionSigned>>;
 }
 
 /// `Eth` API implementation.
@@ -174,6 +178,10 @@ where
 
     fn accounts(&self) -> Vec<Address> {
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
+    }
+
+    async fn transaction_by_hash(&self, _hash: H256) -> Result<Option<TransactionSigned>> {
+        todo!()
     }
 }
 

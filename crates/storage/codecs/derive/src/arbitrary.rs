@@ -38,10 +38,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                     let len = field.clone().encode(&mut buf);
                     let decoded = super::#type_ident::decode(&mut buf.as_slice()).unwrap();
-                    dbg!("Lens value:");
-                    dbg!(&len);
-                    dbg!("Decoded value");
-                    dbg!(&decoded);
+
                     assert!(field == decoded);
                 }
             });
