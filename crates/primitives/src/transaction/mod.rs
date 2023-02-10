@@ -182,11 +182,11 @@ impl Transaction {
     }
 
     /// Get chain_id.
-    pub fn chain_id(&self) -> Option<&u64> {
+    pub fn chain_id(&self) -> Option<u64> {
         match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => chain_id.as_ref(),
-            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(chain_id),
-            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(chain_id),
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
+            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(*chain_id),
+            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(*chain_id),
         }
     }
 
@@ -251,6 +251,18 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
             Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
+        }
+    }
+
+    /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
+    /// is `None`
+    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        match self {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+                Some(*max_priority_fee_per_gas)
+            }
         }
     }
 
@@ -742,7 +754,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
 
         any::<(Transaction, Signature)>()
             .prop_map(move |(mut transaction, sig)| {
-                if let Some(chain_id) = transaction.chain_id().cloned() {
+                if let Some(chain_id) = transaction.chain_id() {
                     // Otherwise we might overflow when calculating `v` on `recalculate_hash`
                     transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
@@ -759,7 +771,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut transaction = Transaction::arbitrary(u)?;
-        if let Some(chain_id) = transaction.chain_id().cloned() {
+        if let Some(chain_id) = transaction.chain_id() {
             // Otherwise we might overflow when calculating `v` on `recalculate_hash`
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
         }
