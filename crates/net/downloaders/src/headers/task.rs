@@ -172,7 +172,7 @@ mod tests {
         let downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
 
         let mut downloader = TaskDownloader::spawn(downloader);
         downloader.update_local_head(p3.clone());

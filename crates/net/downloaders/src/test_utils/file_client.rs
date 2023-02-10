@@ -309,7 +309,7 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
@@ -330,7 +330,7 @@ mod tests {
 
         // construct headers downloader and use first header
         let mut header_downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         header_downloader.update_local_head(headers.first().unwrap().clone());
         header_downloader.update_sync_target(SyncTarget::Tip(headers.last().unwrap().hash()));
 

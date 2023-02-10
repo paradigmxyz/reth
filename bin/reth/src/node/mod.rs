@@ -297,6 +297,42 @@ impl Command {
 
         Ok(pipeline)
     }
+
+    fn spawn_headers_downloader(
+        &self,
+        config: &Config,
+        consensus: &Arc<dyn Consensus>,
+        fetch_client: &Arc<FetchClient>,
+    ) -> reth_downloaders::headers::task::TaskDownloader {
+        let headers_conf = &config.stages.headers;
+        headers::task::TaskDownloader::spawn(
+            headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
+                .request_limit(headers_conf.downloader_batch_size)
+                .stream_batch_size(headers_conf.commit_threshold as usize)
+                .build(fetch_client.clone(), consensus.clone()),
+        )
+    }
+
+    fn spawn_bodies_downloader(
+        &self,
+        config: &Config,
+        consensus: &Arc<dyn Consensus>,
+        fetch_client: &Arc<FetchClient>,
+        db: &Arc<Env<WriteMap>>,
+    ) -> reth_downloaders::bodies::task::TaskDownloader {
+        let bodies_conf = &config.stages.bodies;
+        bodies::task::TaskDownloader::spawn(
+            bodies::bodies::BodiesDownloaderBuilder::default()
+                .with_stream_batch_size(bodies_conf.downloader_stream_batch_size)
+                .with_request_limit(bodies_conf.downloader_request_limit)
+                .with_max_buffered_responses(bodies_conf.downloader_max_buffered_responses)
+                .with_concurrent_requests_range(
+                    bodies_conf.downloader_min_concurrent_requests..=
+                        bodies_conf.downloader_max_concurrent_requests,
+                )
+                .build(fetch_client.clone(), consensus.clone(), db.clone()),
+        )
+    }
 }
 
 /// Dumps peers to `file_path` for persistence.
