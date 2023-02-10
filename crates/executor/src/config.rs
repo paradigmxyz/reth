@@ -10,29 +10,29 @@ pub const WEI_3ETH: u128 = 3000000000000000000u128;
 pub const WEI_5ETH: u128 = 5000000000000000000u128;
 
 /// return revm_spec from spec configuration.
-pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm::SpecId {
+pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm::primitives::SpecId {
     if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
-        revm::MERGE_EOF
+        revm::primitives::MERGE_EOF
     } else if chain_spec.fork(Hardfork::Paris).active_at_head(&block) {
-        revm::MERGE
+        revm::primitives::MERGE
     } else if chain_spec.fork(Hardfork::London).active_at_head(&block) {
-        revm::LONDON
+        revm::primitives::LONDON
     } else if chain_spec.fork(Hardfork::Berlin).active_at_head(&block) {
-        revm::BERLIN
+        revm::primitives::BERLIN
     } else if chain_spec.fork(Hardfork::Istanbul).active_at_head(&block) {
-        revm::ISTANBUL
+        revm::primitives::ISTANBUL
     } else if chain_spec.fork(Hardfork::Petersburg).active_at_head(&block) {
-        revm::PETERSBURG
+        revm::primitives::PETERSBURG
     } else if chain_spec.fork(Hardfork::Byzantium).active_at_head(&block) {
-        revm::BYZANTIUM
+        revm::primitives::BYZANTIUM
     } else if chain_spec.fork(Hardfork::SpuriousDragon).active_at_head(&block) {
-        revm::SPURIOUS_DRAGON
+        revm::primitives::SPURIOUS_DRAGON
     } else if chain_spec.fork(Hardfork::Tangerine).active_at_head(&block) {
-        revm::TANGERINE
+        revm::primitives::TANGERINE
     } else if chain_spec.fork(Hardfork::Homestead).active_at_head(&block) {
-        revm::HOMESTEAD
+        revm::primitives::HOMESTEAD
     } else if chain_spec.fork(Hardfork::Frontier).active_at_head(&block) {
-        revm::FRONTIER
+        revm::primitives::FRONTIER
     } else {
         panic!("wrong configuration")
     }
@@ -46,49 +46,49 @@ mod tests {
     fn test_to_revm_spec() {
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().paris_activated().build(), Head::default()),
-            revm::MERGE
+            revm::primitives::MERGE
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().london_activated().build(), Head::default()),
-            revm::LONDON
+            revm::primitives::LONDON
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().berlin_activated().build(), Head::default()),
-            revm::BERLIN
+            revm::primitives::BERLIN
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().istanbul_activated().build(), Head::default()),
-            revm::ISTANBUL
+            revm::primitives::ISTANBUL
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().petersburg_activated().build(), Head::default()),
-            revm::PETERSBURG
+            revm::primitives::PETERSBURG
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().byzantium_activated().build(), Head::default()),
-            revm::BYZANTIUM
+            revm::primitives::BYZANTIUM
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().spurious_dragon_activated().build(),
                 Head::default()
             ),
-            revm::SPURIOUS_DRAGON
+            revm::primitives::SPURIOUS_DRAGON
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().tangerine_whistle_activated().build(),
                 Head::default()
             ),
-            revm::TANGERINE
+            revm::primitives::TANGERINE
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().homestead_activated().build(), Head::default()),
-            revm::HOMESTEAD
+            revm::primitives::HOMESTEAD
         );
         assert_eq!(
             revm_spec(&ChainSpecBuilder::mainnet().frontier_activated().build(), Head::default()),
-            revm::FRONTIER
+            revm::primitives::FRONTIER
         );
     }
 
@@ -102,7 +102,7 @@ mod tests {
                     ..Default::default()
                 }
             ),
-            revm::MERGE
+            revm::primitives::MERGE
         );
         // TTD trumps the block number
         assert_eq!(
@@ -114,43 +114,43 @@ mod tests {
                     ..Default::default()
                 }
             ),
-            revm::MERGE
+            revm::primitives::MERGE
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 15537394 - 10, ..Default::default() }),
-            revm::LONDON
+            revm::primitives::LONDON
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 12244000 + 10, ..Default::default() }),
-            revm::BERLIN
+            revm::primitives::BERLIN
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 12244000 - 10, ..Default::default() }),
-            revm::ISTANBUL
+            revm::primitives::ISTANBUL
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 7280000 + 10, ..Default::default() }),
-            revm::PETERSBURG
+            revm::primitives::PETERSBURG
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 7280000 - 10, ..Default::default() }),
-            revm::BYZANTIUM
+            revm::primitives::BYZANTIUM
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 2675000 + 10, ..Default::default() }),
-            revm::SPURIOUS_DRAGON
+            revm::primitives::SPURIOUS_DRAGON
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 2675000 - 10, ..Default::default() }),
-            revm::TANGERINE
+            revm::primitives::TANGERINE
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 1150000 + 10, ..Default::default() }),
-            revm::HOMESTEAD
+            revm::primitives::HOMESTEAD
         );
         assert_eq!(
             revm_spec(&MAINNET, Head { number: 1150000 - 10, ..Default::default() }),
-            revm::FRONTIER
+            revm::primitives::FRONTIER
         );
     }
 }
