@@ -146,6 +146,9 @@ delegate_provider_impls!(HistoricalStateProvider<'a, TX>);
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        AccountProvider, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+    };
     use reth_db::{
         database::Database,
         mdbx::test_utils::create_test_rw_db,
@@ -156,11 +159,15 @@ mod tests {
     };
     use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
 
-    use crate::{AccountProvider, HistoricalStateProviderRef, StateProvider};
-
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
     const STORAGE: H256 =
         H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+
+    fn assert_state_provider<T: StateProvider>() {}
+    #[allow(unused)]
+    fn assert_historical_state_provider<'txn, T: DbTx<'txn> + 'txn>() {
+        assert_state_provider::<HistoricalStateProvider<'txn, T>>();
+    }
 
     #[test]
     fn history_provider_get_account() {

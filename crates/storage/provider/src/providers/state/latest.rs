@@ -77,3 +77,14 @@ impl<'a, TX: DbTx<'a>> LatestStateProvider<'a, TX> {
 
 // Delegates all provider impls to [LatestStateProviderRef]
 delegate_provider_impls!(LatestStateProvider<'a, TX>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_state_provider<T: StateProvider>() {}
+    #[allow(unused)]
+    fn assert_latest_state_provider<'txn, T: DbTx<'txn> + 'txn>() {
+        assert_state_provider::<LatestStateProvider<'txn, T>>();
+    }
+}
