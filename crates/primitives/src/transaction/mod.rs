@@ -914,7 +914,6 @@ mod tests {
     use bytes::BytesMut;
     use ethers_core::utils::hex;
     use reth_rlp::{Decodable, DecodeError, Encodable};
-    use revm_interpreter::ruint::aliases::B256;
     use std::str::FromStr;
 
     #[test]
