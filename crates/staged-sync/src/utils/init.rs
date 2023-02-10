@@ -53,10 +53,10 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256,
     let hash = header.hash_slow();
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
     tx.put::<tables::HeaderNumbers>(hash, 0)?;
-    tx.put::<tables::BlockBodies>((0, hash).into(), Default::default())?;
+    tx.put::<tables::BlockBodies>(0, Default::default())?;
     tx.put::<tables::BlockTransitionIndex>(0, 0)?;
-    tx.put::<tables::HeaderTD>((0, hash).into(), header.difficulty.into())?;
-    tx.put::<tables::Headers>((0, hash).into(), header)?;
+    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
+    tx.put::<tables::Headers>(0, header)?;
 
     tx.commit()?;
     Ok(hash)

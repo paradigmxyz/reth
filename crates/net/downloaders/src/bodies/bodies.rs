@@ -134,7 +134,7 @@ where
                 .ok_or(DownloadError::MissingHeader { block_number: current_block_num })?;
             // Find the block header.
             let (_, header) = header_cursor
-                .seek_exact((number, hash).into())?
+                .seek_exact(number)?
                 .ok_or(DownloadError::MissingHeader { block_number: number })?;
 
             // If the header is not empty, increment the counter

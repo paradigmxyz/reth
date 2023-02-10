@@ -56,14 +56,10 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         let mut cursor_bodies = tx.cursor_read::<tables::BlockBodies>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-        let start_key = tx.get_block_numhash(start_block)?;
 
         // Walk over block bodies within a specified range.
-        let bodies = cursor_bodies.walk(start_key)?.take_while(|entry| {
-            entry
-                .as_ref()
-                .map(|(block_num_hash, _)| block_num_hash.number() <= end_block)
-                .unwrap_or_default()
+        let bodies = cursor_bodies.walk(start_block)?.take_while(|entry| {
+            entry.as_ref().map(|(num, _)| *num <= end_block).unwrap_or_default()
         });
 
         // Collect transactions for each body
@@ -117,8 +113,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut rev_walker = body_cursor.walk_back(None)?;
-        while let Some((key, body)) = rev_walker.next().transpose()? {
-            if key.number() <= input.unwind_to {
+        while let Some((number, body)) = rev_walker.next().transpose()? {
+            if number <= input.unwind_to {
                 break
             }
 
@@ -247,8 +243,8 @@ mod tests {
         ///
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxHashNumber] is not empty.
-        fn ensure_no_hash_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body_by_num(block);
+        fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
+            let body_result = self.tx.inner().get_block_body(number);
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_index(),
@@ -301,9 +297,8 @@ mod tests {
                         return Ok(())
                     }
 
-                    let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
                     let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
-                    body_cursor.seek_exact((start_block, start_hash).into())?;
+                    body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_id_range() {
