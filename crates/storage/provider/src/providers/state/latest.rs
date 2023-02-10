@@ -1,4 +1,7 @@
-use crate::{AccountProvider, BlockHashProvider, StateProvider};
+use crate::{
+    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
+    StateProvider,
+};
 use reth_db::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{Account, Address, Bytes, StorageKey, StorageValue, H256, U256};
@@ -64,26 +67,24 @@ impl<'a, TX: DbTx<'a>> LatestStateProvider<'a, TX> {
     pub fn new(db: TX) -> Self {
         Self { db, _phantom: PhantomData {} }
     }
+
+    /// Returns a new provider that takes the `TX` as reference
+    #[inline(always)]
+    fn as_ref<'b>(&'b self) -> LatestStateProviderRef<'a, 'b, TX> {
+        LatestStateProviderRef::new(&self.db)
+    }
 }
 
-/// Derive trait implementation for [LatestStateProvider]
-/// from [LatestStateProviderRef] type.
-///
-/// Used to implement provider traits.
-macro_rules! derive_from_ref {
-    ($trait:ident, $(fn $func:ident(&self$(, )?$($arg_name:ident: $arg:ty),*) -> $ret:ty),*) => {
-        impl<'a, TX: DbTx<'a>> $trait for LatestStateProvider<'a, TX> {
-            $(fn $func(&self, $($arg_name: $arg),*) -> $ret {
-                LatestStateProviderRef::new(&self.db).$func($($arg_name),*)
-            })*
-        }
-    };
-}
+// Delegates all provider impls to [LatestStateProviderRef]
+delegate_provider_impls!(LatestStateProvider<'a, TX>);
 
-derive_from_ref!(AccountProvider, fn basic_account(&self, address: Address) -> Result<Option<Account>>);
-derive_from_ref!(BlockHashProvider, fn block_hash(&self, number: U256) -> Result<Option<H256>>);
-derive_from_ref!(
-    StateProvider,
-    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>,
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>
-);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_state_provider<T: StateProvider>() {}
+    #[allow(unused)]
+    fn assert_latest_state_provider<'txn, T: DbTx<'txn> + 'txn>() {
+        assert_state_provider::<LatestStateProvider<'txn, T>>();
+    }
+}
