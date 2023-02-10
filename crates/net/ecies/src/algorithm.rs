@@ -314,7 +314,6 @@ impl ECIES {
             &sigdata[..64],
             RecoveryId::from_i32(sigdata[64] as i32)?,
         )?;
-        println!("RECOVERY >> {:?}", RecoveryId::from_i32(sigdata[64] as i32)?);
         let remote_id = data.get_next()?.ok_or(ECIESErrorImpl::InvalidAuthData)?;
         self.remote_id = Some(remote_id);
         self.remote_public_key = Some(id2pk(remote_id)?);

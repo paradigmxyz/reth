@@ -61,7 +61,7 @@ impl Consensus for CliqueConsensus {
     }
 
     fn has_block_reward(&self, _total_difficulty: U256) -> bool {
-        // No block rewards in PoA, so the state remains as is and uncles are dropped
+        // No block rewards in PoA
         false
     }
 }
