@@ -4682,6 +4682,7 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]

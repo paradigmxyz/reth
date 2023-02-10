@@ -87,6 +87,7 @@ pub type TransitionId = u64;
 pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, H128, H64, U64},
+    utils as rpc_utils,
 };
 pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
 
