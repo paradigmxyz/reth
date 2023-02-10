@@ -37,7 +37,7 @@ impl Signature {
 
     /// Output the `v` of the signature depends on chain_id
     #[inline]
-    fn v(&self, chain_id: Option<u64>) -> u64 {
+    pub fn v(&self, chain_id: Option<u64>) -> u64 {
         if let Some(chain_id) = chain_id {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
             self.odd_y_parity as u64 + chain_id * 2 + 35

@@ -1,6 +1,6 @@
 //! Types for broadcasting new data.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Header, TransactionSigned, H256, U128};
+use reth_primitives::{Block, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use std::sync::Arc;
 
@@ -54,19 +54,6 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
     }
 }
 
-/// A block body, including transactions and uncle headers.
-#[derive_arbitrary(rlp, 25)]
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct RawBlockBody {
-    /// This block's header
-    pub header: Header,
-    /// Transactions in this block.
-    pub transactions: Vec<TransactionSigned>,
-    /// Uncle block headers.
-    pub ommers: Vec<Header>,
-}
-
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
 #[derive_arbitrary(rlp, 25)]
@@ -74,7 +61,7 @@ pub struct RawBlockBody {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewBlock {
     /// A new block.
-    pub block: RawBlockBody,
+    pub block: Block,
     /// The current total difficulty.
     pub td: U128,
 }

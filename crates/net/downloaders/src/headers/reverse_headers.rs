@@ -1,5 +1,6 @@
 //! A headers downloader that can handle multiple requests concurrently.
 
+use super::task::TaskDownloader;
 use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
@@ -357,6 +358,8 @@ where
                 // validate the response
                 let highest = &headers[0];
 
+                trace!(target: "downloaders::headers", requested_block_number, highest=?highest.number, "Validating non-empty headers response");
+
                 if highest.number != requested_block_number {
                     return Err(HeadersResponseError {
                         request,
@@ -462,6 +465,7 @@ where
 
     /// Starts a request future
     fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+        trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
     }
 
@@ -496,6 +500,18 @@ where
         let mut rem = self.queued_validated_headers.split_off(batch_size);
         std::mem::swap(&mut rem, &mut self.queued_validated_headers);
         rem
+    }
+}
+
+impl<H> ReverseHeadersDownloader<H>
+where
+    H: HeadersClient,
+    Self: HeaderDownloader + 'static,
+{
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
+    /// it.
+    pub fn as_task(self) -> TaskDownloader {
+        TaskDownloader::spawn(self)
     }
 }
 

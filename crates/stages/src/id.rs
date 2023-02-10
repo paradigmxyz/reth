@@ -1,5 +1,4 @@
 use crate::stages::{BODIES, HEADERS};
-use metrics::absolute_counter;
 use reth_db::{
     tables::SyncStage,
     transaction::{DbTx, DbTxMut},
@@ -37,7 +36,6 @@ impl StageId {
         tx: &impl DbTxMut<'db>,
         block: BlockNumber,
     ) -> Result<(), DbError> {
-        absolute_counter!("stage_progress", block, "stage" => self.0);
         tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
     }
 }

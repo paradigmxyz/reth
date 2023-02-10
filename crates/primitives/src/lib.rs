@@ -41,7 +41,8 @@ pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::{
-    Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA,
+    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
+    MAINNET, SEPOLIA,
 };
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
@@ -89,6 +90,7 @@ pub type TransitionId = u64;
 pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, H128, H64, U64},
+    utils as rpc_utils,
     utils::CliqueConfig,
 };
 pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};

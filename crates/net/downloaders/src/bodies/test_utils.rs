@@ -6,9 +6,9 @@ use reth_db::{
     tables,
     transaction::DbTxMut,
 };
-use reth_eth_wire::{BlockBody, RawBlockBody};
+use reth_eth_wire::BlockBody;
 use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
-use reth_primitives::{SealedBlock, SealedHeader, H256};
+use reth_primitives::{Block, SealedBlock, SealedHeader, H256};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(
@@ -35,7 +35,7 @@ pub(crate) fn zip_blocks<'a>(
 pub(crate) fn create_raw_bodies<'a>(
     headers: impl Iterator<Item = &'a SealedHeader>,
     bodies: &mut HashMap<H256, BlockBody>,
-) -> Vec<RawBlockBody> {
+) -> Vec<Block> {
     headers
         .into_iter()
         .map(|header| {

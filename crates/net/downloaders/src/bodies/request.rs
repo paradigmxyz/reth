@@ -9,7 +9,7 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{Header, PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
+use reth_primitives::{PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
 use std::{
     collections::VecDeque,
     pin::Pin,

@@ -4062,6 +4062,7 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
+ "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
  "reth-net-nat",
@@ -4213,6 +4214,7 @@ dependencies = [
  "bytes",
  "futures",
  "futures-util",
+ "itertools 0.10.5",
  "metrics",
  "pin-project",
  "reth-db",
@@ -4685,6 +4687,7 @@ dependencies = [
  "reth-rlp",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -4741,7 +4744,9 @@ dependencies = [
  "hasher",
  "itertools 0.10.5",
  "metrics",
+ "num-traits",
  "paste",
+ "pin-project",
  "proptest",
  "rand 0.8.5",
  "rayon",
@@ -4750,6 +4755,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-executor",
  "reth-interfaces",
+ "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
