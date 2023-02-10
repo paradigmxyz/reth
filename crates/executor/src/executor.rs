@@ -13,7 +13,10 @@ use reth_primitives::{
 };
 use reth_provider::StateProvider;
 use revm::{
-    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Return, SpecId,
+    db::AccountState,
+    primitives::{
+        Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, ResultAndState, SpecId,
+    },
     EVM,
 };
 use std::collections::BTreeMap;
@@ -25,6 +28,9 @@ where
 {
     chain_spec: &'a ChainSpec,
     evm: EVM<&'a mut SubState<DB>>,
+    /// Enable revm inspector printer.
+    /// In execution this will print opcode level traces directly to console.
+    pub use_printer_tracer: bool,
 }
 
 impl<'a, DB> Executor<'a, DB>
@@ -34,7 +40,7 @@ where
     fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
         let mut evm = EVM::new();
         evm.database(db);
-        Executor { chain_spec, evm }
+        Executor { chain_spec, evm, use_printer_tracer: false }
     }
 
     fn db(&mut self) -> &mut SubState<DB> {
@@ -347,7 +353,7 @@ where
         self.init_block_env(header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
-        // output of verification
+        // output of execution
         let mut changesets = Vec::with_capacity(body.len());
 
         for (transaction, sender) in body.iter().zip(senders.into_iter()) {
@@ -365,53 +371,46 @@ where
             revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
             // Execute transaction.
-            let out = self.evm.transact();
+            let out = if self.use_printer_tracer {
+                // execution with inspector.
+                let out = self.evm.inspect(revm::inspectors::CustomPrintTracer::default());
 
-            // Useful for debugging
-            // let out = evm.inspect(revm::inspectors::CustomPrintTracer::default());
-            // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
-            // \nENV:{:?}",transaction.hash(),transaction,evm.env);
-
-            let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
-
-            // Fatal internal error.
-            if exit_reason == revm::Return::FatalExternalError {
-                return Err(Error::ExecutionFatalError)
-            }
-
-            // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
-            // TODO for verification (exit_reason): some error should return EVM error as the block
-            // with that transaction can have consensus error that would make block
-            // invalid.
-            let is_success = match exit_reason {
-                revm::return_ok!() => true,
-                revm::return_revert!() => false,
-                _ => false,
-                // TODO: Handle after bumping to revm v3.0: https://github.com/paradigmxyz/reth/issues/463
-                // e => return Err(Error::EVMError { error_code: e as u32 }),
+                tracing::trace!(target:"evm","Executed transaction: {:?},
+                    \nExecution output:{out:?}:
+                    \nTransaction data:{transaction:?}
+                    \nenv data:{:?}",transaction.hash(),self.evm.env);
+                out
+            } else {
+                // main execution.
+                self.evm.transact()
             };
 
-            // Add spent gas.
-            cumulative_gas_used += gas_used;
+            // cast the error and extract returnables.
+            let ResultAndState { result, state } = out.map_err(|e| Error::EVM(format!("{e:?}")))?;
 
-            // commit state
+            // commit changes
             let (changeset, new_bytecodes) = self.commit_changes(state);
 
-            // Transform logs to reth format.
-            let logs: Vec<Log> = logs.into_iter().map(into_reth_log).collect();
+            // append gas used
+            cumulative_gas_used += result.gas_used();
 
-            // Push transaction changeset and calculte header bloom filter for receipt.
+            // cast revm logs to reth logs
+            let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
             changesets.push(TransactionChangeSet {
                 receipt: Receipt {
                     tx_type: transaction.tx_type(),
-                    success: is_success,
+                    // Success flag was added in `EIP-658: Embedding transaction status code in
+                    // receipts`.
+                    success: result.is_success(),
                     cumulative_gas_used,
                     bloom: logs_bloom(logs.iter()),
                     logs,
                 },
                 changeset,
                 new_bytecodes,
-            })
+            });
         }
 
         // Check if gas used matches the value set in header.
