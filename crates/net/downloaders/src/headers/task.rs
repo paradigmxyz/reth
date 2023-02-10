@@ -46,9 +46,9 @@ impl TaskDownloader {
     /// # use reth_interfaces::p2p::headers::client::HeadersClient;
     /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
-    ///        consensus,
     ///        client,
-    ///    );
+    ///        consensus
+    ///     );
     ///   let downloader = TaskDownloader::spawn(downloader);
     /// # }
     pub fn spawn<T>(downloader: T) -> Self
