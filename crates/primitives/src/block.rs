@@ -122,7 +122,7 @@ impl Decodable for BlockHashOrNumber {
             // strip the first byte, parsing the rest of the string.
             // If the rest of the string fails to decode into 32 bytes, we'll bubble up the
             // decoding error.
-            let hash = H256::from_slice(buf);
+            let hash = H256::decode(buf)?;
             Ok(Self::Hash(hash))
         } else {
             // a block number when encoded as bytes ranges from 0 to any number of bytes - we're
