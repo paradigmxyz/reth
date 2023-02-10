@@ -5,7 +5,7 @@ use reth_db::{
         tx::Tx,
         Env, EnvKind, WriteMap, RW,
     },
-    models::{BlockNumHash, StoredBlockBody},
+    models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -215,6 +215,8 @@ impl TestTransaction {
 
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
     /// Superset functionality of [TestTransaction::insert_headers].
+    ///
+    /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedBlock>,
@@ -233,11 +235,13 @@ impl TestTransaction {
                         tx_count: block.body.len() as u64,
                     },
                 )?;
-                for body_tx in block.body.clone() {
-                    tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
+                block.body.iter().try_for_each(|body_tx| {
+                    tx.put::<tables::TxTransitionIndex>(current_tx_id, current_tx_id)?;
+                    tx.put::<tables::Transactions>(current_tx_id, body_tx.clone())?;
                     current_tx_id += 1;
-                }
-                Ok(())
+                    Ok(())
+                })?;
+                tx.put::<tables::BlockTransitionIndex>(key.number(), current_tx_id)
             })
         })
     }
@@ -262,6 +266,32 @@ impl TestTransaction {
 
                     tx.put::<tables::PlainStorageState>(address, entry)?;
                     tx.put::<tables::HashedStorage>(hashed_address, hashed_entry)
+                })
+            })
+        })
+    }
+
+    /// Insert collection of Vec<([Address], [Account], Vec<[StorageEntry]>)> into
+    /// corresponding tables.
+    pub fn insert_transitions<I>(&self, transitions: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = Vec<(Address, Account, Vec<StorageEntry>)>>,
+    {
+        self.commit(|tx| {
+            transitions.into_iter().enumerate().try_for_each(|(transition_id, changes)| {
+                changes.into_iter().try_for_each(|(address, old_account, old_storage)| {
+                    // Insert into account changeset.
+                    tx.put::<tables::AccountChangeSet>(
+                        transition_id as u64,
+                        AccountBeforeTx { address, info: Some(old_account) },
+                    )?;
+
+                    let tid_address = (transition_id as u64, address).into();
+
+                    // Insert into storage changeset.
+                    old_storage.into_iter().try_for_each(|entry| {
+                        tx.put::<tables::StorageChangeSet>(tid_address, entry)
+                    })
                 })
             })
         })

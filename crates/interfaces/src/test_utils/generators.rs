@@ -1,11 +1,10 @@
-use std::{collections::BTreeMap, ops::Sub};
-
 use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
 use reth_primitives::{
     proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, StorageEntry,
     Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
+use std::{collections::BTreeMap, ops::Sub};
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
 // relevant crates?
@@ -166,29 +165,29 @@ pub fn random_block_range(
     blocks
 }
 
+type Transition = Vec<(Address, Account, Vec<StorageEntry>)>;
+type AccountState = (Account, Vec<StorageEntry>);
+
 /// Generate a range of transitions for given blocks and accounts.
 /// Assumes all accounts start with an empty storage.
 ///
 /// Returns a Vec of account and storage changes for each transition,
 /// along with the final state of all accounts and storages.
-pub fn random_transition_range<IBlk, IAcc>(
+pub fn random_transition_range<'a, IBlk, IAcc>(
     blocks: IBlk,
     accounts: IAcc,
     n_changes: std::ops::Range<u64>,
     key_range: std::ops::Range<u64>,
-) -> (
-    Vec<(Vec<(Address, Account, Vec<StorageEntry>)>)>,
-    BTreeMap<Address, (Account, Vec<StorageEntry>)>,
-)
+) -> (Vec<Transition>, BTreeMap<Address, AccountState>)
 where
-    IBlk: IntoIterator<Item = SealedBlock>,
+    IBlk: IntoIterator<Item = &'a SealedBlock>,
     IAcc: IntoIterator<Item = (Address, Account)>,
 {
     let mut rng = rand::thread_rng();
     let mut state: BTreeMap<_, _> =
         accounts.into_iter().map(|(addr, acc)| (addr, (acc, BTreeMap::new()))).collect();
 
-    let valid_addresses = state.iter().map(|(addr, _)| *addr).collect();
+    let valid_addresses = state.keys().copied().collect();
 
     let num_transitions: usize = blocks.into_iter().map(|block| block.body.len()).sum();
     let mut transitions = Vec::with_capacity(num_transitions);
@@ -210,13 +209,21 @@ where
 
         let old_entries = new_entries
             .into_iter()
-            .map(|entry| {
-                let old = storage.insert(entry.key, entry.value);
-                StorageEntry { value: old.unwrap_or(U256::from(0)), ..entry }
+            .filter_map(|entry| {
+                let old = if entry.value != U256::ZERO {
+                    storage.insert(entry.key, entry.value)
+                } else {
+                    let old = storage.remove(&entry.key);
+                    if matches!(old, Some(U256::ZERO)) {
+                        return None
+                    }
+                    old
+                };
+                Some(StorageEntry { value: old.unwrap_or(U256::from(0)), ..entry })
             })
             .collect();
 
-        transition.push((from, *prev_to, old_entries));
+        transition.push((to, *prev_to, old_entries));
 
         prev_to.balance = prev_to.balance.wrapping_add(transfer);
 
@@ -241,10 +248,10 @@ pub fn random_account_change(
     key_range: std::ops::Range<u64>,
 ) -> (Address, Address, U256, Vec<StorageEntry>) {
     let mut rng = rand::thread_rng();
-    let mut addresses = valid_addresses.choose_multiple(&mut rng, 2).into_iter().cloned();
+    let mut addresses = valid_addresses.choose_multiple(&mut rng, 2).cloned();
 
-    let addr_from = addresses.next().unwrap_or_else(|| Address::random());
-    let addr_to = addresses.next().unwrap_or_else(|| Address::random());
+    let addr_from = addresses.next().unwrap_or_else(Address::random);
+    let addr_to = addresses.next().unwrap_or_else(Address::random);
 
     let balance_change = U256::from(rng.gen::<u64>());
 

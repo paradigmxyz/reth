@@ -8,17 +8,24 @@ use reth_db::{
     mdbx::{Env, WriteMap},
     models::BlockNumHash,
     tables,
-    transaction::DbTx,
+    transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{StorageEntry, H256};
+use reth_interfaces::test_utils::generators::{
+    random_block_range, random_contract_account_range, random_eoa_account_range,
+    random_transition_range,
+};
+use reth_primitives::{Account, Address, H256};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
-criterion_group!(benches, tx_lookup, senders, total_difficulty);
+criterion_group!(benches, tx_lookup, senders, total_difficulty, merkle);
 criterion_main!(benches);
 
 fn senders(c: &mut Criterion) {
@@ -75,10 +82,8 @@ fn merkle(c: &mut Criterion) {
 
     let path = accs_testdata(num_blocks);
 
-    let num_blocks = 10_000;
-
     let stage = MerkleStage::Both { clean_threshold: 10_001 };
-    measure_stage(&mut group, stage, path, "MerkleStage-incremental".to_string());
+    measure_stage(&mut group, stage, path.clone(), "MerkleStage-incremental".to_string());
 
     let stage = MerkleStage::Both { clean_threshold: 0 };
     measure_stage(&mut group, stage, path, "MerkleStage-fullhash".to_string());
@@ -126,10 +131,6 @@ fn measure_stage<S: Clone + Stage<Env<WriteMap>>>(
     });
 }
 
-use reth_interfaces::test_utils::generators::{
-    random_block_range, random_eoa_account_range, random_storage_entry,
-};
-
 // Helper for generating testdata for the sender recovery stage and tx lookup stages (512MB).
 // Returns the path to the database file and the number of blocks written.
 fn txs_testdata(num_blocks: usize) -> PathBuf {
@@ -149,11 +150,6 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
         tx.insert_blocks(blocks.iter(), None).unwrap();
 
         // // initialize TD
-        use reth_db::{
-            cursor::DbCursorRO,
-            tables,
-            transaction::{DbTx, DbTxMut},
-        };
         tx.commit(|tx| {
             let (head, _) =
                 tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default().into();
@@ -169,8 +165,13 @@ fn accs_testdata(num_blocks: usize) -> PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("accs-bench");
     let txs_range = 100..150;
 
+    // number of storage changes per transition
+    let n_changes = 0..3;
+
+    // range of possible values for a storage key
     let key_range = 0..300;
 
+    // number of accounts
     let n_eoa = 131;
     let n_contract = 31;
 
@@ -183,57 +184,20 @@ fn accs_testdata(num_blocks: usize) -> PathBuf {
         let accounts: BTreeMap<Address, Account> = concat([
             random_eoa_account_range(&mut (0..n_eoa)),
             random_contract_account_range(&mut (0..n_contract)),
-        ]);
-        let addresses = accounts.iter().map(|(k, _)| *k).collect();
-
-        // insert starting accounts
-        tx.insert_accounts_and_storages(
-            accounts.iter().map(|(addr, acc)| (addr, (acc, std::iter::empty()))),
-        );
+        ])
+        .into_iter()
+        .collect();
 
         let blocks = random_block_range(0..num_blocks as u64 + 1, H256::zero(), txs_range);
 
-        // insert all blocks
         tx.insert_blocks(blocks.iter(), None).unwrap();
 
-        let transitions = random_transition_range(blocks.iter(), accounts);
+        let (transitions, final_state) =
+            random_transition_range(blocks.iter(), accounts, n_changes.clone(), key_range.clone());
 
-        transition_id = 0;
-        // TODO: insert account and storage changes
-        tx.commit(|tx| {
-            let storage_cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-            blocks.into_iter().try_for_each(|block| {
-                tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
+        tx.insert_transitions(transitions).unwrap();
 
-                let (addr, new_entry) = random_storage_entry(addresses, key_range);
-
-                // modify account
-                let prev_acc = accounts.get_mut(&address).unwrap();
-                let acc_before_tx = AccountBeforeTx { address, info: Some(*prev_acc) };
-
-                prev_acc.nonce += 1;
-                prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
-
-                tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
-
-                let old_entry = storage_cursor
-                    .seek_by_key_subkey(addr, new_entry.key)?
-                    .and_then(|entry| {
-                        if entry.key != new_entry.key {
-                            None
-                        } else {
-                            storage_cursor.delete_current()?;
-                            Some(entry)
-                        }
-                    })
-                    .unwrap_or(StorageEntry { value: U256::ZERO, ..new_entry });
-
-                transition_id += 1;
-                Ok(())
-            })
-        })
-
-        // TODO: insert hashed accounts and storage
+        tx.insert_accounts_and_storages(final_state).unwrap();
     }
 
     path

@@ -174,15 +174,13 @@ mod tests {
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use itertools::Itertools;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-        models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
         tables,
         transaction::{DbTx, DbTxMut},
     };
     use reth_interfaces::test_utils::generators::{
-        random_block, random_block_range, random_contract_account_range, random_storage_entry,
+        random_block, random_block_range, random_contract_account_range, random_transition_range,
     };
     use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
     use std::collections::BTreeMap;
@@ -278,16 +276,17 @@ mod tests {
             let end = input.previous_stage_progress() + 1;
 
             let n_accounts = 31;
-            let mut accounts = random_contract_account_range(&mut (0..n_accounts))
+            let accounts = random_contract_account_range(&mut (0..n_accounts))
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
-            let addresses = accounts.iter().map(|(addr, _)| *addr).collect_vec();
 
             let SealedBlock { header, body, ommers } =
                 random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
+
             header.state_root =
                 self.generate_initial_trie(accounts.iter().map(|(k, v)| (*k, *v)))?;
+
             let sealed_head = SealedBlock { header: header.seal(), body, ommers };
 
             let head_hash = sealed_head.hash();
@@ -295,73 +294,14 @@ mod tests {
 
             blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..3));
 
-            self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+            self.tx.insert_blocks(blocks.iter(), None)?;
 
-            let (mut transition_id, mut tx_id) = (0, 0);
+            let (transitions, final_state) =
+                random_transition_range(blocks.iter(), accounts, 0..3, 0..256);
 
-            let mut storages: BTreeMap<Address, BTreeMap<H256, U256>> = BTreeMap::new();
+            self.tx.insert_transitions(transitions)?;
 
-            for progress in blocks.iter() {
-                // Insert last progress data
-                self.tx.commit(|tx| {
-                    let key: BlockNumHash = (progress.number, progress.hash()).into();
-
-                    let body = StoredBlockBody {
-                        start_tx_id: tx_id,
-                        tx_count: progress.body.len() as u64,
-                    };
-
-                    progress.body.iter().try_for_each(|transaction| {
-                        tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
-                        tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
-                        tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
-
-                        let (address, new_entry) = random_storage_entry(&addresses, 0..125);
-
-                        // seed account changeset
-                        let prev_acc = accounts.get_mut(&address).unwrap();
-                        let acc_before_tx = AccountBeforeTx { address, info: Some(*prev_acc) };
-
-                        tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
-
-                        prev_acc.nonce += 1;
-                        prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
-
-                        let storage = storages.entry(address).or_default();
-                        let old_value = storage.entry(new_entry.key).or_default();
-
-                        tx.put::<tables::StorageChangeSet>(
-                            (transition_id, address).into(),
-                            StorageEntry { key: new_entry.key, value: *old_value },
-                        )?;
-
-                        *old_value = new_entry.value;
-
-                        tx_id += 1;
-                        transition_id += 1;
-
-                        Ok(())
-                    })?;
-
-                    tx.put::<tables::BlockTransitionIndex>(key.number(), transition_id)?;
-                    tx.put::<tables::BlockBodies>(key, body)
-                })?;
-            }
-
-            self.tx.insert_accounts_and_storages(accounts.iter().map(|(addr, acc)| {
-                (
-                    *addr,
-                    (
-                        *acc,
-                        storages
-                            .entry(*addr)
-                            .or_default()
-                            .iter()
-                            .map(|(&key, &value)| StorageEntry { key, value })
-                            .collect_vec(),
-                    ),
-                )
-            }))?;
+            self.tx.insert_accounts_and_storages(final_state)?;
 
             let last_numhash = self.tx.inner().get_block_numhash(end - 1).unwrap();
             let root = self.state_root()?;
