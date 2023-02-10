@@ -4,9 +4,10 @@ use crate::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, Bytes, ChainInfo, Header,
-    StorageKey, StorageValue, H256, U256,
+    rpc::BlockId, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, Bytes,
+    ChainInfo, Header, StorageKey, StorageValue, H256, U256,
 };
+use std::ops::{Range};
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug, Clone, Default, Copy)]
@@ -50,6 +51,10 @@ impl HeaderProvider for NoopProvider {
 
     fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
         Ok(None)
+    }
+
+    fn headers_range(&self, _range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
+        Ok(vec![])
     }
 }
 

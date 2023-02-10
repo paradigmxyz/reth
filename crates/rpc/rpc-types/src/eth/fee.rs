@@ -2,7 +2,7 @@ use reth_primitives::U256;
 use serde::{Deserialize, Serialize};
 
 /// Response type for `eth_feeHistory`
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeeHistory {
     /// An array of block base fees per gas.

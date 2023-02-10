@@ -4,10 +4,14 @@ use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
-    U256,
+    Account, Address, Block, BlockHash, BlockHashOrNumber, Bytes, ChainInfo, Header, StorageKey,
+    StorageValue, H256, U256,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::{Range},
+    sync::Arc,
+};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]
@@ -105,6 +109,20 @@ impl HeaderProvider for MockEthProvider {
                 .filter(|h| h.number < target.number)
                 .fold(target.difficulty, |td, h| td + h.difficulty)
         }))
+    }
+
+    fn headers_range(&self, range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
+        let start_block = self.block_hash_for_id(range.start.into())?.unwrap();
+        let end_block = self.block_hash_for_id(range.end.into())?.unwrap();
+
+        let lock = self.headers.lock();
+        Ok(lock
+            .iter()
+            .skip_while(|(hash, _)| **hash != start_block)
+            .take_while(|(hash, _)| **hash != end_block)
+            .map(|(_hash, header)| header)
+            .cloned()
+            .collect())
     }
 }
 

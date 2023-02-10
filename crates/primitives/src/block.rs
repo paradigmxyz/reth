@@ -1,4 +1,5 @@
 use crate::{Header, SealedHeader, TransactionSigned, H256};
+use ethers_core::types::BlockId;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
@@ -93,6 +94,15 @@ impl From<H256> for BlockHashOrNumber {
 impl From<u64> for BlockHashOrNumber {
     fn from(value: u64) -> Self {
         BlockHashOrNumber::Number(value)
+    }
+}
+
+impl From<BlockHashOrNumber> for BlockId {
+    fn from(value: BlockHashOrNumber) -> Self {
+        match value {
+            BlockHashOrNumber::Hash(hash) => Self::Hash(hash.0.into()),
+            BlockHashOrNumber::Number(number) => Self::Number(number.into()),
+        }
     }
 }
 

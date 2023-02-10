@@ -5,14 +5,17 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
-use std::sync::Arc;
+use reth_primitives::{
+    rpc::BlockId, Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, H256, U256,
+};
+use std::{ops::Range, sync::Arc};
 
 mod historical;
 pub use historical::{HistoricalStateProvider, HistoricalStateProviderRef};
 
 mod latest;
 pub use latest::{LatestStateProvider, LatestStateProviderRef};
+use reth_db::{cursor::DbCursorRO, models::BlockNumHash};
 
 /// A common provider that fetches data from a database.
 ///
@@ -55,6 +58,27 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
         } else {
             Ok(None)
         }
+    }
+
+    fn headers_range(&self, range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
+        let start_block = BlockNumHash((
+            self.block_number_for_id(range.start.into())?.unwrap(),
+            self.block_hash_for_id(range.start.into())?.unwrap(),
+        ));
+        let end_block = BlockNumHash((
+            self.block_number_for_id(range.end.into())?.unwrap(),
+            self.block_hash_for_id(range.end.into())?.unwrap(),
+        ));
+
+        self.db
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::Headers>()?;
+                cursor
+                    .walk_range(start_block..end_block)?
+                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
     }
 }
 

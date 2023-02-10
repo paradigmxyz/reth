@@ -1,6 +1,7 @@
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{BlockHash, BlockHashOrNumber, Header, U256};
+use std::ops::Range;
 
 /// Client trait for fetching `Header` related data.
 #[auto_impl(&)]
@@ -26,4 +27,7 @@ pub trait HeaderProvider: Send + Sync {
 
     /// Get total difficulty by block hash.
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
+
+    /// Get headers in range of block hashes or numbers
+    fn headers_range(&self, range: Range<BlockHashOrNumber>) -> Result<Vec<Header>>;
 }

@@ -8,9 +8,9 @@ use crate::{
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
-    Address, BlockNumber, Bytes, H256, H64, U256, U64,
+    Address, BlockHashOrNumber, BlockNumber, Bytes, H256, H64, U256, U64,
 };
-use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
@@ -26,7 +26,7 @@ impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
     Self: EthApiSpec,
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + HeaderProvider + StateProviderFactory + 'static,
     Network: 'static,
 {
     async fn protocol_version(&self) -> Result<U64> {
@@ -180,11 +180,44 @@ where
 
     async fn fee_history(
         &self,
-        _block_count: U256,
-        _newest_block: BlockNumber,
+        block_count: u64,
+        newest_block: BlockNumber,
         _reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
-        Err(internal_rpc_err("unimplemented"))
+        if block_count == 0 {
+            return Ok(FeeHistory::default())
+        }
+
+        let headers = self
+            .inner
+            .client
+            .headers_range(
+                BlockHashOrNumber::Number(newest_block - block_count)..(newest_block + 1).into(),
+            )
+            .to_rpc_result()?;
+        if headers.is_empty() {
+            return Ok(FeeHistory::default())
+        }
+
+        Ok(FeeHistory {
+            base_fee_per_gas: headers
+                .iter()
+                .map(|header| header.base_fee_per_gas.unwrap_or_default().try_into().unwrap())
+                .collect(),
+            gas_used_ratio: headers
+                .iter()
+                .map(|header| header.gas_used as f64 / header.gas_limit as f64)
+                .collect(),
+            oldest_block: U256::from_be_bytes(
+                self.inner
+                    .client
+                    .block_hash((newest_block - block_count).try_into().unwrap())
+                    .to_rpc_result()?
+                    .unwrap()
+                    .0,
+            ),
+            reward: None,
+        })
     }
 
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {

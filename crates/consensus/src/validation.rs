@@ -350,9 +350,10 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
 mod tests {
     use reth_interfaces::Result;
     use reth_primitives::{
-        hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
-        TransactionSigned, MAINNET, U256,
+        hex_literal::hex, Account, Address, BlockHash, BlockHashOrNumber, Bytes, Header, Signature,
+        TransactionKind, TransactionSigned, MAINNET, U256,
     };
+    use std::ops::Range;
 
     use super::*;
 
@@ -421,6 +422,10 @@ mod tests {
 
         fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
             Ok(None)
+        }
+
+        fn headers_range(&self, _range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
+            Ok(vec![])
         }
     }
 
