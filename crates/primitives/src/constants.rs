@@ -37,7 +37,7 @@ pub const EMPTY_OMMER_ROOT: H256 =
 
 #[cfg(any(test, feature = "clique"))]
 /// Clique constants.
-/// See https://eips.ethereum.org/EIPS/eip-225 for more information.
+/// See <https://eips.ethereum.org/EIPS/eip-225> for more information.
 pub mod clique {
     use std::time::Duration;
 

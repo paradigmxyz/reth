@@ -6,7 +6,7 @@ use reth_primitives::{ChainSpec, CliqueConfig, SealedBlock, SealedHeader, EMPTY_
 use tokio::sync::watch;
 
 /// Implementation of Clique proof-of-authority consensus protocol.
-/// https://eips.ethereum.org/EIPS/eip-225
+/// <https://eips.ethereum.org/EIPS/eip-225>
 #[derive(Debug)]
 pub struct CliqueConsensus {
     /// The chain specification.

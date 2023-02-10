@@ -84,7 +84,7 @@ pub enum Error {
 }
 
 /// Clique consensus error.
-/// https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/clique.go#L72-L140
+/// <https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/clique.go#L72-L140>
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
 pub enum CliqueError {

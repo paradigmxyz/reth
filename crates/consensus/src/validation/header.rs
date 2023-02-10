@@ -126,7 +126,7 @@ pub fn validate_header_consistency(
 
 /// Verify the header gas limit according increase/decrease
 /// in relation to the parent gas limit.
-/// https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/misc/gaslimit.go#L28
+/// <https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/misc/gaslimit.go#L28>
 pub fn validate_gas_limit_difference(
     child: &SealedHeader,
     parent: &SealedHeader,

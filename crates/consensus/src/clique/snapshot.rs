@@ -1,5 +1,5 @@
 //! Implementation of clique voting snapshots.
-//! https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/snapshot.go
+//! <https://github.com/ethereum/go-ethereum/blob/d0a4989a8def7e6bad182d1513e8d4a093c1672d/consensus/clique/snapshot.go>
 
 use super::utils::{extract_checkpoint_signers, recover_header_signer};
 use bytes::BufMut;
