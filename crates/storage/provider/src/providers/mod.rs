@@ -37,7 +37,13 @@ impl<DB: Clone> Clone for ShareableDatabase<DB> {
 
 impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
-        self.db.view(|tx| tx.get::<tables::Headers>((0, *block_hash).into()))?.map_err(Into::into)
+        self.db.view(|tx| {
+            if let Some(num) = tx.get::<tables::HeaderNumbers>(*block_hash)? {
+                Ok(tx.get::<tables::Headers>(num)?)
+            } else {
+                Ok(None)
+            }
+        })?
     }
 
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
@@ -49,12 +55,13 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     }
 
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
-        if let Some(num) = self.db.view(|tx| tx.get::<tables::HeaderNumbers>(*hash))?? {
-            let td = self.db.view(|tx| tx.get::<tables::HeaderTD>((num, *hash).into()))??;
-            Ok(td.map(|v| v.0))
-        } else {
-            Ok(None)
-        }
+        self.db.view(|tx| {
+            if let Some(num) = tx.get::<tables::HeaderNumbers>(*hash)? {
+                Ok(tx.get::<tables::HeaderTD>(num)?.map(|td| td.0))
+            } else {
+                Ok(None)
+            }
+        })?
     }
 }
 
@@ -111,19 +118,6 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         // get block number
         let block_number =
             tx.get::<tables::HeaderNumbers>(block_hash)?.ok_or(Error::BlockHash { block_hash })?;
-
-        // check if block is canonical or not. Only canonical blocks have changesets.
-        let canonical_block_hash = tx
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(Error::BlockCanonical { block_number, block_hash })?;
-        if canonical_block_hash != block_hash {
-            return Err(Error::NonCanonicalBlock {
-                block_number,
-                received_hash: block_hash,
-                expected_hash: canonical_block_hash,
-            }
-            .into())
-        }
 
         // get transition id
         let transition = tx

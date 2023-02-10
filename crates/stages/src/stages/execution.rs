@@ -5,7 +5,7 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
+    models::{StoredBlockBody, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -89,12 +89,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
-        // Get next canonical block hashes to execute.
-        let mut canonicals = tx.cursor_read::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
-        let mut headers = tx.cursor_read::<tables::Headers>()?;
+        let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
         // Get total difficulty
-        let mut tds = tx.cursor_read::<tables::HeaderTD>()?;
+        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
         // Get bodies with canonical hashes.
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
@@ -104,32 +102,18 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Skip sender recovery and load signer from database.
         let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
 
-        // get canonical blocks (num,hash)
-        let canonical_batch = canonicals
+        // Get block headers and bodies
+        let block_batch = headers_cursor
             .walk_range(start_block..end_block + 1)?
-            .map(|i| i.map(BlockNumHash))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // Get block headers and bodies from canonical hashes
-        let block_batch = canonical_batch
-            .iter()
-            .map(|key| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
-                // NOTE: It probably will be faster to fetch all items from one table with cursor,
-                // but to reduce complexity we are using `seek_exact` to skip some
-                // edge cases that can happen.
-                let (_, header) =
-                    headers.seek_exact(*key)?.ok_or(DatabaseIntegrityError::Header {
-                        number: key.number(),
-                        hash: key.hash(),
-                    })?;
-                let (_, td) = tds
-                    .seek_exact(*key)?
-                    .ok_or(DatabaseIntegrityError::TotalDifficulty { number: key.number() })?;
+            .map(|entry| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
+                let (number, header) = entry?;
+                let (_, td) = td_cursor
+                    .seek_exact(number)?
+                    .ok_or(DatabaseIntegrityError::TotalDifficulty { number })?;
                 let (_, body) = bodies_cursor
-                    .seek_exact(*key)?
-                    .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
-
+                    .seek_exact(number)?
+                    .ok_or(DatabaseIntegrityError::BlockBody { number })?;
+                let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
                 Ok((header, td.into(), body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -138,7 +122,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
         // Fetch transactions, execute them and generate results
-        let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
+        let mut block_change_patches = Vec::with_capacity(block_batch.len());
         for (header, td, body, ommers) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");

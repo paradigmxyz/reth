@@ -40,7 +40,6 @@ There are many tables within the node, all used to store different types of data
 - Headers
 - BlockBodies
 - BlockOmmers
-- NonCanonicalTransactions
 - Transactions
 - TxHashNumber
 - Receipts
@@ -241,10 +240,9 @@ Lets take a look at a couple examples before moving on. In the snippet below, th
 [File: crates/storage/provider/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/block.rs#L121-L125)
 
 ```rust ignore
-    let block_num_hash = BlockNumHash((block.number, block.hash()));
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
     // Put header with canonical hashes.
-    tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
+    tx.put::<tables::Headers>(block.number, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
 ```
 
