@@ -6,7 +6,6 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
-use std::sync::Arc;
 
 mod state;
 pub use state::{
@@ -20,19 +19,19 @@ pub use state::{
 /// This provider implements most provider or provider factory traits.
 pub struct ShareableDatabase<DB> {
     /// Database
-    db: Arc<DB>,
+    db: DB,
 }
 
 impl<DB> ShareableDatabase<DB> {
     /// create new database provider
-    pub fn new(db: Arc<DB>) -> Self {
+    pub fn new(db: DB) -> Self {
         Self { db }
     }
 }
 
-impl<DB> Clone for ShareableDatabase<DB> {
+impl<DB: Clone> Clone for ShareableDatabase<DB> {
     fn clone(&self) -> Self {
-        Self { db: Arc::clone(&self.db) }
+        Self { db: self.db.clone() }
     }
 }
 

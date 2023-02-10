@@ -239,7 +239,7 @@ impl Command {
         &self,
         config: &Config,
         db: &Arc<Env<WriteMap>>,
-    ) -> NetworkConfig<ShareableDatabase<Env<WriteMap>>> {
+    ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
         let peers_file = (!self.network.no_persist_peers).then_some(&self.network.peers_file);
         config.network_config(
             db.clone(),
