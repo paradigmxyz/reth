@@ -13,6 +13,6 @@ use std::marker::PhantomData;
 ///
 /// Note: The lifetime of this type is limited by the type that created it.
 pub struct ChainState<'a> {
-    inner: Box<dyn StateProvider>,
+    _inner: Box<dyn StateProvider>,
     _phantom: PhantomData<&'a ()>,
 }
