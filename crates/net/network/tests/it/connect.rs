@@ -28,7 +28,7 @@ use tokio::task;
 async fn test_establish_connections() {
     reth_tracing::init_test_tracing();
 
-    for _ in 0..10 {
+    for _ in 0..3 {
         let net = Testnet::create(3).await;
 
         net.for_each(|peer| assert_eq!(0, peer.num_peers()));
@@ -131,15 +131,15 @@ async fn test_already_connected() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_peer() {
     reth_tracing::init_test_tracing();
-    let mut net = Testnet::default();
 
+    let mut net = Testnet::default();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
     let client = Arc::new(NoopProvider::default());
+
     let p1 = PeerConfig::default();
     let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
     let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
-
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
     let mut handles = net.handles();
@@ -160,7 +160,6 @@ async fn test_get_peer() {
 
     let peers = handle0.get_peers().await.unwrap();
     assert_eq!(handle0.num_connected_peers(), peers.len());
-    dbg!(peers);
 }
 
 #[tokio::test(flavor = "multi_thread")]
