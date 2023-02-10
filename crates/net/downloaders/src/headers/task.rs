@@ -46,9 +46,9 @@ impl TaskDownloader {
     /// # use reth_interfaces::p2p::headers::client::HeadersClient;
     /// # fn t<H: HeadersClient + 'static>(consensus:Arc<dyn Consensus>, client: Arc<H>) {
     ///    let downloader = ReverseHeadersDownloader::<H>::builder().build(
-    ///        consensus,
     ///        client,
-    ///    );
+    ///        consensus
+    ///     );
     ///   let downloader = TaskDownloader::spawn(downloader);
     /// # }
     pub fn spawn<T>(downloader: T) -> Self
@@ -172,7 +172,7 @@ mod tests {
         let downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
 
         let mut downloader = TaskDownloader::spawn(downloader);
         downloader.update_local_head(p3.clone());

@@ -423,7 +423,7 @@ mod tests {
                     downloader_factory: Box::new(move || {
                         ReverseHeadersDownloaderBuilder::default()
                             .stream_batch_size(500)
-                            .build(consensus.clone(), client.clone())
+                            .build(client.clone(), consensus.clone())
                     }),
                     tx: TestTransaction::default(),
                 }

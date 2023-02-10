@@ -126,7 +126,7 @@ impl ImportCommand {
         C: Consensus + 'static,
     {
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
-            .build(consensus.clone(), file_client.clone())
+            .build(file_client.clone(), consensus.clone())
             .as_task();
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
