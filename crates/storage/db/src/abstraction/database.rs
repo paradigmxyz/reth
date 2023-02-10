@@ -3,6 +3,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     Error,
 };
+use std::sync::Arc;
 
 /// Implements the GAT method from:
 /// <https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#the-better-gats>.
@@ -49,5 +50,37 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
         tx.commit()?;
 
         Ok(res)
+    }
+}
+
+// Generic over Arc
+impl<'a, DB: Database> DatabaseGAT<'a> for Arc<DB> {
+    type TX = <DB as DatabaseGAT<'a>>::TX;
+    type TXMut = <DB as DatabaseGAT<'a>>::TXMut;
+}
+
+impl<DB: Database> Database for Arc<DB> {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
+        <DB as Database>::tx(self)
+    }
+
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
+        <DB as Database>::tx_mut(self)
+    }
+}
+
+// Generic over reference
+impl<'a, DB: Database> DatabaseGAT<'a> for &DB {
+    type TX = <DB as DatabaseGAT<'a>>::TX;
+    type TXMut = <DB as DatabaseGAT<'a>>::TXMut;
+}
+
+impl<DB: Database> Database for &DB {
+    fn tx(&self) -> Result<<Self as DatabaseGAT<'_>>::TX, Error> {
+        <DB as Database>::tx(self)
+    }
+
+    fn tx_mut(&self) -> Result<<Self as DatabaseGAT<'_>>::TXMut, Error> {
+        <DB as Database>::tx_mut(self)
     }
 }

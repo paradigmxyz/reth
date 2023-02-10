@@ -30,7 +30,7 @@ impl Config {
     /// Initializes network config from read data
     pub fn network_config<DB: Database>(
         &self,
-        db: Arc<DB>,
+        db: DB,
         chain_spec: ChainSpec,
         disable_discovery: bool,
         bootnodes: Option<Vec<NodeRecord>>,
