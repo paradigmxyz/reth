@@ -38,7 +38,6 @@ impl<'a> ChainState<'a> {
 // Delegates all provider impls to the boxed [StateProvider]
 delegate_provider_impls!(ChainState<'a>);
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
