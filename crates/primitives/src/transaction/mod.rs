@@ -652,74 +652,107 @@ impl TransactionSigned {
         initial_tx
     }
 
-    /// Decodes a eip2718 transaction where tx is [id, rlp(typedtx)]
-    pub fn decode_enveloped(&self, tx: Bytes) -> Result<Self, DecodeError> {
+    /// Decodes the "raw" format of transaction (e.g. `eth_sendRawTransaction`).
+    ///
+    /// The raw transaction is either a legacy transaction or EIP-2718 type transaction
+    /// For legacy transactions, the format is encoded as: `rlp(tx)`
+    /// For EIP-2718 typed transaction, the format is encoded as the type of the transaction
+    /// followed by the rlp of the transaction: `type` + `rlp(tx)`
+    pub fn decode_enveloped(tx: Bytes) -> Result<Self, DecodeError> {
         let mut data = tx.as_ref();
 
+        // keep this around so we can use it to calculate the hash
+        let original_encoding = data;
+
+        // decode header
         let first_header = Header::decode(&mut data)?;
 
-        if data[0] > 0x7f {
-            // legacy transaction
-            let mut transaction = Transaction::Legacy(TxLegacy {
-                nonce: Decodable::decode(&mut data)?,
-                gas_price: Decodable::decode(&mut data)?,
-                gas_limit: Decodable::decode(&mut data)?,
-                to: Decodable::decode(&mut data)?,
-                value: Decodable::decode(&mut data)?,
-                input: Bytes(Decodable::decode(&mut data)?),
-                chain_id: None,
-            });
-            let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(&mut data)?;
-            if let Some(id) = extracted_id {
-                transaction.set_chain_id(id);
-            }
-
-            let tx_length = first_header.payload_length + first_header.length();
-            let hash = keccak256(&data[..tx_length]);
-            let signed = TransactionSigned { transaction, hash, signature };
-            Ok(signed)
+        // Check if its a type byte
+        if data[0] < 0x80 {
+            // decode as envolped type transaction
+            decode_type_transaction(&mut data, first_header)
         } else {
-            let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
-            data.advance(1);
-            // decode the list header for the rest of the transaction
-            let header = Header::decode(&mut data)?;
-            if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+            // check if it's a list header
+            if !first_header.list {
+                return Err(DecodeError::Custom("Invalid Input"))
             }
-
-            // decode common fields
-            let transaction = match tx_type {
-                1 => Transaction::Eip2930(TxEip2930 {
-                    chain_id: Decodable::decode(&mut data)?,
-                    nonce: Decodable::decode(&mut data)?,
-                    gas_price: Decodable::decode(&mut data)?,
-                    gas_limit: Decodable::decode(&mut data)?,
-                    to: Decodable::decode(&mut data)?,
-                    value: Decodable::decode(&mut data)?,
-                    input: Bytes(Decodable::decode(&mut data)?),
-                    access_list: Decodable::decode(&mut data)?,
-                }),
-                2 => Transaction::Eip1559(TxEip1559 {
-                    chain_id: Decodable::decode(&mut data)?,
-                    nonce: Decodable::decode(&mut data)?,
-                    max_priority_fee_per_gas: Decodable::decode(&mut data)?,
-                    max_fee_per_gas: Decodable::decode(&mut data)?,
-                    gas_limit: Decodable::decode(&mut data)?,
-                    to: Decodable::decode(&mut data)?,
-                    value: Decodable::decode(&mut data)?,
-                    input: Bytes(Decodable::decode(&mut data)?),
-                    access_list: Decodable::decode(&mut data)?,
-                }),
-                _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
-            };
-
-            let signature = Signature::decode(&mut data)?;
-
-            let hash = keccak256(&data[..first_header.payload_length]);
-            let signed = TransactionSigned { transaction, hash, signature };
-            Ok(signed)
+            // decode legacy transaction
+            decode_legacy(original_encoding, &mut data, first_header)
         }
     }
+}
+
+pub(crate) fn decode_legacy(
+    original_encoding: &[u8],
+    data: &mut &[u8],
+    first_header: Header,
+) -> Result<TransactionSigned, DecodeError> {
+    let mut transaction = Transaction::Legacy(TxLegacy {
+        nonce: Decodable::decode(data)?,
+        gas_price: Decodable::decode(data)?,
+        gas_limit: Decodable::decode(data)?,
+        to: Decodable::decode(data)?,
+        value: Decodable::decode(data)?,
+        input: Bytes(Decodable::decode(data)?),
+        chain_id: None,
+    });
+    let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
+    if let Some(id) = extracted_id {
+        transaction.set_chain_id(id);
+    }
+
+    let tx_length = first_header.payload_length + first_header.length();
+    let hash = keccak256(&original_encoding[..tx_length]);
+    let signed = TransactionSigned { transaction, hash, signature };
+    Ok(signed)
+}
+
+pub(crate) fn decode_type_transaction(
+    data: &mut &[u8],
+    first_header: Header,
+) -> Result<TransactionSigned, DecodeError> {
+    // keep this around so we can use it to calculate the hash
+    let original_encoding = *data;
+
+    let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
+    data.advance(1);
+    // decode the list header for the rest of the transaction
+    let header = Header::decode(data)?;
+    if !header.list {
+        return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
+    }
+
+    // decode common fields
+    let transaction = match tx_type {
+        1 => Transaction::Eip2930(TxEip2930 {
+            chain_id: Decodable::decode(data)?,
+            nonce: Decodable::decode(data)?,
+            gas_price: Decodable::decode(data)?,
+            gas_limit: Decodable::decode(data)?,
+            to: Decodable::decode(data)?,
+            value: Decodable::decode(data)?,
+            input: Bytes(Decodable::decode(data)?),
+            access_list: Decodable::decode(data)?,
+        }),
+        2 => Transaction::Eip1559(TxEip1559 {
+            chain_id: Decodable::decode(data)?,
+            nonce: Decodable::decode(data)?,
+            max_priority_fee_per_gas: Decodable::decode(data)?,
+            max_fee_per_gas: Decodable::decode(data)?,
+            gas_limit: Decodable::decode(data)?,
+            to: Decodable::decode(data)?,
+            value: Decodable::decode(data)?,
+            input: Bytes(Decodable::decode(data)?),
+            access_list: Decodable::decode(data)?,
+        }),
+        _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
+    };
+
+    let signature = Signature::decode(data)?;
+
+    let hash = keccak256(&original_encoding[..first_header.payload_length]);
+    let signed = TransactionSigned { transaction, hash, signature };
+    Ok(signed)
 }
 
 impl From<TransactionSignedEcRecovered> for TransactionSigned {
@@ -749,66 +782,9 @@ impl Decodable for TransactionSigned {
         if !first_header.list {
             // Bytes that are going to be used to create a hash of transaction.
             // For eip2728 types transaction header is not used inside hash
-            let original_encoding = *buf;
-
-            let tx_type = *buf.first().ok_or(DecodeError::InputTooShort)?;
-            buf.advance(1);
-            // decode the list header for the rest of the transaction
-            let header = Header::decode(buf)?;
-            if !header.list {
-                return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
-            }
-
-            // decode common fields
-            let transaction = match tx_type {
-                1 => Transaction::Eip2930(TxEip2930 {
-                    chain_id: Decodable::decode(buf)?,
-                    nonce: Decodable::decode(buf)?,
-                    gas_price: Decodable::decode(buf)?,
-                    gas_limit: Decodable::decode(buf)?,
-                    to: Decodable::decode(buf)?,
-                    value: Decodable::decode(buf)?,
-                    input: Bytes(Decodable::decode(buf)?),
-                    access_list: Decodable::decode(buf)?,
-                }),
-                2 => Transaction::Eip1559(TxEip1559 {
-                    chain_id: Decodable::decode(buf)?,
-                    nonce: Decodable::decode(buf)?,
-                    max_priority_fee_per_gas: Decodable::decode(buf)?,
-                    max_fee_per_gas: Decodable::decode(buf)?,
-                    gas_limit: Decodable::decode(buf)?,
-                    to: Decodable::decode(buf)?,
-                    value: Decodable::decode(buf)?,
-                    input: Bytes(Decodable::decode(buf)?),
-                    access_list: Decodable::decode(buf)?,
-                }),
-                _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
-            };
-
-            let signature = Signature::decode(buf)?;
-
-            let hash = keccak256(&original_encoding[..first_header.payload_length]);
-            let signed = TransactionSigned { transaction, hash, signature };
-            Ok(signed)
+            decode_type_transaction(buf, first_header)
         } else {
-            let mut transaction = Transaction::Legacy(TxLegacy {
-                nonce: Decodable::decode(buf)?,
-                gas_price: Decodable::decode(buf)?,
-                gas_limit: Decodable::decode(buf)?,
-                to: Decodable::decode(buf)?,
-                value: Decodable::decode(buf)?,
-                input: Bytes(Decodable::decode(buf)?),
-                chain_id: None,
-            });
-            let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(buf)?;
-            if let Some(id) = extracted_id {
-                transaction.set_chain_id(id);
-            }
-
-            let tx_length = first_header.payload_length + first_header.length();
-            let hash = keccak256(&original_encoding[..tx_length]);
-            let signed = TransactionSigned { transaction, hash, signature };
-            Ok(signed)
+            decode_legacy(original_encoding, buf, first_header)
         }
     }
 }
@@ -938,6 +914,7 @@ mod tests {
     use bytes::BytesMut;
     use ethers_core::utils::hex;
     use reth_rlp::{Decodable, DecodeError, Encodable};
+    use revm_interpreter::ruint::aliases::B256;
     use std::str::FromStr;
 
     #[test]
