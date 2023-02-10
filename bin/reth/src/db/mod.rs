@@ -13,9 +13,7 @@ use reth_db::{
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
-use reth_staged_sync::utils::init::init_db;
-use reth_stages::{stages::ExecutionStage, Stage, StageId, UnwindInput};
-use std::{collections::BTreeMap, ops::DerefMut};
+use std::collections::BTreeMap;
 use tracing::{error, info};
 
 /// DB List TUI
@@ -55,8 +53,6 @@ pub enum Subcommands {
     },
     /// Deletes all database entries
     Drop,
-    /// Deletes all database entries
-    Out,
 }
 
 #[derive(Parser, Debug)]
@@ -186,10 +182,6 @@ impl Command {
             Subcommands::Drop => {
                 tool.drop(&self.db)?;
             }
-            Subcommands::Out => {
-                // tool.out(49790, 49810, &self.db).await?;
-                tool.out(49794, 49796, &self.db).await?;
-            }
         }
 
         Ok(())
@@ -197,13 +189,13 @@ impl Command {
 }
 
 /// Wrapper over DB that implements many useful DB queries.
-struct DbTool<'a, DB: Database> {
+pub(crate) struct DbTool<'a, DB: Database> {
     pub(crate) db: &'a DB,
 }
 
 impl<'a, DB: Database> DbTool<'a, DB> {
     /// Takes a DB where the tables have already been created.
-    fn new(db: &'a DB) -> eyre::Result<Self> {
+    pub(crate) fn new(db: &'a DB) -> eyre::Result<Self> {
         Ok(Self { db })
     }
 
@@ -247,98 +239,17 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         Ok(())
     }
 
-    async fn out(&mut self, from: u64, to: u64, output_path: &PlatformPath<DbPath>) -> Result<()> {
-        let output_path: String = "hello".to_string();
-        info!(target: "reth::cli", "Creating separate db at {}", output_path);
-        assert!(from < to, "FROM block should be bigger than TO block.");
-
-        let mut output_db = init_db(output_path)?;
-
-        // Copy input tables
-        self.dump_table_with_range::<tables::CanonicalHeaders>(&mut output_db, from, to)?;
-        self.dump_table_with_range::<tables::HeaderTD>(&mut output_db, from, to)?;
-        self.dump_table_with_range::<tables::Headers>(&mut output_db, from, to)?;
-        self.dump_table_with_range::<tables::BlockBodies>(&mut output_db, from, to)?;
-        self.dump_table_with_range::<tables::BlockTransitionIndex>(&mut output_db, from - 1, to)?;
-
-        // Find range of transactions that need to be copied over
-        let (from_tx, to_tx) = self.db.view(|read_tx| {
-            let mut read_cursor = read_tx.cursor_read::<tables::BlockBodies>()?;
-            let (_, from_block) = read_cursor.seek(from.into())?.ok_or(eyre::eyre!("error"))?;
-            let (_, to_block) = read_cursor.seek(to.into())?.ok_or(eyre::eyre!("error"))?;
-
-            Ok::<(u64, u64), eyre::ErrReport>((
-                from_block.start_tx_id,
-                to_block.start_tx_id + to_block.tx_count,
-            ))
-        })??;
-        self.dump_table_with_range::<tables::Transactions>(&mut output_db, from_tx, to_tx)?;
-        self.dump_table_with_range::<tables::TxSenders>(&mut output_db, from_tx, to_tx)?;
-
-        // Find the latest block to unwind from
-        let (tip_block_number, _) = self
-            .db
-            .view(|tx| tx.cursor_read::<tables::BlockTransitionIndex>()?.last())??
-            .expect("some");
-
-        // Dry-run an unwind to FROM block, so we can get the PlainStorageState and
-        // PlainAccountState safely. There might be some state dependency from an address
-        // which hasn't been changed in the given range.
-        {
-            let mut unwind_tx = reth_stages::Transaction::new(self.db)?;
-            let mut exec_stage = ExecutionStage::default();
-
-            exec_stage
-                .unwind(
-                    &mut unwind_tx,
-                    UnwindInput {
-                        unwind_to: from,
-                        stage_progress: dbg!(tip_block_number),
-                        bad_block: None,
-                    },
-                )
-                .await?;
-
-            let unwind_inner_tx = unwind_tx.deref_mut();
-
-            Self::dump_dupsort::<tables::PlainStorageState>(&output_db, unwind_inner_tx)?;
-            Self::dump_table::<tables::PlainAccountState>(&output_db, unwind_inner_tx)?;
-            Self::dump_table::<tables::Bytecodes>(&output_db, unwind_inner_tx)?;
-
-            // We don't want to actually commit these changes to our original database.
-            unwind_tx.drop()?;
-        }
-
-        // Try to re-execute the stage without committing
-        {
-            let mut tx = reth_stages::Transaction::new(&output_db)?;
-
-            let mut exec_stage = ExecutionStage::default();
-            exec_stage
-                .execute(
-                    &mut tx,
-                    reth_stages::ExecInput {
-                        previous_stage: Some((StageId("Another"), to)),
-                        stage_progress: Some(from),
-                    },
-                )
-                .await?;
-            tx.drop()?;
-        }
-
-        Ok(())
-    }
-
-    fn dump_table_with_range<T: Table>(
+    /// Duplicates table data within a range (`From<u64>`) into another database: `destination_db`.
+    pub(crate) fn dump_table_with_range<T: Table>(
         &mut self,
-        output_db: &mut Env<WriteMap>,
         from: u64,
         to: u64,
+        destination_db: &mut Env<WriteMap>,
     ) -> eyre::Result<()>
     where
         <T as reth_db::table::Table>::Key: From<u64>,
     {
-        output_db.update(|write_tx| {
+        destination_db.update(|write_tx| {
             let mut cursor_destination = write_tx.cursor_write::<T>()?;
 
             self.db.view(|read_tx| {
@@ -354,40 +265,45 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         })??
     }
 
-    fn dump_table<T: Table>(
-        output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    /// Duplicates table data into another database: `destination_db`. The reason for `TXMut` for
+    /// the source database is that we might want to call this method after making a dry-run
+    /// unwind.
+    pub(crate) fn dump_table<T: Table>(
         source_db_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        destination_db: &Env<WriteMap>,
     ) -> eyre::Result<()> {
-        output_db.update(|write_tx| {
+        destination_db.update(|write_tx| {
             let mut cursor_source = source_db_tx.cursor_read::<T>()?;
             let mut cursor_destination = write_tx.cursor_write::<T>()?;
 
             let start_walker = cursor_source.first().transpose();
-            let mut walker = Walker::new(&mut cursor_source, start_walker);
-            while let Some(v) = walker.next() {
-                let (k, v) = v?;
+            let walker = Walker::new(&mut cursor_source, start_walker);
+            for kv in walker {
+                let (k, v) = kv?;
                 cursor_destination.append(k, v)?;
             }
             Ok::<(), eyre::ErrReport>(())
         })?
     }
 
-    fn dump_dupsort<T: DupSort>(
-        output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    /// Duplicates table (DUPSORT) data into another database: `destination_db`. The reason for
+    /// `TXMut` for the source database is that we might want to call this method after making a
+    /// dry-run unwind.
+    pub(crate) fn dump_dupsort<T: DupSort>(
         source_db_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
+        destination_db: &Env<WriteMap>,
     ) -> eyre::Result<()>
     where
-        <T as reth_db::table::Table>::Key: Default,
-        <T as reth_db::table::DupSort>::SubKey: Default,
+        <T as DupSort>::SubKey: Default,
     {
-        output_db.update(|write_tx| {
+        destination_db.update(|write_tx| {
             let mut cursor_source = source_db_tx.cursor_dup_read::<T>()?;
             let mut cursor_destination = write_tx.cursor_dup_write::<T>()?;
 
             if let Some((first_key, _)) = cursor_source.first()? {
-                let mut walker = cursor_source.walk_dup(first_key, T::SubKey::default())?;
-                while let Some(v) = walker.next() {
-                    let (k, v) = v?;
+                let walker = cursor_source.walk_dup(first_key, T::SubKey::default())?;
+                for kv in walker {
+                    let (k, v) = kv?;
                     cursor_destination.append_dup(k, v)?;
                 }
             }

@@ -2,7 +2,7 @@
 use crate::{
     db,
     dirs::{LogsDir, PlatformPath},
-    node, p2p, stage, test_eth_chain, test_vectors,
+    dump_stage, node, p2p, stage, test_eth_chain, test_vectors,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
@@ -24,6 +24,7 @@ pub async fn run() -> eyre::Result<()> {
         Commands::TestEthChain(command) => command.execute().await,
         Commands::Db(command) => command.execute().await,
         Commands::Stage(command) => command.execute().await,
+        Commands::DumpStage(command) => command.execute().await,
         Commands::P2P(command) => command.execute().await,
         Commands::TestVectors(command) => command.execute().await,
     }
@@ -46,6 +47,9 @@ pub enum Commands {
     /// a lot of memory to store all the data.
     #[command(name = "stage")]
     Stage(stage::Command),
+    /// Dumps a stage from a range into a new database.
+    #[command(name = "dump-stage")]
+    DumpStage(dump_stage::Command),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),
