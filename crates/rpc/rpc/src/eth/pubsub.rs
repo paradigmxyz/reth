@@ -11,14 +11,14 @@ use std::sync::Arc;
 ///
 /// This handles
 #[derive(Debug, Clone)]
-pub struct EthPubSub<Pool, Client> {
+pub struct EthPubSub<Client, Pool> {
     /// All nested fields bundled together.
-    inner: Arc<EthPubSubInner<Pool, Client>>,
+    inner: Arc<EthPubSubInner<Client, Pool>>,
 }
 
 // === impl EthPubSub ===
 
-impl<Pool, Client> EthPubSub<Pool, Client> {
+impl<Client, Pool> EthPubSub<Client, Pool> {
     /// Creates a new, shareable instance.
     pub fn new(client: Arc<Client>, pool: Pool) -> Self {
         let inner = EthPubSubInner { client, pool };
@@ -26,10 +26,10 @@ impl<Pool, Client> EthPubSub<Pool, Client> {
     }
 }
 
-impl<Pool, Client> EthPubSubApiServer for EthPubSub<Pool, Client>
+impl<Client, Pool> EthPubSubApiServer for EthPubSub<Client, Pool>
 where
-    Pool: TransactionPool + 'static,
     Client: BlockProvider + 'static,
+    Pool: TransactionPool + 'static,
 {
     fn subscribe(
         &self,
@@ -43,7 +43,7 @@ where
 }
 
 /// The actual handler for and accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Pool, Client>(
+async fn handle_accepted<Client, Pool>(
     _pool: Pool,
     _client: Arc<Client>,
     _accepted_sink: SubscriptionSink,
@@ -54,7 +54,7 @@ async fn handle_accepted<Pool, Client>(
 
 /// Container type `EthPubSub`
 #[derive(Debug)]
-struct EthPubSubInner<Pool, Client> {
+struct EthPubSubInner<Client, Pool> {
     /// The transaction pool.
     pool: Pool,
     /// The client that can interact with the chain.

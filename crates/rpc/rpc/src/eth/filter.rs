@@ -9,12 +9,12 @@ use std::sync::Arc;
 
 /// `Eth` filter RPC implementation.
 #[derive(Debug, Clone)]
-pub struct EthFilter<Pool, Client> {
+pub struct EthFilter<Client, Pool> {
     /// All nested fields bundled together.
-    inner: Arc<EthFilterInner<Pool, Client>>,
+    inner: Arc<EthFilterInner<Client, Pool>>,
 }
 
-impl<Pool, Client> EthFilter<Pool, Client> {
+impl<Client, Pool> EthFilter<Client, Pool> {
     /// Creates a new, shareable instance.
     pub fn new(client: Arc<Client>, pool: Pool) -> Self {
         let inner = EthFilterInner { client, pool };
@@ -23,10 +23,10 @@ impl<Pool, Client> EthFilter<Pool, Client> {
 }
 
 #[async_trait]
-impl<Pool, Client> EthFilterApiServer for EthFilter<Pool, Client>
+impl<Client, Pool> EthFilterApiServer for EthFilter<Client, Pool>
 where
-    Pool: TransactionPool + 'static,
     Client: BlockProvider + 'static,
+    Pool: TransactionPool + 'static,
 {
     fn new_filter(&self, _filter: Filter) -> RpcResult<U256> {
         todo!()
@@ -59,7 +59,7 @@ where
 
 /// Container type `EthFilter`
 #[derive(Debug)]
-struct EthFilterInner<Pool, Client> {
+struct EthFilterInner<Client, Pool> {
     /// The transaction pool.
     pool: Pool,
     /// The client that can interact with the chain.
