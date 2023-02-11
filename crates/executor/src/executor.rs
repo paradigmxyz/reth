@@ -69,8 +69,9 @@ where
             Head {
                 number: header.number,
                 timestamp: header.timestamp,
+                difficulty: header.difficulty,
                 total_difficulty,
-                ..Default::default()
+                hash: Default::default(),
             },
         );
 

@@ -507,7 +507,7 @@ impl ForkCondition {
     pub fn active_at_head(&self, head: &Head) -> bool {
         self.active_at_block(head.number) ||
             self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, U256::ZERO) // TODO:
+            self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.
