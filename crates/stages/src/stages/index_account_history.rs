@@ -1,6 +1,4 @@
-use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -10,6 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
+use reth_provider::Transaction;
 
 use reth_primitives::{Address, TransitionId};
 use std::{collections::BTreeMap, fmt::Debug};

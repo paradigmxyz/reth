@@ -1,4 +1,3 @@
-use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
@@ -12,6 +11,7 @@ use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
     H256, KECCAK_EMPTY, U256,
 };
+use reth_provider::Transaction;
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
     EMPTY_STRING_CODE,

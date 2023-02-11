@@ -13,8 +13,9 @@ use reth_primitives::{
     keccak256, Account as RethAccount, Address, ChainSpec, ForkCondition, Hardfork, JsonU256,
     SealedBlock, SealedHeader, StorageEntry, H256, U256,
 };
+use reth_provider::Transaction;
 use reth_rlp::Decodable;
-use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId, Transaction};
+use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId};
 use std::{
     collections::HashMap,
     ffi::OsStr,

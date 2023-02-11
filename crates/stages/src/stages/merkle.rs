@@ -1,9 +1,10 @@
 use crate::{
-    db::Transaction, trie::DBTrieLoader, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    trie::DBTrieLoader, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::consensus;
+use reth_provider::Transaction;
 use std::fmt::Debug;
 use tracing::*;
 
