@@ -480,12 +480,7 @@ impl ForkCondition {
     /// This will return false for any condition that is not TTD-based.
     pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
         if let ForkCondition::TTD { total_difficulty, .. } = self {
-            if ttd >= difficulty {
-                (ttd - difficulty) >= *total_difficulty
-            } else {
-                // invalid difficulty
-                false
-            }
+            ttd.saturating_sub(difficulty) >= *total_difficulty
         } else {
             false
         }
