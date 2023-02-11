@@ -476,8 +476,9 @@ impl ForkCondition {
     /// of a current block.
     ///
     /// The fork is considered active if the _previous_ total difficulty is above the threshold.
-    /// To achieve that, we subtract the passed `difficulty` from the current block's total difficulty,
-    /// and check if it's above the Fork Condition's total difficulty (here: 58_750_000_000_000_000_000_000)
+    /// To achieve that, we subtract the passed `difficulty` from the current block's total
+    /// difficulty, and check if it's above the Fork Condition's total difficulty (here:
+    /// 58_750_000_000_000_000_000_000)
     ///
     /// This will return false for any condition that is not TTD-based.
     pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
