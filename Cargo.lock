@@ -4075,6 +4075,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-staged-sync",
  "reth-stages",
+ "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",
