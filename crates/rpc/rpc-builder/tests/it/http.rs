@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_primitives::{NodeRecord, H256, BlockNumber, U256, H64, rpc::{BlockId, BlockNumber as RpcBlockNumber}, Bytes};
-use reth_rpc_api::{DebugApiClient, NetApiClient, TraceApiClient};
+use reth_rpc_api::{DebugApiClient, NetApiClient, TraceApiClient, Web3ApiClient};
 use reth_rpc_api::clients::{AdminApiClient, EthApiClient};
 use reth_rpc_builder::RethRpcModule;
 use jsonrpsee::core::error::Error;
@@ -119,7 +119,8 @@ where C: ClientT + SubscriptionClientT + Sync {
 
 async fn test_basic_web3_calls<C>(client: &C)
 where C: ClientT + SubscriptionClientT + Sync {
-
+    Web3ApiClient::client_version(client).await.unwrap();
+    Web3ApiClient::sha3(client, Bytes::default()).await.unwrap();
 }
 
 
