@@ -1,8 +1,10 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
+use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
+use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::RpcModuleConfig;
-use std::net::IpAddr;
+use std::{net::IpAddr, path::Path};
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]
@@ -47,6 +49,35 @@ pub struct RpcServerArgs {
     /// Filename for IPC socket/pipe within the datadir
     #[arg(long)]
     pub ipcpath: Option<String>,
+
+    /// Path to a JWT secret to use for authenticated RPC endpoints
+    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
+    authrpc_jwtsecret: Option<PlatformPath<JwtSecretPath>>,
+}
+
+impl RpcServerArgs {
+    /// The execution layer and consensus layer clients SHOULD accept a configuration parameter:
+    /// jwt-secret, which designates a file containing the hex-encoded 256 bit secret key to be used
+    /// for verifying/generating JWT tokens.
+    ///
+    /// If such a parameter is given, but the file cannot be read, or does not contain a hex-encoded
+    /// key of 256 bits, the client SHOULD treat this as an error.
+    ///
+    /// If such a parameter is not given, the client SHOULD generate such a token, valid for the
+    /// duration of the execution, and SHOULD store the hex-encoded secret as a jwt.hex file on
+    /// the filesystem. This file can then be used to provision the counterpart client.
+    pub(crate) fn jwt_secret(&self) -> Result<JwtSecret, JwtError> {
+        let arg = self.authrpc_jwtsecret.as_ref();
+        let path: Option<&Path> = arg.map(|p| p.as_ref());
+        match path {
+            Some(fpath) => JwtSecret::from_file(fpath),
+            None => {
+                let default_path = PlatformPath::<JwtSecretPath>::default();
+                let fpath = default_path.as_ref();
+                JwtSecret::try_create(fpath)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

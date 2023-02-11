@@ -135,6 +135,10 @@ impl Command {
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
+        // TODO: Use the resolved secret to spawn the Engine API server
+        // Look at `reth_rpc::AuthLayer` for integration hints
+        let _secret = self.rpc.jwt_secret();
+
         // TODO(mattsse): cleanup, add cli args
         let _rpc_server = reth_rpc_builder::launch(
             ShareableDatabase::new(db.clone()),
