@@ -3,7 +3,7 @@
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_primitives::NodeRecord;
-use reth_rpc_api::clients::AdminApiClient;
+use reth_rpc_api::{clients::AdminApiClient, EthApiClient};
 use reth_rpc_builder::RethRpcModule;
 
 async fn test_basic_admin_calls<C>(client: &C)
@@ -19,6 +19,17 @@ where
     AdminApiClient::remove_trusted_peer(client, node).await.unwrap();
     AdminApiClient::node_info(client).await.unwrap();
 }
+
+async fn test_basic_eth_calls<C>(client: &C)
+where C: ClientT + SubscriptionClientT + Sync {
+
+    EthApiClient::protocol_version(client).await.unwrap();
+    EthApiClient::syncing(client).await.unwrap();
+    EthApiClient::author(client).await.unwrap();
+    panic!();
+
+}
+    
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_call_admin_functions_http() {
@@ -45,4 +56,31 @@ async fn test_call_admin_functions_http_and_ws() {
     let handle = launch_http_ws(vec![RethRpcModule::Admin]).await;
     let client = handle.http_client().unwrap();
     test_basic_admin_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_eth_functions_http() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+    test_basic_eth_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_eth_functions_ws() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_ws(vec![RethRpcModule::Eth]).await;
+    let client = handle.ws_client().await.unwrap();
+    test_basic_eth_calls(&client).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_call_eth_functions_http_and_ws() {
+    reth_tracing::init_test_tracing();
+
+    let handle = launch_http_ws(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+    test_basic_eth_calls(&client).await;
 }
