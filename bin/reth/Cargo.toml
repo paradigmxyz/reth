@@ -26,6 +26,7 @@ reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-network-api = {path = "../../crates/net/network-api" }
 reth-downloaders = {path = "../../crates/net/downloaders", features = ["test-utils"] }
 reth-tracing = { path = "../../crates/tracing" }
+reth-tasks = { path = "../../crates/tasks" }
 reth-net-nat = { path = "../../crates/net/nat" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 

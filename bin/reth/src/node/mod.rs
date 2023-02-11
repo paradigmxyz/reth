@@ -5,6 +5,7 @@ use crate::{
     args::{NetworkArgs, RpcServerArgs},
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
+    runner::CliContext,
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -105,7 +106,7 @@ pub struct Command {
 impl Command {
     /// Execute `node` command
     // TODO: RPC
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
         // Raise the fd limit of the process.
