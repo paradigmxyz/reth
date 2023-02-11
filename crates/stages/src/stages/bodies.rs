@@ -619,7 +619,8 @@ mod tests {
 
                     let mut prev_number: Option<BlockNumber> = None;
                     let mut expected_transition_id = 0;
-                    for entry in bodies_cursor.walk(first_body_key)? {
+
+                    for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (number, body) = entry?;
 
                         // Validate sequentiality only after prev progress,

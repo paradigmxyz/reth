@@ -199,7 +199,7 @@ where
         T2: Table<Key = T1::Value>,
     {
         let mut cursor = self.cursor_write::<T1>()?;
-        let mut walker = cursor.walk(start_at)?;
+        let mut walker = cursor.walk(Some(start_at))?;
         while let Some((_, value)) = walker.next().transpose()? {
             self.delete::<T2>(value, None)?;
         }

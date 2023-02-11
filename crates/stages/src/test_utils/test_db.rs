@@ -85,7 +85,9 @@ impl TestTransaction {
         T::Key: Default + Ord,
     {
         self.query(|tx| {
-            tx.cursor_read::<T>()?.walk(T::Key::default())?.collect::<Result<Vec<_>, DbError>>()
+            tx.cursor_read::<T>()?
+                .walk(Some(T::Key::default()))?
+                .collect::<Result<Vec<_>, DbError>>()
         })
     }
 

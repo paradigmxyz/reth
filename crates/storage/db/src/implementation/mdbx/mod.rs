@@ -211,7 +211,7 @@ mod tests {
         assert!(first.is_some(), "First should be our put");
 
         // Walk
-        let walk = cursor.walk(key).unwrap();
+        let walk = cursor.walk(Some(key.into())).unwrap();
         let first = walk.into_iter().next().unwrap().unwrap();
         assert_eq!(first.1, value, "First next should be put value");
     }
@@ -363,7 +363,7 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -396,7 +396,7 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -423,7 +423,7 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -451,7 +451,7 @@ mod tests {
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(0).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -570,7 +570,7 @@ mod tests {
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
-            let mut walker = cursor.walk_dup(key, H256::from_low_u64_be(1)).unwrap();
+            let mut walker = cursor.walk_dup(Some(key), Some(H256::from_low_u64_be(1))).unwrap();
             assert_eq!(
                 (key, value11),
                 walker
@@ -608,8 +608,7 @@ mod tests {
         {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
-            let first = cursor.first().unwrap().unwrap();
-            let mut walker = cursor.walk_dup(first.0, first.1.key).unwrap();
+            let mut walker = cursor.walk_dup(None, None).unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
             assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
@@ -624,7 +623,7 @@ mod tests {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
             let first = cursor.first().unwrap().unwrap();
-            let mut walker = cursor.walk(first.0).unwrap();
+            let mut walker = cursor.walk(Some(first.0)).unwrap();
             assert_eq!(Some(Ok((key1, value00))), walker.next());
             assert_eq!(Some(Ok((key1, value11))), walker.next());
             assert_eq!(Some(Ok((key2, value22))), walker.next());
@@ -652,7 +651,7 @@ mod tests {
             let tx = env.tx().expect(ERROR_INIT_TX);
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
             let first = cursor.first().unwrap().unwrap();
-            let mut walker = cursor.walk(first.0).unwrap();
+            let mut walker = cursor.walk(Some(first.0)).unwrap();
 
             // NOTE: Both values are present
             assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
@@ -690,7 +689,7 @@ mod tests {
             // It will seek the one greater or equal to the query. Since we have `Address | 100`,
             // `Address | 200` in the database and we're querying `Address | 150` it will return us
             // `Address | 200`.
-            let mut walker = cursor.walk(ShardedKey::new(real_key, 150)).unwrap();
+            let mut walker = cursor.walk(Some(ShardedKey::new(real_key, 150))).unwrap();
             let (key, list) = walker
                 .next()
                 .expect("element should exist.")
