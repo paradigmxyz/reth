@@ -881,7 +881,8 @@ impl Discv4Service {
         // send the pong first, but the PONG and optionally PING don't need to be send in a
         // particular order
         let msg = Message::Pong(Pong {
-            to: ping.from,
+            // we use the actual address of the peer
+            to: record.into(),
             echo: hash,
             expire: ping.expire,
             enr_sq: self.enr_seq(),
@@ -2088,18 +2089,54 @@ mod tests {
         let _ = discv4.lookup_self().await;
     }
 
+    // sends a PING packet with wrong 'to' field and expects a PONG response.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_check_wrong_to() {
+        reth_tracing::init_test_tracing();
+
+        let config = Discv4Config::builder().external_ip_resolver(None).build();
+        let (_discv4, mut service_1) = create_discv4_with_config(config.clone()).await;
+        let (_discv4, mut service_2) = create_discv4_with_config(config).await;
+
+        // ping node 2 with wrong to field
+        let mut ping = Ping {
+            from: service_1.local_node_record.into(),
+            to: service_2.local_node_record.into(),
+            expire: service_1.ping_expiration(),
+            enr_sq: service_1.enr_seq(),
+        };
+        ping.to.address = "192.0.2.0".parse().unwrap();
+
+        let echo_hash = service_1.send_packet(Message::Ping(ping), service_2.local_addr());
+        let ping_request = PingRequest {
+            sent_at: Instant::now(),
+            node: service_2.local_node_record,
+            echo_hash,
+            reason: PingReason::Initial,
+        };
+        service_1.pending_pings.insert(*service_2.local_peer_id(), ping_request);
+
+        // wait for the processed ping
+        let event = poll_fn(|cx| service_2.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Ping);
+
+        // we now wait for PONG
+        let event = poll_fn(|cx| service_1.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Pong);
+        // followed by a ping
+        let event = poll_fn(|cx| service_1.poll(cx)).await;
+        assert_eq!(event, Discv4Event::Ping);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_check_ping_pong() {
         reth_tracing::init_test_tracing();
 
-        let config = Discv4Config::builder().build();
+        let config = Discv4Config::builder().external_ip_resolver(None).build();
         let (_discv4, mut service_1) = create_discv4_with_config(config.clone()).await;
         let (_discv4, mut service_2) = create_discv4_with_config(config).await;
 
-        service_1.local_enr_mut().address = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-        service_2.local_enr_mut().address = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
         // send ping from 1 -> 2
-
         service_1.add_node(service_2.local_node_record);
 
         // wait for the processed ping
