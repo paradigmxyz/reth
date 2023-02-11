@@ -340,7 +340,7 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn has_block_reward(&self, _: U256) -> bool {
+    fn has_block_reward(&self, _: U256, _: U256) -> bool {
         true
     }
 }

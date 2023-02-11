@@ -1,4 +1,4 @@
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
 
 /// The block response
 #[derive(PartialEq, Eq, Debug)]
@@ -21,5 +21,13 @@ impl BlockResponse {
     /// Return the block number
     pub fn block_number(&self) -> BlockNumber {
         self.header().number
+    }
+
+    /// Return the reference to the response header
+    pub fn difficulty(&self) -> U256 {
+        match self {
+            BlockResponse::Full(block) => block.difficulty,
+            BlockResponse::Empty(header) => header.difficulty,
+        }
     }
 }

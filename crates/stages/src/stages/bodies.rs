@@ -113,6 +113,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         for response in downloaded_bodies {
             // Write block
             let block_number = response.block_number();
+            let difficulty = response.difficulty();
 
             match response {
                 BlockResponse::Full(block) => {
@@ -161,7 +162,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .seek(block_number)?
                 .ok_or(ProviderError::TotalDifficulty { number: block_number })?
                 .1;
-            let has_reward = self.consensus.has_block_reward(td.into());
+            let has_reward = self.consensus.has_block_reward(td.into(), difficulty);
             if has_reward {
                 transition_id += 1;
             }
@@ -664,7 +665,7 @@ mod tests {
                             .seek(number)?
                             .expect("Missing TD for header")
                             .1;
-                        if self.consensus.has_block_reward(td.into()) {
+                        if self.consensus.has_block_reward(td.into(), header.difficulty) {
                             expected_transition_id += 1;
                         }
 
