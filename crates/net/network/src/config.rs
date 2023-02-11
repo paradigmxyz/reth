@@ -308,7 +308,7 @@ impl NetworkConfigBuilder {
             hash: chain_spec.genesis_hash(),
             number: 0,
             timestamp: 0,
-            difficulty: U256::ZERO,
+            difficulty: chain_spec.genesis.difficulty,
             total_difficulty: U256::ZERO,
         });
 
