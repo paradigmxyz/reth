@@ -1,9 +1,11 @@
 //! Standalone http tests
 
+use std::collections::HashSet;
+
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
-use reth_primitives::{NodeRecord, H256, BlockNumber, U256, H64, rpc::{BlockId, BlockNumber as RpcBlockNumber }};
-use reth_rpc_api::DebugApiClient;
+use reth_primitives::{NodeRecord, H256, BlockNumber, U256, H64, rpc::{BlockId, BlockNumber as RpcBlockNumber}, Bytes};
+use reth_rpc_api::{DebugApiClient, NetApiClient, TraceApiClient};
 use reth_rpc_api::clients::{AdminApiClient, EthApiClient};
 use reth_rpc_builder::RethRpcModule;
 use jsonrpsee::core::error::Error;
@@ -86,21 +88,33 @@ async fn test_basic_debug_calls<C>(client: &C)
 where C: ClientT + SubscriptionClientT + Sync {
     let block_id = BlockId::Number(RpcBlockNumber::default());
 
+    assert!(is_unimplemented(DebugApiClient::raw_header(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::raw_block(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::raw_transaction(client, H256::default()).await.err().unwrap()));
-    assert!(is_unimplemented(DebugApiClient::raw_header(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::raw_receipts(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
 }
 
 async fn test_basic_net_calls<C>(client: &C)
 where C: ClientT + SubscriptionClientT + Sync {
-
+    NetApiClient::version(client).await.unwrap();
+    NetApiClient::peer_count(client).await.unwrap();
+    NetApiClient::is_listening(client).await.unwrap();
 }
 
 async fn test_basic_trace_calls<C>(client: &C)
 where C: ClientT + SubscriptionClientT + Sync {
+    let block_id = BlockId::Number(RpcBlockNumber::default());
 
+    // TraceApiClient::call(client)
+    // TraceApiClient::call_many(client)
+    assert!(is_unimplemented(TraceApiClient::raw_transaction(client, Bytes::default(), HashSet::default(), None).await.err().unwrap()));
+    assert!(is_unimplemented(TraceApiClient::replay_block_transactions(client, block_id, HashSet::default()).await.err().unwrap()));
+    assert!(is_unimplemented(TraceApiClient::replay_transaction(client, H256::default(), HashSet::default()).await.err().unwrap()));
+    assert!(is_unimplemented(TraceApiClient::block(client, block_id).await.err().unwrap()));
+    // TraceApiClient::filter(client)
+    assert!(is_unimplemented(TraceApiClient::trace(client, H256::default(), vec![]).await.err().unwrap()));
+    assert!(is_unimplemented(TraceApiClient::transaction_traces(client, H256::default()).await.err().unwrap()));
 }
 
 async fn test_basic_web3_calls<C>(client: &C)
