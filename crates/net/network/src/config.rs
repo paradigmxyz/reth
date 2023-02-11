@@ -309,7 +309,7 @@ impl NetworkConfigBuilder {
             number: 0,
             timestamp: 0,
             difficulty: chain_spec.genesis.difficulty,
-            total_difficulty: U256::ZERO,
+            total_difficulty: chain_spec.genesis.difficulty,
         });
 
         // set the status
