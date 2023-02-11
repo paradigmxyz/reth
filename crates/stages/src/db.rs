@@ -7,7 +7,7 @@ use std::{
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
-    models::{BlockNumHash, StoredBlockBody},
+    models::StoredBlockBody,
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -110,29 +110,15 @@ where
         Ok(hash)
     }
 
-    /// Query for block hash by block number and return it as [BlockNumHash] key
-    pub(crate) fn get_block_numhash(
-        &self,
-        number: BlockNumber,
-    ) -> Result<BlockNumHash, StageError> {
-        Ok((number, self.get_block_hash(number)?).into())
-    }
-
-    /// Query the block body by [BlockNumHash] key
-    pub(crate) fn get_block_body(&self, key: BlockNumHash) -> Result<StoredBlockBody, StageError> {
-        let body = self
-            .get::<tables::BlockBodies>(key)?
-            .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-        Ok(body)
-    }
-
-    /// Query the block body by number
-    pub(crate) fn get_block_body_by_num(
+    /// Query the block body by number.
+    pub(crate) fn get_block_body(
         &self,
         number: BlockNumber,
     ) -> Result<StoredBlockBody, StageError> {
-        let key = self.get_block_numhash(number)?;
-        self.get_block_body(key)
+        let body = self
+            .get::<tables::BlockBodies>(number)?
+            .ok_or(DatabaseIntegrityError::BlockBody { number })?;
+        Ok(body)
     }
 
     /// Query the last transition of the block by [BlockNumber] key
@@ -156,20 +142,19 @@ where
             return Ok((0, 0))
         }
 
-        let prev_key = self.get_block_numhash(block - 1)?;
-        let prev_body = self.get_block_body(prev_key)?;
+        let prev_number = block - 1;
+        let prev_body = self.get_block_body(prev_number)?;
         let last_transition = self
-            .get::<tables::BlockTransitionIndex>(prev_key.number())?
-            .ok_or(DatabaseIntegrityError::BlockTransition { number: prev_key.number() })?;
+            .get::<tables::BlockTransitionIndex>(prev_number)?
+            .ok_or(DatabaseIntegrityError::BlockTransition { number: prev_number })?;
         Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
     }
 
     /// Query the block header by number
-    pub(crate) fn get_header_by_num(&self, block: BlockNumber) -> Result<Header, StageError> {
-        let key = self.get_block_numhash(block)?;
+    pub(crate) fn get_header(&self, number: BlockNumber) -> Result<Header, StageError> {
         let header = self
-            .get::<tables::Headers>(key)?
-            .ok_or(DatabaseIntegrityError::Header { number: block, hash: key.hash() })?;
+            .get::<tables::Headers>(number)?
+            .ok_or(DatabaseIntegrityError::Header { number })?;
         Ok(header)
     }
 
@@ -181,16 +166,6 @@ where
         T: Table<Key = u64>,
     {
         self.unwind_table::<T, _>(num, |key| key)
-    }
-
-    /// Unwind table by composite block number hash key
-    #[inline]
-    pub(crate) fn unwind_table_by_num_hash<T>(&self, block: BlockNumber) -> Result<(), Error>
-    where
-        DB: Database,
-        T: Table<Key = BlockNumHash>,
-    {
-        self.unwind_table::<T, _>(block, |key| key.number())
     }
 
     /// Unwind the table to a provided block

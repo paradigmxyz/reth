@@ -5,13 +5,13 @@ use reth_db::{
         tx::Tx,
         Env, EnvKind, WriteMap, RW,
     },
-    models::{BlockNumHash, StoredBlockBody},
+    models::StoredBlockBody,
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader};
+use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
 use std::{borrow::Borrow, path::Path, sync::Arc};
 
 use crate::db::Transaction;
@@ -188,11 +188,32 @@ impl TestTransaction {
             let headers = headers.collect::<Vec<_>>();
 
             for header in headers {
-                let key: BlockNumHash = header.num_hash().into();
-
                 tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
                 tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
-                tx.put::<tables::Headers>(key, header.clone().unseal())?;
+                tx.put::<tables::Headers>(header.number, header.clone().unseal())?;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Inserts total difficulty of headers into the corresponding tables.
+    ///
+    /// Superset functionality of [TestTransaction::insert_headers].
+    pub(crate) fn insert_headers_with_td<'a, I>(&self, headers: I) -> Result<(), DbError>
+    where
+        I: Iterator<Item = &'a SealedHeader>,
+    {
+        self.commit(|tx| {
+            let headers = headers.collect::<Vec<_>>();
+
+            let mut td = U256::ZERO;
+            for header in headers {
+                td += header.difficulty;
+                tx.put::<tables::HeaderTD>(header.number, td.into())?;
+                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+                tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
+                tx.put::<tables::Headers>(header.number, header.clone().unseal())?;
             }
 
             Ok(())
@@ -209,16 +230,14 @@ impl TestTransaction {
             let mut current_tx_id = tx_offset.unwrap_or_default();
 
             for block in blocks {
-                let key: BlockNumHash = block.num_hash().into();
-
                 // Insert into header tables.
                 tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
                 tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
-                tx.put::<tables::Headers>(key, block.header.clone().unseal())?;
+                tx.put::<tables::Headers>(block.number, block.header.clone().unseal())?;
 
                 // Insert into body tables.
                 tx.put::<tables::BlockBodies>(
-                    key,
+                    block.number,
                     StoredBlockBody {
                         start_tx_id: current_tx_id,
                         tx_count: block.body.len() as u64,

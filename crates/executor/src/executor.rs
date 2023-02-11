@@ -8,12 +8,15 @@ use crate::{
 use hashbrown::hash_map::Entry;
 use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
-    TransactionSigned, H160, H256, U256,
+    bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Head, Header, Log,
+    Receipt, TransactionSigned, H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
-    db::AccountState, Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, Return, SpecId,
+    db::AccountState,
+    primitives::{
+        Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, ResultAndState, SpecId,
+    },
     EVM,
 };
 use std::collections::BTreeMap;
@@ -25,6 +28,9 @@ where
 {
     chain_spec: &'a ChainSpec,
     evm: EVM<&'a mut SubState<DB>>,
+    /// Enable revm inspector printer.
+    /// In execution this will print opcode level traces directly to console.
+    pub use_printer_tracer: bool,
 }
 
 impl<'a, DB> Executor<'a, DB>
@@ -34,7 +40,7 @@ where
     fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
         let mut evm = EVM::new();
         evm.database(db);
-        Executor { chain_spec, evm }
+        Executor { chain_spec, evm, use_printer_tracer: false }
     }
 
     fn db(&mut self) -> &mut SubState<DB> {
@@ -57,8 +63,17 @@ where
         }
     }
 
-    fn init_block_env(&mut self, header: &Header) {
-        let spec_id = revm_spec(self.chain_spec, header.number);
+    fn init_block_env(&mut self, header: &Header, total_difficulty: U256) {
+        let spec_id = revm_spec(
+            self.chain_spec,
+            Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                total_difficulty,
+                ..Default::default()
+            },
+        );
+
         self.evm.env.cfg.chain_id = U256::from(self.chain_spec.chain().id());
         self.evm.env.cfg.spec_id = spec_id;
         self.evm.env.cfg.perf_all_precompiles_have_balance = false;
@@ -192,6 +207,7 @@ where
     pub fn block_reward_changeset(
         &mut self,
         header: &Header,
+        total_difficulty: U256,
         ommers: &[Header],
     ) -> Result<Option<BTreeMap<H160, AccountInfoChangeSet>>, Error> {
         // NOTE: Related to Ethereum reward change, for other network this is probably going to be
@@ -204,11 +220,14 @@ where
         // ommer, we raise the block’s beneficiary by an additional 1/32 of the block reward
         // and the beneficiary of the ommer gets rewarded depending on the blocknumber.
         // Formally we define the function Ω:
-        match header.number {
-            n if Some(n) >= self.chain_spec.paris_status().block_number() => None,
-            n if Some(n) >= self.chain_spec.fork_block(Hardfork::Petersburg) => Some(WEI_2ETH),
-            n if Some(n) >= self.chain_spec.fork_block(Hardfork::Byzantium) => Some(WEI_3ETH),
-            _ => Some(WEI_5ETH),
+        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty) {
+            None
+        } else if self.chain_spec.fork(Hardfork::Petersburg).active_at_block(header.number) {
+            Some(WEI_2ETH)
+        } else if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(header.number) {
+            Some(WEI_3ETH)
+        } else {
+            Some(WEI_5ETH)
         }
         .map(|reward| -> Result<_, _> {
             let mut reward_beneficiaries: BTreeMap<H160, u128> = BTreeMap::new();
@@ -325,15 +344,16 @@ where
     fn execute(
         &mut self,
         block: &Block,
+        total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<ExecutionResult, Error> {
         let Block { header, body, ommers } = block;
         let senders = self.recover_senders(body, senders)?;
 
-        self.init_block_env(header);
+        self.init_block_env(header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
-        // output of verification
+        // output of execution
         let mut changesets = Vec::with_capacity(body.len());
 
         for (transaction, sender) in body.iter().zip(senders.into_iter()) {
@@ -351,53 +371,46 @@ where
             revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
             // Execute transaction.
-            let out = self.evm.transact();
+            let out = if self.use_printer_tracer {
+                // execution with inspector.
+                let out = self.evm.inspect(revm::inspectors::CustomPrintTracer::default());
 
-            // Useful for debugging
-            // let out = evm.inspect(revm::inspectors::CustomPrintTracer::default());
-            // tracing::trace!(target:"evm","Executing transaction {:?}, \n:{out:?}: {:?}
-            // \nENV:{:?}",transaction.hash(),transaction,evm.env);
-
-            let (revm::ExecutionResult { exit_reason, gas_used, logs, .. }, state) = out;
-
-            // Fatal internal error.
-            if exit_reason == revm::Return::FatalExternalError {
-                return Err(Error::ExecutionFatalError)
-            }
-
-            // Success flag was added in `EIP-658: Embedding transaction status code in receipts`.
-            // TODO for verification (exit_reason): some error should return EVM error as the block
-            // with that transaction can have consensus error that would make block
-            // invalid.
-            let is_success = match exit_reason {
-                revm::return_ok!() => true,
-                revm::return_revert!() => false,
-                _ => false,
-                // TODO: Handle after bumping to revm v3.0: https://github.com/paradigmxyz/reth/issues/463
-                // e => return Err(Error::EVMError { error_code: e as u32 }),
+                tracing::trace!(target:"evm","Executed transaction: {:?},
+                    \nExecution output:{out:?}:
+                    \nTransaction data:{transaction:?}
+                    \nenv data:{:?}",transaction.hash(),self.evm.env);
+                out
+            } else {
+                // main execution.
+                self.evm.transact()
             };
 
-            // Add spent gas.
-            cumulative_gas_used += gas_used;
+            // cast the error and extract returnables.
+            let ResultAndState { result, state } = out.map_err(|e| Error::EVM(format!("{e:?}")))?;
 
-            // commit state
+            // commit changes
             let (changeset, new_bytecodes) = self.commit_changes(state);
 
-            // Transform logs to reth format.
-            let logs: Vec<Log> = logs.into_iter().map(into_reth_log).collect();
+            // append gas used
+            cumulative_gas_used += result.gas_used();
 
-            // Push transaction changeset and calculte header bloom filter for receipt.
+            // cast revm logs to reth logs
+            let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
             changesets.push(TransactionChangeSet {
                 receipt: Receipt {
                     tx_type: transaction.tx_type(),
-                    success: is_success,
+                    // Success flag was added in `EIP-658: Embedding transaction status code in
+                    // receipts`.
+                    success: result.is_success(),
                     cumulative_gas_used,
                     bloom: logs_bloom(logs.iter()),
                     logs,
                 },
                 changeset,
                 new_bytecodes,
-            })
+            });
         }
 
         // Check if gas used matches the value set in header.
@@ -405,9 +418,9 @@ where
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
         }
 
-        let mut block_reward = self.block_reward_changeset(header, ommers)?;
+        let mut block_reward = self.block_reward_changeset(header, total_difficulty, ommers)?;
 
-        if self.chain_spec.fork_block(Hardfork::Dao) == Some(header.number) {
+        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(header.number) {
             let mut irregular_state_changeset = self.dao_fork_changeset()?;
             irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
             block_reward = Some(irregular_state_changeset);
@@ -420,17 +433,19 @@ where
 /// Execute and verify block
 pub fn execute_and_verify_receipt<DB: StateProvider>(
     block: &Block,
+    total_difficulty: U256,
     senders: Option<Vec<Address>>,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
-    let execution_result = execute(block, senders, chain_spec, db)?;
+    let execution_result = execute(block, total_difficulty, senders, chain_spec, db)?;
 
     let receipts_iter = execution_result.changesets.iter().map(|changeset| &changeset.receipt);
 
-    if Some(block.header.number) >= chain_spec.fork_block(Hardfork::Byzantium) {
+    if chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
         verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
     }
+
     // TODO Before Byzantium, receipts contained state root that would mean that expensive operation
     // as hashing that is needed for state root got calculated in every transaction
     // This was replaced with is_success flag.
@@ -468,23 +483,23 @@ pub fn verify_receipt<'a>(
 /// additional TransactionStatechangeset for account that receives the reward.
 pub fn execute<DB: StateProvider>(
     block: &Block,
+    total_difficulty: U256,
     senders: Option<Vec<Address>>,
     chain_spec: &ChainSpec,
     db: &mut SubState<DB>,
 ) -> Result<ExecutionResult, Error> {
     let mut executor = Executor::new(chain_spec, db);
-    executor.execute(block, senders)
+    executor.execute(block, total_difficulty, senders)
 }
 
 #[cfg(test)]
 mod tests {
-
     use std::collections::HashMap;
 
     use crate::revm_wrap::State;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, SealedBlock,
-        StorageKey, H160, H256, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
+        SealedBlock, StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
@@ -598,7 +613,8 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(&block, None, &chain_spec, &mut db).unwrap();
+        let out =
+            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
@@ -719,13 +735,14 @@ mod tests {
 
         let chain_spec = ChainSpecBuilder::from(&*MAINNET)
             .homestead_activated()
-            .with_fork(Hardfork::Dao, 1)
+            .with_fork(Hardfork::Dao, ForkCondition::Block(1))
             .build();
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
         let out = execute_and_verify_receipt(
             &Block { header, body: vec![], ommers: vec![] },
+            U256::ZERO,
             None,
             &chain_spec,
             &mut db,
@@ -813,7 +830,9 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(&block.unseal(), None, &chain_spec, &mut db).unwrap();
+        let out =
+            execute_and_verify_receipt(&block.unseal(), U256::ZERO, None, &chain_spec, &mut db)
+                .unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 

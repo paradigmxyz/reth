@@ -226,7 +226,7 @@ mod tests {
     use reth_db::{
         cursor::DbCursorRW,
         mdbx::{tx::Tx, WriteMap, RW},
-        models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
+        models::{StoredBlockBody, TransitionIdAddress},
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
@@ -313,8 +313,6 @@ mod tests {
             for progress in iter {
                 // Insert last progress data
                 self.tx.commit(|tx| {
-                    let key: BlockNumHash = (progress.number, progress.hash()).into();
-
                     let body = StoredBlockBody {
                         start_tx_id: tx_id,
                         tx_count: progress.body.len() as u64,
@@ -359,8 +357,8 @@ mod tests {
                         transition_id += 1;
                     }
 
-                    tx.put::<tables::BlockTransitionIndex>(key.number(), transition_id)?;
-                    tx.put::<tables::BlockBodies>(key, body)
+                    tx.put::<tables::BlockTransitionIndex>(progress.number, transition_id)?;
+                    tx.put::<tables::BlockBodies>(progress.number, body)
                 })?;
             }
 

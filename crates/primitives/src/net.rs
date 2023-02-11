@@ -93,7 +93,17 @@ impl fmt::Display for NodeRecord {
         f.write_str("enode://")?;
         hex::encode(self.id.as_bytes()).fmt(f)?;
         f.write_char('@')?;
-        self.address.fmt(f)?;
+        match self.address {
+            IpAddr::V4(ip) => {
+                ip.fmt(f)?;
+            }
+            IpAddr::V6(ip) => {
+                // encapsulate with brackets
+                f.write_char('[')?;
+                ip.fmt(f)?;
+                f.write_char(']')?;
+            }
+        }
         f.write_char(':')?;
         self.tcp_port.fmt(f)?;
         if self.tcp_port != self.udp_port {

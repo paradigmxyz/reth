@@ -177,16 +177,16 @@ mod tests {
         let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
 
         let value = Header::default();
-        let key = (1u64, H256::zero());
+        let key = 1u64;
 
         // PUT
         let tx = env.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<Headers>(key.into(), value.clone()).expect(ERROR_PUT);
+        tx.put::<Headers>(key, value.clone()).expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         // GET
         let tx = env.tx().expect(ERROR_INIT_TX);
-        let result = tx.get::<Headers>(key.into()).expect(ERROR_GET);
+        let result = tx.get::<Headers>(key).expect(ERROR_GET);
         assert!(result.expect(ERROR_RETURN_VALUE) == value);
         tx.commit().expect(ERROR_COMMIT);
     }
@@ -196,11 +196,11 @@ mod tests {
         let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
 
         let value = Header::default();
-        let key = (1u64, H256::zero());
+        let key = 1u64;
 
         // PUT
         let tx = env.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<Headers>(key.into(), value.clone()).expect(ERROR_PUT);
+        tx.put::<Headers>(key, value.clone()).expect(ERROR_PUT);
         tx.commit().expect(ERROR_COMMIT);
 
         // Cursor

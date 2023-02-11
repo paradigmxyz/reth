@@ -1,10 +1,13 @@
 use crate::traits::PropagateKind;
 use reth_primitives::{TxHash, H256};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// Various events that describe status changes of a transaction.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionEvent {
     /// Transaction has been added to the pending pool.
     Pending,

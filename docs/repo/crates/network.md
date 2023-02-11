@@ -64,7 +64,6 @@ let mut pipeline = reth_stages::Pipeline::new()
         commit_threshold: config.stages.bodies.commit_threshold,
     })
     .push(SenderRecoveryStage {
-        batch_size: config.stages.sender_recovery.batch_size,
         commit_threshold: config.stages.sender_recovery.commit_threshold,
     })
     .push(ExecutionStage { config: ExecutorConfig::new_ethereum() });

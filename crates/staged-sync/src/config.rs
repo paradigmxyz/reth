@@ -1,8 +1,12 @@
 //! Configuration files.
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use reth_db::database::Database;
 use reth_discv4::Discv4Config;
+use reth_downloaders::{
+    bodies::bodies::BodiesDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+};
 use reth_network::{
     config::{mainnet_nodes, rng_secret_key},
     NetworkConfig, NetworkConfigBuilder, PeersConfig,
@@ -26,15 +30,18 @@ impl Config {
     /// Initializes network config from read data
     pub fn network_config<DB: Database>(
         &self,
-        db: Arc<DB>,
+        db: DB,
         chain_spec: ChainSpec,
         disable_discovery: bool,
         bootnodes: Option<Vec<NodeRecord>>,
         nat_resolution_method: reth_net_nat::NatResolver,
+        peers_file: Option<PathBuf>,
     ) -> NetworkConfig<ShareableDatabase<DB>> {
-        let peer_config = reth_network::PeersConfig::default()
-            .with_trusted_nodes(self.peers.trusted_nodes.clone())
-            .with_connect_trusted_nodes_only(self.peers.connect_trusted_nodes_only);
+        let peer_config = self
+            .peers
+            .clone()
+            .with_basic_nodes_from_file(peers_file)
+            .unwrap_or_else(|_| self.peers.clone());
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
         NetworkConfigBuilder::new(rng_secret_key())
@@ -63,24 +70,30 @@ pub struct StageConfig {
 }
 
 /// Header stage configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct HeadersConfig {
     /// The maximum number of headers to download before committing progress to the database.
     pub commit_threshold: u64,
     /// The maximum number of headers to request from a peer at a time.
     pub downloader_batch_size: u64,
-    /// The number of times to retry downloading a set of headers.
-    pub downloader_retries: usize,
 }
 
 impl Default for HeadersConfig {
     fn default() -> Self {
-        Self { commit_threshold: 10_000, downloader_batch_size: 1000, downloader_retries: 5 }
+        Self { commit_threshold: 10_000, downloader_batch_size: 1000 }
+    }
+}
+
+impl From<HeadersConfig> for ReverseHeadersDownloaderBuilder {
+    fn from(config: HeadersConfig) -> Self {
+        ReverseHeadersDownloaderBuilder::default()
+            .request_limit(config.downloader_batch_size)
+            .stream_batch_size(config.commit_threshold as usize)
     }
 }
 
 /// Total difficulty stage configuration
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct TotalDifficultyConfig {
     /// The maximum number of total difficulty entries to sum up before committing progress to the
     /// database.
@@ -94,7 +107,7 @@ impl Default for TotalDifficultyConfig {
 }
 
 /// Body stage configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
     pub downloader_request_limit: u64,
@@ -121,23 +134,34 @@ impl Default for BodiesConfig {
     }
 }
 
+impl From<BodiesConfig> for BodiesDownloaderBuilder {
+    fn from(config: BodiesConfig) -> Self {
+        BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(config.downloader_stream_batch_size)
+            .with_request_limit(config.downloader_request_limit)
+            .with_max_buffered_responses(config.downloader_max_buffered_responses)
+            .with_concurrent_requests_range(
+                config.downloader_min_concurrent_requests..=
+                    config.downloader_max_concurrent_requests,
+            )
+    }
+}
+
 /// Sender recovery stage configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SenderRecoveryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
     pub commit_threshold: u64,
-    /// The maximum number of transactions to recover senders for concurrently.
-    pub batch_size: usize,
 }
 
 impl Default for SenderRecoveryConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000, batch_size: 1000 }
+        Self { commit_threshold: 5_000 }
     }
 }
 
 /// Execution stage configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ExecutionConfig {
     /// The maximum number of blocks to execution before committing progress to the database.
     pub commit_threshold: u64,

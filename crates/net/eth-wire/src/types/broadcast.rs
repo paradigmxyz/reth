@@ -1,23 +1,16 @@
 //! Types for broadcasting new data.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Header, TransactionSigned, H256, U128};
+use reth_primitives::{Block, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive_arbitrary(rlp)]
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewBlockHashes(
     /// New block hashes and the block number for each blockhash.
     /// Clients should request blocks using a [`GetBlockBodies`](crate::GetBlockBodies) message.
@@ -40,9 +33,8 @@ impl NewBlockHashes {
 
 /// A block hash _and_ a block number.
 #[derive_arbitrary(rlp)]
-#[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockHashNumber {
     /// The block hash
     pub hash: H256,
@@ -62,29 +54,14 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
     }
 }
 
-/// A block body, including transactions and uncle headers.
-#[derive_arbitrary(rlp, 25)]
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
-)]
-pub struct RawBlockBody {
-    /// This block's header
-    pub header: Header,
-    /// Transactions in this block.
-    pub transactions: Vec<TransactionSigned>,
-    /// Uncle block headers.
-    pub ommers: Vec<Header>,
-}
-
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
 #[derive_arbitrary(rlp, 25)]
-#[derive(
-    Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Serialize, Deserialize, Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewBlock {
     /// A new block.
-    pub block: RawBlockBody,
+    pub block: Block,
     /// The current total difficulty.
     pub td: U128,
 }
@@ -92,17 +69,8 @@ pub struct NewBlock {
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
 #[derive_arbitrary(rlp, 10)]
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Transactions(
     /// New transactions for the peer to include in its mempool.
     pub Vec<TransactionSigned>,
@@ -134,17 +102,8 @@ pub struct SharedTransactions(
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    RlpEncodableWrapper,
-    RlpDecodableWrapper,
-    Serialize,
-    Deserialize,
-    Default,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes(
     /// Transaction hashes for new transactions that have appeared on the network.
     /// Clients should request the transactions with the given hashes using a

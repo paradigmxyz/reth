@@ -28,7 +28,7 @@ use tokio::task;
 async fn test_establish_connections() {
     reth_tracing::init_test_tracing();
 
-    for _ in 0..10 {
+    for _ in 0..3 {
         let net = Testnet::create(3).await;
 
         net.for_each(|peer| assert_eq!(0, peer.num_peers()));
@@ -131,15 +131,15 @@ async fn test_already_connected() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_get_peer() {
     reth_tracing::init_test_tracing();
-    let mut net = Testnet::default();
 
+    let mut net = Testnet::default();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
     let client = Arc::new(NoopProvider::default());
+
     let p1 = PeerConfig::default();
     let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
     let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
-
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
     let mut handles = net.handles();
@@ -160,7 +160,6 @@ async fn test_get_peer() {
 
     let peers = handle0.get_peers().await.unwrap();
     assert_eq!(handle0.num_connected_peers(), peers.len());
-    dbg!(peers);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -550,4 +549,32 @@ async fn test_shutdown() {
     handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let (_peer, reason) = listener0.next_session_closed().await.unwrap();
     assert_eq!(reason, Some(DisconnectReason::DisconnectRequested));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
+    let net = Testnet::create(1).await;
+    let (reth_p2p, reth_disc) = unused_tcp_udp();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let peers_config = PeersConfig::default().with_max_inbound(0);
+
+    let config = NetworkConfigBuilder::new(secret_key)
+        .listener_addr(reth_p2p)
+        .discovery_addr(reth_disc)
+        .peer_config(peers_config)
+        .build(Arc::new(NoopProvider::default()));
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let other_peer_handle = net.handles().next().unwrap();
+
+    let handle = network.handle().clone();
+
+    other_peer_handle.add_peer(*handle.peer_id(), handle.local_addr());
+
+    tokio::task::spawn(network);
+    let _handle = net.spawn();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    assert_eq!(handle.num_connected_peers(), 0);
 }

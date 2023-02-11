@@ -68,6 +68,19 @@ impl XdgPath for ConfigPath {
     }
 }
 
+/// Returns the path to the default reth known peers file.
+///
+/// Refer to [dirs_next::config_dir] for cross-platform behavior.
+#[derive(Default, Debug, Clone)]
+#[non_exhaustive]
+pub struct KnownPeersPath;
+
+impl XdgPath for KnownPeersPath {
+    fn resolve() -> Option<PathBuf> {
+        database_path().map(|p| p.join("known-peers.json"))
+    }
+}
+
 /// Returns the path to the reth logs directory.
 ///
 /// Refer to [dirs_next::cache_dir] for cross-platform behavior.

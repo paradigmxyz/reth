@@ -1,14 +1,14 @@
 use crate::{
-    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
+    Stage, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
+    models::{StoredBlockBody, StoredBlockOmmers},
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
     consensus::Consensus,
@@ -81,6 +81,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Update the header range on the downloader
         self.downloader.set_download_range(start_block..end_block + 1)?;
 
+        // Cursor used to get total difficulty
+        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
+
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
@@ -107,20 +110,19 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
         for response in downloaded_bodies {
             // Write block
-            let block_header = response.header();
-            let numhash: BlockNumHash = block_header.num_hash().into();
+            let block_number = response.block_number();
 
             match response {
                 BlockResponse::Full(block) => {
                     body_cursor.append(
-                        numhash,
+                        block_number,
                         StoredBlockBody {
                             start_tx_id: current_tx_id,
                             tx_count: block.body.len() as u64,
                         },
                     )?;
                     ommers_cursor.append(
-                        numhash,
+                        block_number,
                         StoredBlockOmmers {
                             ommers: block
                                 .ommers
@@ -143,7 +145,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 }
                 BlockResponse::Empty(_) => {
                     body_cursor.append(
-                        numhash,
+                        block_number,
                         StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
                     )?;
                 }
@@ -153,13 +155,17 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Increment the transition if the block contains an addition block reward.
             // If the block does not have a reward, the transition will be the same as the
             // transition at the last transaction of this block.
-            let has_reward = self.consensus.has_block_reward(numhash.number());
+            let td = td_cursor
+                .seek(block_number)?
+                .ok_or(DatabaseIntegrityError::TotalDifficulty { number: block_number })?
+                .1;
+            let has_reward = self.consensus.has_block_reward(td.into());
             if has_reward {
                 transition_id += 1;
             }
-            block_transition_cursor.append(numhash.number(), transition_id)?;
+            block_transition_cursor.append(block_number, transition_id)?;
 
-            highest_block = numhash.number();
+            highest_block = block_number;
         }
 
         // The stage is "done" if:
@@ -186,18 +192,18 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
 
         let mut rev_walker = body_cursor.walk_back(None)?;
-        while let Some((key, body)) = rev_walker.next().transpose()? {
-            if key.number() <= input.unwind_to {
+        while let Some((number, body)) = rev_walker.next().transpose()? {
+            if number <= input.unwind_to {
                 break
             }
 
             // Delete the ommers value if any
-            if ommers_cursor.seek_exact(key)?.is_some() {
+            if ommers_cursor.seek_exact(number)?.is_some() {
                 ommers_cursor.delete_current()?;
             }
 
             // Delete the block transition if any
-            if block_transition_cursor.seek_exact(key.number())?.is_some() {
+            if block_transition_cursor.seek_exact(number)?.is_some() {
                 block_transition_cursor.delete_current()?;
             }
 
@@ -214,7 +220,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             }
 
             // Delete the current body value
-            tx.delete::<tables::BlockBodies>(key, None)?;
+            tx.delete::<tables::BlockBodies>(number, None)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -404,7 +410,7 @@ mod tests {
             cursor::DbCursorRO,
             database::Database,
             mdbx::{Env, WriteMap},
-            models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
+            models::{StoredBlockBody, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
         };
@@ -505,11 +511,10 @@ mod tests {
                 let start = input.stage_progress.unwrap_or_default();
                 let end = input.previous_stage_progress() + 1;
                 let blocks = random_block_range(start..end, GENESIS_HASH, 0..2);
-                self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+                self.tx.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
-                        let key: BlockNumHash = (progress.number, progress.hash()).into();
                         let body = StoredBlockBody {
                             start_tx_id: 0,
                             tx_count: progress.body.len() as u64,
@@ -523,11 +528,14 @@ mod tests {
                         let last_transition_id = progress.body.len() as u64;
                         let block_transition_id = last_transition_id + 1; // for block reward
 
-                        tx.put::<tables::BlockTransitionIndex>(key.number(), block_transition_id)?;
-                        tx.put::<tables::BlockBodies>(key, body)?;
+                        tx.put::<tables::BlockTransitionIndex>(
+                            progress.number,
+                            block_transition_id,
+                        )?;
+                        tx.put::<tables::BlockBodies>(progress.number, body)?;
                         if !progress.is_empty() {
                             tx.put::<tables::BlockOmmers>(
-                                key,
+                                progress.number,
                                 StoredBlockOmmers { ommers: vec![] },
                             )?;
                         }
@@ -554,13 +562,9 @@ mod tests {
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 self.tx
-                    .ensure_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| {
-                        key.number()
-                    })?;
+                    .ensure_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| key)?;
                 self.tx
-                    .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| {
-                        key.number()
-                    })?;
+                    .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| key)?;
                 self.tx.ensure_no_entry_above::<tables::BlockTransitionIndex, _>(
                     input.unwind_to,
                     |key| key,
@@ -601,6 +605,7 @@ mod tests {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
+                    let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
@@ -612,30 +617,30 @@ mod tests {
                         None => return Ok(()),
                     };
 
-                    let mut prev_key: Option<BlockNumHash> = None;
+                    let mut prev_number: Option<BlockNumber> = None;
                     let mut expected_transition_id = 0;
+
                     for entry in bodies_cursor.walk(Some(first_body_key))? {
-                        let (key, body) = entry?;
+                        let (number, body) = entry?;
 
                         // Validate sequentiality only after prev progress,
                         // since the data before is mocked and can contain gaps
-                        if key.number() > prev_progress {
-                            if let Some(prev_key) = prev_key {
-                                assert_eq!(prev_key.number() + 1, key.number(), "Body entries must be sequential");
+                        if number > prev_progress {
+                            if let Some(prev_key) = prev_number {
+                                assert_eq!(prev_key + 1, number, "Body entries must be sequential");
                             }
                         }
 
                         // Validate that the current entry is below or equals to the highest allowed block
                         assert!(
-                            key.number() <= highest_block,
-                            "We wrote a block body outside of our synced range. Found block with number {}, highest block according to stage is {}",
-                            key.number(), highest_block
+                            number <= highest_block,
+                            "We wrote a block body outside of our synced range. Found block with number {number}, highest block according to stage is {highest_block}",
                         );
 
-                        let (_, header) = headers_cursor.seek_exact(key)?.expect("to be present");
+                        let (_, header) = headers_cursor.seek_exact(number)?.expect("to be present");
                         // Validate that ommers exist
                         assert_matches!(
-                            ommers_cursor.seek_exact(key),
+                            ommers_cursor.seek_exact(number),
                             Ok(ommers) => {
                                 assert!(if header.is_empty() { ommers.is_none() } else { ommers.is_some() })
                             },
@@ -653,15 +658,19 @@ mod tests {
                         }
 
                         // Increment expected id for block reward.
-                        if self.consensus.has_block_reward(key.number()) {
+                        let td = td_cursor
+                            .seek(number)?
+                            .expect("Missing TD for header")
+                            .1;
+                        if self.consensus.has_block_reward(td.into()) {
                             expected_transition_id += 1;
                         }
 
                         // Validate that block transition exists
-                        assert_eq!(block_transition_cursor.seek_exact(key.number()).expect("To be okay").expect("Block transition to be present").1,expected_transition_id);
+                        assert_eq!(block_transition_cursor.seek_exact(number).expect("To be okay").expect("Block transition to be present").1,expected_transition_id);
 
 
-                        prev_key = Some(key);
+                        prev_number = Some(number);
                     }
                     Ok(())
                 })?;
@@ -726,9 +735,8 @@ mod tests {
                         let mut headers = Vec::default();
                         for entry in walker {
                             let (num, hash) = entry?;
-                            let (_, header) = header_cursor
-                                .seek_exact((num, hash).into())?
-                                .expect("missing header");
+                            let (_, header) =
+                                header_cursor.seek_exact(num)?.expect("missing header");
                             headers.push(SealedHeader::new(header, hash));
                         }
                         Ok(headers)

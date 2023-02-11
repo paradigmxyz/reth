@@ -52,7 +52,7 @@ async fn handle_accepted<Pool, Client>(
 ) {
 }
 
-/// Container type `EthApi`
+/// Container type `EthPubSub`
 #[derive(Debug)]
 struct EthPubSubInner<Pool, Client> {
     /// The transaction pool.

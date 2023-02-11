@@ -11,6 +11,7 @@ reth-codecs = { path = "../storage/codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../rpc/rpc-types" }
 reth-network-api = { path = "../net/network-api"}
+revm-primitives = "1.0"
 async-trait = "0.1.57"
 thiserror = "1.0.37"
 auto_impl = "1.0"
@@ -21,7 +22,6 @@ bytes = "1.2"
 reth-eth-wire = { path = "../net/eth-wire" }
 
 # codecs
-serde = { version = "1.0.*", default-features = false }
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 futures = "0.3.25"
 tokio-stream = "0.1.11"

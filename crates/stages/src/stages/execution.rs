@@ -5,7 +5,7 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
+    models::{StoredBlockBody, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -29,6 +29,7 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// Input tables:
 /// - [tables::CanonicalHeaders] get next block to execute.
 /// - [tables::Headers] get for revm environment variables.
+/// - [tables::HeaderTD]
 /// - [tables::BlockBodies] to get tx number
 /// - [tables::Transactions] to execute
 ///
@@ -88,10 +89,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
-        // Get next canonical block hashes to execute.
-        let mut canonicals = tx.cursor_read::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
-        let mut headers = tx.cursor_read::<tables::Headers>()?;
+        let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
+        // Get total difficulty
+        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
         // Get bodies with canonical hashes.
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
@@ -101,30 +102,19 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Skip sender recovery and load signer from database.
         let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
 
-        // get canonical blocks (num,hash)
-        let canonical_batch = canonicals
+        // Get block headers and bodies
+        let block_batch = headers_cursor
             .walk_range(start_block..end_block + 1)?
-            .map(|i| i.map(BlockNumHash))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // Get block headers and bodies from canonical hashes
-        let block_batch = canonical_batch
-            .iter()
-            .map(|key| -> Result<(Header, StoredBlockBody, Vec<Header>), StageError> {
-                // NOTE: It probably will be faster to fetch all items from one table with cursor,
-                // but to reduce complexity we are using `seek_exact` to skip some
-                // edge cases that can happen.
-                let (_, header) =
-                    headers.seek_exact(*key)?.ok_or(DatabaseIntegrityError::Header {
-                        number: key.number(),
-                        hash: key.hash(),
-                    })?;
+            .map(|entry| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
+                let (number, header) = entry?;
+                let (_, td) = td_cursor
+                    .seek_exact(number)?
+                    .ok_or(DatabaseIntegrityError::TotalDifficulty { number })?;
                 let (_, body) = bodies_cursor
-                    .seek_exact(*key)?
-                    .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
-
-                Ok((header, body, stored_ommers.ommers))
+                    .seek_exact(number)?
+                    .ok_or(DatabaseIntegrityError::BlockBody { number })?;
+                let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
+                Ok((header, td.into(), body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -132,10 +122,11 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
         // Fetch transactions, execute them and generate results
-        let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
-        for (header, body, ommers) in block_batch.into_iter() {
+        let mut block_change_patches = Vec::with_capacity(block_batch.len());
+        for (header, td, body, ommers) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
+
             // iterate over all transactions
             let mut tx_walker = tx_cursor.walk(Some(body.start_tx_id))?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
@@ -180,6 +171,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                         // execute and store output to results
                         reth_executor::executor::execute_and_verify_receipt(
                             &Block { header, body: transactions, ommers },
+                            td,
                             Some(signers),
                             &self.chain_spec,
                             &mut state_provider,
@@ -196,12 +188,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut current_transition_id = tx.get_block_transition(last_block)?;
         info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
 
-        let spurious_dragon_activation =
-            self.chain_spec.fork_block(Hardfork::SpuriousDragon).unwrap_or_default();
-
         // apply changes to plain database.
         for (results, block_number) in block_change_patches.into_iter() {
-            let spurious_dragon_active = block_number >= spurious_dragon_activation;
+            let spurious_dragon_active =
+                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
             // insert state change set
             for result in results.changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {

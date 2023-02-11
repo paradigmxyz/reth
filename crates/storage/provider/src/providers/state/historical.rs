@@ -1,4 +1,7 @@
-use crate::{AccountProvider, BlockHashProvider, Error, StateProvider};
+use crate::{
+    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider, Error,
+    StateProvider,
+};
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -130,32 +133,22 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
     pub fn new(tx: TX, transition: TransitionId) -> Self {
         Self { tx, transition, _phantom: PhantomData {} }
     }
+
+    /// Returns a new provider that takes the `TX` as reference
+    #[inline(always)]
+    fn as_ref<'b>(&'b self) -> HistoricalStateProviderRef<'a, 'b, TX> {
+        HistoricalStateProviderRef::new(&self.tx, self.transition)
+    }
 }
 
-/// Derive trait implementation for [HistoricalStateProvider]
-/// from [HistoricalStateProviderRef] type.
-///
-/// Used to implement provider traits.
-macro_rules! derive_from_ref {
-    ($trait:ident, $(fn $func:ident(&self$(, )?$($arg_name:ident: $arg:ty),*) -> $ret:ty),*) => {
-        impl<'a, TX: DbTx<'a>> $trait for HistoricalStateProvider<'a, TX> {
-            $(fn $func(&self, $($arg_name: $arg),*) -> $ret {
-                HistoricalStateProviderRef::new(&self.tx, self.transition).$func($($arg_name),*)
-            })*
-        }
-    };
-}
-
-derive_from_ref!(AccountProvider, fn basic_account(&self, address: Address) -> Result<Option<Account>>);
-derive_from_ref!(BlockHashProvider, fn block_hash(&self, number: U256) -> Result<Option<H256>>);
-derive_from_ref!(
-    StateProvider,
-    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>,
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>
-);
+// Delegates all provider impls to [HistoricalStateProviderRef]
+delegate_provider_impls!(HistoricalStateProvider<'a, TX>);
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        AccountProvider, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+    };
     use reth_db::{
         database::Database,
         mdbx::test_utils::create_test_rw_db,
@@ -166,11 +159,15 @@ mod tests {
     };
     use reth_primitives::{hex_literal::hex, Account, StorageEntry, H160, H256, U256};
 
-    use crate::{AccountProvider, HistoricalStateProviderRef, StateProvider};
-
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));
     const STORAGE: H256 =
         H256(hex!("0000000000000000000000000000000000000000000000000000000000000001"));
+
+    fn assert_state_provider<T: StateProvider>() {}
+    #[allow(unused)]
+    fn assert_historical_state_provider<'txn, T: DbTx<'txn> + 'txn>() {
+        assert_state_provider::<HistoricalStateProvider<'txn, T>>();
+    }
 
     #[test]
     fn history_provider_get_account() {

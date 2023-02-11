@@ -1,77 +1,61 @@
 use serde::{Deserialize, Serialize};
 
+use crate::{ChainSpec, ForkCondition, ForkFilter, ForkId};
 use std::{fmt::Display, str::FromStr};
 
-use crate::{BlockNumber, ChainSpec, ForkFilter, ForkHash, ForkId};
-
-#[allow(missing_docs)]
-#[derive(
-    Debug, Default, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+/// The name of an Ethereum hardfork.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Hardfork {
+    /// Frontier.
     Frontier,
+    /// Homestead.
     Homestead,
+    /// The DAO fork.
     Dao,
+    /// Tangerine.
     Tangerine,
+    /// Spurious Dragon.
     SpuriousDragon,
+    /// Byzantium.
     Byzantium,
+    /// Constantinople.
     Constantinople,
+    /// Petersburg.
     Petersburg,
+    /// Istanbul.
     Istanbul,
-    Muirglacier,
+    /// Muir Glacier.
+    MuirGlacier,
+    /// Berlin.
     Berlin,
+    /// London.
     London,
+    /// Arrow Glacier.
     ArrowGlacier,
+    /// Gray Glacier.
     GrayGlacier,
-    MergeNetsplit,
+    /// Paris.
+    Paris,
+    /// Shanghai.
     Shanghai,
-    #[default]
-    Latest,
 }
 
 impl Hardfork {
-    /// Compute the forkid for the given [`ChainSpec`].
-    ///
-    /// This assumes the current hardfork's block number is the current head and uses known future
-    /// hardforks from the [`ChainSpec`] to set the forkid's `next` field.
-    ///
-    /// If the hard fork is not present in the [`ChainSpec`] then `None` is returned.
-    pub fn fork_id(&self, chain_spec: &ChainSpec) -> Option<ForkId> {
-        if let Some(fork_block) = chain_spec.fork_block(*self) {
-            let mut curr_forkhash = ForkHash::from(chain_spec.genesis_hash());
-            let mut curr_block_number = 0;
-
-            for (_, b) in chain_spec.forks_iter() {
-                if fork_block >= b {
-                    if b != curr_block_number {
-                        curr_forkhash += b;
-                        curr_block_number = b;
-                    }
-                } else {
-                    return Some(ForkId { hash: curr_forkhash, next: b })
-                }
-            }
-            Some(ForkId { hash: curr_forkhash, next: 0 })
-        } else {
-            None
+    /// Get the [ForkId] for this hardfork in the given spec, if the fork is activated at any point.
+    pub fn fork_id(&self, spec: &ChainSpec) -> Option<ForkId> {
+        match spec.fork(*self) {
+            ForkCondition::Never => None,
+            _ => Some(spec.fork_id(&spec.fork(*self).satisfy())),
         }
     }
 
-    /// Creates a [`ForkFilter`](crate::ForkFilter) for the given hardfork.
-    ///
-    /// This assumes the current hardfork's block number is the current head and uses known future
-    /// hardforks from the [`ChainSpec`] to initialize the filter.
-    ///
-    /// This returns `None` if the hardfork is not present in the given [`ChainSpec`].
-    pub fn fork_filter(&self, chain_spec: &ChainSpec) -> Option<ForkFilter> {
-        if let Some(fork_block) = chain_spec.fork_block(*self) {
-            let future_forks: Vec<BlockNumber> =
-                chain_spec.forks_iter().filter(|(_, b)| b > &fork_block).map(|(_, b)| b).collect();
-
-            // pass in the chain spec's genesis hash to initialize the fork filter
-            Some(ForkFilter::new(fork_block, chain_spec.genesis_hash(), future_forks))
-        } else {
-            None
+    /// Get the [ForkFilter] for this hardfork in the given spec, if the fork is activated at any
+    /// point.
+    pub fn fork_filter(&self, spec: &ChainSpec) -> Option<ForkFilter> {
+        match spec.fork(*self) {
+            ForkCondition::Never => None,
+            _ => Some(spec.fork_filter(spec.fork(*self).satisfy())),
         }
     }
 }
@@ -82,22 +66,23 @@ impl FromStr for Hardfork {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_lowercase();
         let hardfork = match s.as_str() {
-            "frontier" | "1" => Hardfork::Frontier,
-            "homestead" | "2" => Hardfork::Homestead,
-            "dao" | "3" => Hardfork::Dao,
-            "tangerine" | "4" => Hardfork::Tangerine,
-            "spuriousdragon" | "5" => Hardfork::SpuriousDragon,
-            "byzantium" | "6" => Hardfork::Byzantium,
-            "constantinople" | "7" => Hardfork::Constantinople,
-            "petersburg" | "8" => Hardfork::Petersburg,
-            "istanbul" | "9" => Hardfork::Istanbul,
-            "muirglacier" | "10" => Hardfork::Muirglacier,
-            "berlin" | "11" => Hardfork::Berlin,
-            "london" | "12" => Hardfork::London,
-            "arrowglacier" | "13" => Hardfork::ArrowGlacier,
+            "frontier" => Hardfork::Frontier,
+            "homestead" => Hardfork::Homestead,
+            "dao" => Hardfork::Dao,
+            "tangerine" => Hardfork::Tangerine,
+            "spuriousdragon" => Hardfork::SpuriousDragon,
+            "byzantium" => Hardfork::Byzantium,
+            "constantinople" => Hardfork::Constantinople,
+            "petersburg" => Hardfork::Petersburg,
+            "istanbul" => Hardfork::Istanbul,
+            "muirglacier" => Hardfork::MuirGlacier,
+            "berlin" => Hardfork::Berlin,
+            "london" => Hardfork::London,
+            "arrowglacier" => Hardfork::ArrowGlacier,
             "grayglacier" => Hardfork::GrayGlacier,
-            "latest" | "14" => Hardfork::Latest,
-            _ => return Err(format!("Unknown hardfork {s}")),
+            "paris" => Hardfork::Paris,
+            "shanghai" => Hardfork::Shanghai,
+            _ => return Err(format!("Unknown hardfork: {s}")),
         };
         Ok(hardfork)
     }

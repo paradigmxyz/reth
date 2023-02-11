@@ -1,10 +1,10 @@
 use reth_db::{
-    models::{BlockNumHash, StoredBlockBody, StoredBlockOmmers},
+    models::{StoredBlockBody, StoredBlockOmmers},
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{provider::Error as ProviderError, Result};
-use reth_primitives::SealedBlock;
+use reth_primitives::{SealedBlock, U256};
 
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.
 ///
@@ -19,15 +19,19 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     has_block_reward: bool,
     parent_tx_num_transition_id: Option<(u64, u64)>,
 ) -> Result<()> {
-    let block_num_hash = BlockNumHash((block.number, block.hash()));
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
     // Put header with canonical hashes.
-    tx.put::<tables::Headers>(block_num_hash, block.header.as_ref().clone())?;
+    tx.put::<tables::Headers>(block.number, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
+    tx.put::<tables::HeaderTD>(
+        block.number,
+        if has_block_reward { U256::ZERO } else { U256::from(58_750_000_000_000_000_000_000u128) }
+            .into(),
+    )?;
 
     // insert body ommers data
     tx.put::<tables::BlockOmmers>(
-        block_num_hash,
+        block.number,
         StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
     )?;
 
@@ -38,15 +42,9 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
             (0, 0)
         } else {
             let prev_block_num = block.number - 1;
-            let prev_block_hash = tx
-                .get::<tables::CanonicalHeaders>(prev_block_num)?
-                .ok_or(ProviderError::BlockNumber { block_number: prev_block_num })?;
             let prev_body = tx
-                .get::<tables::BlockBodies>((prev_block_num, prev_block_hash).into())?
-                .ok_or(ProviderError::BlockBody {
-                    block_number: prev_block_num,
-                    block_hash: prev_block_hash,
-                })?;
+                .get::<tables::BlockBodies>(prev_block_num)?
+                .ok_or(ProviderError::BlockBody { block_number: prev_block_num })?;
             let last_transition_id = tx
                 .get::<tables::BlockTransitionIndex>(prev_block_num)?
                 .ok_or(ProviderError::BlockTransition { block_number: prev_block_num })?;
@@ -55,7 +53,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     // insert body data
     tx.put::<tables::BlockBodies>(
-        block_num_hash,
+        block.number,
         StoredBlockBody { start_tx_id: current_tx_id, tx_count: block.body.len() as u64 },
     )?;
 

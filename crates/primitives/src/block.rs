@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 /// Ethereum full block.
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive_arbitrary(rlp, 25)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 pub struct Block {
     /// Block header.
     pub header: Header,
@@ -23,7 +26,10 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive_arbitrary(rlp, 10)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,

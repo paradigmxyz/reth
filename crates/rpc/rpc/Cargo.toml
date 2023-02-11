@@ -16,7 +16,7 @@ reth-rpc-api = { path = "../rpc-api" }
 reth-rlp = { path = "../../rlp" }
 reth-rpc-types = { path = "../rpc-types" }
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
-reth-transaction-pool = { path = "../../transaction-pool" }
+reth-transaction-pool = { path = "../../transaction-pool", features=["test-utils"]}
 reth-network-api = { path = "../../net/network-api" }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 
@@ -49,3 +49,4 @@ tracing = "0.1"
 
 [dev-dependencies]
 jsonrpsee = { version = "0.16", features = ["client"]}
+

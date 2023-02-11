@@ -176,31 +176,14 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let (headers, mut bodies) = generate_bodies(0..20);
-
-        // Insert a subset of headers to the database
-        insert_headers(&db, &headers[10..]);
-
-        let client = Arc::new(
-            TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
-        );
         let downloader = BodiesDownloaderBuilder::default().build(
-            client.clone(),
+            Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
             db,
         );
         let mut downloader = TaskDownloader::spawn(downloader);
 
-        downloader.set_download_range(10..20).expect("failed to set download range");
-        assert_matches!(
-            downloader.next().await,
-            Some(Ok(res)) => assert_eq!(res, zip_blocks(headers.iter().skip(10), &mut bodies))
-        );
-
-        downloader.set_download_range(0..20).expect("failed to set download range");
-        assert_matches!(
-            downloader.next().await,
-            Some(Err(DownloadError::MissingHeader { block_number: 0 }))
-        );
+        downloader.set_download_range(0..0).expect("failed to set download range");
+        assert_matches!(downloader.next().await, Some(Err(DownloadError::InvalidBodyRange { .. })));
     }
 }

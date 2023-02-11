@@ -8,7 +8,8 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::U256;
+use reth_interfaces::consensus::Error;
+use reth_primitives::{ChainSpec, Hardfork, EMPTY_OMMER_ROOT, MAINNET, U256};
 use tracing::*;
 
 const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
@@ -18,15 +19,17 @@ const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
 /// This stage walks over inserted headers and computes total difficulty
 /// at each block. The entries are inserted into [`HeaderTD`][reth_db::tables::HeaderTD]
 /// table.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TotalDifficultyStage {
+    /// The chain specification.
+    pub chain_spec: ChainSpec,
     /// The number of table entries to commit at once
     pub commit_threshold: u64,
 }
 
 impl Default for TotalDifficultyStage {
     fn default() -> Self {
-        Self { commit_threshold: 100_000 }
+        Self { chain_spec: MAINNET.clone(), commit_threshold: 100_000 }
     }
 }
 
@@ -53,22 +56,45 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
-        let last_header_key = tx.get_block_numhash(input.stage_progress.unwrap_or_default())?;
+        let last_header_number = input.stage_progress.unwrap_or_default();
         let last_entry = cursor_td
-            .seek_exact(last_header_key)?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: last_header_key.number() })?;
+            .seek_exact(last_header_number)?
+            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: last_header_number })?;
 
         let mut td: U256 = last_entry.1.into();
-        debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_key.number(), "Last total difficulty entry");
+        debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
-        let start_key = tx.get_block_numhash(start_block)?;
         let walker = cursor_headers
-            .walk(Some(start_key))?
+            .walk(Some(start_block))?
             .take_while(|e| e.as_ref().map(|(_, h)| h.number <= end_block).unwrap_or_default());
         // Walk over newly inserted headers, update & insert td
         for entry in walker {
             let (key, header) = entry?;
             td += header.difficulty;
+
+            if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(td) {
+                if header.difficulty != U256::ZERO {
+                    return Err(StageError::Validation {
+                        block: header.number,
+                        error: Error::TheMergeDifficultyIsNotZero,
+                    })
+                }
+
+                if header.nonce != 0 {
+                    return Err(StageError::Validation {
+                        block: header.number,
+                        error: Error::TheMergeNonceIsNotZero,
+                    })
+                }
+
+                if header.ommers_hash != EMPTY_OMMER_ROOT {
+                    return Err(StageError::Validation {
+                        block: header.number,
+                        error: Error::TheMergeOmmerRootIsNotEmpty,
+                    })
+                }
+            }
+
             cursor_td.append(key, td.into())?;
         }
 
@@ -84,7 +110,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::total_difficulty", to_block = input.unwind_to, "Unwinding");
-        tx.unwind_table_by_num_hash::<tables::HeaderTD>(input.unwind_to)?;
+        tx.unwind_table_by_num::<tables::HeaderTD>(input.unwind_to)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
@@ -93,7 +119,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 mod tests {
     use reth_db::transaction::DbTx;
     use reth_interfaces::test_utils::generators::{random_header, random_header_range};
-    use reth_primitives::{BlockNumber, SealedHeader};
+    use reth_primitives::{BlockNumber, SealedHeader, MAINNET};
 
     use super::*;
     use crate::test_utils::{
@@ -162,7 +188,10 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            TotalDifficultyStage { commit_threshold: self.commit_threshold }
+            TotalDifficultyStage {
+                chain_spec: MAINNET.clone(),
+                commit_threshold: self.commit_threshold,
+            }
         }
     }
 
@@ -181,7 +210,7 @@ mod tests {
                     .map(|(_, v)| v)
                     .unwrap_or_default()
                     .into();
-                tx.put::<tables::HeaderTD>(head.num_hash().into(), (td + head.difficulty).into())
+                tx.put::<tables::HeaderTD>(head.number, (td + head.difficulty).into())
             })?;
 
             // use previous progress as seed size
@@ -207,15 +236,14 @@ mod tests {
             match output {
                 Some(output) if output.stage_progress > initial_stage_progress => {
                     self.tx.query(|tx| {
-                        let start_hash = tx
-                            .get::<tables::CanonicalHeaders>(initial_stage_progress)?
-                            .expect("no initial header hash");
-                        let start_key = (initial_stage_progress, start_hash).into();
                         let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
-                        let (_, mut current_header) =
-                            header_cursor.seek_exact(start_key)?.expect("no initial header");
-                        let mut td: U256 =
-                            tx.get::<tables::HeaderTD>(start_key)?.expect("no initial td").into();
+                        let (_, mut current_header) = header_cursor
+                            .seek_exact(initial_stage_progress)?
+                            .expect("no initial header");
+                        let mut td: U256 = tx
+                            .get::<tables::HeaderTD>(initial_stage_progress)?
+                            .expect("no initial td")
+                            .into();
 
                         while let Some((next_key, next_header)) = header_cursor.next()? {
                             assert_eq!(current_header.number + 1, next_header.number);
@@ -243,7 +271,7 @@ mod tests {
 
     impl TotalDifficultyTestRunner {
         fn check_no_td_above(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            self.tx.ensure_no_entry_above::<tables::HeaderTD, _>(block, |key| key.number())?;
+            self.tx.ensure_no_entry_above::<tables::HeaderTD, _>(block, |num| num)?;
             Ok(())
         }
 

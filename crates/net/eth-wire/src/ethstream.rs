@@ -266,7 +266,7 @@ mod tests {
     use ethers_core::types::Chain;
     use futures::{SinkExt, StreamExt};
     use reth_ecies::{stream::ECIESStream, util::pk2id};
-    use reth_primitives::{ForkFilter, H256, U256};
+    use reth_primitives::{ForkFilter, Head, H256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
@@ -274,7 +274,7 @@ mod tests {
     #[tokio::test]
     async fn can_handshake() {
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
+        let fork_filter = ForkFilter::new(Head::default(), genesis, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,
@@ -408,7 +408,7 @@ mod tests {
         );
 
         let genesis = H256::random();
-        let fork_filter = ForkFilter::new(0, genesis, Vec::<u64>::new());
+        let fork_filter = ForkFilter::new(Head::default(), genesis, Vec::new());
 
         let status = Status {
             version: EthVersion::Eth67 as u8,

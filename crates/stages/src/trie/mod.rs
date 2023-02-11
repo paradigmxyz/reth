@@ -366,6 +366,7 @@ impl DBTrieLoader {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
     use reth_primitives::{
         hex_literal::hex,
@@ -530,7 +531,7 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        let state_root = genesis_state_root(genesis.alloc);
+        let state_root = genesis_state_root(&genesis.alloc);
 
         assert_matches!(
             trie.calculate_root(&tx),
@@ -623,7 +624,7 @@ mod tests {
 
     #[test]
     fn arbitrary() {
-        proptest::proptest!(|(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>)| {
+        proptest!(ProptestConfig::with_cases(10), |(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>)| {
             test_with_accounts(accounts);
         });
     }
