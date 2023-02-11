@@ -12,9 +12,8 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
+use reth_provider::Transaction;
 use std::{borrow::Borrow, path::Path, sync::Arc};
-
-use crate::db::Transaction;
 
 /// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.

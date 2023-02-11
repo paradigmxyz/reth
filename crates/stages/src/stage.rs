@@ -1,9 +1,10 @@
 use std::ops::RangeInclusive;
 
-use crate::{db::Transaction, error::StageError, id::StageId};
+use crate::{error::StageError, id::StageId};
 use async_trait::async_trait;
 use reth_db::database::Database;
 use reth_primitives::BlockNumber;
+use reth_provider::Transaction;
 
 /// Stage execution input, see [Stage::execute].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]

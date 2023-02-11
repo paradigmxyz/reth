@@ -1,7 +1,4 @@
-use crate::{
-    db::Transaction, DatabaseIntegrityError, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -12,8 +9,10 @@ use reth_db::{
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
+    provider::Error as ProviderError,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
+use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
 
@@ -60,7 +59,7 @@ where
         let mut header_cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let (head_num, _) = header_cursor
             .seek_exact(stage_progress)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
+            .ok_or(ProviderError::CanonicalHeader { block_number: stage_progress })?;
         // Check if the next entry is congruent
         Ok(header_cursor.next()?.map(|(next_num, _)| head_num + 1 == next_num).unwrap_or_default())
     }
@@ -80,12 +79,12 @@ where
         // Get head hash and reposition the cursor
         let (head_num, head_hash) = cursor
             .seek_exact(stage_progress)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number: stage_progress })?;
+            .ok_or(ProviderError::CanonicalHeader { block_number: stage_progress })?;
 
         // Construct head
         let (_, head) = header_cursor
             .seek_exact(head_num)?
-            .ok_or(DatabaseIntegrityError::Header { number: head_num })?;
+            .ok_or(ProviderError::Header { number: head_num })?;
         let local_head = SealedHeader::new(head, head_hash);
 
         // Look up the next header
@@ -94,7 +93,7 @@ where
             .map(|(next_num, next_hash)| -> Result<SealedHeader, StageError> {
                 let (_, next) = header_cursor
                     .seek_exact(next_num)?
-                    .ok_or(DatabaseIntegrityError::Header { number: next_num })?;
+                    .ok_or(ProviderError::Header { number: next_num })?;
                 Ok(SealedHeader::new(next, next_hash))
             })
             .transpose()?;
@@ -500,8 +499,8 @@ mod tests {
         // Empty database
         assert_matches!(
             stage.get_sync_gap(&tx, stage_progress).await,
-            Err(StageError::DatabaseIntegrity(DatabaseIntegrityError::CanonicalHeader { number }))
-                if number == stage_progress
+            Err(StageError::DatabaseIntegrity(ProviderError::CanonicalHeader { block_number }))
+                if block_number == stage_progress
         );
 
         // Checkpoint and no gap

@@ -1,12 +1,10 @@
-use crate::{
-    db::Transaction, error::*, util::opt, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput,
-};
+use crate::{error::*, util::opt, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use metrics::Gauge;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
 use reth_metrics_derive::Metrics;
 use reth_primitives::BlockNumber;
+use reth_provider::Transaction;
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
@@ -421,7 +419,7 @@ mod tests {
     use crate::{StageId, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
-    use reth_interfaces::{consensus, sync::NoopSyncStateUpdate};
+    use reth_interfaces::{consensus, provider::Error as ProviderError, sync::NoopSyncStateUpdate};
     use tokio_stream::StreamExt;
     use utils::TestStage;
 
@@ -682,15 +680,15 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
         let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
             .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
-                StageError::DatabaseIntegrity(DatabaseIntegrityError::BlockBody { number: 5 }),
+                StageError::DatabaseIntegrity(ProviderError::BlockBody { number: 5 }),
             )))
             .build();
         let result = pipeline.run(db).await;
         assert_matches!(
             result,
-            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
-                DatabaseIntegrityError::BlockBody { number: 5 }
-            )))
+            Err(PipelineError::Stage(StageError::DatabaseIntegrity(ProviderError::BlockBody {
+                number: 5
+            })))
         );
     }
 

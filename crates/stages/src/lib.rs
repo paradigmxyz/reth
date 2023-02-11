@@ -49,7 +49,6 @@
 //!     .build();
 //! #
 //! ```
-mod db;
 mod error;
 mod id;
 mod pipeline;
@@ -69,7 +68,6 @@ pub mod stages;
 
 pub mod sets;
 
-pub use db::Transaction;
 pub use error::*;
 pub use id::*;
 pub use pipeline::*;
