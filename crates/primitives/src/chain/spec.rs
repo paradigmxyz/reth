@@ -32,7 +32,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
             Hardfork::Paris,
             ForkCondition::TTD {
                 fork_block: None,
-                total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+                total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
             },
         ),
     ]),
@@ -480,7 +480,12 @@ impl ForkCondition {
     /// This will return false for any condition that is not TTD-based.
     pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
         if let ForkCondition::TTD { total_difficulty, .. } = self {
-            ttd - difficulty >= *total_difficulty
+            if ttd >= difficulty {
+                (ttd - difficulty) >= *total_difficulty
+            } else {
+                // invalid difficulty
+                false
+            }
         } else {
             false
         }
