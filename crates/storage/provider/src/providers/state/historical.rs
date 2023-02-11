@@ -142,7 +142,7 @@ impl<'a, TX: DbTx<'a>> HistoricalStateProvider<'a, TX> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<'a, TX>);
+delegate_provider_impls!(HistoricalStateProvider<'a, TX> where [TX: DbTx<'a>]);
 
 #[cfg(test)]
 mod tests {

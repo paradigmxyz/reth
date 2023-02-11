@@ -76,7 +76,7 @@ impl<'a, TX: DbTx<'a>> LatestStateProvider<'a, TX> {
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
-delegate_provider_impls!(LatestStateProvider<'a, TX>);
+delegate_provider_impls!(LatestStateProvider<'a, TX> where [TX: DbTx<'a>]);
 
 #[cfg(test)]
 mod tests {
