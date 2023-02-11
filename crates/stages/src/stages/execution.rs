@@ -61,27 +61,14 @@ pub struct ExecutionStage {
 
 impl Default for ExecutionStage {
     fn default() -> Self {
-        Self { chain_spec: MAINNET.clone(), commit_threshold: 1000 }
+        Self { chain_spec: MAINNET.clone(), commit_threshold: 1_000 }
     }
 }
 
 impl ExecutionStage {
-    /// Create new execution stage with specified config.
-    pub fn new(chain_spec: ChainSpec, commit_threshold: u64) -> Self {
-        Self { chain_spec, commit_threshold }
-    }
-}
-
-#[async_trait::async_trait]
-impl<DB: Database> Stage<DB> for ExecutionStage {
-    /// Return the id of the stage
-    fn id(&self) -> StageId {
-        EXECUTION
-    }
-
-    /// Execute the stage
-    async fn execute(
-        &mut self,
+    /// Execute the stage.
+    pub fn execute_inner<DB: Database>(
+        &self,
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
@@ -159,27 +146,13 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
             trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
-            // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
-            // revm can take more then default allocated stack space. For this case we are using
-            // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
-            // we can see to set more accurate stack size or even optimize revm to move more data to
-            // heap.
-            let changeset = std::thread::scope(|scope| {
-                let handle = std::thread::Builder::new()
-                    .stack_size(50 * 1024 * 1024)
-                    .spawn_scoped(scope, || {
-                        // execute and store output to results
-                        reth_executor::executor::execute_and_verify_receipt(
-                            &Block { header, body: transactions, ommers },
-                            td,
-                            Some(signers),
-                            &self.chain_spec,
-                            &mut state_provider,
-                        )
-                    })
-                    .expect("Expects that thread name is not null");
-                handle.join().expect("Expects for thread to not panic")
-            })
+            let changeset = reth_executor::executor::execute_and_verify_receipt(
+                &Block { header, body: transactions, ommers },
+                td,
+                Some(signers),
+                &self.chain_spec,
+                &mut state_provider,
+            )
             .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
             block_change_patches.push((changeset, block_number));
         }
@@ -296,6 +269,44 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done })
+    }
+}
+
+impl ExecutionStage {
+    /// Create new execution stage with specified config.
+    pub fn new(chain_spec: ChainSpec, commit_threshold: u64) -> Self {
+        Self { chain_spec, commit_threshold }
+    }
+}
+
+#[async_trait::async_trait]
+impl<DB: Database> Stage<DB> for ExecutionStage {
+    /// Return the id of the stage
+    fn id(&self) -> StageId {
+        EXECUTION
+    }
+
+    /// Execute the stage
+    async fn execute(
+        &mut self,
+        tx: &mut Transaction<'_, DB>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
+        // revm can take more then default allocated stack space. For this case we are using
+        // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
+        // we can see to set more accurate stack size or even optimize revm to move more data to
+        // heap.
+        std::thread::scope(|scope| {
+            let handle = std::thread::Builder::new()
+                .stack_size(50 * 1024 * 1024)
+                .spawn_scoped(scope, || {
+                    // execute and store output to results
+                    self.execute_inner(tx, input)
+                })
+                .expect("Expects that thread name is not null");
+            handle.join().expect("Expects for thread to not panic")
+        })
     }
 
     /// Unwind the stage.
