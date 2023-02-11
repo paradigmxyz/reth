@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use futures_util::StreamExt;
 
@@ -12,6 +12,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::TxNumber;
+use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;

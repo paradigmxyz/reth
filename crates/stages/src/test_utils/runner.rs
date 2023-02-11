@@ -1,9 +1,9 @@
+use super::TestTransaction;
+use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_db::mdbx::{Env, WriteMap};
+use reth_provider::Transaction;
 use std::borrow::Borrow;
 use tokio::sync::oneshot;
-
-use super::TestTransaction;
-use crate::{db::Transaction, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum TestRunnerError {

@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -13,10 +13,11 @@ use reth_executor::{
     execution_result::AccountChangeSet,
     revm_wrap::{State, SubState},
 };
+use reth_interfaces::provider::Error as ProviderError;
 use reth_primitives::{
     Address, Block, ChainSpec, Hardfork, Header, StorageEntry, H256, MAINNET, U256,
 };
-use reth_provider::LatestStateProviderRef;
+use reth_provider::{LatestStateProviderRef, Transaction};
 use std::fmt::Debug;
 use tracing::*;
 
@@ -96,10 +97,9 @@ impl ExecutionStage {
                 let (number, header) = entry?;
                 let (_, td) = td_cursor
                     .seek_exact(number)?
-                    .ok_or(DatabaseIntegrityError::TotalDifficulty { number })?;
-                let (_, body) = bodies_cursor
-                    .seek_exact(number)?
-                    .ok_or(DatabaseIntegrityError::BlockBody { number })?;
+                    .ok_or(ProviderError::TotalDifficulty { number })?;
+                let (_, body) =
+                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockBody { number })?;
                 let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
                 Ok((header, td.into(), body, stored_ommers.ommers))
             })
@@ -120,10 +120,10 @@ impl ExecutionStage {
             // get next N transactions.
             for index in body.tx_id_range() {
                 let (tx_index, tx) =
-                    tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
+                    tx_walker.next().ok_or(ProviderError::EndOfTransactionTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
+                    return Err(ProviderError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
             }
@@ -132,14 +132,11 @@ impl ExecutionStage {
             let mut tx_sender_walker = tx_sender.walk(Some(body.start_tx_id))?;
             let mut signers = Vec::with_capacity(body.tx_count as usize);
             for index in body.tx_id_range() {
-                let (tx_index, tx) = tx_sender_walker
-                    .next()
-                    .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
+                let (tx_index, tx) =
+                    tx_sender_walker.next().ok_or(ProviderError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Signer gap");
-                    return Err(
-                        DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
-                    )
+                    return Err(ProviderError::TransactionsSignerGap { missing: tx_index }.into())
                 }
                 signers.push(tx);
             }

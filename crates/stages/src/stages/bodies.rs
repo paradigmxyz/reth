@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use futures_util::TryStreamExt;
 use reth_db::{
@@ -13,7 +13,9 @@ use reth_db::{
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
+    provider::Error as ProviderError,
 };
+use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
 
@@ -157,7 +159,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // transition at the last transaction of this block.
             let td = td_cursor
                 .seek(block_number)?
-                .ok_or(DatabaseIntegrityError::TotalDifficulty { number: block_number })?
+                .ok_or(ProviderError::TotalDifficulty { number: block_number })?
                 .1;
             let has_reward = self.consensus.has_block_reward(td.into());
             if has_reward {

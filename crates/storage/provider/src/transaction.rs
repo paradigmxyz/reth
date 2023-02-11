@@ -1,9 +1,4 @@
 #![allow(dead_code)]
-use std::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
-
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
@@ -11,11 +6,13 @@ use reth_db::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error,
 };
+use reth_interfaces::{db::Error as DbError, provider::Error as ProviderError};
 use reth_primitives::{BlockHash, BlockNumber, Header, TransitionId, TxNumber};
-
-use crate::{DatabaseIntegrityError, StageError};
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.
@@ -70,7 +67,7 @@ where
     /// Create a new container with the given database handle.
     ///
     /// A new inner transaction will be opened.
-    pub fn new(db: &'this DB) -> Result<Self, Error> {
+    pub fn new(db: &'this DB) -> Result<Self, DbError> {
         Ok(Self { db, tx: Some(db.tx_mut()?) })
     }
 
@@ -85,14 +82,14 @@ where
     ///
     /// Panics if an inner transaction does not exist. This should never be the case unless
     /// [Transaction::close] was called without following up with a call to [Transaction::open].
-    pub fn commit(&mut self) -> Result<bool, Error> {
+    pub fn commit(&mut self) -> Result<bool, DbError> {
         let success = if let Some(tx) = self.tx.take() { tx.commit()? } else { false };
         self.tx = Some(self.db.tx_mut()?);
         Ok(success)
     }
 
     /// Open a new inner transaction.
-    pub fn open(&mut self) -> Result<(), Error> {
+    pub fn open(&mut self) -> Result<(), DbError> {
         self.tx = Some(self.db.tx_mut()?);
         Ok(())
     }
@@ -103,41 +100,37 @@ where
     }
 
     /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
+    pub(crate) fn get_block_hash(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<BlockHash, TransactionError> {
         let hash = self
-            .get::<tables::CanonicalHeaders>(number)?
-            .ok_or(DatabaseIntegrityError::CanonicalHeader { number })?;
+            .get::<tables::CanonicalHeaders>(block_number)?
+            .ok_or(ProviderError::CanonicalHeader { block_number })?;
         Ok(hash)
     }
 
     /// Query the block body by number.
-    pub(crate) fn get_block_body(
-        &self,
-        number: BlockNumber,
-    ) -> Result<StoredBlockBody, StageError> {
-        let body = self
-            .get::<tables::BlockBodies>(number)?
-            .ok_or(DatabaseIntegrityError::BlockBody { number })?;
+    pub fn get_block_body(&self, number: BlockNumber) -> Result<StoredBlockBody, TransactionError> {
+        let body =
+            self.get::<tables::BlockBodies>(number)?.ok_or(ProviderError::BlockBody { number })?;
         Ok(body)
     }
 
     /// Query the last transition of the block by [BlockNumber] key
-    pub(crate) fn get_block_transition(
-        &self,
-        key: BlockNumber,
-    ) -> Result<TransitionId, StageError> {
+    pub fn get_block_transition(&self, key: BlockNumber) -> Result<TransitionId, TransactionError> {
         let last_transition_id = self
             .get::<tables::BlockTransitionIndex>(key)?
-            .ok_or(DatabaseIntegrityError::BlockTransition { number: key })?;
+            .ok_or(ProviderError::BlockTransition { block_number: key })?;
         Ok(last_transition_id)
     }
 
     /// Get the next start transaction id and transition for the `block` by looking at the previous
     /// block. Returns Zero/Zero for Genesis.
-    pub(crate) fn get_next_block_ids(
+    pub fn get_next_block_ids(
         &self,
         block: BlockNumber,
-    ) -> Result<(TxNumber, TransitionId), StageError> {
+    ) -> Result<(TxNumber, TransitionId), TransactionError> {
         if block == 0 {
             return Ok((0, 0))
         }
@@ -146,21 +139,20 @@ where
         let prev_body = self.get_block_body(prev_number)?;
         let last_transition = self
             .get::<tables::BlockTransitionIndex>(prev_number)?
-            .ok_or(DatabaseIntegrityError::BlockTransition { number: prev_number })?;
+            .ok_or(ProviderError::BlockTransition { block_number: prev_number })?;
         Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
     }
 
     /// Query the block header by number
-    pub(crate) fn get_header(&self, number: BlockNumber) -> Result<Header, StageError> {
-        let header = self
-            .get::<tables::Headers>(number)?
-            .ok_or(DatabaseIntegrityError::Header { number })?;
+    pub fn get_header(&self, number: BlockNumber) -> Result<Header, TransactionError> {
+        let header =
+            self.get::<tables::Headers>(number)?.ok_or(ProviderError::Header { number })?;
         Ok(header)
     }
 
     /// Unwind table by some number key
     #[inline]
-    pub(crate) fn unwind_table_by_num<T>(&self, num: u64) -> Result<(), Error>
+    pub fn unwind_table_by_num<T>(&self, num: u64) -> Result<(), DbError>
     where
         DB: Database,
         T: Table<Key = u64>,
@@ -173,7 +165,7 @@ where
         &self,
         block: BlockNumber,
         mut selector: F,
-    ) -> Result<(), Error>
+    ) -> Result<(), DbError>
     where
         DB: Database,
         T: Table,
@@ -192,7 +184,7 @@ where
     }
 
     /// Unwind a table forward by a [Walker][reth_db::abstraction::cursor::Walker] on another table
-    pub(crate) fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), Error>
+    pub fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), DbError>
     where
         DB: Database,
         T1: Table,
@@ -205,4 +197,15 @@ where
         }
         Ok(())
     }
+}
+
+/// An error that can occur when using the transaction container
+#[derive(Debug, thiserror::Error)]
+pub enum TransactionError {
+    /// The transaction encountered a database error.
+    #[error("Database error: {0}")]
+    Database(#[from] DbError),
+    /// The transaction encountered a database integrity error.
+    #[error("A database integrity error occurred: {0}")]
+    DatabaseIntegrity(#[from] ProviderError),
 }

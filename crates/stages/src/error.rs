@@ -1,6 +1,10 @@
 use crate::pipeline::PipelineEvent;
-use reth_interfaces::{consensus, db::Error as DbError, executor, p2p::error::DownloadError};
-use reth_primitives::{BlockNumber, TxNumber};
+use reth_interfaces::{
+    consensus, db::Error as DbError, executor, p2p::error::DownloadError,
+    provider::Error as ProviderError,
+};
+use reth_primitives::BlockNumber;
+use reth_provider::TransactionError;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
@@ -31,7 +35,10 @@ pub enum StageError {
     },
     /// The stage encountered a database integrity error.
     #[error("A database integrity error occurred: {0}")]
-    DatabaseIntegrity(#[from] DatabaseIntegrityError),
+    DatabaseIntegrity(#[from] ProviderError),
+    /// The stage encountered an error related to the current database transaction.
+    #[error("A database transaction error occurred: {0}")]
+    Transaction(#[from] TransactionError),
     /// Invalid download response. Applicable for stages which
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
@@ -64,59 +71,6 @@ impl StageError {
                 StageError::Fatal(_)
         )
     }
-}
-
-/// A database integrity error.
-/// The sender stage error
-#[derive(Error, Debug)]
-#[allow(missing_docs)]
-pub enum DatabaseIntegrityError {
-    /// The canonical header for a block is missing from the database.
-    #[error("No canonical header for block #{number}")]
-    CanonicalHeader {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// A header is missing from the database.
-    #[error("No header for block #{number}")]
-    Header {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// A ommers are missing.
-    #[error("Block ommers not found for block #{number}")]
-    Ommers {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// A block body is missing.
-    #[error("Block body not found for block #{number}")]
-    BlockBody {
-        /// The block number key
-        number: BlockNumber,
-    },
-    /// The transaction is missing
-    #[error("Transaction #{id} not found")]
-    Transaction {
-        /// The transaction id
-        id: TxNumber,
-    },
-    #[error("Block transition not found for block #{number}")]
-    BlockTransition { number: BlockNumber },
-    #[error("Gap in transaction table. Missing tx number #{missing}.")]
-    TransactionsGap { missing: TxNumber },
-    #[error("Gap in transaction signer table. Missing tx number #{missing}.")]
-    TransactionsSignerGap { missing: TxNumber },
-    #[error("Got to the end of transaction table")]
-    EndOfTransactionTable,
-    #[error("Got to the end of the transaction sender table")]
-    EndOfTransactionSenderTable,
-    /// The total difficulty from the block header is missing.
-    #[error("Total difficulty not found for block #{number}")]
-    TotalDifficulty {
-        /// The block number key
-        number: BlockNumber,
-    },
 }
 
 /// A pipeline execution error.

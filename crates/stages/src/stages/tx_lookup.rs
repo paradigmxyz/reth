@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -8,6 +8,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_provider::Transaction;
 use tracing::*;
 
 const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
