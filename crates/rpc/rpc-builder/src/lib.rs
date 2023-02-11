@@ -66,7 +66,7 @@ use reth_rpc_api::servers::*;
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
@@ -376,8 +376,8 @@ where
     /// [RpcModuleConfig]
     pub fn module(&mut self, config: &RpcModuleConfig) -> RpcModule<()> {
         let mut module = RpcModule::new(());
-        for reth_module in config.iter_selection() {
-            let methods = self.reth_methods(reth_module);
+        let all_methods = self.reth_methods(config.iter_selection());
+        for methods in all_methods {
             module.merge(methods).expect("No conflicts");
         }
         module
@@ -387,27 +387,30 @@ where
     ///
     /// If this is the first time the namespace is requested, a new instance of API implementation
     /// will be created.
-    pub fn reth_methods(&mut self, namespace: RethRpcModule) -> Methods {
-        if let Some(methods) = self.modules.get(&namespace).cloned() {
-            return methods
-        }
-        let methods: Methods = match namespace {
-            RethRpcModule::Admin => AdminApi::new(self.network.clone()).into_rpc().into(),
-            RethRpcModule::Debug => {
-                let eth_api = self.eth_api();
-                DebugApi::new(eth_api).into_rpc().into()
-            }
-            RethRpcModule::Eth => self.eth_api().into_rpc().into(),
-            RethRpcModule::Net => {
-                let eth_api = self.eth_api();
-                NetApi::new(self.network.clone(), eth_api).into_rpc().into()
-            }
-            RethRpcModule::Trace => TraceApi::new().into_rpc().into(),
-            RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
-        };
-        self.modules.insert(namespace, methods.clone());
-
-        methods
+    pub fn reth_methods(
+        &mut self,
+        namespaces: impl Iterator<Item = RethRpcModule>,
+    ) -> Vec<Methods> {
+        let eth_api = self.eth_api();
+        namespaces
+            .map(|namespace| {
+                self.modules
+                    .entry(namespace)
+                    .or_insert_with(|| match namespace {
+                        RethRpcModule::Admin => {
+                            AdminApi::new(self.network.clone()).into_rpc().into()
+                        }
+                        RethRpcModule::Debug => DebugApi::new(eth_api.clone()).into_rpc().into(),
+                        RethRpcModule::Eth => eth_api.clone().into_rpc().into(),
+                        RethRpcModule::Net => {
+                            NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
+                        }
+                        RethRpcModule::Trace => TraceApi::new().into_rpc().into(),
+                        RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
+                    })
+                    .clone()
+            })
+            .collect::<Vec<_>>()
     }
 
     /// Returns the configured [EthApi] or creates it if it does not exist yet
