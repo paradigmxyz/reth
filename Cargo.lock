@@ -4071,6 +4071,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "reth-rpc",
  "reth-rpc-builder",
  "reth-staged-sync",
  "reth-stages",

@@ -1,4 +1,6 @@
 //! CLI definition and entrypoint to executable
+use std::str::FromStr;
+
 use crate::{
     chain, db,
     dirs::{LogsDir, PlatformPath},
@@ -10,7 +12,6 @@ use reth_tracing::{
     tracing_subscriber::{filter::Directive, registry::LookupSpan},
     BoxedLayer, FileWorkerGuard,
 };
-use std::str::FromStr;
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub async fn run() -> eyre::Result<()> {
