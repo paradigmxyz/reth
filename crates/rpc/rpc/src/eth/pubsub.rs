@@ -1,9 +1,11 @@
 //! `eth_` PubSub RPC handler implementation
 
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
+use reth_primitives::rpc::FilteredParams;
 use reth_provider::BlockProvider;
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::pubsub::{Kind, Params};
+use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
@@ -11,22 +13,24 @@ use std::sync::Arc;
 ///
 /// This handles
 #[derive(Debug, Clone)]
-pub struct EthPubSub<Pool, Client> {
+pub struct EthPubSub<Client, Pool> {
     /// All nested fields bundled together.
-    inner: Arc<EthPubSubInner<Pool, Client>>,
+    inner: Arc<EthPubSubInner<Client, Pool>>,
+    /// The executor that's used to spawn subscription tasks.
+    subscription_executor: TaskExecutor,
 }
 
 // === impl EthPubSub ===
 
-impl<Pool, Client> EthPubSub<Pool, Client> {
+impl<Client, Pool> EthPubSub<Client, Pool> {
     /// Creates a new, shareable instance.
     pub fn new(client: Arc<Client>, pool: Pool) -> Self {
         let inner = EthPubSubInner { client, pool };
-        Self { inner: Arc::new(inner) }
+        Self { inner: Arc::new(inner), subscription_executor: todo!() }
     }
 }
 
-impl<Pool, Client> EthPubSubApiServer for EthPubSub<Pool, Client>
+impl<Client, Pool> EthPubSubApiServer for EthPubSub<Client, Pool>
 where
     Pool: TransactionPool + 'static,
     Client: BlockProvider + 'static,
@@ -34,27 +38,36 @@ where
     fn subscribe(
         &self,
         mut sink: SubscriptionSink,
-        _kind: Kind,
-        _params: Option<Params>,
+        kind: Kind,
+        params: Option<Params>,
     ) -> SubscriptionResult {
         sink.accept()?;
+
+        let pubsub = Arc::clone(&self.inner);
+        self.subscription_executor
+            .spawn(async move { handle_accepted(pubsub, sink, kind, params).await });
+
         todo!()
     }
 }
 
 /// The actual handler for and accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Pool, Client>(
-    _pool: Pool,
-    _client: Arc<Client>,
+async fn handle_accepted<Client, Pool>(
+    pubsub: EthPubSubInner<Client, Pool>,
     _accepted_sink: SubscriptionSink,
     _kind: Kind,
-    _params: Option<Params>,
+    params: Option<Params>,
 ) {
+    // if no params are provided, used default filter params
+    let params = match params {
+        Some(Params::Logs(filter)) => FilteredParams::new(Some(*filter)),
+        _ => FilteredParams::default(),
+    };
 }
 
 /// Container type `EthPubSub`
 #[derive(Debug)]
-struct EthPubSubInner<Pool, Client> {
+struct EthPubSubInner<Client, Pool> {
     /// The transaction pool.
     pool: Pool,
     /// The client that can interact with the chain.
