@@ -1,7 +1,9 @@
 //! Error variants for the `eth_` namespace.
 
-use crate::{impl_to_rpc_result, result::ToRpcResult};
+use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
 use reth_transaction_pool::error::PoolError;
+
+use crate::result::{internal_rpc_err, rpc_err};
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
@@ -27,7 +29,16 @@ pub(crate) enum EthApiError {
     Internal(#[from] reth_interfaces::Error),
 }
 
-impl_to_rpc_result!(EthApiError);
+impl From<EthApiError> for RpcError {
+    fn from(value: EthApiError) -> Self {
+        match value {
+            EthApiError::UnknownBlockNumber => {
+                rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
+            }
+            err => internal_rpc_err(err.to_string()),
+        }
+    }
+}
 
 /// A helper error type that mirrors `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
