@@ -65,7 +65,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
         let walker = cursor_headers
-            .walk(start_block)?
+            .walk(Some(start_block))?
             .take_while(|e| e.as_ref().map(|(_, h)| h.number <= end_block).unwrap_or_default());
         // Walk over newly inserted headers, update & insert td
         for entry in walker {

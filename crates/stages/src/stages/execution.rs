@@ -115,7 +115,7 @@ impl ExecutionStage {
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
 
             // iterate over all transactions
-            let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
+            let mut tx_walker = tx_cursor.walk(Some(body.start_tx_id))?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
             // get next N transactions.
             for index in body.tx_id_range() {
@@ -129,7 +129,7 @@ impl ExecutionStage {
             }
 
             // take signers
-            let mut tx_sender_walker = tx_sender.walk(body.start_tx_id)?;
+            let mut tx_sender_walker = tx_sender.walk(Some(body.start_tx_id))?;
             let mut signers = Vec::with_capacity(body.tx_count as usize);
             for index in body.tx_id_range() {
                 let (tx_index, tx) = tx_sender_walker
@@ -198,7 +198,7 @@ impl ExecutionStage {
                     if wipe_storage {
                         // iterate over storage and save them before entry is deleted.
                         tx.cursor_read::<tables::PlainStorageState>()?
-                            .walk(address)?
+                            .walk(Some(address))?
                             .take_while(|res| {
                                 res.as_ref().map(|(k, _)| *k == address).unwrap_or_default()
                             })

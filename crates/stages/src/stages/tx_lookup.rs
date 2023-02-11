@@ -58,7 +58,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
 
         // Walk over block bodies within a specified range.
-        let bodies = cursor_bodies.walk(start_block)?.take_while(|entry| {
+        let bodies = cursor_bodies.walk(Some(start_block))?.take_while(|entry| {
             entry.as_ref().map(|(num, _)| *num <= end_block).unwrap_or_default()
         });
 
@@ -66,7 +66,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_list = vec![];
         for body_entry in bodies {
             let (_, body) = body_entry?;
-            let transactions = tx_cursor.walk(body.start_tx_id)?.take(body.tx_count as usize);
+            let transactions = tx_cursor.walk(Some(body.start_tx_id))?.take(body.tx_count as usize);
 
             for tx_entry in transactions {
                 let (id, transaction) = tx_entry?;

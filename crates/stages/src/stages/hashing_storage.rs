@@ -8,7 +8,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Address, StorageEntry, H160, H256, U256};
+use reth_primitives::{keccak256, Address, StorageEntry, H256, U256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -63,7 +63,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             tx.clear::<tables::HashedStorage>()?;
             tx.commit()?;
 
-            let mut first_key = H160::zero();
+            let mut first_key = None;
             loop {
                 let next_key = {
                     let mut storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
@@ -92,7 +92,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 tx.commit()?;
 
                 first_key = match next_key {
-                    Some(key) => key,
+                    Some(key) => Some(key),
                     None => break,
                 };
             }
@@ -413,8 +413,7 @@ mod tests {
                         );
                         expected += 1;
                     }
-                    let count =
-                        tx.cursor_dup_read::<tables::HashedStorage>()?.walk(H256::zero())?.count();
+                    let count = tx.cursor_dup_read::<tables::HashedStorage>()?.walk(None)?.count();
 
                     assert_eq!(count, expected);
                     Ok(())
