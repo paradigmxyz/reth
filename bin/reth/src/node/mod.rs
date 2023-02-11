@@ -2,10 +2,9 @@
 //!
 //! Starts the client
 use crate::{
+    args::{NetworkArgs, RpcServerArgs},
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{chainspec::genesis_value_parser, init::init_db, parse_socket_address},
-    NetworkOpts, RpcServerOpts,
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -28,7 +27,14 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
 use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
-use reth_staged_sync::{utils::init::init_genesis, Config};
+use reth_staged_sync::{
+    utils::{
+        chainspec::genesis_value_parser,
+        init::{init_db, init_genesis},
+        parse_socket_address,
+    },
+    Config,
+};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
@@ -77,7 +83,7 @@ pub struct Command {
     metrics: Option<SocketAddr>,
 
     #[clap(flatten)]
-    network: NetworkOpts,
+    network: NetworkArgs,
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
@@ -93,7 +99,7 @@ pub struct Command {
     max_block: Option<u64>,
 
     #[clap(flatten)]
-    rpc: RpcServerOpts,
+    rpc: RpcServerArgs,
 }
 
 impl Command {

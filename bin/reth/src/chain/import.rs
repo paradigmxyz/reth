@@ -1,7 +1,6 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     node::{handle_events, NodeEvent},
-    utils::{chainspec::genesis_value_parser, init::init_db},
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -17,7 +16,13 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
 };
 use reth_primitives::ChainSpec;
-use reth_staged_sync::{utils::init::init_genesis, Config};
+use reth_staged_sync::{
+    utils::{
+        chainspec::genesis_value_parser,
+        init::{init_db, init_genesis},
+    },
+    Config,
+};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
