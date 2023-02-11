@@ -22,6 +22,10 @@ pub use providers::{
     LatestStateProviderRef, ShareableDatabase,
 };
 
+/// Helper types for interacting with the database
+mod transaction;
+pub use transaction::{Transaction, TransactionError};
+
 /// Common database utilities.
 mod utils;
 pub use utils::{insert_block, insert_canonical_block};

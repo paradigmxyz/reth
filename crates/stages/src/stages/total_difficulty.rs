@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -8,8 +8,9 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::consensus::Error;
+use reth_interfaces::{consensus::Error, provider::Error as ProviderError};
 use reth_primitives::{ChainSpec, Hardfork, EMPTY_OMMER_ROOT, MAINNET, U256};
+use reth_provider::Transaction;
 use tracing::*;
 
 const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
@@ -59,7 +60,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let last_header_number = input.stage_progress.unwrap_or_default();
         let last_entry = cursor_td
             .seek_exact(last_header_number)?
-            .ok_or(DatabaseIntegrityError::TotalDifficulty { number: last_header_number })?;
+            .ok_or(ProviderError::TotalDifficulty { number: last_header_number })?;
 
         let mut td: U256 = last_entry.1.into();
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");

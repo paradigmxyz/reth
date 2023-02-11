@@ -44,7 +44,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
             let prev_block_num = block.number - 1;
             let prev_body = tx
                 .get::<tables::BlockBodies>(prev_block_num)?
-                .ok_or(ProviderError::BlockBody { block_number: prev_block_num })?;
+                .ok_or(ProviderError::BlockBody { number: prev_block_num })?;
             let last_transition_id = tx
                 .get::<tables::BlockTransitionIndex>(prev_block_num)?
                 .ok_or(ProviderError::BlockTransition { block_number: prev_block_num })?;
