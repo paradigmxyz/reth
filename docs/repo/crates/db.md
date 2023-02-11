@@ -194,7 +194,7 @@ pub trait DbTxMut<'tx>: for<'a> DbTxMutGAT<'a> {
 
 Lets take a look at the `DbTx` and `DbTxMut` traits in action. Revisiting the `Transaction` struct as an example, the `Transaction::get_block_hash()` method uses the `DbTx::get()` function to get a block header hash in the form of `self.get::<tables::CanonicalHeaders>(number)`.
 
-[File: crates/provider/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/provider/src/transaction.rs#L106)
+[File: crates/storage/provider/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/transaction.rs#L106)
 
 ```rust ignore
 
