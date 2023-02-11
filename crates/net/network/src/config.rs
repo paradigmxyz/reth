@@ -307,8 +307,9 @@ impl NetworkConfigBuilder {
         let head = head.unwrap_or(Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
-            total_difficulty: U256::ZERO,
             timestamp: 0,
+            difficulty: chain_spec.genesis.difficulty,
+            total_difficulty: U256::ZERO,
         });
 
         // set the status
