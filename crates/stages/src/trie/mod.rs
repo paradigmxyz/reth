@@ -203,7 +203,7 @@ impl DBTrieLoader {
         tx.clear::<tables::StoragesTrie>()?;
 
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
-        let mut walker = accounts_cursor.walk(H256::zero())?;
+        let mut walker = accounts_cursor.walk(None)?;
 
         let db = Arc::new(HashDatabase::new(tx)?);
 

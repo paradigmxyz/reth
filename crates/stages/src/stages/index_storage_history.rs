@@ -58,7 +58,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         let storage_chageset = tx
             .cursor_read::<tables::StorageChangeSet>()?
-            .walk((from_transition, Address::zero()).into())?
+            .walk(Some((from_transition, Address::zero()).into()))?
             .take_while(|res| {
                 res.as_ref().map(|(k, _)| k.transition_id() < to_transition).unwrap_or_default()
             })
@@ -127,7 +127,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
 
         let storage_changesets = tx
             .cursor_read::<tables::StorageChangeSet>()?
-            .walk((from_transition_rev, Address::zero()).into())?
+            .walk(Some((from_transition_rev, Address::zero()).into()))?
             .take_while(|res| {
                 res.as_ref().map(|(k, _)| k.transition_id() < to_transition_rev).unwrap_or_default()
             })
