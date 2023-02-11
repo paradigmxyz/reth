@@ -98,7 +98,8 @@ mod tests {
             revm_spec(
                 &MAINNET,
                 Head {
-                    total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+                    total_difficulty: U256::from(58_750_000_000_000_000_000_010_u128),
+                    difficulty: U256::from(10_u128),
                     ..Default::default()
                 }
             ),
@@ -110,7 +111,8 @@ mod tests {
                 &MAINNET,
                 Head {
                     number: 15537394 - 10,
-                    total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+                    total_difficulty: U256::from(58_750_000_000_000_000_000_010_u128),
+                    difficulty: U256::from(10_u128),
                     ..Default::default()
                 }
             ),

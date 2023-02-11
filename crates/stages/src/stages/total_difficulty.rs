@@ -73,7 +73,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
             let (key, header) = entry?;
             td += header.difficulty;
 
-            if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(td) {
+            if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, header.difficulty) {
                 if header.difficulty != U256::ZERO {
                     return Err(StageError::Validation {
                         block: header.number,
