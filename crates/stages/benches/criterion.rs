@@ -5,14 +5,35 @@ use criterion::{
 use reth_db::mdbx::{Env, WriteMap};
 use reth_primitives::H256;
 use reth_stages::{
-    stages::{SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
+    stages::{
+        AccountHashingStage, SeedOpts, SenderRecoveryStage, TotalDifficultyStage,
+        TransactionLookupStage,
+    },
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::path::{Path, PathBuf};
 
-criterion_group!(benches, tx_lookup, senders, total_difficulty);
+criterion_group!(benches, account_hashing tx_lookup, senders, total_difficulty);
 criterion_main!(benches);
+
+fn account_hashing(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Stages");
+
+    // don't need to run each stage for that many times
+    group.sample_size(10);
+
+    let stage = AccountHashingStage::default();
+    let num_blocks = 10_000;
+    let opts = SeedOpts {
+        blocks: 0..num_blocks + 1,
+        accounts: 0..10_000,
+        txs: 100..150,
+        transitions: 10_000 + 1,
+    };
+    let path = account_hashing_testdata(opts);
+    measure_stage_with_path(&mut group, stage, num_blocks, path, "AccountHashing".to_string());
+}
 
 fn senders(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
@@ -52,13 +73,13 @@ fn total_difficulty(c: &mut Criterion) {
     measure_stage(&mut group, stage, num_blocks, "TotalDifficulty".to_string());
 }
 
-fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
+fn measure_stage_with_path<S: Clone + Default + Stage<Env<WriteMap>>>(
     group: &mut BenchmarkGroup<WallTime>,
     stage: S,
     num_blocks: u64,
+    path: PathBuf,
     label: String,
 ) {
-    let path = txs_testdata(num_blocks as usize);
     let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
@@ -86,6 +107,16 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
             },
         )
     });
+}
+
+fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
+    group: &mut BenchmarkGroup<WallTime>,
+    stage: S,
+    num_blocks: u64,
+    label: String,
+) {
+    let path = txs_testdata(num_blocks as usize);
+    measure_stage_with_path(group, stage, num_blocks, path, label)
 }
 
 use reth_interfaces::test_utils::generators::random_block_range;
@@ -119,6 +150,23 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
             tx.put::<tables::HeaderTD>(head, reth_primitives::U256::from(0).into())
         })
         .unwrap();
+    }
+
+    path
+}
+
+// Helper for generating testdata for the account hashing benchmark
+// Returns the path to the database file and the number of blocks written.
+fn account_hashing_testdata(opts: reth_stages::stages::SeedOpts) -> PathBuf {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("account-hashing-bench");
+
+    if !path.exists() {
+        // create the dirs
+        std::fs::create_dir_all(&path).unwrap();
+        println!("Account Hashing testdata not found, generating to {:?}", path.display());
+        let tx = TestTransaction::new(&path);
+        let mut tx = tx.inner();
+        let accounts = AccountHashingStage::seed(&mut tx, opts);
     }
 
     path

@@ -10,7 +10,7 @@ use reth_provider::Transaction;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Range, RangeInclusive},
+    ops::Range,
 };
 use tracing::*;
 
@@ -19,7 +19,7 @@ pub const ACCOUNT_HASHING: StageId = StageId("AccountHashing");
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AccountHashingStage {
     /// The threshold (in number of state transitions) for switching between incremental
     /// hashing and full storage hashing.
@@ -57,7 +57,7 @@ pub struct SeedOpts {
     pub transitions: u64,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 impl AccountHashingStage {
     /// Initializes the `PlainAccountState` table with `num_accounts` having some random state
     /// at the target block, with `txs_range` transactions in each block.
