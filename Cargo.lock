@@ -4649,6 +4649,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
+ "reth-rpc-types",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",
