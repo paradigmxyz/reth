@@ -13,6 +13,7 @@ reth-network-api = { path = "../../net/network-api" }
 reth-provider = { path = "../../storage/provider" }
 reth-rpc = { path = "../rpc" }
 reth-rpc-api = { path = "../rpc-api" }
+reth-rpc-types = { path = "../rpc-types" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 jsonrpsee = { version = "0.16", features = ["server"] }
