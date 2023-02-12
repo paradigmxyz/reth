@@ -252,3 +252,15 @@ impl TestTransaction {
         })
     }
 }
+
+struct InsertOpts {
+    headers: Vec<SealedHeader>,
+    blocks: Vec<SealedBlock>,
+    difficulty: bool,
+}
+
+impl From<Vec<SealedHeader>> for InsertOpts {
+    fn from(headers: Vec<SealedHeader>) -> Self {
+        InsertOpts { headers, blocks: Vec::new(), difficulty: false }
+    }
+}
