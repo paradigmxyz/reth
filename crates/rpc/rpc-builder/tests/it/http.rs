@@ -3,24 +3,30 @@
 use std::collections::HashSet;
 
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
-use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
-use jsonrpsee::core::error::Error;
-use jsonrpsee::types::error::{CallError, ErrorCode};
+use jsonrpsee::{
+    core::{
+        client::{ClientT, SubscriptionClientT},
+        error::Error,
+    },
+    types::error::{CallError, ErrorCode},
+};
 use reth_primitives::{
     hex_literal::hex,
     rpc::{BlockId, BlockNumber as RpcBlockNumber},
     Address, BlockNumber, Bytes, NodeRecord, H256, H64, U256,
 };
-use reth_rpc_api::clients::{AdminApiClient, EthApiClient};
-use reth_rpc_api::{DebugApiClient, NetApiClient, TraceApiClient, Web3ApiClient};
+use reth_rpc_api::{
+    clients::{AdminApiClient, EthApiClient},
+    DebugApiClient, NetApiClient, TraceApiClient, Web3ApiClient,
+};
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Index, TransactionRequest};
 
 fn is_unimplemented(err: Error) -> bool {
     match err {
         Error::Call(CallError::Custom(error_obj)) => {
-            error_obj.code() == ErrorCode::InternalError.code()
-                && error_obj.message() == "unimplemented"
+            error_obj.code() == ErrorCode::InternalError.code() &&
+                error_obj.message() == "unimplemented"
         }
         _ => return false,
     }
