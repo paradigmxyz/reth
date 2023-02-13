@@ -3,9 +3,11 @@ use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
-use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::sync::mpsc::Receiver;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 /// General purpose abstraction fo a transaction-pool.
 ///
@@ -128,7 +130,8 @@ pub trait TransactionPool: Send + Sync + Clone {
 pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
 
 /// Represents how a transaction was propagated over the network.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PropagateKind {
     /// The full transaction object was sent to the peer.
     ///
