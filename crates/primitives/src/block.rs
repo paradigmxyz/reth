@@ -186,9 +186,9 @@ impl Serialize for BlockId {
         match *self {
             BlockId::Hash(BlockHashCanonical { ref block_hash, ref require_canonical }) => {
                 let mut s = serializer.serialize_struct("BlockIdEip1898", 1)?;
-                s.serialize_field("blockHash", &format!("{block_hash:?}"))?;
+                s.serialize_field("blockHash", block_hash))?;
                 if let Some(require_canonical) = require_canonical {
-                    s.serialize_field("requireCanonical", &format!("{require_canonical:?}"))?;
+                    s.serialize_field("requireCanonical", require_canonical))?;
                 }
                 s.end()
             }
@@ -404,7 +404,7 @@ impl fmt::Display for BlockNumberOrTag {
 /// the block is not in the canonical chain.
 /// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md#specification>
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct BlockHashCanonical {
+pub struct BlockHash {
     /// A block hash
     pub block_hash: H256,
     /// Whether the block must be a canonical block
