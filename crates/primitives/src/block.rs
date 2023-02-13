@@ -375,9 +375,8 @@ impl FromStr for BlockNumberOrTag {
             "pending" => Self::Pending,
             _number => {
                 let hex_string = s.trim_start_matches("0x");
-                let number = u64::from_str_radix(&hex_string, 16)
-                    .map_err(|err| err.to_string());
-                BlockNumberOrTag::Number(number)
+                let number = u64::from_str_radix(&hex_string, 16).map_err(|err| err.to_string());
+                BlockNumberOrTag::Number(number?)
             }
         };
         Ok(block)
@@ -407,13 +406,84 @@ pub struct BlockHashCanonical {
 }
 #[cfg(test)]
 mod test {
-    use super::BlockId;
+    use super::{BlockId, BlockNumberOrTag::*};
+    use super::*;
     #[test]
-    fn can_parse_eip1898_block_ids() {
+    fn can_parse_blockid_u64() {
         let num = serde_json::json!(
-            {"blockNumber": "0x0AF"}
+            {"blockNumber": "0xaf"}
         );
+
         let id = serde_json::from_value::<BlockId>(num);
-        assert_eq!(id.unwrap(), BlockId::from(175))
+        assert_eq!(id.unwrap(), BlockId::from(175));
+    }
+    #[test]
+    fn can_parse_block_hash() {
+        let block_hash =
+            H256::from_str(
+            "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
+        ).unwrap();
+        let block_hash_json = serde_json::json!(
+            { "blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"}
+        );
+        let id = serde_json::from_value::<BlockId>(block_hash_json).unwrap();
+        assert_eq!(
+            id,
+            BlockId::from(
+                block_hash,
+            )
+        );
+    }
+    #[test]
+    fn can_parse_block_hash_with_canonical() {
+        let block_hash = H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3").unwrap();
+        let require_canonical = Some(true);
+        let block_id = BlockId::Hash(BlockHashCanonical {block_hash, require_canonical});
+        let block_hash_json = serde_json::json!(
+            { "blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", "requireCanonical": true }
+        );
+        let id = serde_json::from_value::<BlockId>(block_hash_json).unwrap();
+        assert_eq!(
+            id,
+            block_id
+        )
+    }
+    #[test]
+    fn can_parse_blockid_tags() {
+        let tags =
+            [("latest", Latest), ("finalized", Finalized), ("safe", Safe), ("pending", Pending)];
+        for (value, tag) in tags {
+            let num = serde_json::json!({ "blockNumber": value });
+            let id = serde_json::from_value::<BlockId>(num).unwrap();
+            assert_eq!(id, BlockId::from(tag))
+        }
+    }
+    #[test]
+    fn serde_blockid_tags() {
+        let block_ids = [
+            Latest,
+            Finalized,
+            Safe,
+            Pending,
+        ].map(|id| BlockId::from(id));
+        for block_id in &block_ids {
+           let serialized = serde_json::to_string(&block_id).unwrap();
+           let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
+           assert_eq!(deserialized, *block_id)
+        }
+    }
+    #[test]
+    fn serde_blockid_number() {
+        let block_id = BlockId::from(100u64);
+        let serialized = serde_json::to_string(&block_id).unwrap();
+        let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, block_id)
+    }
+    #[test]
+    fn serde_blockid_hash() {
+        let block_id = BlockId::from(H256::default());
+        let serialized = serde_json::to_string(&block_id).unwrap();
+        let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, block_id)
     }
 }
