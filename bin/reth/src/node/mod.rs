@@ -19,7 +19,10 @@ use reth_downloaders::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
+    p2p::{
+        bodies::downloader::BodyDownloader,
+        headers::{client::StatusUpdater, downloader::HeaderDownloader},
+    },
     sync::SyncStateUpdater,
 };
 use reth_net_nat::NatResolver;
@@ -306,7 +309,7 @@ impl Command {
     where
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        U: SyncStateUpdater,
+        U: SyncStateUpdater + StatusUpdater + Clone + 'static,
     {
         let stage_conf = &config.stages;
 
@@ -318,17 +321,13 @@ impl Command {
         }
 
         let pipeline = builder
-            .with_sync_state_updater(updater)
+            .with_sync_state_updater(updater.clone())
             .add_stages(
-                OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
-                    TotalDifficultyStage {
+                DefaultStages::new(consensus.clone(), header_downloader, body_downloader, updater)
+                    .set(TotalDifficultyStage {
                         chain_spec: self.chain.clone(),
                         commit_threshold: stage_conf.total_difficulty.commit_threshold,
-                    },
-                ),
-            )
-            .add_stages(
-                OfflineStages::default()
+                    })
                     .set(SenderRecoveryStage {
                         commit_threshold: stage_conf.sender_recovery.commit_threshold,
                     })
