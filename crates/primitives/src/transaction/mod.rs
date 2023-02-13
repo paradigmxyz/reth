@@ -3,7 +3,9 @@ pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_STRING_CODE};
+use reth_rlp::{
+    length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
+};
 pub use signature::Signature;
 pub use tx_type::TxType;
 
@@ -652,13 +654,14 @@ impl TransactionSigned {
         initial_tx
     }
 
-    /// Decodes legacy transaction
-    pub fn decode_legacy(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
-        // keep this around so we can use it to calculate the hash
+    /// Decodes legacy transaction from the data buffer.
+    ///
+    /// This expects `rlp(legacy_tx)`
+    fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
+        // keep this around, so we can use it to calculate the hash
         let original_encoding = *data;
 
-        // decode header
-        let first_header = Header::decode(data)?;
+        let header = Header::decode(data)?;
 
         let mut transaction = Transaction::Legacy(TxLegacy {
             nonce: Decodable::decode(data)?,
@@ -674,17 +677,18 @@ impl TransactionSigned {
             transaction.set_chain_id(id);
         }
 
-        let tx_length = first_header.payload_length + first_header.length();
+        let tx_length = header.payload_length + header.length();
         let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
 
-    /// Decodes a EIP-2718 typed transaction.
-    pub fn decode_typed_transaction(data: &mut &[u8]) -> Result<TransactionSigned, DecodeError> {
-        // decode header
-        let first_header = Header::decode(data)?;
-
+    /// Decodes en enveloped EIP-2718 typed transaction.
+    ///
+    /// CAUTION: this expects that `data` is `[id, rlp(tx)]`
+    fn decode_enveloped_typed_transaction(
+        data: &mut &[u8],
+    ) -> Result<TransactionSigned, DecodeError> {
         // keep this around so we can use it to calculate the hash
         let original_encoding = *data;
 
@@ -723,8 +727,7 @@ impl TransactionSigned {
         };
 
         let signature = Signature::decode(data)?;
-
-        let hash = keccak256(&original_encoding[..first_header.payload_length]);
+        let hash = keccak256(&original_encoding[..header.payload_length]);
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
@@ -738,20 +741,16 @@ impl TransactionSigned {
     pub fn decode_enveloped(tx: Bytes) -> Result<Self, DecodeError> {
         let mut data = tx.as_ref();
 
-        // Check if its a type byte
-        if data[0] < EMPTY_STRING_CODE {
-            // decode as envolped type transaction
-            TransactionSigned::decode_typed_transaction(&mut data)
-        } else {
-            // decode header
-            let first_header = Header::decode(&mut data)?;
+        if data.is_empty() {
+            return Err(DecodeError::InputTooShort)
+        }
 
-            // check if it's a list header
-            if !first_header.list {
-                return Err(DecodeError::Custom("Invalid Input"))
-            }
+        // Check if the tx is a list
+        if data[0] >= EMPTY_LIST_CODE {
             // decode as legacy transaction
-            TransactionSigned::decode_legacy(&mut data)
+            TransactionSigned::decode_rlp_legacy_transaction(&mut data)
+        } else {
+            TransactionSigned::decode_enveloped_typed_transaction(&mut data)
         }
     }
 }
@@ -772,20 +771,23 @@ impl Encodable for TransactionSigned {
     }
 }
 
-/// This `Decodable` implementation only supports decoding the transaction format sent over p2p.
+/// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used by
+/// p2p.
+///
+/// CAUTION: this expects that the given buf contains rlp
 impl Decodable for TransactionSigned {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         // decode header
-        let mut encoding = *buf;
-        let first_header = Header::decode(&mut encoding)?;
+        let mut original_encoding = *buf;
+        let header = Header::decode(buf)?;
 
         // if the transaction is encoded as a string then it is a typed transaction
-        if !first_header.list {
-            // Bytes that are going to be used to create a hash of transaction.
-            // For eip2728 types transaction header is not used inside hash
-            TransactionSigned::decode_typed_transaction(buf)
+        if !header.list {
+            TransactionSigned::decode_enveloped_typed_transaction(buf)
         } else {
-            TransactionSigned::decode_legacy(buf)
+            let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
+            *buf = original_encoding;
+            Ok(tx)
         }
     }
 }
@@ -793,8 +795,6 @@ impl Decodable for TransactionSigned {
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::arbitrary::Arbitrary for TransactionSigned {
     type Parameters = ();
-    type Strategy = proptest::strategy::BoxedStrategy<TransactionSigned>;
-
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
@@ -811,6 +811,8 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
             })
             .boxed()
     }
+
+    type Strategy = proptest::strategy::BoxedStrategy<TransactionSigned>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
