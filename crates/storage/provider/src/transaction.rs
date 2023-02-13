@@ -89,7 +89,7 @@ where
     }
 
     /// Drops the current inner transaction and open a new one.
-    pub fn drop(&mut self) -> Result<(), Error> {
+    pub fn drop(&mut self) -> Result<(), DbError> {
         if let Some(tx) = self.tx.take() {
             drop(tx);
         }

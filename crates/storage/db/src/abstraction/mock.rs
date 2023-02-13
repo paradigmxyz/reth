@@ -8,7 +8,7 @@ use crate::{
         ReverseWalker, Walker,
     },
     database::{Database, DatabaseGAT},
-    table::{DupSort, Table},
+    table::{DupSort, Table, TableImporter},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     Error,
 };
@@ -99,6 +99,8 @@ impl<'a> DbTxMut<'a> for TxMock {
         todo!()
     }
 }
+
+impl<'a> TableImporter<'a> for TxMock {}
 
 /// CUrsor that iterates over table
 pub struct CursorMock {

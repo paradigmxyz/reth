@@ -2,7 +2,10 @@
 use crate::dirs::{DbPath, PlatformPath};
 use clap::Parser;
 use eyre::Result;
-use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
+use reth_db::{
+    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+};
+use reth_provider::Transaction;
 use reth_staged_sync::utils::init::init_db;
 use reth_stages::{stages::ExecutionStage, Stage, StageId, UnwindInput};
 use std::ops::DerefMut;
@@ -92,18 +95,28 @@ async fn dump_execution_stage<DB: Database>(
 
     info!(target: "reth::cli", "Creating separate db at {}", output_db);
 
-    let mut output_db = init_db(output_db)?;
+    let output_db = init_db(output_db)?;
 
-    // Copy input tables
-    db_tool.dump_table_with_range::<tables::CanonicalHeaders>(from, to, &mut output_db)?;
-    db_tool.dump_table_with_range::<tables::HeaderTD>(from, to, &mut output_db)?;
-    db_tool.dump_table_with_range::<tables::Headers>(from, to, &mut output_db)?;
-    db_tool.dump_table_with_range::<tables::BlockBodies>(from, to, &mut output_db)?;
-    db_tool.dump_table_with_range::<tables::BlockTransitionIndex>(
-        from - 1,
-        to + 1,
-        &mut output_db,
-    )?;
+    // Copy input tables. We're not sharing the transaction in case the memory grows too much.
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::CanonicalHeaders, _>(&db_tool.db.tx()?, Some(from), to)
+    })??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::HeaderTD, _>(&db_tool.db.tx()?, Some(from), to)
+    })??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::Headers, _>(&db_tool.db.tx()?, Some(from), to)
+    })??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::BlockBodies, _>(&db_tool.db.tx()?, Some(from), to)
+    })??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::BlockTransitionIndex, _>(
+            &db_tool.db.tx()?,
+            Some(from - 1),
+            to + 1,
+        )
+    })??;
 
     // Find range of transactions that need to be copied over
     let (from_tx, to_tx) = db_tool.db.view(|read_tx| {
@@ -119,8 +132,17 @@ async fn dump_execution_stage<DB: Database>(
             to_block.start_tx_id + to_block.tx_count,
         ))
     })??;
-    db_tool.dump_table_with_range::<tables::Transactions>(from_tx, to_tx, &mut output_db)?;
-    db_tool.dump_table_with_range::<tables::TxSenders>(from_tx, to_tx, &mut output_db)?;
+
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::Transactions, _>(
+            &db_tool.db.tx()?,
+            Some(from_tx),
+            to_tx,
+        )
+    })??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::TxSenders, _>(&db_tool.db.tx()?, Some(from_tx), to_tx)
+    })??;
 
     // Find the latest block to unwind from
     let (tip_block_number, _) = db_tool
@@ -132,7 +154,7 @@ async fn dump_execution_stage<DB: Database>(
     // PlainAccountState safely. There might be some state dependency from an address
     // which hasn't been changed in the given range.
     {
-        let mut unwind_tx = reth_stages::Transaction::new(db_tool.db)?;
+        let mut unwind_tx = Transaction::new(db_tool.db)?;
         let mut exec_stage = ExecutionStage::default();
 
         exec_stage
@@ -144,9 +166,11 @@ async fn dump_execution_stage<DB: Database>(
 
         let unwind_inner_tx = unwind_tx.deref_mut();
 
-        DbTool::<DB>::dump_dupsort::<tables::PlainStorageState>(unwind_inner_tx, &output_db)?;
-        DbTool::<DB>::dump_table::<tables::PlainAccountState>(unwind_inner_tx, &output_db)?;
-        DbTool::<DB>::dump_table::<tables::Bytecodes>(unwind_inner_tx, &output_db)?;
+        output_db
+            .update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(unwind_inner_tx))??;
+        output_db
+            .update(|tx| tx.import_table::<tables::PlainAccountState, _>(unwind_inner_tx))??;
+        output_db.update(|tx| tx.import_table::<tables::Bytecodes, _>(unwind_inner_tx))??;
 
         // We don't want to actually commit these changes to our original database.
         unwind_tx.drop()?;
@@ -156,7 +180,7 @@ async fn dump_execution_stage<DB: Database>(
     if dry_run {
         info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-        let mut tx = reth_stages::Transaction::new(&output_db)?;
+        let mut tx = Transaction::new(&output_db)?;
 
         let mut exec_stage = ExecutionStage::default();
         exec_stage

@@ -4,12 +4,11 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::{Result, WrapErr};
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, Walker},
-    database::{Database, DatabaseGAT},
-    mdbx::{Env, WriteMap},
-    table::{DupSort, Table},
+    cursor::{DbCursorRO, Walker},
+    database::Database,
+    table::Table,
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTx,
 };
 use reth_interfaces::test_utils::generators::random_block_range;
 use reth_provider::insert_canonical_block;
@@ -238,78 +237,5 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         info!(target: "reth::cli", "Dropping db at {}", path);
         std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
-    }
-
-    /// Duplicates table data within a range (`From<u64>`) into another database: `destination_db`.
-    pub(crate) fn dump_table_with_range<T: Table>(
-        &mut self,
-        from: u64,
-        to: u64,
-        destination_db: &mut Env<WriteMap>,
-    ) -> eyre::Result<()>
-    where
-        <T as reth_db::table::Table>::Key: From<u64>,
-    {
-        destination_db.update(|write_tx| {
-            let mut cursor_destination = write_tx.cursor_write::<T>()?;
-
-            self.db.view(|read_tx| {
-                let mut cursor_source = read_tx.cursor_read::<T>()?;
-
-                for row in cursor_source.walk(from.into())?.take((to - from) as usize) {
-                    let (key, value) = row?;
-                    cursor_destination.append(key, value)?;
-                }
-
-                Ok::<(), eyre::ErrReport>(())
-            })
-        })??
-    }
-
-    /// Duplicates table data into another database: `destination_db`. The reason for `TXMut` for
-    /// the source database is that we might want to call this method after making a dry-run
-    /// unwind.
-    pub(crate) fn dump_table<T: Table>(
-        source_db_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
-        destination_db: &Env<WriteMap>,
-    ) -> eyre::Result<()> {
-        destination_db.update(|write_tx| {
-            let mut cursor_source = source_db_tx.cursor_read::<T>()?;
-            let mut cursor_destination = write_tx.cursor_write::<T>()?;
-
-            let start_walker = cursor_source.first().transpose();
-            let walker = Walker::new(&mut cursor_source, start_walker);
-            for kv in walker {
-                let (k, v) = kv?;
-                cursor_destination.append(k, v)?;
-            }
-            Ok::<(), eyre::ErrReport>(())
-        })?
-    }
-
-    /// Duplicates table (DUPSORT) data into another database: `destination_db`. The reason for
-    /// `TXMut` for the source database is that we might want to call this method after making a
-    /// dry-run unwind.
-    pub(crate) fn dump_dupsort<T: DupSort>(
-        source_db_tx: &mut <DB as DatabaseGAT<'_>>::TXMut,
-        destination_db: &Env<WriteMap>,
-    ) -> eyre::Result<()>
-    where
-        <T as DupSort>::SubKey: Default,
-    {
-        destination_db.update(|write_tx| {
-            let mut cursor_source = source_db_tx.cursor_dup_read::<T>()?;
-            let mut cursor_destination = write_tx.cursor_dup_write::<T>()?;
-
-            if let Some((first_key, _)) = cursor_source.first()? {
-                let walker = cursor_source.walk_dup(first_key, T::SubKey::default())?;
-                for kv in walker {
-                    let (k, v) = kv?;
-                    cursor_destination.append_dup(k, v)?;
-                }
-            }
-
-            Ok::<(), eyre::ErrReport>(())
-        })?
     }
 }

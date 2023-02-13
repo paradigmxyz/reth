@@ -2,7 +2,7 @@
 
 use super::cursor::Cursor;
 use crate::{
-    table::{Compress, DupSort, Encode, Table},
+    table::{Compress, DupSort, Encode, Table, TableImporter},
     tables::utils::decode_one,
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     Error,
@@ -56,6 +56,8 @@ impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxMutGAT<'a> for Tx<'_, K, E>
     type CursorMut<T: Table> = Cursor<'a, RW, T>;
     type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
 }
+
+impl<'a, E: EnvironmentKind> TableImporter<'a> for Tx<'_, RW, E> {}
 
 impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
     // Iterate over read only values in database.
