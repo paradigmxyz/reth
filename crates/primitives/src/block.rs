@@ -373,7 +373,16 @@ impl FromStr for BlockNumberOrTag {
             "safe" => Self::Safe,
             "earliest" => Self::Earliest,
             "pending" => Self::Pending,
-            n => BlockNumberOrTag::Number(n.parse::<u64>().map_err(|err| err.to_string())?),
+            // Ethers uses U64 struct, that accepts
+            // both decimal and hex, so let's copy
+            // that behaviour here.
+            _number => {
+                let number = match s.to_lowercase().strip_prefix("0x") {
+                    Some(hex_num) => u64::from_str_radix(hex_num, 16),
+                    None => u64::from_str_radix(s, 10),
+                };
+                BlockNumberOrTag::Number(number.map_err(|err| err.to_string()).unwrap())
+            }
         };
         Ok(block)
     }
@@ -409,7 +418,6 @@ mod test {
             {"blockNumber": "0x0"}
         );
         let id = serde_json::from_value::<BlockId>(num);
-        println!("Id: {:?}", {});
         assert_eq!(id.unwrap(), BlockId::from(0))
     }
 }
