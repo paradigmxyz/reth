@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::{StoredBlockBody, StoredBlockOmmers},
+    models::{StoredBlockBody, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -88,8 +88,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
-        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
         // Cursors used to write state transition mapping
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
@@ -136,6 +137,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                         transition_id += 1;
                     }
 
+                    // Write ommers if any
                     if !block.ommers.is_empty() {
                         ommers_cursor.append(
                             block_number,
@@ -147,6 +149,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                                     .collect(),
                             },
                         )?;
+                    }
+
+                    // Write withdrawals if any
+                    if let Some(withdrawals) = block.withdrawals {
+                        if !withdrawals.is_empty() {
+                            withdrawals_cursor
+                                .append(block_number, StoredBlockWithdrawals { withdrawals })?;
+                        }
                     }
                 }
                 BlockResponse::Empty(_) => {
@@ -191,8 +201,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
-        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
         // Cursors to unwind transitions
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
@@ -203,9 +214,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 break
             }
 
-            // Delete the ommers value if any
+            // Delete the ommers entry if any
             if ommers_cursor.seek_exact(number)?.is_some() {
                 ommers_cursor.delete_current()?;
+            }
+
+            // Delete the withdrawals entry if any
+            if withdrawals_cursor.seek_exact(number)?.is_some() {
+                withdrawals_cursor.delete_current()?;
             }
 
             // Delete the block transition if any
