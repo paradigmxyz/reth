@@ -1,22 +1,28 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+use syn::{Error, Result};
 
-use crate::utils::has_attribute;
+use crate::utils::{field_ident, has_attribute, is_optional, parse_struct};
 
-pub(crate) fn impl_encodable(ast: &syn::DeriveInput) -> TokenStream {
-    let body = if let syn::Data::Struct(s) = &ast.data {
-        s
-    } else {
-        panic!("#[derive(RlpEncodable)] is only defined for structs.");
-    };
+pub(crate) fn impl_encodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
+    let body = parse_struct(ast, "RlpEncodable")?;
 
-    let (length_stmts, stmts): (Vec<_>, Vec<_>) = body
-        .fields
-        .iter()
-        .enumerate()
-        .filter(|(_, field)| !has_attribute(field, "skip"))
-        .map(|(i, field)| (encodable_length(i, field), encodable_field(i, field)))
-        .unzip();
+    let fields = body.fields.iter().enumerate().filter(|(_, field)| !has_attribute(field, "skip"));
+
+    let mut encountered_opt_item = false;
+    let mut length_stmts = Vec::with_capacity(body.fields.len());
+    let mut stmts = Vec::with_capacity(body.fields.len());
+    for (i, field) in fields {
+        let is_opt = is_optional(field);
+        if is_opt {
+            encountered_opt_item = true;
+        } else if encountered_opt_item {
+            return Err(Error::new_spanned(field, "All subsequent fields must be optional."))
+        }
+
+        length_stmts.push(encodable_length(i, field, is_opt));
+        stmts.push(encodable_field(i, field, is_opt));
+    }
 
     let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
@@ -46,20 +52,16 @@ pub(crate) fn impl_encodable(ast: &syn::DeriveInput) -> TokenStream {
         }
     };
 
-    quote! {
+    Ok(quote! {
         const _: () = {
             extern crate reth_rlp;
             #impl_block
         };
-    }
+    })
 }
 
-pub(crate) fn impl_encodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
-    let body = if let syn::Data::Struct(s) = &ast.data {
-        s
-    } else {
-        panic!("#[derive(RlpEncodableWrapper)] is only defined for structs.");
-    };
+pub(crate) fn impl_encodable_wrapper(ast: &syn::DeriveInput) -> Result<TokenStream> {
+    let body = parse_struct(ast, "RlpEncodableWrapper")?;
 
     let ident = {
         let fields: Vec<_> = body.fields.iter().collect();
@@ -85,20 +87,16 @@ pub(crate) fn impl_encodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
         }
     };
 
-    quote! {
+    Ok(quote! {
         const _: () = {
             extern crate reth_rlp;
             #impl_block
         };
-    }
+    })
 }
 
-pub(crate) fn impl_max_encoded_len(ast: &syn::DeriveInput) -> TokenStream {
-    let body = if let syn::Data::Struct(s) = &ast.data {
-        s
-    } else {
-        panic!("#[derive(RlpMaxEncodedLen)] is only defined for structs.");
-    };
+pub(crate) fn impl_max_encoded_len(ast: &syn::DeriveInput) -> Result<TokenStream> {
+    let body = parse_struct(ast, "RlpMaxEncodedLen")?;
 
     let stmts: Vec<_> = body
         .fields
@@ -116,27 +114,22 @@ pub(crate) fn impl_max_encoded_len(ast: &syn::DeriveInput) -> TokenStream {
         }
     };
 
-    quote! {
+    Ok(quote! {
         const _: () = {
             extern crate reth_rlp;
             #impl_block
         };
-    }
+    })
 }
 
-fn field_ident(index: usize, field: &syn::Field) -> TokenStream {
-    if let Some(ident) = &field.ident {
-        quote! { #ident }
-    } else {
-        let index = syn::Index::from(index);
-        quote! { #index }
-    }
-}
-
-fn encodable_length(index: usize, field: &syn::Field) -> TokenStream {
+fn encodable_length(index: usize, field: &syn::Field, is_opt: bool) -> TokenStream {
     let ident = field_ident(index, field);
 
-    quote! { rlp_head.payload_length += reth_rlp::Encodable::length(&self.#ident); }
+    if is_opt {
+        quote! { rlp_head.payload_length += &self.#ident.as_ref().map(|val| reth_rlp::Encodable::length(val)).unwrap_or_default(); }
+    } else {
+        quote! { rlp_head.payload_length += reth_rlp::Encodable::length(&self.#ident); }
+    }
 }
 
 fn encodable_max_length(index: usize, field: &syn::Field) -> TokenStream {
@@ -149,10 +142,12 @@ fn encodable_max_length(index: usize, field: &syn::Field) -> TokenStream {
     }
 }
 
-fn encodable_field(index: usize, field: &syn::Field) -> TokenStream {
+fn encodable_field(index: usize, field: &syn::Field, is_opt: bool) -> TokenStream {
     let ident = field_ident(index, field);
 
-    let id = quote! { self.#ident };
-
-    quote! { reth_rlp::Encodable::encode(&#id, out); }
+    if is_opt {
+        quote! { self.#ident.as_ref().map(|val| reth_rlp::Encodable::encode(val, out)); }
+    } else {
+        quote! { reth_rlp::Encodable::encode(&self.#ident, out); }
+    }
 }

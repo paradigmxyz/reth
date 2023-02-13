@@ -30,6 +30,14 @@ struct Test4NumbersGenerics<'a, D: Encodable> {
     d: &'a D,
 }
 
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct TestOpt {
+    a: u8,
+    b: u64,
+    c: Option<u8>,
+    d: Option<u64>,
+}
+
 fn encoded<T: Encodable>(t: &T) -> BytesMut {
     let mut out = BytesMut::new();
     t.encode(&mut out);
