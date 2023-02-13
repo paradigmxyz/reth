@@ -350,8 +350,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
             .walk_range(
-                (from_transition_rev, Address::zero()).into()..
-                    (to_transition_rev, Address::zero()).into(),
+                TransitionIdAddress((from_transition_rev, Address::zero()))..
+                    TransitionIdAddress((to_transition_rev, Address::zero())),
             )?
             .collect::<Result<Vec<_>, _>>()?;
 
