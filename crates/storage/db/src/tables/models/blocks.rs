@@ -9,7 +9,7 @@ use crate::{
 };
 use bytes::Bytes;
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, H256};
+use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, Withdrawal, H256};
 use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.
@@ -51,11 +51,19 @@ impl StoredBlockBody {
 ///
 /// It is stored as the headers of the block's uncles.
 /// tx_amount)`.
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[main_codec]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct StoredBlockOmmers {
     /// The block headers of this block's uncles.
     pub ommers: Vec<Header>,
+}
+
+/// The storage representation of block withdrawals.
+#[main_codec]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
+pub struct StoredBlockWithdrawals {
+    /// The block withdrawals.
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 /// Hash of the block header. Value for [`CanonicalHeaders`][crate::tables::CanonicalHeaders]

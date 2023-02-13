@@ -45,6 +45,14 @@ pub fn validate_header_standalone(
         return Err(Error::BaseFeeMissing)
     }
 
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
+        header.withdrawals_root.is_none()
+    {
+        return Err(Error::WithdrawalsRootMissing)
+    } else if header.withdrawals_root.is_some() {
+        return Err(Error::WithdrawalsRootUnexpected)
+    }
+
     Ok(())
 }
 
@@ -167,7 +175,7 @@ pub fn validate_all_transaction_regarding_block_and_nonces<
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(block: &SealedBlock) -> Result<(), Error> {
+pub fn validate_block_standalone(block: &SealedBlock, chain_spec: &ChainSpec) -> Result<(), Error> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let ommers_hash =
@@ -187,6 +195,20 @@ pub fn validate_block_standalone(block: &SealedBlock) -> Result<(), Error> {
             got: transaction_root,
             expected: block.header.transactions_root,
         })
+    }
+
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
+        let withdrawals = block.withdrawals.as_ref().ok_or(Error::BodyWithdrawalsMissing)?;
+        let withdrawals_root =
+            reth_primitives::proofs::calculate_withdrawals_root(withdrawals.iter());
+        let header_withdrawals_root =
+            block.withdrawals_root.as_ref().ok_or(Error::WithdrawalsRootMissing)?;
+        if withdrawals_root != *header_withdrawals_root {
+            return Err(Error::BodyWithdrawalsRootDiff {
+                got: withdrawals_root,
+                expected: *header_withdrawals_root,
+            })
+        }
     }
 
     Ok(())
@@ -326,7 +348,7 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     chain_spec: &ChainSpec,
 ) -> RethResult<()> {
     validate_header_standalone(&block.header, chain_spec)?;
-    validate_block_standalone(block)?;
+    validate_block_standalone(block, chain_spec)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
 
@@ -442,6 +464,7 @@ mod tests {
         let signer = Address::zero();
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
     }
+
     /// got test block
     fn mock_block() -> (SealedBlock, Header) {
         // https://etherscan.io/block/15867168 where transaction root and receipts root are cleared
@@ -464,6 +487,7 @@ mod tests {
             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
+            withdrawals_root: None
         };
         // size: 0x9b5
 
@@ -476,7 +500,7 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal(), body, ommers }, parent)
+        (SealedBlock { header: header.seal(), body, ommers, withdrawals: None }, parent)
     }
 
     #[test]

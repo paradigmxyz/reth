@@ -12,7 +12,8 @@ use crate::{
         models::{
             accounts::{AccountBeforeTx, TransitionIdAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
-            ShardedKey,
+            storage_sharded_key::StorageShardedKey,
+            ShardedKey, StoredBlockBody, StoredBlockWithdrawals,
         },
     },
 };
@@ -20,8 +21,6 @@ use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
     StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
-
-use self::models::{storage_sharded_key::StorageShardedKey, StoredBlockBody};
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
@@ -139,6 +138,11 @@ table!(
 table!(
     /// Stores the uncles/ommers of the block.
     ( BlockOmmers ) BlockNumber | StoredBlockOmmers
+);
+
+table!(
+    /// Stores the block withdrawals.
+    ( BlockWithdrawals ) BlockNumber | StoredBlockWithdrawals
 );
 
 table!(

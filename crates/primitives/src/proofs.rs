@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    keccak256, Address, Bytes, GenesisAccount, Header, Log, Receipt, TransactionSigned, H256,
+    keccak256, Address, Bytes, GenesisAccount, Header, Log, Receipt, TransactionSigned, Withdrawal,
+    H256,
 };
 use bytes::BytesMut;
 use hash_db::Hasher;
@@ -45,6 +46,14 @@ pub fn calculate_transaction_root<'a>(
         tx.encode_inner(&mut tx_rlp, false);
         tx_rlp
     }))
+}
+
+/// Calculates the root hash of the withdrawals.
+pub fn calculate_withdrawals_root<'a>(
+    withdrawals: impl IntoIterator<Item = &'a Withdrawal>,
+) -> H256 {
+    // TODO: implement and add tests
+    todo!()
 }
 
 /// Calculates the receipt root for a header.

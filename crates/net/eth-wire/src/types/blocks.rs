@@ -2,9 +2,12 @@
 //! types.
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{
-    Block, BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, H256,
+    Block, BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, Withdrawal, H256,
 };
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use reth_rlp::{
+    length_of_length, Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
+    RlpEncodableWrapper,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -71,13 +74,15 @@ impl From<Vec<H256>> for GetBlockBodies {
 // TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
 #[derive_arbitrary(rlp, 10)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockBody {
     /// Transactions in the block
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
     pub ommers: Vec<Header>,
+    /// Withdrawals in the block.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl BlockBody {
@@ -87,7 +92,59 @@ impl BlockBody {
             header: header.clone(),
             body: self.transactions.clone(),
             ommers: self.ommers.clone(),
+            withdrawals: self.withdrawals.clone(),
         }
+    }
+
+    fn payload_len(&self) -> usize {
+        let mut length = 0;
+        length += self.transactions.length();
+        length += self.ommers.length();
+        length += self.withdrawals.as_ref().map(|w| w.length()).unwrap_or_default();
+        length
+    }
+}
+
+impl Encodable for BlockBody {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        reth_rlp::Header { list: true, payload_length: self.payload_len() }.encode(out);
+        self.transactions.encode(out);
+        self.ommers.encode(out);
+        if let Some(ref withdrawals) = self.withdrawals {
+            withdrawals.encode(out);
+        }
+    }
+
+    fn length(&self) -> usize {
+        let len = self.payload_len();
+        // RLP header length + payload length
+        len + length_of_length(len)
+    }
+}
+
+impl Decodable for BlockBody {
+    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+        let rlp_head = reth_rlp::Header::decode(buf)?;
+        if !rlp_head.list {
+            return Err(reth_rlp::DecodeError::UnexpectedString)
+        }
+        let started_len = buf.len();
+        let mut this = Self {
+            transactions: Decodable::decode(buf)?,
+            ommers: Decodable::decode(buf)?,
+            withdrawals: None,
+        };
+        if started_len - buf.len() < rlp_head.payload_length {
+            this.withdrawals = Some(Decodable::decode(buf)?);
+        }
+        let consumed = started_len - buf.len();
+        if consumed != rlp_head.payload_length {
+            return Err(reth_rlp::DecodeError::ListLengthMismatch {
+                expected: rlp_head.payload_length,
+                got: consumed,
+            })
+        }
+        Ok(this)
     }
 }
 
@@ -276,6 +333,7 @@ mod test {
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
                     nonce: 0x0000000000000000u64,
                     base_fee_per_gas: None,
+                    withdrawals_root: None,
                 },
             ]),
         }.encode(&mut data);
@@ -306,6 +364,7 @@ mod test {
                     mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
                     nonce: 0x0000000000000000u64,
                     base_fee_per_gas: None,
+                    withdrawals_root: None,
                 },
             ]),
         };
@@ -417,8 +476,10 @@ mod test {
     hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
                             nonce: 0x0000000000000000u64,
                             base_fee_per_gas: None,
+                            withdrawals_root: None,
                         },
                     ],
+                    withdrawals: None,
                 }
             ]),
         };
@@ -499,8 +560,10 @@ mod test {
     hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
                             nonce: 0x0000000000000000u64,
                             base_fee_per_gas: None,
+                            withdrawals_root: None,
                         },
                     ],
+                    withdrawals: None,
                 }
             ]),
         };

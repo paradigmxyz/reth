@@ -103,6 +103,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             ommers_hash: EMPTY_LIST_HASH,
             difficulty: Default::default(),
             nonce: Default::default(),
+            withdrawals_root: None,
         };
         let header = header.seal();
 
@@ -113,7 +114,12 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             })
         }
 
-        Ok(SealedBlock { header, body: transactions, ommers: Default::default() })
+        Ok(SealedBlock {
+            header,
+            body: transactions,
+            ommers: Default::default(),
+            withdrawals: None, /* TODO: */
+        })
     }
 
     /// Called to retrieve the latest state of the network, validate new blocks, and maintain

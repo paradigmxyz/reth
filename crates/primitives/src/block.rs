@@ -1,21 +1,21 @@
-use crate::{Header, SealedHeader, TransactionSigned, H256};
+use crate::{Header, SealedHeader, TransactionSigned, Withdrawal, H256};
 use reth_codecs::derive_arbitrary;
-use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
+use reth_rlp::{Decodable, DecodeError, Encodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 /// Ethereum full block.
 #[derive_arbitrary(rlp, 25)]
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Block {
     /// Block header.
     pub header: Header,
     /// Transactions in this block.
     pub body: Vec<TransactionSigned>,
-    /// Ommers/uncles header
+    /// Ommers/uncles header.
     pub ommers: Vec<Header>,
+    /// Block withdrawals.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl Deref for Block {
@@ -25,11 +25,25 @@ impl Deref for Block {
     }
 }
 
+impl Encodable for Block {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        todo!()
+    }
+
+    fn length(&self) -> usize {
+        todo!()
+    }
+}
+
+impl Decodable for Block {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        todo!()
+    }
+}
+
 /// Sealed Ethereum full block.
-#[derive_arbitrary(rlp, 10)]
-#[derive(
-    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
-)]
+// #[derive_arbitrary(rlp, 10)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,
@@ -37,6 +51,8 @@ pub struct SealedBlock {
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
+    /// Block withdrawals.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl SealedBlock {
@@ -56,7 +72,24 @@ impl SealedBlock {
             header: self.header.unseal(),
             body: self.body,
             ommers: self.ommers.into_iter().map(|o| o.unseal()).collect(),
+            withdrawals: self.withdrawals,
         }
+    }
+}
+
+impl Encodable for SealedBlock {
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        todo!()
+    }
+
+    fn length(&self) -> usize {
+        todo!()
+    }
+}
+
+impl Decodable for SealedBlock {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        todo!()
     }
 }
 

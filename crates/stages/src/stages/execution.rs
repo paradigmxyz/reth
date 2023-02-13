@@ -144,7 +144,7 @@ impl ExecutionStage {
             trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
             let changeset = reth_executor::executor::execute_and_verify_receipt(
-                &Block { header, body: transactions, ommers },
+                &Block { header, body: transactions, ommers, withdrawals: None /* TODO: */ },
                 td,
                 Some(signers),
                 &self.chain_spec,

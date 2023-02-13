@@ -349,7 +349,7 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<ExecutionResult, Error> {
-        let Block { header, body, ommers } = block;
+        let Block { header, body, ommers, withdrawals /* TODO: */ } = block;
         let senders = self.recover_senders(body, senders)?;
 
         self.init_block_env(header, total_difficulty);
@@ -576,7 +576,8 @@ mod tests {
         ommer.number = block.number;
         let ommers = vec![ommer];
 
-        let block = Block { header: block.header.unseal(), body: block.body, ommers };
+        let block =
+            Block { header: block.header.unseal(), body: block.body, ommers, withdrawals: None };
 
         let mut db = StateProviderTest::default();
 
@@ -743,7 +744,7 @@ mod tests {
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
         let out = execute_and_verify_receipt(
-            &Block { header, body: vec![], ommers: vec![] },
+            &Block { header, body: vec![], ommers: vec![], withdrawals: None },
             U256::ZERO,
             None,
             &chain_spec,

@@ -74,6 +74,7 @@ impl Block {
             nonce,
             base_fee_per_gas,
             extra_data,
+            withdrawals_root: _withdrawals_root, // TODO:
         } = block.header;
 
         let header = Header {
