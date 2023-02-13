@@ -319,6 +319,7 @@ where
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .no_dns_discovery()
+            .no_discv4_discovery()
     }
 }
 
