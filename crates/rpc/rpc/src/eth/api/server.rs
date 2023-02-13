@@ -185,7 +185,7 @@ where
         newest_block: BlockNumber,
         _reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
-        if block_count == 0 {
+        if block_count == 0 || newest_block < block_count {
             return Ok(FeeHistory::default())
         }
 
@@ -202,8 +202,10 @@ where
                 fee_history_cache_items.insert(block, fee_history_cache_item.clone());
             } else {
                 // If block doesn't exist in cache, set it as a first non-cached block to query it
-                // from the database
+                // from the database and break the loop since we'll overwrite the remaining blocks
+                // in cache anyway.
                 first_non_cached_block.get_or_insert(block);
+                break
             }
         }
 
@@ -213,8 +215,8 @@ where
                 .inner
                 .client
                 // TODO: make `header_range` accept `RangeInclusive`, so we can pass
-                //  `start_block.into()..end_block.into()` instead.
-                .headers_range(start_block.into()..(end_block + 1).into())
+                //  `start_block..=end_block` instead.
+                .headers_range(start_block..(end_block + 1))
                 .to_rpc_result()?;
             if headers.is_empty() {
                 return Ok(FeeHistory::default())

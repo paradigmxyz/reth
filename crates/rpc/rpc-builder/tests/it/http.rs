@@ -67,6 +67,7 @@ where
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
+    EthApiClient::fee_history(client, 1, block_number + 2, None).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
@@ -126,9 +127,6 @@ where
         EthApiClient::estimate_gas(client, call_request.clone(), None).await.err().unwrap()
     ));
     assert!(is_unimplemented(EthApiClient::gas_price(client).await.err().unwrap()));
-    assert!(is_unimplemented(
-        EthApiClient::fee_history(client, U256::default(), block_number, None).await.err().unwrap()
-    ));
     assert!(is_unimplemented(EthApiClient::max_priority_fee_per_gas(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::is_mining(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::hashrate(client).await.err().unwrap()));

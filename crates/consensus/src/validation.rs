@@ -350,8 +350,8 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
 mod tests {
     use reth_interfaces::Result;
     use reth_primitives::{
-        hex_literal::hex, Account, Address, BlockHash, BlockHashOrNumber, Bytes, Header, Signature,
-        TransactionKind, TransactionSigned, MAINNET, U256,
+        hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
+        TransactionSigned, MAINNET, U256,
     };
     use std::ops::Range;
 
