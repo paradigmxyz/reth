@@ -122,10 +122,13 @@ pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
     /// Imports all dupsort data from another transaction.
     fn import_dupsort<T: DupSort, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), Error> {
         let mut destination_cursor = self.cursor_dup_write::<T>()?;
+        let mut cursor = source_tx.cursor_dup_read::<T>()?;
 
-        for kv in source_tx.cursor_dup_read::<T>()?.walk_dup(None, None)? {
-            let (k, v) = kv?;
-            destination_cursor.append_dup(k, v)?;
+        while let Some((k, _)) = cursor.next_no_dup()? {
+            for kv in cursor.walk_dup(Some(k), None)? {
+                let (k, v) = kv?;
+                destination_cursor.append_dup(k, v)?;
+            }
         }
 
         Ok(())
