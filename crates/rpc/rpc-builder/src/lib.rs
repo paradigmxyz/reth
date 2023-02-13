@@ -26,12 +26,12 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockProvider, StateProviderFactory};
+//! use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Client, Pool, Network>(client: Client, pool: Pool, network: Network)
 //! where
-//!     Client: BlockProvider + StateProviderFactory + Clone + 'static,
+//!     Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //! {
