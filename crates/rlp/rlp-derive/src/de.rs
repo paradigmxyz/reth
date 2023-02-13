@@ -9,11 +9,16 @@ pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
 
     let fields = body.fields.iter().enumerate();
 
+    let supports_trailing_opt = attributes_include(&ast.attrs, "trailing");
+
     let mut encountered_opt_item = false;
     let mut stmts = Vec::with_capacity(body.fields.len());
     for (i, field) in fields {
         let is_opt = is_optional(field);
         if is_opt {
+            if !supports_trailing_opt {
+                return Err(Error::new_spanned(field, "Optional fields are disabled. Add `#[rlp(trailing)]` attribute to the struct in order to enable"))
+            }
             encountered_opt_item = true;
         } else if encountered_opt_item && !attributes_include(&field.attrs, "default") {
             return Err(Error::new_spanned(
