@@ -396,13 +396,19 @@ impl fmt::Display for BlockNumberOrTag {
     }
 }
 
-/// A block hash and an optional bool that defines if it's canonical
+/// A block hash which may have
+/// a boolean requireCanonical field.
+/// If false, an RPC call should raise if a block
+/// matching the hash is not found.
+/// If true, an RPC call should additionaly raise if
+/// the block is not in the canonical chain.
+/// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md#specification>
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BlockHashCanonical {
     /// A block hash
-    block_hash: H256,
+    pub block_hash: H256,
     /// Whether the block must be a canonical block
-    require_canonical: Option<bool>,
+    pub require_canonical: Option<bool>,
 }
 #[cfg(test)]
 mod test {
