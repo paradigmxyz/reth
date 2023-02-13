@@ -58,7 +58,7 @@ impl Serialize for SubscriptionResult {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
-pub enum Kind {
+pub enum SubscriptionKind {
     /// New block headers subscription.
     NewHeads,
     /// Logs subscription.

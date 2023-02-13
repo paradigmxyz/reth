@@ -1,5 +1,5 @@
 use jsonrpsee::proc_macros::rpc;
-use reth_rpc_types::pubsub::{Kind, Params};
+use reth_rpc_types::pubsub::{Params, SubscriptionKind};
 
 /// Ethereum pub-sub rpc interface.
 #[rpc(server)]
@@ -10,5 +10,5 @@ pub trait EthPubSubApi {
         unsubscribe = "eth_unsubscribe",
         item = reth_rpc_types::pubsub::SubscriptionResult
     )]
-    fn subscribe(&self, kind: Kind, params: Option<Params>);
+    fn subscribe(&self, kind: SubscriptionKind, params: Option<Params>);
 }
