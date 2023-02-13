@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Error, Result};
 
-use crate::utils::{field_ident, has_attribute, is_optional, parse_struct};
+use crate::utils::{attributes_include, field_ident, is_optional, parse_struct};
 
 pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
     let body = parse_struct(ast, "RlpDecodable")?;
@@ -15,7 +15,7 @@ pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
         let is_opt = is_optional(field);
         if is_opt {
             encountered_opt_item = true;
-        } else if encountered_opt_item && !has_attribute(field, "default") {
+        } else if encountered_opt_item && !attributes_include(&field.attrs, "default") {
             return Err(Error::new_spanned(
                 field,
                 "All subsequent fields must be either optional or default.",
@@ -97,7 +97,7 @@ pub(crate) fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> Result<TokenStre
 fn decodable_field(index: usize, field: &syn::Field, is_opt: bool) -> TokenStream {
     let ident = field_ident(index, field);
 
-    if has_attribute(field, "default") {
+    if attributes_include(&field.attrs, "default") {
         quote! { #ident: Default::default(), }
     } else if is_opt {
         quote! {

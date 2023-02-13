@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DataStruct, Error, Field, Meta, NestedMeta, Result, Type, TypePath};
+use syn::{Attribute, DataStruct, Error, Field, Meta, NestedMeta, Result, Type, TypePath};
 
 pub(crate) fn parse_struct<'a>(
     ast: &'a syn::DeriveInput,
@@ -16,8 +16,8 @@ pub(crate) fn parse_struct<'a>(
     }
 }
 
-pub(crate) fn has_attribute(field: &Field, attr_name: &str) -> bool {
-    field.attrs.iter().any(|attr| {
+pub(crate) fn attributes_include(attrs: &[Attribute], attr_name: &str) -> bool {
+    attrs.iter().any(|attr| {
         if attr.path.is_ident("rlp") {
             if let Ok(Meta::List(meta)) = attr.parse_meta() {
                 if let Some(NestedMeta::Meta(meta)) = meta.nested.first() {

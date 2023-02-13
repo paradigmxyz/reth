@@ -31,6 +31,7 @@ struct Test4NumbersGenerics<'a, D: Encodable> {
 }
 
 #[derive(Debug, PartialEq, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
 struct TestOpt {
     a: u8,
     b: u64,

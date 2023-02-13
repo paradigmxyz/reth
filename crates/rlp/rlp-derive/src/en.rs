@@ -2,12 +2,18 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Error, Result};
 
-use crate::utils::{field_ident, has_attribute, is_optional, parse_struct};
+use crate::utils::{attributes_include, field_ident, is_optional, parse_struct};
 
 pub(crate) fn impl_encodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
     let body = parse_struct(ast, "RlpEncodable")?;
 
-    let fields = body.fields.iter().enumerate().filter(|(_, field)| !has_attribute(field, "skip"));
+    let fields = body
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| !attributes_include(&field.attrs, "skip"));
+
+    let supports_trailing_opt = attributes_include(&ast.attrs, "trailing");
 
     let mut encountered_opt_item = false;
     let mut length_stmts = Vec::with_capacity(body.fields.len());
@@ -15,6 +21,9 @@ pub(crate) fn impl_encodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
     for (i, field) in fields {
         let is_opt = is_optional(field);
         if is_opt {
+            if !supports_trailing_opt {
+                return Err(Error::new_spanned(field, "Optional fields are disabled. Add `#[rlp(trailing)]` attribute to the struct in order to enable"))
+            }
             encountered_opt_item = true;
         } else if encountered_opt_item {
             return Err(Error::new_spanned(field, "All subsequent fields must be optional."))
@@ -102,7 +111,7 @@ pub(crate) fn impl_max_encoded_len(ast: &syn::DeriveInput) -> Result<TokenStream
         .fields
         .iter()
         .enumerate()
-        .filter(|(_, field)| !has_attribute(field, "skip"))
+        .filter(|(_, field)| !attributes_include(&field.attrs, "skip"))
         .map(|(index, field)| encodable_max_length(index, field))
         .collect();
     let name = &ast.ident;
