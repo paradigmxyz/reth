@@ -12,6 +12,7 @@ tokio = { version = "1", features = ["sync", "rt"] }
 tracing-futures = "0.2"
 tracing = { version = "0.1", default-features = false }
 futures-util = "0.3"
+thiserror = "1.0"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
