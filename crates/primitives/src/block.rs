@@ -143,7 +143,7 @@ impl Decodable for BlockHashOrNumber {
 /// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md>
 pub enum BlockId {
     /// A block hash and an optional bool that defines if it's canonical
-    Hash(BlockHashCanonical),
+    Hash(BlockHash),
     /// A block number
     Number(BlockNumberOrTag),
 }
@@ -162,18 +162,18 @@ impl From<BlockNumberOrTag> for BlockId {
 
 impl From<H256> for BlockId {
     fn from(block_hash: H256) -> Self {
-        BlockId::Hash(BlockHashCanonical { block_hash, require_canonical: None })
+        BlockId::Hash(BlockHash { block_hash, require_canonical: None })
     }
 }
 
 impl From<(H256, Option<bool>)> for BlockId {
     fn from(hash_can: (H256, Option<bool>)) -> Self {
-        BlockId::Hash(BlockHashCanonical { block_hash: hash_can.0, require_canonical: hash_can.1 })
+        BlockId::Hash(BlockHash { block_hash: hash_can.0, require_canonical: hash_can.1 })
     }
 }
 
-impl From<BlockHashCanonical> for BlockId {
-    fn from(hash_can: BlockHashCanonical) -> Self {
+impl From<BlockHash> for BlockId {
+    fn from(hash_can: BlockHash) -> Self {
         BlockId::Hash(hash_can)
     }
 }
@@ -184,11 +184,11 @@ impl Serialize for BlockId {
         S: Serializer,
     {
         match *self {
-            BlockId::Hash(BlockHashCanonical { ref block_hash, ref require_canonical }) => {
+            BlockId::Hash(BlockHash { ref block_hash, ref require_canonical }) => {
                 let mut s = serializer.serialize_struct("BlockIdEip1898", 1)?;
-                s.serialize_field("blockHash", block_hash))?;
+                s.serialize_field("blockHash", block_hash)?;
                 if let Some(require_canonical) = require_canonical {
-                    s.serialize_field("requireCanonical", require_canonical))?;
+                    s.serialize_field("requireCanonical", require_canonical)?;
                 }
                 s.end()
             }
@@ -229,7 +229,7 @@ impl<'de> Deserialize<'de> for BlockId {
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "blockNumber" => {
-                            if number.is_some() || block_hash.is_some() {
+                            if number.is_some() || block_hash.is_some() || require_canonical.is_some() {
                                 return Err(serde::de::Error::duplicate_field("blockNumber"))
                             }
                             number = Some(map.next_value::<BlockNumberOrTag>()?)
@@ -260,7 +260,7 @@ impl<'de> Deserialize<'de> for BlockId {
                 if let Some(number) = number {
                     Ok(BlockId::Number(number))
                 } else if let Some(block_hash) = block_hash {
-                    Ok(BlockId::Hash(BlockHashCanonical { block_hash, require_canonical }))
+                    Ok(BlockId::Hash(BlockHash { block_hash, require_canonical }))
                 } else {
                     Err(serde::de::Error::custom(
                         "Expected `blockNumber` or `blockHash` with `requireCanonical` optionally",
@@ -403,7 +403,7 @@ impl fmt::Display for BlockNumberOrTag {
 /// If true, an RPC call should additionaly raise if
 /// the block is not in the canonical chain.
 /// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md#specification>
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct BlockHash {
     /// A block hash
     pub block_hash: H256,
@@ -444,7 +444,7 @@ mod test {
     fn can_parse_block_hash_with_canonical() {
         let block_hash = H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3").unwrap();
         let require_canonical = Some(true);
-        let block_id = BlockId::Hash(BlockHashCanonical {block_hash, require_canonical});
+        let block_id = BlockId::Hash(BlockHash {block_hash, require_canonical});
         let block_hash_json = serde_json::json!(
             { "blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", "requireCanonical": true }
         );
@@ -460,9 +460,16 @@ mod test {
             [("latest", Latest), ("finalized", Finalized), ("safe", Safe), ("pending", Pending)];
         for (value, tag) in tags {
             let num = serde_json::json!({ "blockNumber": value });
-            let id = serde_json::from_value::<BlockId>(num).unwrap();
-            assert_eq!(id, BlockId::from(tag))
+            let id = serde_json::from_value::<BlockId>(num);
+            assert_eq!(id.unwrap(), BlockId::from(tag))
         }
+    }
+    #[test]
+    fn repeated_keys_is_err() {
+        let num = serde_json::json!({"blockNumber": 1, "requireCanonical": true, "requireCanonical": false});
+        assert!(serde_json::from_value::<BlockId>(num).is_err());
+        let num = serde_json::json!({"blockNumber": 1, "requireCanonical": true, "blockNumber": 23});
+        assert!(serde_json::from_value::<BlockId>(num).is_err());
     }
     #[test]
     fn serde_blockid_tags() {
