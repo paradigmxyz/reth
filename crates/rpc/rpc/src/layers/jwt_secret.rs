@@ -3,13 +3,10 @@ use jsonwebtoken::{decode, errors::ErrorKind, Algorithm, DecodingKey, Validation
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use tracing::info;
 
 /// Errors returned by the [`JwtSecret`][crate::layers::JwtSecret]
 #[derive(Error, Debug)]
@@ -316,7 +313,6 @@ mod tests {
             }
             Err(_) => {
                 delete(fpath);
-                assert!(false); // Fail test
             }
         }
     }
@@ -339,7 +335,7 @@ mod tests {
     }
 
     fn hex(secret: &JwtSecret) -> String {
-        hex::encode(&secret.0)
+        hex::encode(secret.0)
     }
 
     fn delete(path: &Path) {
