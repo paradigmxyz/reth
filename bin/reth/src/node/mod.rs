@@ -25,12 +25,11 @@ use reth_interfaces::{
     },
     sync::SyncStateUpdater,
 };
-use reth_net_nat::NatResolver;
 use reth_network::{
     error::NetworkError, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, H256};
+use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
 use reth_staged_sync::{
@@ -91,9 +90,6 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
-
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
 
     /// Set the chain tip manually for testing purposes.
     ///
@@ -286,16 +282,11 @@ impl Command {
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
-        let peers_file = self.network.persistent_peers_file();
-        config.network_config(
-            db,
-            self.chain.clone(),
-            self.network.disable_discovery,
-            self.network.bootnodes.clone(),
-            self.nat,
-            peers_file,
-            Some(executor),
-        )
+        self.network
+            .network_config(config, self.chain.clone())
+            .set_head(Head::default())
+            .executor(Some(executor))
+            .build(Arc::new(ShareableDatabase::new(db.clone())))
     }
 
     async fn build_pipeline<H, B, U>(

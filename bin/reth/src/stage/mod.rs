@@ -9,9 +9,8 @@ use crate::{
 use clap::{Parser, ValueEnum};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
-use reth_provider::Transaction;
+use reth_provider::{ShareableDatabase, Transaction};
 use reth_staged_sync::{
     utils::{chainspec::chain_spec_value_parser, init::init_db},
     Config,
@@ -85,9 +84,6 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
-
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
@@ -137,16 +133,10 @@ impl Command {
                     });
                 }
 
-                let network = config
-                    .network_config(
-                        db.clone(),
-                        self.chain.clone(),
-                        self.network.disable_discovery,
-                        None,
-                        self.nat,
-                        None,
-                        None,
-                    )
+                let network = self
+                    .network
+                    .network_config(&config, self.chain.clone())
+                    .build(Arc::new(ShareableDatabase::new(db.clone())))
                     .start_network()
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);

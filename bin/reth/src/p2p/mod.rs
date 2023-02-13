@@ -10,6 +10,7 @@ use reth_interfaces::p2p::{
 };
 use reth_network::FetchClient;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
+use reth_provider::ShareableDatabase;
 use reth_staged_sync::{
     utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
     Config,
@@ -98,15 +99,10 @@ impl Command {
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
         let network = config
-            .network_config(
-                noop_db,
-                self.chain.clone(),
-                self.disable_discovery,
-                None,
-                self.nat,
-                None,
-                None,
-            )
+            .network_config(self.nat, None)
+            .set_discovery(self.disable_discovery)
+            .chain_spec(self.chain.clone())
+            .build(Arc::new(ShareableDatabase::new(noop_db)))
             .start_network()
             .await?;
 
