@@ -1,11 +1,14 @@
-use crate::{AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider};
+use crate::{
+    AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider,
+    StateProviderFactory,
+};
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, Bytes, ChainInfo, Header, StorageKey,
-    StorageValue, H256, U256,
+    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
+    U256,
 };
 use std::{collections::HashMap, ops::Range, sync::Arc};
 
@@ -107,16 +110,11 @@ impl HeaderProvider for MockEthProvider {
         }))
     }
 
-    fn headers_range(&self, range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
-        let start_block = self.block_hash_for_id(range.start.into())?.unwrap();
-        let end_block = self.block_hash_for_id(range.end.into())?.unwrap();
-
+    fn headers_range(&self, range: Range<reth_primitives::BlockNumber>) -> Result<Vec<Header>> {
         let lock = self.headers.lock();
         Ok(lock
-            .iter()
-            .skip_while(|(hash, _)| **hash != start_block)
-            .take_while(|(hash, _)| **hash != end_block)
-            .map(|(_hash, header)| header)
+            .values()
+            .filter(|header| (range.start..range.end).contains(&header.number))
             .cloned()
             .collect())
     }
@@ -197,5 +195,25 @@ impl StateProvider for MockEthProvider {
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
+    }
+}
+
+impl StateProviderFactory for MockEthProvider {
+    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
+    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
+
+    fn latest(&self) -> Result<Self::LatestSP<'_>> {
+        Ok(self)
+    }
+
+    fn history_by_block_number(
+        &self,
+        _block: reth_primitives::BlockNumber,
+    ) -> Result<Self::HistorySP<'_>> {
+        todo!()
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+        todo!()
     }
 }

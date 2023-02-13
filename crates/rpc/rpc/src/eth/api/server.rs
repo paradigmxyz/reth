@@ -8,7 +8,7 @@ use crate::{
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
-    Address, BlockHashOrNumber, BlockNumber, Bytes, Header, H256, H64, U256, U64,
+    Address, BlockNumber, Bytes, Header, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -212,7 +212,9 @@ where
             let headers: Vec<Header> = self
                 .inner
                 .client
-                .headers_range(BlockHashOrNumber::Number(start_block)..(end_block + 1).into())
+                // TODO: make `header_range` accept `RangeInclusive`, so we can pass
+                //  `start_block.into()..end_block.into()` instead.
+                .headers_range(start_block.into()..(end_block + 1).into())
                 .to_rpc_result()?;
             if headers.is_empty() {
                 return Ok(FeeHistory::default())
@@ -307,5 +309,61 @@ where
         _block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
         Err(internal_rpc_err("unimplemented"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::random;
+    use reth_network_api::test_utils::NoopNetwork;
+    use reth_primitives::{Block, Header, H256, U256};
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_api::EthApiServer;
+    use reth_transaction_pool::test_utils::testing_pool;
+
+    use crate::EthApi;
+
+    #[tokio::test]
+    async fn test_fee_history() {
+        let mock_provider = MockEthProvider::default();
+
+        let block_count = 10;
+        let newest_block = 1337;
+
+        let mut oldest_block = None;
+        let mut gas_used_ratios = Vec::new();
+        let mut base_fees_per_gas = Vec::new();
+
+        for i in (0..=block_count).rev() {
+            let hash = H256::random();
+            let gas_limit: u64 = random();
+            let gas_used: u64 = random();
+            let base_fee_per_gas: Option<u64> =
+                if random::<bool>() { Some(random()) } else { None };
+
+            let header = Header {
+                number: newest_block - i,
+                gas_limit,
+                gas_used,
+                base_fee_per_gas,
+                ..Default::default()
+            };
+
+            mock_provider.add_block(hash, Block { header: header.clone(), ..Default::default() });
+            mock_provider.add_header(hash, header);
+
+            oldest_block.get_or_insert(hash);
+            gas_used_ratios.push(gas_used as f64 / gas_limit as f64);
+            base_fees_per_gas
+                .push(base_fee_per_gas.map(|fee| U256::try_from(fee).unwrap()).unwrap_or_default());
+        }
+
+        let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
+
+        let fee_history = eth_api.fee_history(block_count, newest_block, None).await.unwrap();
+
+        assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
+        assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
+        assert_eq!(fee_history.oldest_block, U256::from_be_bytes(oldest_block.unwrap().0));
     }
 }

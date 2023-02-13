@@ -424,7 +424,7 @@ mod tests {
             Ok(None)
         }
 
-        fn headers_range(&self, _range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
+        fn headers_range(&self, _range: Range<BlockNumber>) -> Result<Vec<Header>> {
             Ok(vec![])
         }
     }

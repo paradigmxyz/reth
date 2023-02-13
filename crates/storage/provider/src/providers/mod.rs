@@ -5,9 +5,7 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_interfaces::Result;
-use reth_primitives::{
-    rpc::BlockId, Block, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, H256, U256,
-};
+use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
 use std::ops::Range;
 
 mod state;
@@ -68,15 +66,12 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
         })?
     }
 
-    fn headers_range(&self, range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
-        let start_block = self.block_number_for_id(range.start.into())?.unwrap();
-        let end_block = self.block_number_for_id(range.end.into())?.unwrap();
-
+    fn headers_range(&self, range: Range<BlockNumber>) -> Result<Vec<Header>> {
         self.db
             .view(|tx| {
                 let mut cursor = tx.cursor_read::<tables::Headers>()?;
                 cursor
-                    .walk_range(start_block..end_block)?
+                    .walk_range(range.start..range.end)?
                     .map(|result| result.map(|(_, header)| header).map_err(Into::into))
                     .collect::<Result<Vec<_>>>()
             })?
