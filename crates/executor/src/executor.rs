@@ -69,8 +69,9 @@ where
             Head {
                 number: header.number,
                 timestamp: header.timestamp,
+                difficulty: header.difficulty,
                 total_difficulty,
-                ..Default::default()
+                hash: Default::default(),
             },
         );
 
@@ -220,7 +221,8 @@ where
         // ommer, we raise the block’s beneficiary by an additional 1/32 of the block reward
         // and the beneficiary of the ommer gets rewarded depending on the blocknumber.
         // Formally we define the function Ω:
-        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty) {
+        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
+        {
             None
         } else if self.chain_spec.fork(Hardfork::Petersburg).active_at_block(header.number) {
             Some(WEI_2ETH)

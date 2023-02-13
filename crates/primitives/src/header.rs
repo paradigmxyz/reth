@@ -24,7 +24,9 @@ pub struct Head {
     pub number: BlockNumber,
     /// The hash of the head block.
     pub hash: H256,
-    /// The total difficulty of the head block.
+    /// The difficulty of the head block.
+    pub difficulty: U256,
+    /// The total difficulty at the head block.
     pub total_difficulty: U256,
     /// The timestamp of the head block.
     pub timestamp: u64,

@@ -4,7 +4,9 @@ use std::str::FromStr;
 use crate::{
     chain, db,
     dirs::{LogsDir, PlatformPath},
-    node, p2p, stage, test_eth_chain, test_vectors,
+    node, p2p,
+    runner::CliRunner,
+    stage, test_eth_chain, test_vectors,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
@@ -14,21 +16,23 @@ use reth_tracing::{
 };
 
 /// Parse CLI options, set up logging and run the chosen command.
-pub async fn run() -> eyre::Result<()> {
+pub fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
     let (layer, _guard) = opt.logs.layer();
     reth_tracing::init(vec![layer, reth_tracing::stdout(opt.verbosity.directive())]);
 
+    let runner = CliRunner::default();
+
     match opt.command {
-        Commands::Node(command) => command.execute().await,
-        Commands::Init(command) => command.execute().await,
-        Commands::Import(command) => command.execute().await,
-        Commands::Db(command) => command.execute().await,
-        Commands::Stage(command) => command.execute().await,
-        Commands::P2P(command) => command.execute().await,
-        Commands::TestVectors(command) => command.execute().await,
-        Commands::TestEthChain(command) => command.execute().await,
+        Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+        Commands::Init(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Import(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Db(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Stage(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
     }
 }
 

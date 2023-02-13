@@ -25,8 +25,12 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
     tx.put::<tables::HeaderTD>(
         block.number,
-        if has_block_reward { U256::ZERO } else { U256::from(58_750_000_000_000_000_000_000u128) }
-            .into(),
+        if has_block_reward {
+            U256::ZERO
+        } else {
+            U256::from(58_750_000_000_000_000_000_000_u128) + block.difficulty
+        }
+        .into(),
     )?;
 
     // insert body ommers data
