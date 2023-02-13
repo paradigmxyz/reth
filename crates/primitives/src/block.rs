@@ -400,3 +400,16 @@ pub struct BlockHashCanonical {
     /// Whether the block must be a canonical block
     require_canonical: Option<bool>,
 }
+#[cfg(test)]
+mod test {
+    use super::BlockId;
+    #[test]
+    fn can_parse_eip1898_block_ids() {
+        let num = serde_json::json!(
+            {"blockNumber": "0x0"}
+        );
+        let id = serde_json::from_value::<BlockId>(num);
+        println!("Id: {:?}", {});
+        assert_eq!(id.unwrap(), BlockId::from(0))
+    }
+}
