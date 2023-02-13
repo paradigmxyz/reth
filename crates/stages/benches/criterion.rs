@@ -6,7 +6,6 @@ use itertools::concat;
 use reth_db::{
     cursor::DbCursorRO,
     mdbx::{Env, WriteMap},
-    models::BlockNumHash,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -143,7 +142,7 @@ fn measure_stage<S, F>(
     let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
-    let (BlockNumHash((num_blocks, _)), _) = tx
+    let (num_blocks, _) = tx
         .inner()
         .cursor_read::<tables::Headers>()
         .unwrap()

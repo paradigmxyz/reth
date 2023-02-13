@@ -14,9 +14,8 @@ use reth_db::{
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
 };
+use reth_provider::Transaction;
 use std::{borrow::Borrow, collections::BTreeMap, path::Path, sync::Arc};
-
-use crate::db::Transaction;
 
 /// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
@@ -87,7 +86,9 @@ impl TestTransaction {
         T::Key: Default + Ord,
     {
         self.query(|tx| {
-            tx.cursor_read::<T>()?.walk(T::Key::default())?.collect::<Result<Vec<_>, DbError>>()
+            tx.cursor_read::<T>()?
+                .walk(Some(T::Key::default()))?
+                .collect::<Result<Vec<_>, DbError>>()
         })
     }
 
@@ -180,11 +181,9 @@ impl TestTransaction {
 
     /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
     fn insert_header(tx: &mut Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
-        let key: BlockNumHash = header.num_hash().into();
-
         tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
-        tx.put::<tables::Headers>(key, header.clone().unseal())
+        tx.put::<tables::Headers>(header.number, header.clone().unseal())
     }
 
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
@@ -208,7 +207,7 @@ impl TestTransaction {
             headers.into_iter().try_for_each(|header| {
                 Self::insert_header(tx, header)?;
                 td += header.difficulty;
-                tx.put::<tables::HeaderTD>(header.num_hash().into(), td.into())
+                tx.put::<tables::HeaderTD>(header.number, td.into())
             })
         })
     }
@@ -226,10 +225,9 @@ impl TestTransaction {
 
             blocks.into_iter().try_for_each(|block| {
                 Self::insert_header(tx, &block.header)?;
-                let key: BlockNumHash = block.num_hash().into();
                 // Insert into body tables.
                 tx.put::<tables::BlockBodies>(
-                    key,
+                    block.number,
                     StoredBlockBody {
                         start_tx_id: current_tx_id,
                         tx_count: block.body.len() as u64,
@@ -241,7 +239,7 @@ impl TestTransaction {
                     current_tx_id += 1;
                     Ok(())
                 })?;
-                tx.put::<tables::BlockTransitionIndex>(key.number(), current_tx_id)
+                tx.put::<tables::BlockTransitionIndex>(block.number, current_tx_id)
             })
         })
     }

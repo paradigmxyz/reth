@@ -4071,9 +4071,11 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
+ "reth-rpc",
  "reth-rpc-builder",
  "reth-staged-sync",
  "reth-stages",
+ "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",
@@ -4647,6 +4649,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
+ "reth-rpc-types",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",
@@ -4770,6 +4773,7 @@ name = "reth-tasks"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-futures",
