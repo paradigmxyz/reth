@@ -13,6 +13,7 @@ use reth_db::{
     cursor::{DbDupCursorRO, DbDupCursorRW},
     mdbx::Env,
 };
+use reth_libmdbx::WriteFlags;
 use std::{collections::HashSet, time::Instant};
 use test_fuzz::runtime::num_traits::Zero;
 
@@ -59,6 +60,8 @@ where
         (insert::<T>, "insert_sorted"),
         (put::<T>, "put_unsorted"),
         (put::<T>, "put_sorted"),
+        (put_with_dbi::<T>, "put_with_dbi_unsorted"),
+        (put_with_dbi::<T>, "put_with_dbi_sorted"),
     ];
 
     // `preload` is to be inserted into the database during the setup phase in all scenarios but
@@ -206,6 +209,27 @@ where
         black_box({
             for (k, v) in input {
                 tx.put::<T>(k, v).expect("submit");
+            }
+
+            tx.inner.commit().unwrap();
+        });
+    }
+    db
+}
+
+fn put_with_dbi<T>(
+    db: Env<WriteMap>,
+    input: Vec<(<T as Table>::Key, <T as Table>::Value)>,
+) -> Env<WriteMap>
+where
+    T: Table + Default,
+{
+    {
+        let tx = db.tx_mut().expect("tx");
+        let dbi = tx.inner.open_db(Some(T::NAME)).expect("dbi");
+        black_box({
+            for (k, v) in input {
+                tx.inner.put(&dbi, &k.encode(), &v.compress(), WriteFlags::UPSERT).expect("submit");
             }
 
             tx.inner.commit().unwrap();
