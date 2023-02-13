@@ -134,8 +134,9 @@ impl Command {
         self.init_trusted_nodes(&mut config);
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let netconf = self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
-        let network = self.start_network(netconf, &ctx.task_executor, ()).await?;
+        let network_config =
+            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
+        let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         // TODO: Use the resolved secret to spawn the Engine API server
