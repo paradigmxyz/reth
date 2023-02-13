@@ -218,7 +218,9 @@ where
                 //  `start_block..=end_block` instead.
                 .headers_range(start_block..(end_block + 1))
                 .to_rpc_result()?;
-            if headers.is_empty() {
+
+            // We should receive exactly the amount of blocks missing from the cache
+            if headers.len() != (end_block - start_block + 1) as usize {
                 return Ok(FeeHistory::default())
             }
 
@@ -229,6 +231,7 @@ where
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
                 let fee_history_cache_item = FeeHistoryCacheItem {
+                    hash: None,
                     base_fee_per_gas,
                     gas_used_ratio,
                     reward: None, // TODO: calculate rewards per transaction
@@ -239,6 +242,16 @@ where
             }
         }
 
+        let oldest_block_hash = self
+            .inner
+            .client
+            .block_hash((newest_block - block_count).try_into().unwrap())
+            .to_rpc_result()?
+            .unwrap();
+
+        fee_history_cache_items.get_mut(&(newest_block - block_count)).unwrap().hash =
+            Some(oldest_block_hash);
+
         Ok(FeeHistory {
             base_fee_per_gas: fee_history_cache_items
                 .values()
@@ -248,14 +261,7 @@ where
                 .values()
                 .map(|item| item.gas_used_ratio)
                 .collect(),
-            oldest_block: U256::from_be_bytes(
-                self.inner
-                    .client
-                    .block_hash((newest_block - block_count).try_into().unwrap())
-                    .to_rpc_result()?
-                    .unwrap()
-                    .0,
-            ),
+            oldest_block: U256::from_be_bytes(oldest_block_hash.0),
             reward: None,
         })
     }
