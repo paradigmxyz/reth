@@ -4,7 +4,7 @@ use reth_rpc_types::{FilterChanges, Log};
 
 /// Rpc Interface for poll-based ethereum filter API.
 #[cfg_attr(not(feature = "client"), rpc(server))]
-#[cfg_attr(feature = "client", rpc(server, client))]
+#[cfg_attr(feature = "client", rpc(server))] // TODO(mattsse) make it work with SubscriptionId lifetime
 pub trait EthFilterApi {
     /// Creates anew filter and returns its id.
     #[method(name = "eth_newFilter")]
