@@ -24,7 +24,7 @@ use std::{
 use tracing::*;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum TrieError {
+pub enum TrieError {
     #[error("Some error occurred: {0}")]
     InternalError(#[from] cita_trie::TrieError),
     #[error("The root node wasn't found in the DB")]
@@ -190,12 +190,14 @@ impl EthAccount {
     }
 }
 
+/// Struct for calculating the root of a merkle patricia tree,
+/// while populating the database with intermediate hashes.
 #[derive(Debug, Default)]
-pub(crate) struct DBTrieLoader;
+pub struct DBTrieLoader;
 
 impl DBTrieLoader {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
-    pub(crate) fn calculate_root<DB: Database>(
+    pub fn calculate_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
@@ -255,7 +257,7 @@ impl DBTrieLoader {
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
-    pub(crate) fn update_root<DB: Database>(
+    pub fn update_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         root: H256,

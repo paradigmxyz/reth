@@ -13,14 +13,14 @@ use reth_interfaces::test_utils::generators::{
     random_block_range, random_contract_account_range, random_eoa_account_range,
     random_transition_range,
 };
-use reth_primitives::{Account, Address, H256};
+use reth_primitives::{Account, Address, SealedBlock, H256};
 use reth_stages::{
     stages::{
         AccountHashingStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TotalDifficultyStage, TransactionLookupStage,
     },
     test_utils::TestTransaction,
-    ExecInput, Stage, StageId, UnwindInput,
+    DBTrieLoader, ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{
     collections::BTreeMap,
@@ -41,9 +41,9 @@ fn senders(c: &mut Criterion) {
         stage.commit_threshold = num_blocks;
         let label = format!("SendersRecovery-batch-{batch}");
 
-        let path = txs_testdata(num_blocks as usize);
+        let path = txs_testdata(num_blocks);
 
-        measure_stage(&mut group, stage_unwind, stage, path, label);
+        measure_stage(&mut group, 0..num_blocks, stage_unwind, stage, path, label);
     }
 }
 
@@ -55,9 +55,16 @@ fn tx_lookup(c: &mut Criterion) {
     let num_blocks = 10_000;
     let stage = TransactionLookupStage::new(num_blocks);
 
-    let path = txs_testdata(num_blocks as usize);
+    let path = txs_testdata(num_blocks);
 
-    measure_stage(&mut group, stage_unwind, stage, path, "TransactionLookup".to_string());
+    measure_stage(
+        &mut group,
+        0..num_blocks,
+        stage_unwind,
+        stage,
+        path,
+        "TransactionLookup".to_string(),
+    );
 }
 
 fn total_difficulty(c: &mut Criterion) {
@@ -72,7 +79,14 @@ fn total_difficulty(c: &mut Criterion) {
 
     let path = txs_testdata(num_blocks);
 
-    measure_stage(&mut group, stage_unwind, stage, path, "TotalDifficulty".to_string());
+    measure_stage(
+        &mut group,
+        0..num_blocks,
+        stage_unwind,
+        stage,
+        path,
+        "TotalDifficulty".to_string(),
+    );
 }
 
 fn merkle(c: &mut Criterion) {
@@ -84,11 +98,25 @@ fn merkle(c: &mut Criterion) {
 
     let path = txs_testdata(num_blocks);
 
-    let stage = MerkleStage::Both { clean_threshold: 10_001 };
-    measure_stage(&mut group, unwind_hashes, stage, path.clone(), "Merkle-incremental".to_string());
+    let stage = MerkleStage::Both { clean_threshold: num_blocks + 1 };
+    measure_stage(
+        &mut group,
+        1..num_blocks,
+        unwind_hashes,
+        stage,
+        path.clone(),
+        "Merkle-incremental".to_string(),
+    );
 
     let stage = MerkleStage::Both { clean_threshold: 0 };
-    measure_stage(&mut group, unwind_hashes, stage, path, "Merkle-fullhash".to_string());
+    measure_stage(
+        &mut group,
+        1..num_blocks,
+        unwind_hashes,
+        stage,
+        path,
+        "Merkle-fullhash".to_string(),
+    );
 }
 
 fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
@@ -131,6 +159,7 @@ fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
 
 fn measure_stage<S, F>(
     group: &mut BenchmarkGroup<WallTime>,
+    block_interval: std::ops::Range<u64>,
     setup: F,
     stage: S,
     path: PathBuf,
@@ -142,14 +171,9 @@ fn measure_stage<S, F>(
     let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
-    let (num_blocks, _) = tx
-        .inner()
-        .cursor_read::<tables::Headers>()
-        .unwrap()
-        .last()
-        .unwrap()
-        .expect("Headers table should not be empty");
-    input.previous_stage = Some((StageId("Another"), num_blocks));
+
+    input.previous_stage = Some((StageId("Another"), block_interval.end - 1));
+    input.stage_progress = Some(block_interval.start);
 
     group.bench_function(label, move |b| {
         b.to_async(FuturesExecutor).iter_with_setup(
@@ -169,7 +193,7 @@ fn measure_stage<S, F>(
 
 // Helper for generating testdata for the benchmarks.
 // Returns the path to the database file.
-fn txs_testdata(num_blocks: usize) -> PathBuf {
+fn txs_testdata(num_blocks: u64) -> PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("accs-bench");
     let txs_range = 100..150;
 
@@ -196,16 +220,49 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
         .into_iter()
         .collect();
 
-        let blocks = random_block_range(0..num_blocks as u64 + 1, H256::zero(), txs_range);
+        let mut blocks = random_block_range(0..num_blocks as u64 + 1, H256::zero(), txs_range);
+
+        let (transitions, start_state) = random_transition_range(
+            blocks.iter().take(2),
+            accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+            n_changes.clone(),
+            key_range.clone(),
+        );
+
+        tx.insert_accounts_and_storages(start_state.clone()).unwrap();
+
+        // make first block after genesis have valid state root
+        let root = DBTrieLoader::default().calculate_root(&tx.inner()).unwrap();
+        let second_block = blocks.get_mut(1).unwrap();
+        let cloned_second = second_block.clone();
+        let mut updated_header = cloned_second.header.unseal();
+        updated_header.state_root = root;
+        *second_block = SealedBlock { header: updated_header.seal(), ..cloned_second };
+
+        let offset = transitions.len() as u64;
+
+        tx.insert_transitions(transitions, None).unwrap();
+
+        let (transitions, final_state) = random_transition_range(
+            blocks.iter().skip(2),
+            start_state,
+            n_changes.clone(),
+            key_range.clone(),
+        );
+
+        tx.insert_transitions(transitions, Some(offset)).unwrap();
+
+        tx.insert_accounts_and_storages(final_state).unwrap();
 
         tx.insert_blocks(blocks.iter(), None).unwrap();
 
-        let (transitions, final_state) =
-            random_transition_range(blocks.iter(), accounts, n_changes.clone(), key_range.clone());
-
-        tx.insert_transitions(transitions).unwrap();
-
-        tx.insert_accounts_and_storages(final_state).unwrap();
+        // make last block have valid state root
+        let root = DBTrieLoader::default().calculate_root(&tx.inner()).unwrap();
+        let last_block = blocks.last_mut().unwrap();
+        let cloned_last = last_block.clone();
+        let mut updated_header = cloned_last.header.unseal();
+        updated_header.state_root = root;
+        *last_block = SealedBlock { header: updated_header.seal(), ..cloned_last };
 
         // initialize TD
         tx.commit(|tx| {

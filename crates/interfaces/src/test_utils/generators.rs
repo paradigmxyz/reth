@@ -181,11 +181,13 @@ pub fn random_transition_range<'a, IBlk, IAcc>(
 ) -> (Vec<Transition>, BTreeMap<Address, AccountState>)
 where
     IBlk: IntoIterator<Item = &'a SealedBlock>,
-    IAcc: IntoIterator<Item = (Address, Account)>,
+    IAcc: IntoIterator<Item = (Address, (Account, Vec<StorageEntry>))>,
 {
     let mut rng = rand::thread_rng();
-    let mut state: BTreeMap<_, _> =
-        accounts.into_iter().map(|(addr, acc)| (addr, (acc, BTreeMap::new()))).collect();
+    let mut state: BTreeMap<_, _> = accounts
+        .into_iter()
+        .map(|(addr, (acc, st))| (addr, (acc, st.into_iter().map(|e| (e.key, e.value)).collect())))
+        .collect();
 
     let valid_addresses = state.keys().copied().collect();
 

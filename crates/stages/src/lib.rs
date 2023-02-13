@@ -60,6 +60,8 @@ mod util;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+pub use trie::DBTrieLoader;
+
 /// A re-export of common structs and traits.
 pub mod prelude;
 

@@ -297,10 +297,14 @@ mod tests {
 
             self.tx.insert_blocks(blocks.iter(), None)?;
 
-            let (transitions, final_state) =
-                random_transition_range(blocks.iter(), accounts, 0..3, 0..256);
+            let (transitions, final_state) = random_transition_range(
+                blocks.iter(),
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                0..3,
+                0..256,
+            );
 
-            self.tx.insert_transitions(transitions)?;
+            self.tx.insert_transitions(transitions, None)?;
 
             self.tx.insert_accounts_and_storages(final_state)?;
 

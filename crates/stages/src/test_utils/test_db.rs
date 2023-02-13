@@ -271,20 +271,26 @@ impl TestTransaction {
 
     /// Insert collection of Vec<([Address], [Account], Vec<[StorageEntry]>)> into
     /// corresponding tables.
-    pub fn insert_transitions<I>(&self, transitions: I) -> Result<(), DbError>
+    pub fn insert_transitions<I>(
+        &self,
+        transitions: I,
+        transition_offset: Option<u64>,
+    ) -> Result<(), DbError>
     where
         I: IntoIterator<Item = Vec<(Address, Account, Vec<StorageEntry>)>>,
     {
+        let offset = transition_offset.unwrap_or_default();
         self.commit(|tx| {
             transitions.into_iter().enumerate().try_for_each(|(transition_id, changes)| {
                 changes.into_iter().try_for_each(|(address, old_account, old_storage)| {
+                    let tid = offset + transition_id as u64;
                     // Insert into account changeset.
                     tx.put::<tables::AccountChangeSet>(
-                        transition_id as u64,
+                        tid,
                         AccountBeforeTx { address, info: Some(old_account) },
                     )?;
 
-                    let tid_address = (transition_id as u64, address).into();
+                    let tid_address = (tid, address).into();
 
                     // Insert into storage changeset.
                     old_storage.into_iter().try_for_each(|entry| {
