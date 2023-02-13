@@ -124,11 +124,10 @@ async fn dump_execution_stage<DB: Database>(
     // Find range of transactions that need to be copied over
     let (from_tx, to_tx) = db_tool.db.view(|read_tx| {
         let mut read_cursor = read_tx.cursor_read::<tables::BlockBodies>()?;
-        let (_, from_block) = read_cursor
-            .seek(from.into())?
-            .ok_or(eyre::eyre!("BlockBody {from} does not exist."))?;
+        let (_, from_block) =
+            read_cursor.seek(from)?.ok_or(eyre::eyre!("BlockBody {from} does not exist."))?;
         let (_, to_block) =
-            read_cursor.seek(to.into())?.ok_or(eyre::eyre!("BlockBody {to} does not exist."))?;
+            read_cursor.seek(to)?.ok_or(eyre::eyre!("BlockBody {to} does not exist."))?;
 
         Ok::<(u64, u64), eyre::ErrReport>((
             from_block.start_tx_id,
