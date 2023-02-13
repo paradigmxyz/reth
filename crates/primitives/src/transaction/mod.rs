@@ -182,11 +182,11 @@ impl Transaction {
     }
 
     /// Get chain_id.
-    pub fn chain_id(&self) -> Option<&u64> {
+    pub fn chain_id(&self) -> Option<u64> {
         match self {
-            Transaction::Legacy(TxLegacy { chain_id, .. }) => chain_id.as_ref(),
-            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(chain_id),
-            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(chain_id),
+            Transaction::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
+            Transaction::Eip2930(TxEip2930 { chain_id, .. }) => Some(*chain_id),
+            Transaction::Eip1559(TxEip1559 { chain_id, .. }) => Some(*chain_id),
         }
     }
 
@@ -251,6 +251,18 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
             Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
+        }
+    }
+
+    /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
+    /// is `None`
+    pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        match self {
+            Transaction::Legacy(_) => None,
+            Transaction::Eip2930(_) => None,
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+                Some(*max_priority_fee_per_gas)
+            }
         }
     }
 
@@ -555,6 +567,25 @@ impl TransactionSigned {
         Some(TransactionSignedEcRecovered { signed_transaction: self.clone(), signer })
     }
 
+    /// Returns the enveloped encoded transactions.
+    ///
+    /// See also [TransactionSigned::encode_enveloped]
+    pub fn envelope_encoded(&self) -> bytes::Bytes {
+        let mut buf = BytesMut::new();
+        self.encode_enveloped(&mut buf);
+        buf.freeze()
+    }
+
+    /// Encodes the transaction into the "raw" format (e.g. `eth_sendRawTransaction`).
+    /// This format is also referred to as "binary" encoding.
+    ///
+    /// For legacy transactions, it encodes the RLP of the transaction into the buffer: `rlp(tx)`
+    /// For EIP-2718 typed it encodes the type of the transaction followed by the rlp of the
+    /// transaction: `type` + `rlp(tx)`
+    pub fn encode_enveloped(&self, out: &mut dyn bytes::BufMut) {
+        self.encode_inner(out, false)
+    }
+
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
     /// hash that for eip2728 does not require rlp header
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
@@ -723,7 +754,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
 
         any::<(Transaction, Signature)>()
             .prop_map(move |(mut transaction, sig)| {
-                if let Some(chain_id) = transaction.chain_id().cloned() {
+                if let Some(chain_id) = transaction.chain_id() {
                     // Otherwise we might overflow when calculating `v` on `recalculate_hash`
                     transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
                 }
@@ -740,7 +771,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut transaction = Transaction::arbitrary(u)?;
-        if let Some(chain_id) = transaction.chain_id().cloned() {
+        if let Some(chain_id) = transaction.chain_id() {
             // Otherwise we might overflow when calculating `v` on `recalculate_hash`
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
         }
@@ -1137,5 +1168,15 @@ mod tests {
         let signed_tx = TransactionSigned::from_transaction_and_signature(tx, sig);
         assert_eq!(signed_tx.hash(), hash, "Expected same hash");
         assert_eq!(signed_tx.recover_signer(), Some(signer), "Recovering signer should pass.");
+    }
+
+    #[test]
+    fn test_envelop_encode() {
+        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
+        let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
+        let decoded = TransactionSigned::decode(&mut &input[..]).unwrap();
+
+        let encoded = decoded.envelope_encoded();
+        assert_eq!(encoded, input);
     }
 }

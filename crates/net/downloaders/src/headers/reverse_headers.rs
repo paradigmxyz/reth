@@ -1,5 +1,6 @@
 //! A headers downloader that can handle multiple requests concurrently.
 
+use super::task::TaskDownloader;
 use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
@@ -357,6 +358,8 @@ where
                 // validate the response
                 let highest = &headers[0];
 
+                trace!(target: "downloaders::headers", requested_block_number, highest=?highest.number, "Validating non-empty headers response");
+
                 if highest.number != requested_block_number {
                     return Err(HeadersResponseError {
                         request,
@@ -462,6 +465,7 @@ where
 
     /// Starts a request future
     fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+        trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
     }
 
@@ -496,6 +500,18 @@ where
         let mut rem = self.queued_validated_headers.split_off(batch_size);
         std::mem::swap(&mut rem, &mut self.queued_validated_headers);
         rem
+    }
+}
+
+impl<H> ReverseHeadersDownloader<H>
+where
+    H: HeadersClient,
+    Self: HeaderDownloader + 'static,
+{
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
+    /// it.
+    pub fn as_task(self) -> TaskDownloader {
+        TaskDownloader::spawn(self)
     }
 }
 
@@ -872,8 +888,8 @@ impl ReverseHeadersDownloaderBuilder {
     /// and header client implementations
     pub fn build<H>(
         self,
-        consensus: Arc<dyn Consensus>,
         client: Arc<H>,
+        consensus: Arc<dyn Consensus>,
     ) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,
@@ -945,7 +961,7 @@ mod tests {
         let genesis = SealedHeader::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -973,7 +989,7 @@ mod tests {
         let header = SealedHeader::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(header.clone());
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -1014,7 +1030,7 @@ mod tests {
         let start = 1000;
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .request_limit(batch_size)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -1064,7 +1080,7 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
@@ -1096,7 +1112,7 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 

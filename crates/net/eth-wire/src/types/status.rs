@@ -130,12 +130,13 @@ impl Debug for Status {
 // <https://etherscan.io/block/0>
 impl Default for Status {
     fn default() -> Self {
+        let mainnet_genesis = MAINNET.genesis_hash();
         Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
-            blockhash: MAINNET.genesis_hash(),
-            genesis: MAINNET.genesis_hash(),
+            blockhash: mainnet_genesis,
+            genesis: mainnet_genesis,
             forkid: Hardfork::Frontier
                 .fork_id(&MAINNET)
                 .expect("The Frontier hardfork should always exist"),

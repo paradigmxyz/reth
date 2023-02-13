@@ -45,7 +45,7 @@ pub trait Consensus: Debug + Send + Sync {
     /// This flag is needed as reth's changeset is indexed on transaction level granularity.
     ///
     /// More info [here](https://github.com/paradigmxyz/reth/issues/237)
-    fn has_block_reward(&self, total_difficulty: U256) -> bool;
+    fn has_block_reward(&self, total_difficulty: U256, difficulty: U256) -> bool;
 }
 
 /// Consensus Errors

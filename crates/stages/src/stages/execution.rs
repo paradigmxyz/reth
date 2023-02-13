@@ -1,11 +1,11 @@
 use crate::{
-    db::Transaction, exec_or_return, DatabaseIntegrityError, ExecAction, ExecInput, ExecOutput,
-    Stage, StageError, StageId, UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
+    models::{StoredBlockBody, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -13,10 +13,11 @@ use reth_executor::{
     execution_result::AccountChangeSet,
     revm_wrap::{State, SubState},
 };
+use reth_interfaces::provider::Error as ProviderError;
 use reth_primitives::{
     Address, Block, ChainSpec, Hardfork, Header, StorageEntry, H256, MAINNET, U256,
 };
-use reth_provider::LatestStateProviderRef;
+use reth_provider::{LatestStateProviderRef, Transaction};
 use std::fmt::Debug;
 use tracing::*;
 
@@ -61,27 +62,14 @@ pub struct ExecutionStage {
 
 impl Default for ExecutionStage {
     fn default() -> Self {
-        Self { chain_spec: MAINNET.clone(), commit_threshold: 1000 }
+        Self { chain_spec: MAINNET.clone(), commit_threshold: 1_000 }
     }
 }
 
 impl ExecutionStage {
-    /// Create new execution stage with specified config.
-    pub fn new(chain_spec: ChainSpec, commit_threshold: u64) -> Self {
-        Self { chain_spec, commit_threshold }
-    }
-}
-
-#[async_trait::async_trait]
-impl<DB: Database> Stage<DB> for ExecutionStage {
-    /// Return the id of the stage
-    fn id(&self) -> StageId {
-        EXECUTION
-    }
-
-    /// Execute the stage
-    async fn execute(
-        &mut self,
+    /// Execute the stage.
+    pub fn execute_inner<DB: Database>(
+        &self,
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
@@ -89,12 +77,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
-        // Get next canonical block hashes to execute.
-        let mut canonicals = tx.cursor_read::<tables::CanonicalHeaders>()?;
         // Get header with canonical hashes.
-        let mut headers = tx.cursor_read::<tables::Headers>()?;
+        let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
         // Get total difficulty
-        let mut tds = tx.cursor_read::<tables::HeaderTD>()?;
+        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
         // Get bodies with canonical hashes.
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
@@ -104,32 +90,17 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // Skip sender recovery and load signer from database.
         let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
 
-        // get canonical blocks (num,hash)
-        let canonical_batch = canonicals
+        // Get block headers and bodies
+        let block_batch = headers_cursor
             .walk_range(start_block..end_block + 1)?
-            .map(|i| i.map(BlockNumHash))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // Get block headers and bodies from canonical hashes
-        let block_batch = canonical_batch
-            .iter()
-            .map(|key| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
-                // NOTE: It probably will be faster to fetch all items from one table with cursor,
-                // but to reduce complexity we are using `seek_exact` to skip some
-                // edge cases that can happen.
-                let (_, header) =
-                    headers.seek_exact(*key)?.ok_or(DatabaseIntegrityError::Header {
-                        number: key.number(),
-                        hash: key.hash(),
-                    })?;
-                let (_, td) = tds
-                    .seek_exact(*key)?
-                    .ok_or(DatabaseIntegrityError::TotalDifficulty { number: key.number() })?;
-                let (_, body) = bodies_cursor
-                    .seek_exact(*key)?
-                    .ok_or(DatabaseIntegrityError::BlockBody { number: key.number() })?;
-                let (_, stored_ommers) = ommers_cursor.seek_exact(*key)?.unwrap_or_default();
-
+            .map(|entry| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
+                let (number, header) = entry?;
+                let (_, td) = td_cursor
+                    .seek_exact(number)?
+                    .ok_or(ProviderError::TotalDifficulty { number })?;
+                let (_, body) =
+                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockBody { number })?;
+                let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
                 Ok((header, td.into(), body, stored_ommers.ommers))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -138,64 +109,47 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
         // Fetch transactions, execute them and generate results
-        let mut block_change_patches = Vec::with_capacity(canonical_batch.len());
+        let mut block_change_patches = Vec::with_capacity(block_batch.len());
         for (header, td, body, ommers) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
 
             // iterate over all transactions
-            let mut tx_walker = tx_cursor.walk(body.start_tx_id)?;
+            let mut tx_walker = tx_cursor.walk(Some(body.start_tx_id))?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
             // get next N transactions.
             for index in body.tx_id_range() {
                 let (tx_index, tx) =
-                    tx_walker.next().ok_or(DatabaseIntegrityError::EndOfTransactionTable)??;
+                    tx_walker.next().ok_or(ProviderError::EndOfTransactionTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(DatabaseIntegrityError::TransactionsGap { missing: tx_index }.into())
+                    return Err(ProviderError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
             }
 
             // take signers
-            let mut tx_sender_walker = tx_sender.walk(body.start_tx_id)?;
+            let mut tx_sender_walker = tx_sender.walk(Some(body.start_tx_id))?;
             let mut signers = Vec::with_capacity(body.tx_count as usize);
             for index in body.tx_id_range() {
-                let (tx_index, tx) = tx_sender_walker
-                    .next()
-                    .ok_or(DatabaseIntegrityError::EndOfTransactionSenderTable)??;
+                let (tx_index, tx) =
+                    tx_sender_walker.next().ok_or(ProviderError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Signer gap");
-                    return Err(
-                        DatabaseIntegrityError::TransactionsSignerGap { missing: tx_index }.into()
-                    )
+                    return Err(ProviderError::TransactionsSignerGap { missing: tx_index }.into())
                 }
                 signers.push(tx);
             }
 
             trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
-            // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
-            // revm can take more then default allocated stack space. For this case we are using
-            // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
-            // we can see to set more accurate stack size or even optimize revm to move more data to
-            // heap.
-            let changeset = std::thread::scope(|scope| {
-                let handle = std::thread::Builder::new()
-                    .stack_size(50 * 1024 * 1024)
-                    .spawn_scoped(scope, || {
-                        // execute and store output to results
-                        reth_executor::executor::execute_and_verify_receipt(
-                            &Block { header, body: transactions, ommers },
-                            td,
-                            Some(signers),
-                            &self.chain_spec,
-                            &mut state_provider,
-                        )
-                    })
-                    .expect("Expects that thread name is not null");
-                handle.join().expect("Expects for thread to not panic")
-            })
+            let changeset = reth_executor::executor::execute_and_verify_receipt(
+                &Block { header, body: transactions, ommers },
+                td,
+                Some(signers),
+                &self.chain_spec,
+                &mut state_provider,
+            )
             .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
             block_change_patches.push((changeset, block_number));
         }
@@ -241,7 +195,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
                     if wipe_storage {
                         // iterate over storage and save them before entry is deleted.
                         tx.cursor_read::<tables::PlainStorageState>()?
-                            .walk(address)?
+                            .walk(Some(address))?
                             .take_while(|res| {
                                 res.as_ref().map(|(k, _)| *k == address).unwrap_or_default()
                             })
@@ -312,6 +266,44 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done })
+    }
+}
+
+impl ExecutionStage {
+    /// Create new execution stage with specified config.
+    pub fn new(chain_spec: ChainSpec, commit_threshold: u64) -> Self {
+        Self { chain_spec, commit_threshold }
+    }
+}
+
+#[async_trait::async_trait]
+impl<DB: Database> Stage<DB> for ExecutionStage {
+    /// Return the id of the stage
+    fn id(&self) -> StageId {
+        EXECUTION
+    }
+
+    /// Execute the stage
+    async fn execute(
+        &mut self,
+        tx: &mut Transaction<'_, DB>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
+        // revm can take more then default allocated stack space. For this case we are using
+        // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
+        // we can see to set more accurate stack size or even optimize revm to move more data to
+        // heap.
+        std::thread::scope(|scope| {
+            let handle = std::thread::Builder::new()
+                .stack_size(50 * 1024 * 1024)
+                .spawn_scoped(scope, || {
+                    // execute and store output to results
+                    self.execute_inner(tx, input)
+                })
+                .expect("Expects that thread name is not null");
+            handle.join().expect("Expects for thread to not panic")
+        })
     }
 
     /// Unwind the stage.
