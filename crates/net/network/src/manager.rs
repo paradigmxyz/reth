@@ -40,7 +40,7 @@ use reth_eth_wire::{
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
-use reth_primitives::{PeerId, H256};
+use reth_primitives::{NodeRecord, PeerId, H256};
 use reth_provider::BlockProvider;
 use std::{
     net::SocketAddr,
@@ -293,6 +293,11 @@ where
     /// Returns the [`PeerId`] used in the network.
     pub fn peer_id(&self) -> &PeerId {
         self.handle.peer_id()
+    }
+
+    /// Returns an iterator over all peers in the peer set.
+    pub fn all_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
+        self.swarm.state().peers().iter_peers()
     }
 
     /// Returns a new [`PeersHandle`] that can be cloned and shared.
