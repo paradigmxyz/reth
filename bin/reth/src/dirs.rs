@@ -42,6 +42,13 @@ pub fn logs_dir() -> Option<PathBuf> {
     cache_dir().map(|root| root.join("logs"))
 }
 
+/// Returns the path to the reth jwtsecret directory.
+///
+/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+pub fn jwt_secret_dir() -> Option<PathBuf> {
+    data_dir().map(|root| root.join("jwtsecret"))
+}
+
 /// Returns the path to the reth database.
 ///
 /// Refer to [dirs_next::data_dir] for cross-platform behavior.
@@ -52,6 +59,19 @@ pub struct DbPath;
 impl XdgPath for DbPath {
     fn resolve() -> Option<PathBuf> {
         database_path()
+    }
+}
+
+/// Returns the path to the default JWT secret hex file.
+///
+/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+#[derive(Default, Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct JwtSecretPath;
+
+impl XdgPath for JwtSecretPath {
+    fn resolve() -> Option<PathBuf> {
+        jwt_secret_dir().map(|p| p.join("jwt.hex"))
     }
 }
 
@@ -119,7 +139,7 @@ trait XdgPath {
 ///
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
 
 impl<D> Display for PlatformPath<D> {

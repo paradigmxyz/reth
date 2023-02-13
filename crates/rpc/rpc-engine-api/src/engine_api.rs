@@ -161,7 +161,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             }))
         };
 
-        if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td) {
+        // Short circuit the check by passing parent total difficulty.
+        if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
             return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadPreMerge.to_string(),
             }))

@@ -2,10 +2,10 @@
 //!
 //! Starts the client
 use crate::{
+    args::{NetworkArgs, RpcServerArgs},
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{chainspec::genesis_value_parser, init::init_db, parse_socket_address},
-    NetworkOpts, RpcServerOpts,
+    runner::CliContext,
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -28,7 +28,14 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, H256};
 use reth_provider::ShareableDatabase;
 use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
-use reth_staged_sync::{utils::init::init_genesis, Config};
+use reth_staged_sync::{
+    utils::{
+        chainspec::genesis_value_parser,
+        init::{init_db, init_genesis},
+        parse_socket_address,
+    },
+    Config,
+};
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
@@ -77,7 +84,7 @@ pub struct Command {
     metrics: Option<SocketAddr>,
 
     #[clap(flatten)]
-    network: NetworkOpts,
+    network: NetworkArgs,
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
@@ -93,13 +100,13 @@ pub struct Command {
     max_block: Option<u64>,
 
     #[clap(flatten)]
-    rpc: RpcServerOpts,
+    rpc: RpcServerArgs,
 }
 
 impl Command {
     /// Execute `node` command
     // TODO: RPC
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
         // Raise the fd limit of the process.
@@ -128,6 +135,10 @@ impl Command {
         let network = netconf.start_network().await?;
 
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+
+        // TODO: Use the resolved secret to spawn the Engine API server
+        // Look at `reth_rpc::AuthLayer` for integration hints
+        let _secret = self.rpc.jwt_secret();
 
         // TODO(mattsse): cleanup, add cli args
         let _rpc_server = reth_rpc_builder::launch(
@@ -173,7 +184,7 @@ impl Command {
         let fetch_client = Arc::new(network.fetch_client().await?);
 
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
-            .build(consensus.clone(), fetch_client.clone())
+            .build(fetch_client.clone(), consensus.clone())
             .as_task();
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
@@ -239,7 +250,7 @@ impl Command {
         &self,
         config: &Config,
         db: &Arc<Env<WriteMap>>,
-    ) -> NetworkConfig<ShareableDatabase<Env<WriteMap>>> {
+    ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
         let peers_file = (!self.network.no_persist_peers).then_some(&self.network.peers_file);
         config.network_config(
             db.clone(),

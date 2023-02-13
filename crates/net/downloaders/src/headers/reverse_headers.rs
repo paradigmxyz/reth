@@ -888,8 +888,8 @@ impl ReverseHeadersDownloaderBuilder {
     /// and header client implementations
     pub fn build<H>(
         self,
-        consensus: Arc<dyn Consensus>,
         client: Arc<H>,
+        consensus: Arc<dyn Consensus>,
     ) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,
@@ -961,7 +961,7 @@ mod tests {
         let genesis = SealedHeader::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -989,7 +989,7 @@ mod tests {
         let header = SealedHeader::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(header.clone());
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -1030,7 +1030,7 @@ mod tests {
         let start = 1000;
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .request_limit(batch_size)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -1080,7 +1080,7 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
@@ -1112,7 +1112,7 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
