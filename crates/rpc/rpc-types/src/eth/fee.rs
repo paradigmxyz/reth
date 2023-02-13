@@ -1,4 +1,5 @@
-use reth_primitives::U256;
+use lru::LruCache;
+use reth_primitives::{BlockNumber, U256};
 use serde::{Deserialize, Serialize};
 
 /// Response type for `eth_feeHistory`
@@ -19,4 +20,19 @@ pub struct FeeHistory {
     /// block. All zeroes are returned if the block is empty.
     #[serde(default)]
     pub reward: Option<Vec<Vec<U256>>>,
+}
+
+/// LRU cache for `eth_feeHistory` RPC method. Block Number => Fee History.
+pub type FeeHistoryCache = LruCache<BlockNumber, FeeHistoryCacheItem>;
+
+/// [FeeHistoryCache] item.
+#[derive(Clone, Debug)]
+pub struct FeeHistoryCacheItem {
+    /// Block base fee per gas. Zero for pre-EIP-1559 blocks.
+    pub base_fee_per_gas: U256,
+    /// Block gas used ratio. Calculated as the ratio of `gasUsed` and `gasLimit`.
+    pub gas_used_ratio: f64,
+    /// An (optional) array of effective priority fee per gas data points for a
+    /// block. All zeroes are returned if the block is empty.
+    pub reward: Option<Vec<U256>>,
 }

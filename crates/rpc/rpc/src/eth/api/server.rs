@@ -8,16 +8,17 @@ use crate::{
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
-    Address, BlockHashOrNumber, BlockNumber, Bytes, H256, H64, U256, U64,
+    Address, BlockHashOrNumber, BlockNumber, Bytes, Header, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
-    TransactionReceipt, TransactionRequest, Work,
+    CallRequest, EIP1186AccountProofResponse, FeeHistory, FeeHistoryCacheItem, Index, RichBlock,
+    SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 use super::EthApiSpec;
 
@@ -188,25 +189,60 @@ where
             return Ok(FeeHistory::default())
         }
 
-        let headers = self
-            .inner
-            .client
-            .headers_range(
-                BlockHashOrNumber::Number(newest_block - block_count)..(newest_block + 1).into(),
-            )
-            .to_rpc_result()?;
-        if headers.is_empty() {
-            return Ok(FeeHistory::default())
+        let start_block = newest_block - block_count;
+        let end_block = newest_block;
+
+        let mut fee_history_cache = self.fee_history_cache.lock();
+
+        let mut fee_history_cache_items = BTreeMap::new();
+        let mut first_non_cached_block = None;
+        for block in start_block..=end_block {
+            // Check if block exists in cache, and move it to the head of the list if so
+            if let Some(fee_history_cache_item) = fee_history_cache.get(&block) {
+                fee_history_cache_items.insert(block, fee_history_cache_item.clone());
+            } else {
+                // If block doesn't exist in cache, set it as a first non-cached block to query it
+                // from the database
+                first_non_cached_block.get_or_insert(block);
+            }
+        }
+
+        // If we had any cache misses, query the database starting with the first non-cached block
+        if let Some(start_block) = first_non_cached_block {
+            let headers: Vec<Header> = self
+                .inner
+                .client
+                .headers_range(BlockHashOrNumber::Number(start_block)..(end_block + 1).into())
+                .to_rpc_result()?;
+            if headers.is_empty() {
+                return Ok(FeeHistory::default())
+            }
+
+            for header in headers {
+                let base_fee_per_gas = header.base_fee_per_gas.
+                        unwrap_or_default(). // Zero for pre-EIP-1559 blocks
+                        try_into().unwrap(); // u64 -> U256 won't fail
+                let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
+
+                let fee_history_cache_item = FeeHistoryCacheItem {
+                    base_fee_per_gas,
+                    gas_used_ratio,
+                    reward: None, // TODO: calculate rewards per transaction
+                };
+
+                fee_history_cache_items.insert(header.number, fee_history_cache_item.clone());
+                fee_history_cache.push(header.number, fee_history_cache_item);
+            }
         }
 
         Ok(FeeHistory {
-            base_fee_per_gas: headers
-                .iter()
-                .map(|header| header.base_fee_per_gas.unwrap_or_default().try_into().unwrap())
+            base_fee_per_gas: fee_history_cache_items
+                .values()
+                .map(|item| item.base_fee_per_gas)
                 .collect(),
-            gas_used_ratio: headers
-                .iter()
-                .map(|header| header.gas_used as f64 / header.gas_limit as f64)
+            gas_used_ratio: fee_history_cache_items
+                .values()
+                .map(|item| item.gas_used_ratio)
                 .collect(),
             oldest_block: U256::from_be_bytes(
                 self.inner

@@ -11,7 +11,7 @@ use reth_primitives::{
 use std::ops::Range;
 
 mod state;
-use reth_db::{cursor::DbCursorRO, models::BlockNumHash};
+use reth_db::cursor::DbCursorRO;
 pub use state::{
     chain::ChainState,
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
@@ -69,14 +69,8 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     }
 
     fn headers_range(&self, range: Range<BlockHashOrNumber>) -> Result<Vec<Header>> {
-        let start_block = BlockNumHash((
-            self.block_number_for_id(range.start.into())?.unwrap(),
-            self.block_hash_for_id(range.start.into())?.unwrap(),
-        ));
-        let end_block = BlockNumHash((
-            self.block_number_for_id(range.end.into())?.unwrap(),
-            self.block_hash_for_id(range.end.into())?.unwrap(),
-        ));
+        let start_block = self.block_number_for_id(range.start.into())?.unwrap();
+        let end_block = self.block_number_for_id(range.end.into())?.unwrap();
 
         self.db
             .view(|tx| {
