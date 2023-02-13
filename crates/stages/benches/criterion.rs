@@ -158,21 +158,21 @@ fn measure_stage<S, F>(
     let path = txs_testdata(block_interval.end - 1);
     let tx = TestTransaction::new(&path);
 
-    let mut input = ExecInput::default();
-
-    input.previous_stage = Some((StageId("Another"), block_interval.end - 1));
-    input.stage_progress = Some(block_interval.start);
+    let input = ExecInput {
+        previous_stage: Some((StageId("Another"), block_interval.end - 1)),
+        stage_progress: Some(block_interval.start),
+    };
 
     group.bench_function(label, move |b| {
         b.to_async(FuturesExecutor).iter_with_setup(
             || {
                 // criterion setup does not support async, so we have to use our own runtime
-                setup(stage.clone(), &tx, input.clone())
+                setup(stage.clone(), &tx, input)
             },
             |_| async {
                 let mut stage = stage.clone();
                 let mut db_tx = tx.inner();
-                stage.execute(&mut db_tx, input.clone()).await.unwrap();
+                stage.execute(&mut db_tx, input).await.unwrap();
                 db_tx.commit().unwrap();
             },
         )
@@ -231,12 +231,8 @@ fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         tx.insert_transitions(transitions, None).unwrap();
 
-        let (transitions, final_state) = random_transition_range(
-            blocks.iter().skip(2),
-            start_state,
-            n_changes.clone(),
-            key_range.clone(),
-        );
+        let (transitions, final_state) =
+            random_transition_range(blocks.iter().skip(2), start_state, n_changes, key_range);
 
         tx.insert_transitions(transitions, Some(offset)).unwrap();
 
@@ -254,8 +250,7 @@ fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         // initialize TD
         tx.commit(|tx| {
-            let (head, _) =
-                tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default().into();
+            let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
             tx.put::<tables::HeaderTD>(head, reth_primitives::U256::from(0).into())
         })
         .unwrap();
