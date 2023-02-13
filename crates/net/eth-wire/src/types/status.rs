@@ -4,7 +4,12 @@ use ethers_core::utils::Genesis;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Chain, ChainSpec, ForkId, Hardfork, Head, H256, MAINNET, U256};
 use reth_rlp::{RlpDecodable, RlpEncodable};
-use std::fmt::{Debug, Display};
+use std::{
+    fmt::{Debug, Display},
+    str::FromStr,
+};
+
+const MAINNET_GENESIS: &str = "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3";
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -72,11 +77,18 @@ impl Status {
     /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the [`ChainSpec`]
     /// and head.
     pub fn spec_builder(spec: &ChainSpec, head: &Head) -> StatusBuilder {
-        Self::builder()
-            .chain(spec.chain)
-            .genesis(spec.genesis_hash())
-            .blockhash(head.hash)
-            .forkid(spec.fork_id(head))
+        let status = Status {
+            version: EthVersion::Eth67 as u8,
+            chain: spec.chain,
+            total_difficulty: U256::from(17_179_869_184u64),
+            blockhash: head.hash,
+            genesis: spec.genesis_hash(),
+            forkid: Hardfork::Frontier
+                .fork_id(&MAINNET)
+                .expect("The Frontier hardfork should always exist"),
+        };
+
+        StatusBuilder::new(status)
     }
 }
 
@@ -130,13 +142,12 @@ impl Debug for Status {
 // <https://etherscan.io/block/0>
 impl Default for Status {
     fn default() -> Self {
-        let mainnet_genesis = MAINNET.genesis_hash();
         Status {
             version: EthVersion::Eth67 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
-            blockhash: mainnet_genesis,
-            genesis: mainnet_genesis,
+            blockhash: H256::from_str(MAINNET_GENESIS).unwrap(),
+            genesis: H256::from_str(MAINNET_GENESIS).unwrap(),
             forkid: Hardfork::Frontier
                 .fork_id(&MAINNET)
                 .expect("The Frontier hardfork should always exist"),

@@ -42,6 +42,11 @@ pub struct StatusBuilder {
 }
 
 impl StatusBuilder {
+    /// Creates a new status builder
+    pub fn new(status: Status) -> StatusBuilder {
+        StatusBuilder { status }
+    }
+
     /// Consumes the type and creates the actual [`Status`](crate::types::Status) message.
     pub fn build(self) -> Status {
         self.status
