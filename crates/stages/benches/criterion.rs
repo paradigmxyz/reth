@@ -41,9 +41,7 @@ fn senders(c: &mut Criterion) {
         stage.commit_threshold = num_blocks;
         let label = format!("SendersRecovery-batch-{batch}");
 
-        let path = txs_testdata(num_blocks);
-
-        measure_stage(&mut group, 0..num_blocks, stage_unwind, stage, path, label);
+        measure_stage(&mut group, 0..num_blocks + 1, stage_unwind, stage, label);
     }
 }
 
@@ -55,14 +53,11 @@ fn tx_lookup(c: &mut Criterion) {
     let num_blocks = 10_000;
     let stage = TransactionLookupStage::new(num_blocks);
 
-    let path = txs_testdata(num_blocks);
-
     measure_stage(
         &mut group,
-        0..num_blocks,
+        0..num_blocks + 1,
         stage_unwind,
         stage,
-        path,
         "TransactionLookup".to_string(),
     );
 }
@@ -77,14 +72,11 @@ fn total_difficulty(c: &mut Criterion) {
     let num_blocks = 10_000;
     let stage = TotalDifficultyStage::default();
 
-    let path = txs_testdata(num_blocks);
-
     measure_stage(
         &mut group,
-        0..num_blocks,
+        0..num_blocks + 1,
         stage_unwind,
         stage,
-        path,
         "TotalDifficulty".to_string(),
     );
 }
@@ -96,25 +88,21 @@ fn merkle(c: &mut Criterion) {
 
     let num_blocks = 10_000;
 
-    let path = txs_testdata(num_blocks);
-
     let stage = MerkleStage::Both { clean_threshold: num_blocks + 1 };
     measure_stage(
         &mut group,
-        1..num_blocks,
+        1..num_blocks + 1,
         unwind_hashes,
         stage,
-        path.clone(),
         "Merkle-incremental".to_string(),
     );
 
     let stage = MerkleStage::Both { clean_threshold: 0 };
     measure_stage(
         &mut group,
-        1..num_blocks,
+        1..num_blocks + 1,
         unwind_hashes,
         stage,
-        path,
         "Merkle-fullhash".to_string(),
     );
 }
@@ -162,12 +150,12 @@ fn measure_stage<S, F>(
     block_interval: std::ops::Range<u64>,
     setup: F,
     stage: S,
-    path: PathBuf,
     label: String,
 ) where
     S: Clone + Stage<Env<WriteMap>>,
     F: Fn(S, &TestTransaction, ExecInput),
 {
+    let path = txs_testdata(block_interval.end - 1);
     let tx = TestTransaction::new(&path);
 
     let mut input = ExecInput::default();
@@ -220,7 +208,7 @@ fn txs_testdata(num_blocks: u64) -> PathBuf {
         .into_iter()
         .collect();
 
-        let mut blocks = random_block_range(0..num_blocks as u64 + 1, H256::zero(), txs_range);
+        let mut blocks = random_block_range(0..num_blocks + 1, H256::zero(), txs_range);
 
         let (transitions, start_state) = random_transition_range(
             blocks.iter().take(2),
