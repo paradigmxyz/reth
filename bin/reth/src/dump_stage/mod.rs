@@ -111,6 +111,9 @@ async fn dump_execution_stage<DB: Database>(
         tx.import_table_with_range::<tables::BlockBodies, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
     output_db.update(|tx| {
+        tx.import_table_with_range::<tables::BlockOmmers, _>(&db_tool.db.tx()?, Some(from), to)
+    })??;
+    output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockTransitionIndex, _>(
             &db_tool.db.tx()?,
             Some(from - 1),
