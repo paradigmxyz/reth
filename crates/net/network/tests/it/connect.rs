@@ -511,6 +511,7 @@ async fn test_geth_disconnect() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_shutdown() {
+    reth_tracing::init_test_tracing();
     let net = Testnet::create(3).await;
 
     let mut handles = net.handles();
@@ -532,18 +533,18 @@ async fn test_shutdown() {
     // Before shutting down, we have two connected peers
     let peer1 = listener0.next_session_established().await.unwrap();
     let peer2 = listener0.next_session_established().await.unwrap();
+    assert_eq!(handle0.num_connected_peers(), 2);
     assert!(expected_connections.contains(&peer1));
     assert!(expected_connections.contains(&peer2));
-    assert_eq!(handle0.num_connected_peers(), 2);
 
     handle0.shutdown().await.unwrap();
 
     // All sessions get disconnected
     let (peer1, _reason) = listener0.next_session_closed().await.unwrap();
     let (peer2, _reason) = listener0.next_session_closed().await.unwrap();
+    assert_eq!(handle0.num_connected_peers(), 0);
     assert!(expected_connections.remove(&peer1));
     assert!(expected_connections.remove(&peer2));
-    assert_eq!(handle0.num_connected_peers(), 0);
 
     // New connections are rejected
     handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
