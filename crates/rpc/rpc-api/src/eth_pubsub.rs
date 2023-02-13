@@ -4,7 +4,7 @@ use reth_rpc_types::pubsub::{Params, SubscriptionKind};
 /// Ethereum pub-sub rpc interface.
 #[rpc(server)]
 pub trait EthPubSubApi {
-    /// Create an ethereum subscription.
+    /// Create an ethereum subscription for the given params
     #[subscription(
         name = "eth_subscribe",
         unsubscribe = "eth_unsubscribe",

@@ -345,7 +345,7 @@ mod tests {
     }
 
     fn hex(secret: &JwtSecret) -> String {
-        hex::encode(&secret.0)
+        hex::encode(secret.0)
     }
 
     fn delete(path: &Path) {
