@@ -73,8 +73,11 @@ use std::{
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 
-/// The default port for the http/ws server
-pub const DEFAULT_RPC_PORT: u16 = 8545;
+/// The default port for the http server
+pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
+
+/// The default port for the ws server
+pub const DEFAULT_WS_RPC_PORT: u16 = 8546;
 
 /// The default IPC endpoint
 #[cfg(windows)]
@@ -440,8 +443,10 @@ pub struct RpcServerConfig {
     http_server_config: Option<ServerBuilder>,
     /// Configs for WS server
     ws_server_config: Option<ServerBuilder>,
-    /// Address where to bind the http and ws server to
-    http_ws_addr: Option<SocketAddr>,
+    /// Address where to bind the http server to
+    http_addr: Option<SocketAddr>,
+    /// Address where to bind the ws server to
+    ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
     ipc_server_config: Option<IpcServerBuilder>,
     /// The Endpoint where to launch the ipc server
@@ -478,13 +483,22 @@ impl RpcServerConfig {
         self
     }
 
-    /// Configures the [SocketAddr] of the http/ws server
+    /// Configures the [SocketAddr] of the http server
     ///
-    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_RPC_PORT]
-    pub fn with_address(mut self, addr: SocketAddr) -> Self {
-        self.http_ws_addr = Some(addr);
+    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_HTTP_RPC_PORT]
+    pub fn with_http_address(mut self, addr: SocketAddr) -> Self {
+        self.http_addr = Some(addr);
         self
     }
+
+    /// Configures the [SocketAddr] of the ws server
+    ///
+    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_WS_RPC_PORT]
+    pub fn with_ws_address(mut self, addr: SocketAddr) -> Self {
+        self.ws_addr = Some(addr);
+        self
+    }
+
 
     /// Configures the ipc server
     pub fn with_ipc(mut self, mut config: IpcServerBuilder) -> Self {
@@ -514,14 +528,14 @@ impl RpcServerConfig {
     ///
     /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
     pub async fn build(self) -> Result<RpcServer, RpcError> {
-        let socket_addr = self
-            .http_ws_addr
-            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_RPC_PORT)));
+        let http_socket_addr = self
+            .http_addr
+            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_HTTP_RPC_PORT)));
 
         let mut local_addr = None;
 
         let http_server = if let Some(builder) = self.http_server_config {
-            let server = builder.build(socket_addr).await?;
+            let server = builder.build(http_socket_addr).await?;
             if local_addr.is_none() {
                 local_addr = server.local_addr().ok();
             }
@@ -530,8 +544,12 @@ impl RpcServerConfig {
             None
         };
 
+        let ws_socket_addr = self
+            .ws_addr
+            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_WS_RPC_PORT)));
+
         let ws_server = if let Some(builder) = self.ws_server_config {
-            let server = builder.build(socket_addr).await.unwrap();
+            let server = builder.build(ws_socket_addr).await.unwrap();
             if local_addr.is_none() {
                 local_addr = server.local_addr().ok();
             }
