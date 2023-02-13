@@ -46,7 +46,7 @@ const JWT_MAX_IAT_DIFF: Duration = Duration::from_secs(60);
 /// The execution layer client MUST support at least the following alg HMAC + SHA256 (HS256)
 const JWT_SIGNATURE_ALGO: Algorithm = Algorithm::HS256;
 
-/// Value-object holding a reference to an hex-encoded 256-bit secret key.
+/// Value-object holding a reference to a hex-encoded 256-bit secret key.
 /// A JWT secret key is used to secure JWT-based authentication. The secret key is
 /// a shared secret between the server and the client and is used to calculate a digital signature
 /// for the JWT, which is included in the JWT along with its payload.
@@ -79,7 +79,6 @@ impl JwtSecret {
     pub fn from_file(fpath: &Path) -> Result<Self, JwtError> {
         let hex = std::fs::read_to_string(fpath)?;
         let secret = JwtSecret::from_hex(hex)?;
-        info!("Loaded secret {secret:?} from {fpath:?}");
         Ok(secret)
     }
 
@@ -95,18 +94,13 @@ impl JwtSecret {
         let bytes = &secret.0;
         let hex = hex::encode(bytes);
         std::fs::write(fpath, hex)?;
-        info!("Created ephemeral secret {secret:?} at {fpath:?}");
         Ok(secret)
     }
 }
 
 impl std::fmt::Debug for JwtSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut hasher = DefaultHasher::new();
-        let bytes = &self.0;
-        bytes.hash(&mut hasher);
-        let hash = format!("{}", hasher.finish());
-        f.debug_tuple("JwtSecretHash").field(&hex::encode(hash)).finish()
+        f.debug_tuple("JwtSecretHash").field(&"{{}}").finish()
     }
 }
 
