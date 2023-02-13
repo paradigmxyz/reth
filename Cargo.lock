@@ -4715,6 +4715,7 @@ dependencies = [
  "reth-provider",
  "reth-staged-sync",
  "reth-stages",
+ "reth-tasks",
  "reth-tracing",
  "secp256k1 0.24.3",
  "serde",
