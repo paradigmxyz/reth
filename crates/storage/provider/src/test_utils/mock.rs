@@ -7,11 +7,7 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, Bytes, ChainInfo, Header, StorageKey,
     StorageValue, H256, U256,
 };
-use std::{
-    collections::HashMap,
-    ops::{Range},
-    sync::Arc,
-};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]

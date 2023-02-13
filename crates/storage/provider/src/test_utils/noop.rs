@@ -7,7 +7,7 @@ use reth_primitives::{
     rpc::BlockId, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, Bytes,
     ChainInfo, Header, StorageKey, StorageValue, H256, U256,
 };
-use std::ops::{Range};
+use std::ops::Range;
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug, Clone, Default, Copy)]
