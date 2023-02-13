@@ -141,15 +141,28 @@ impl Command {
         let _secret = self.rpc.jwt_secret();
 
         // TODO(mattsse): cleanup, add cli args
-        let _rpc_server = reth_rpc_builder::launch(
-            ShareableDatabase::new(db.clone()),
-            reth_transaction_pool::test_utils::testing_pool(),
-            network.clone(),
-            TransportRpcModuleConfig::default()
-                .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
-            RpcServerConfig::default().with_http(Default::default()),
-        )
-        .await?;
+        if let Some(domains) = self.rpc.http_corsdomain.as_ref() {
+            let domains_vec = domains.split(",").collect::<Vec<&str>>();
+            let _rpc_server = reth_rpc_builder::launch(
+                ShareableDatabase::new(db.clone()),
+                reth_transaction_pool::test_utils::testing_pool(),
+                network.clone(),
+                TransportRpcModuleConfig::default()
+                    .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
+                RpcServerConfig::default().with_http_cors_domain(Default::default(),domains_vec),
+            )
+            .await?;
+        } else {
+            let _rpc_server = reth_rpc_builder::launch(
+                ShareableDatabase::new(db.clone()),
+                reth_transaction_pool::test_utils::testing_pool(),
+                network.clone(),
+                TransportRpcModuleConfig::default()
+                    .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
+                RpcServerConfig::default().with_http(Default::default()),
+            )
+            .await?; 
+        }
         info!(target: "reth::cli", "Started RPC server");
 
         let (mut pipeline, events) = self

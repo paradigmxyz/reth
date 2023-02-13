@@ -26,6 +26,9 @@ pub struct RpcServerArgs {
     #[arg(long = "http.api")]
     pub http_api: Option<RpcModuleConfig>,
 
+    #[arg(long = "http.corsdomain")]
+    http_corsdomain: Option<String>,
+
     /// Enable the WS-RPC server
     #[arg(long)]
     pub ws: bool,
