@@ -589,7 +589,7 @@ impl TransactionSigned {
     }
 
     /// Inner encoding function that is used for both rlp [`Encodable`] trait and for calculating
-    /// hash that for eip2728 does not require rlp header
+    /// hash that for eip2718 does not require rlp header
     pub(crate) fn encode_inner(&self, out: &mut dyn bytes::BufMut, with_header: bool) {
         match self.transaction {
             Transaction::Legacy(TxLegacy { chain_id, .. }) => {
@@ -700,6 +700,9 @@ impl TransactionSigned {
             return Err(DecodeError::Custom("typed tx fields must be encoded as a list"))
         }
 
+        // length of tx encoding = tx type byte (size = 1) + length of header + payload length
+        let tx_length = 1 + header.length() + header.payload_length;
+
         // decode common fields
         let transaction = match tx_type {
             1 => Transaction::Eip2930(TxEip2930 {
@@ -727,7 +730,8 @@ impl TransactionSigned {
         };
 
         let signature = Signature::decode(data)?;
-        let hash = keccak256(&original_encoding[..header.payload_length]);
+
+        let hash = keccak256(&original_encoding[..tx_length]);
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
@@ -786,6 +790,9 @@ impl Decodable for TransactionSigned {
             TransactionSigned::decode_enveloped_typed_transaction(buf)
         } else {
             let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut original_encoding)?;
+
+            // advance the buffer based on how far `decode_rlp_legacy_transaction` advanced the
+            // buffer
             *buf = original_encoding;
             Ok(tx)
         }
