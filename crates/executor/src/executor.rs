@@ -447,10 +447,14 @@ where
         }
 
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) {
-            let withdrawals = withdrawals.as_ref().unwrap();
-            let mut withdrawals_changeset = self.withdrawals_changeset(withdrawals)?;
-            withdrawals_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
-            block_reward = Some(withdrawals_changeset);
+            if let Some(withdrawals) = withdrawals {
+                if !withdrawals.is_empty() {
+                    let mut withdrawals_changeset = self.withdrawals_changeset(withdrawals)?;
+                    withdrawals_changeset
+                        .extend(block_reward.take().unwrap_or_default().into_iter());
+                    block_reward = Some(withdrawals_changeset);
+                }
+            }
         }
 
         Ok(ExecutionResult { changesets, block_reward })
