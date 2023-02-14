@@ -23,20 +23,11 @@ jobs:
       matrix:
         partition: [1, 2, 3]
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/rust-bootstrap
         with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Install latest nextest release
-        uses: taiki-e/install-action@nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+          rust_toolchain: stable
+          rust_target: x86_64-unknown-linux-musl
 
       - name: Run tests
         run: |
@@ -45,6 +36,7 @@ jobs:
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
+      - uses: ./.github/actions/sccache-finish
       - name: Upload coverage data to codecov
         uses: codecov/codecov-action@v3
         with:
@@ -58,37 +50,32 @@ jobs:
     env:
       RUST_LOG: info,sync=error
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/rust-bootstrap
+        with:
+          rust_toolchain: stable
+          rust_target: x86_64-unknown-linux-musl
 
       - name: Checkout ethereum/tests
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: ethereum/tests
           path: ethtests
           submodules: recursive
-
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
-
       - name: Run Ethereum tests
         run: cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
+
+      - uses: ./.github/actions/sccache-finish
 
   doc-test:
     name: rustdoc
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/rust-bootstrap
+        with:
+          rust_toolchain: stable
+          rust_target: x86_64-unknown-linux-musl
       - name: Run doctests
         run: cargo test --doc --all --all-features
+      - uses: ./.github/actions/sccache-finish

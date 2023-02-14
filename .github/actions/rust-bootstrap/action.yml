@@ -1,0 +1,78 @@
+name: Bootstrap Rust
+description: Configures the system environment for building Rust
+inputs:
+  rust_toolchain:
+    description: rust toolchain to install
+    default: stable
+    required: false
+  rust_target:
+    description: rust target triple to install
+    required: true
+  sccache_version:
+    description: version of sccache to install
+    default: v0.4.0-pre.7
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: Install toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.rust_toolchain }}
+        targets: ${{ input.rust_target }}
+        components: clippy,llvm-tools-preview,rustfmt
+
+    - uses: taiki-e/install-action@v1
+      with:
+        tool: nextest,cargo-llvm-cov
+
+    - name: Bootstrap Environment (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        curl -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-x86_64-unknown-linux-musl.tar.gz 
+        tar -xvzf sccache.tar.gz
+        mv sccache-${{ inputs.sccache_version }}-x86_64-unknown-linux-musl/sccache /home/runner/.cargo/bin/sccache
+        rm -rf sccache*
+        chmod +x /home/runner/.cargo/bin/sccache
+
+    - name: Bootstrap Environment (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        curl -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-x86_64-apple-darwin.tar.gz
+        tar -xvzf sccache.tar.gz
+        mv sccache-${{ inputs.sccache_version }}-x86_64-apple-darwin/sccache /Users/runner/.cargo/bin/sccache
+        rm -rf sccache*
+        chmod +x /Users/runner/.cargo/bin/sccache
+
+    - name: Bootstrap Environment (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        curl -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-x86_64-pc-windows-msvc.tar.gz 
+        tar -xvzf sccache.tar.gz
+        mv sccache-${{ inputs.sccache_version }}-x86_64-pc-windows-msvc/sccache.exe C:/Users/runneradmin/.cargo/bin/sccache.exe
+
+    - name: Set environment
+      shell: bash
+      run: |
+        # Prevent the sccache server from terminating due to inactivity
+        echo "SCCACHE_IDLE_TIMEOUT=0" >> $GITHUB_ENV
+        echo "SCCACHE_GHA_VERSION=sccache" >> $GITHUB_ENV
+        echo "SCCACHE_BYPASS_CHECK=on" >> $GITHUB_ENV
+        # Disable incremental builds (they can't be cached)
+        echo "CARGO_INCREMENTAL=0" >> $GITHUB_ENV
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+    - name: Configure sccache environment
+      uses: actions/github-script@v6
+      with:
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '')
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '')
+
+    - name: Start sccache
+      shell: bash
+      run: |
+        sccache --start-server
