@@ -4715,6 +4715,7 @@ dependencies = [
  "reth-provider",
  "reth-staged-sync",
  "reth-stages",
+ "reth-tasks",
  "reth-tracing",
  "secp256k1 0.24.3",
  "serde",
@@ -4773,6 +4774,7 @@ name = "reth-tasks"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-futures",

@@ -34,10 +34,12 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     )?;
 
     // insert body ommers data
-    tx.put::<tables::BlockOmmers>(
-        block.number,
-        StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
-    )?;
+    if !block.ommers.is_empty() {
+        tx.put::<tables::BlockOmmers>(
+            block.number,
+            StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
+        )?;
+    }
 
     let (mut current_tx_id, mut transition_id) =
         if let Some(parent_tx_num_transition_id) = parent_tx_num_transition_id {

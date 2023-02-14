@@ -1,5 +1,5 @@
 //! Mock database
-use std::{collections::BTreeMap, ops::Range};
+use std::{collections::BTreeMap, ops::RangeBounds};
 
 use crate::{
     common::{PairResult, ValueOnlyResult},
@@ -148,7 +148,7 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
 
     fn walk_range<'cursor>(
         &'cursor mut self,
-        _range: Range<T::Key>,
+        _range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,

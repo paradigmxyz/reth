@@ -170,7 +170,7 @@ impl SessionManager {
         F: Future<Output = ()> + Send + 'static,
     {
         if let Some(ref executor) = self.executor {
-            executor.spawn(async move { f.await })
+            executor.spawn(async move { f.await });
         } else {
             tokio::task::spawn(async move { f.await });
         }
