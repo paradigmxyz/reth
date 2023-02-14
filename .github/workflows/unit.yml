@@ -72,7 +72,7 @@ jobs:
           name: nextest-archive
       - name: Run tests
         run: |
-          ~/.cargo/bin/cargo-nextest run --archive-file nextest-archive.tar.zst \
+          ~/.cargo/bin/cargo-nextest nextest run --archive-file nextest-archive.tar.zst \
             --partition hash:${{ matrix.partition }}/3 \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
