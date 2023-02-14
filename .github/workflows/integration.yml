@@ -1,0 +1,89 @@
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
+  GETH_BUILD: 1.10.26-e5eb32ac
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+name: integration
+jobs:
+  test:
+    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
+    # See also <https://github.com/foundry-rs/foundry/issues/3827>
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install geth
+        run: |
+          mkdir -p "$HOME/bin"
+          wget -q https://gethstore.blob.core.windows.net/builds/geth-linux-amd64-$GETH_BUILD.tar.gz
+          tar -xvf geth-linux-amd64-$GETH_BUILD.tar.gz
+          mv geth-linux-amd64-$GETH_BUILD/geth $HOME/bin/geth
+          chmod u+x "$HOME/bin/geth"
+          export PATH=$HOME/bin:$PATH
+          echo $HOME/bin >> $GITHUB_PATH
+          geth version
+
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run tests
+        run: |
+          cargo llvm-cov nextest --lcov --output-path lcov.info \
+            --locked --workspace --all-features \
+            -E 'kind(test)'
+
+      - name: Upload coverage data to codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          flags: integration-tests
+
+  sync:
+    name: sync / 100k blocks (${{ matrix.profile }})
+    strategy:
+      matrix:
+        profile: [release, dev]
+    runs-on: ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Run Sync (debug)
+        run: |
+          cargo run --profile ${{ matrix.profile }} \
+            --bin reth -- node \
+            --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 \
+            --debug.max-block 100000
