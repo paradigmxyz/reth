@@ -163,6 +163,11 @@ impl PeersManager {
         PeersHandle { manager_tx: self.manager_tx.clone() }
     }
 
+    /// Returns an iterator over all peers
+    pub(crate) fn iter_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
+        self.peers.iter().map(|(peer_id, v)| NodeRecord::new(v.addr, *peer_id))
+    }
+
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
     /// returns an error if the inbound ip address is on the ban list or
@@ -638,9 +643,7 @@ impl PeersManager {
                         let _ = tx.send(self.peers.get(&peer).cloned());
                     }
                     PeerCommand::GetPeers(tx) => {
-                        let _ = tx.send(
-                            self.peers.iter().map(|(k, v)| NodeRecord::new(v.addr, *k)).collect(),
-                        );
+                        let _ = tx.send(self.iter_peers().collect());
                     }
                 }
             }

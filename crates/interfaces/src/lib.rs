@@ -7,28 +7,30 @@
 
 //! Reth interface bindings
 
-/// Block Execution traits.
-pub mod executor;
-
 /// Consensus traits.
 pub mod consensus;
-
-/// Provider error
-pub mod provider;
 
 /// Database error
 pub mod db;
 
-/// P2P traits.
-pub mod p2p;
-
-/// Syncing related traits.
-pub mod sync;
+/// Block Execution traits.
+pub mod executor;
 
 /// Possible errors when interacting with the chain.
 mod error;
-
 pub use error::{Error, Result};
+
+/// Traits for subscribing to events.
+pub mod events;
+
+/// P2P traits.
+pub mod p2p;
+
+/// Provider error
+pub mod provider;
+
+/// Syncing related traits.
+pub mod sync;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.

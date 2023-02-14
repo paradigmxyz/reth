@@ -1,0 +1,89 @@
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+name: unit
+jobs:
+  test:
+    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
+    # See also <https://github.com/foundry-rs/foundry/issues/3827>
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install latest nextest release
+        uses: taiki-e/install-action@nextest
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run tests
+        run: |
+          cargo llvm-cov nextest --lcov --output-path lcov.info \
+            --locked --workspace --all-features \
+            -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
+
+      - name: Upload coverage data to codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          flags: unit-tests
+
+  eth-blockchain:
+    name: ethereum / state tests (stable)
+    runs-on: ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Checkout ethereum/tests
+        uses: actions/checkout@v2
+        with:
+          repository: ethereum/tests
+          path: ethtests
+          submodules: recursive
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Run Ethereum tests
+        run: cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
+
+  doc-test:
+    name: rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run doctests
+        run: cargo test --doc --all --all-features

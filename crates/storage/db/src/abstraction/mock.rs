@@ -1,5 +1,5 @@
 //! Mock database
-use std::{collections::BTreeMap, ops::Range};
+use std::{collections::BTreeMap, ops::RangeBounds};
 
 use crate::{
     common::{PairResult, ValueOnlyResult},
@@ -8,7 +8,7 @@ use crate::{
         ReverseWalker, Walker,
     },
     database::{Database, DatabaseGAT},
-    table::{DupSort, Table},
+    table::{DupSort, Table, TableImporter},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     Error,
 };
@@ -63,6 +63,10 @@ impl<'a> DbTx<'a> for TxMock {
         todo!()
     }
 
+    fn drop(self) {
+        todo!()
+    }
+
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error> {
         todo!()
     }
@@ -95,6 +99,8 @@ impl<'a> DbTxMut<'a> for TxMock {
         todo!()
     }
 }
+
+impl<'a> TableImporter<'a> for TxMock {}
 
 /// CUrsor that iterates over table
 pub struct CursorMock {
@@ -142,7 +148,7 @@ impl<'tx, T: Table> DbCursorRO<'tx, T> for CursorMock {
 
     fn walk_range<'cursor>(
         &'cursor mut self,
-        _range: Range<T::Key>,
+        _range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,

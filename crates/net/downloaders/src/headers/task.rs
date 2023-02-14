@@ -1,17 +1,15 @@
-use futures::Stream;
+use futures::{FutureExt, Stream};
 use futures_util::StreamExt;
 use pin_project::pin_project;
 use reth_interfaces::p2p::headers::downloader::{HeaderDownloader, SyncTarget};
 use reth_primitives::SealedHeader;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::{
-    sync::{mpsc, mpsc::UnboundedSender},
-    task::JoinSet,
-};
+use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A [HeaderDownloader] that drives a spawned [HeaderDownloader] on a spawned task.
@@ -21,16 +19,13 @@ pub struct TaskDownloader {
     #[pin]
     from_downloader: UnboundedReceiverStream<Vec<SealedHeader>>,
     to_downloader: UnboundedSender<DownloaderUpdates>,
-    /// The spawned downloader tasks.
-    ///
-    /// Note: If this type is dropped, the downloader task gets dropped as well.
-    _task: JoinSet<()>,
 }
 
 // === impl TaskDownloader ===
 
 impl TaskDownloader {
-    /// Spawns the given `downloader` and returns a [TaskDownloader] that's connected to that task.
+    /// Spawns the given `downloader` via [tokio::task::spawn] and returns a [TaskDownloader] that's
+    /// connected to that task.
     ///
     /// # Panics
     ///
@@ -55,6 +50,16 @@ impl TaskDownloader {
     where
         T: HeaderDownloader + 'static,
     {
+        Self::spawn_with(downloader, &TokioTaskExecutor::default())
+    }
+
+    /// Spawns the given `downloader` via the given [TaskSpawner] returns a [TaskDownloader] that's
+    /// connected to that task.
+    pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
+    where
+        T: HeaderDownloader + 'static,
+        S: TaskSpawner,
+    {
         let (headers_tx, headers_rx) = mpsc::unbounded_channel();
         let (to_downloader, updates_rx) = mpsc::unbounded_channel();
 
@@ -63,15 +68,9 @@ impl TaskDownloader {
             updates: UnboundedReceiverStream::new(updates_rx),
             downloader,
         };
+        spawner.spawn(async move { downloader.await }.boxed());
 
-        let mut task = JoinSet::<()>::new();
-        task.spawn(downloader);
-
-        Self {
-            from_downloader: UnboundedReceiverStream::new(headers_rx),
-            to_downloader,
-            _task: task,
-        }
+        Self { from_downloader: UnboundedReceiverStream::new(headers_rx), to_downloader }
     }
 }
 
@@ -115,26 +114,38 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
         let this = self.get_mut();
 
         loop {
-            while let Poll::Ready(Some(update)) = this.updates.poll_next_unpin(cx) {
-                match update {
-                    DownloaderUpdates::UpdateSyncGap(head, target) => {
-                        this.downloader.update_sync_gap(head, target);
+            loop {
+                match this.updates.poll_next_unpin(cx) {
+                    Poll::Pending => break,
+                    Poll::Ready(None) => {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
                     }
-                    DownloaderUpdates::UpdateLocalHead(head) => {
-                        this.downloader.update_local_head(head);
-                    }
-                    DownloaderUpdates::UpdateSyncTarget(target) => {
-                        this.downloader.update_sync_target(target);
-                    }
-                    DownloaderUpdates::SetBatchSize(limit) => {
-                        this.downloader.set_batch_size(limit);
-                    }
+                    Poll::Ready(Some(update)) => match update {
+                        DownloaderUpdates::UpdateSyncGap(head, target) => {
+                            this.downloader.update_sync_gap(head, target);
+                        }
+                        DownloaderUpdates::UpdateLocalHead(head) => {
+                            this.downloader.update_local_head(head);
+                        }
+                        DownloaderUpdates::UpdateSyncTarget(target) => {
+                            this.downloader.update_sync_target(target);
+                        }
+                        DownloaderUpdates::SetBatchSize(limit) => {
+                            this.downloader.set_batch_size(limit);
+                        }
+                    },
                 }
             }
 
             match ready!(this.downloader.poll_next_unpin(cx)) {
                 Some(headers) => {
-                    let _ = this.headers_tx.send(headers);
+                    if this.headers_tx.send(headers).is_err() {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
+                    }
                 }
                 None => return Poll::Pending,
             }
