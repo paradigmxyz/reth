@@ -90,7 +90,7 @@ jobs:
     name: ethereum blockchain sync (${{ matrix.profile }}; 100k blocks)
     strategy:
       matrix:
-        profile: [release, debug]
+        profile: [release, dev]
     runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error 
