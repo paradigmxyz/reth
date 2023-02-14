@@ -109,7 +109,7 @@ pub struct ChainSpec {
     ///
     /// This acts as a small cache for known chains. If the chain is known, then the genesis hash
     /// is also known ahead of time, and this will be `Some`.
-    #[serde(skip)]
+    #[serde(skip, default)]
     pub genesis_hash: Option<H256>,
 
     /// The genesis block
