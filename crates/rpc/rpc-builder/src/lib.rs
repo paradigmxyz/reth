@@ -532,13 +532,11 @@ impl RpcServerConfig {
             .http_addr
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_HTTP_RPC_PORT)));
 
-        let mut http_local_addr = None;
+        let http_local_addr = None;    
 
         let http_server = if let Some(builder) = self.http_server_config {
             let server = builder.build(http_socket_addr).await?;
-            if http_local_addr.is_none() {
-                http_local_addr = server.local_addr().ok();
-            }
+            let http_local_addr = server.local_addr().ok();
             Some(server)
         } else {
             None
@@ -548,13 +546,11 @@ impl RpcServerConfig {
             .ws_addr
             .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_WS_RPC_PORT)));
 
-        let mut ws_local_addr = None;
+        let ws_local_addr = None;
 
         let ws_server = if let Some(builder) = self.ws_server_config {
             let server = builder.build(ws_socket_addr).await.unwrap();
-            if ws_local_addr.is_none() {
-                ws_local_addr = server.local_addr().ok();
-            }
+            let ws_local_addr = server.local_addr().ok();
             Some(server)
         } else {
             None
