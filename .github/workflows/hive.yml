@@ -31,13 +31,13 @@ jobs:
         with:
           context: .
           tags: paradigmxyz/reth:main
-          outputs: type=docker,dest=/tmp/myimage.tar
+          outputs: type=docker,dest=/tmp/reth_image.tar
 
-      - name: Upload artifact
+      - name: Upload reth image
         uses: actions/upload-artifact@v3
         with:
-          name: myimage
-          path: /tmp/myimage.tar
+          name: reth_image
+          path: /tmp/reth_image.tar
 
   run-hive-ethereum-sync:
     name: build hive tests
@@ -56,6 +56,17 @@ jobs:
       - uses: Swatinem/rust-cache@v1
         with:
           cache-on-failure: true
+
+      - name: Download reth image
+        uses: actions/download-artifact@v3
+        with:
+          name: reth_image
+          path: /tmp
+      -
+        name: Load image
+        run: |
+          docker load --input /tmp/reth_image.tar
+          docker image ls -a
 
       # TODO: replace when we are not using a fork
       - name: Checkout hive
