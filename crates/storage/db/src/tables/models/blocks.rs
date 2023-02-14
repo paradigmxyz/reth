@@ -97,12 +97,6 @@ impl From<(u64, H256)> for BlockNumHash {
     }
 }
 
-impl From<u64> for BlockNumHash {
-    fn from(tpl: u64) -> Self {
-        BlockNumHash((tpl, H256::default()))
-    }
-}
-
 impl Encode for BlockNumHash {
     type Encoded = [u8; 40];
 
