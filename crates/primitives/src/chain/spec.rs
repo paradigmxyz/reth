@@ -158,7 +158,7 @@ impl ChainSpec {
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> H256 {
         if let Some(hash) = self.genesis_hash {
-            hash.clone()
+            hash
         } else {
             self.genesis_header().hash_slow()
         }
