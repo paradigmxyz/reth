@@ -19,17 +19,17 @@ jobs:
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
     steps:
+      - uses: ./.github/actions/rust-bootstrap
+        with:
+          rust_toolchain: stable
+          rust_target: x86_64-unknown-linux-musl
       - name: Install valgrind
         uses: taiki-e/install-action@valgrind
 
-      - name: Checkout PR sources
+      - name: Checkout sources (main)
         uses: actions/checkout@v3
         with:
           ref: main
-
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
 
       - name: Generate test vectors
         uses: actions-rs/cargo@v1
@@ -43,7 +43,7 @@ jobs:
           command: bench
           args: --package reth-db --bench iai
 
-      - name: Checkout main sources
+      - name: Checkout PR sources
         uses: actions/checkout@v3
         with:
           clean: false
@@ -52,3 +52,5 @@ jobs:
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
         run: |
           ./.github/scripts/compare_iai.sh
+
+      - uses: ./.github/actions/sccache-finish

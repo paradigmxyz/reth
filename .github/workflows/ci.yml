@@ -22,13 +22,10 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/rust-bootstrap
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
+          rust_toolchain: nightly
+          rust_target: x86_64-unknown-linux-musl
 
       - name: cargo fmt
         uses: actions-rs/cargo@v1
@@ -41,14 +38,17 @@ jobs:
         with:
           args: --all --all-features
           token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/sccache-finish
 
   doc-lint:
     name: doc lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/rust-bootstrap
+        with:
+          rust_toolchain: stable
+          rust_target: x86_64-unknown-linux-musl
       - name: Check if documentation builds
         run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items
+      - uses: ./.github/actions/sccache-finish
