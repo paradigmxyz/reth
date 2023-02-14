@@ -1,5 +1,6 @@
 use crate::{
     common::{Bounds, Sealed},
+    table::TableImporter,
     transaction::{DbTx, DbTxMut},
     Error,
 };
@@ -13,7 +14,7 @@ pub trait DatabaseGAT<'a, __ImplicitBounds: Sealed = Bounds<&'a Self>>: Send + S
     /// RO database transaction
     type TX: DbTx<'a> + Send + Sync;
     /// RW database transaction
-    type TXMut: DbTxMut<'a> + DbTx<'a> + Send + Sync;
+    type TXMut: DbTxMut<'a> + DbTx<'a> + TableImporter<'a> + Send + Sync;
 }
 
 /// Main Database trait that spawns transactions to be executed.
