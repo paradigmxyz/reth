@@ -41,7 +41,8 @@ jobs:
 
           cargo nextest archive \
             --locked --workspace --all-features \
-            --archive-file nextest-archive.tar.zst
+            --archive-file nextest-archive.tar.zst \
+            --lib --bins
       - name: Upload archive
         uses: actions/upload-artifact@v3
         with:
