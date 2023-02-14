@@ -391,7 +391,7 @@ impl ChainSpecBuilder {
 
     /// Enable Paris at genesis.
     pub fn paris_activated(mut self) -> Self {
-        self = self.berlin_activated();
+        self = self.london_activated();
         self.hardforks.insert(
             Hardfork::Paris,
             ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
