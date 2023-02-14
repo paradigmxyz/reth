@@ -3,7 +3,6 @@
 use crate::dirs::{KnownPeersPath, PlatformPath};
 use clap::Args;
 use reth_primitives::NodeRecord;
-use std::path::PathBuf;
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Args)]
@@ -37,16 +36,4 @@ pub struct NetworkArgs {
     /// Do not persist peers. Cannot be used with --peers-file
     #[arg(long, verbatim_doc_comment, conflicts_with = "peers_file")]
     pub no_persist_peers: bool,
-}
-
-// === impl NetworkArgs ===
-
-impl NetworkArgs {
-    /// If `no_persist_peers` is true then this returns the path to the persistent peers file
-    pub fn persistent_peers_file(&self) -> Option<PathBuf> {
-        if self.no_persist_peers {
-            return None
-        }
-        Some(self.peers_file.clone().into())
-    }
 }

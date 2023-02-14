@@ -209,10 +209,8 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the executor to use for spawning tasks.
-    ///
-    /// If `None`, then [tokio::spawn] is used for spawning tasks.
-    pub fn executor(mut self, executor: Option<TaskExecutor>) -> Self {
-        self.executor = executor;
+    pub fn executor(mut self, executor: TaskExecutor) -> Self {
+        self.executor = Some(executor);
         self
     }
 

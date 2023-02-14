@@ -145,7 +145,6 @@ impl Command {
                         None,
                         self.nat,
                         None,
-                        None,
                     )
                     .start_network()
                     .await?;
