@@ -92,3 +92,9 @@ jobs:
           ls
           cat hivetests/workspace/logs/*simulator*.log
 
+      - name: Print reth client logs
+        if: ${{ failure() }}
+        run: |
+          ls
+          cat hivetests/workspace/logs/reth/client-*.log
+
