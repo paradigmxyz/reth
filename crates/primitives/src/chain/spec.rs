@@ -90,6 +90,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
                 total_difficulty: U256::from(17_000_000_000_000_000u64),
             },
         ),
+        (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
     ]),
 });
 
