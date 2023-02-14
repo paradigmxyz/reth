@@ -111,16 +111,30 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
         let this = self.get_mut();
 
         loop {
-            while let Poll::Ready(Some(range)) = this.updates.poll_next_unpin(cx) {
-                if let Err(err) = this.downloader.set_download_range(range) {
-                    tracing::error!(target: "downloaders::bodies", ?err, "Failed to set download range");
-                    let _ = this.bodies_tx.send(Err(err));
+            loop {
+                match this.updates.poll_next_unpin(cx) {
+                    Poll::Pending => break,
+                    Poll::Ready(None) => {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
+                    }
+                    Poll::Ready(Some(range)) => {
+                        if let Err(err) = this.downloader.set_download_range(range) {
+                            tracing::error!(target: "downloaders::bodies", ?err, "Failed to set download range");
+                            let _ = this.bodies_tx.send(Err(err));
+                        }
+                    }
                 }
             }
 
             match ready!(this.downloader.poll_next_unpin(cx)) {
                 Some(bodies) => {
-                    let _ = this.bodies_tx.send(bodies);
+                    if this.bodies_tx.send(bodies).is_err() {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
+                    }
                 }
                 None => return Poll::Pending,
             }

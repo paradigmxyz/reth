@@ -115,26 +115,38 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
         let this = self.get_mut();
 
         loop {
-            while let Poll::Ready(Some(update)) = this.updates.poll_next_unpin(cx) {
-                match update {
-                    DownloaderUpdates::UpdateSyncGap(head, target) => {
-                        this.downloader.update_sync_gap(head, target);
+            loop {
+                match this.updates.poll_next_unpin(cx) {
+                    Poll::Pending => break,
+                    Poll::Ready(None) => {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
                     }
-                    DownloaderUpdates::UpdateLocalHead(head) => {
-                        this.downloader.update_local_head(head);
-                    }
-                    DownloaderUpdates::UpdateSyncTarget(target) => {
-                        this.downloader.update_sync_target(target);
-                    }
-                    DownloaderUpdates::SetBatchSize(limit) => {
-                        this.downloader.set_batch_size(limit);
-                    }
+                    Poll::Ready(Some(update)) => match update {
+                        DownloaderUpdates::UpdateSyncGap(head, target) => {
+                            this.downloader.update_sync_gap(head, target);
+                        }
+                        DownloaderUpdates::UpdateLocalHead(head) => {
+                            this.downloader.update_local_head(head);
+                        }
+                        DownloaderUpdates::UpdateSyncTarget(target) => {
+                            this.downloader.update_sync_target(target);
+                        }
+                        DownloaderUpdates::SetBatchSize(limit) => {
+                            this.downloader.set_batch_size(limit);
+                        }
+                    },
                 }
             }
 
             match ready!(this.downloader.poll_next_unpin(cx)) {
                 Some(headers) => {
-                    let _ = this.headers_tx.send(headers);
+                    if this.headers_tx.send(headers).is_err() {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
+                    }
                 }
                 None => return Poll::Pending,
             }
