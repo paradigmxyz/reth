@@ -277,7 +277,12 @@ impl From<EthersGenesis> for ChainSpec {
             );
         }
 
-        Self { chain: genesis.config.chain_id.into(), genesis: genesis_block, hardforks }
+        Self {
+            chain: genesis.config.chain_id.into(),
+            genesis: genesis_block,
+            genesis_hash: None,
+            hardforks,
+        }
     }
 }
 
@@ -430,6 +435,7 @@ impl ChainSpecBuilder {
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
+            genesis_hash: None,
             hardforks: self.hardforks,
         }
     }
