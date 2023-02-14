@@ -1,0 +1,59 @@
+on:
+  push:
+    branches:
+      - main
+      - dan/hive-ci
+  pull_request:
+
+env:
+  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+name: hive
+jobs:
+  hive:
+    name: hive tests (stable)
+    runs-on: ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
+      - run: go version
+
+      # TODO: replace when we are not using a fork
+      - name: Checkout hive
+        uses: actions/checkout@v2
+        with:
+          repository: onbjerg/hive
+          ref: onbjerg/reth
+          path: hivetests
+
+      - name: Build hive tests
+        run: |
+          cd hivetests
+          ls
+          go build ./hivetests/
+
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - uses: Swatinem/rust-cache@v1
+        with:
+          cache-on-failure: true
+
+      - name: Build docker container
+        uses: docker/build-push-action@v4
+      - run: docker build hivetests/clients/reth
