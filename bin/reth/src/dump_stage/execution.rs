@@ -1,13 +1,13 @@
 use crate::{
     db::DbTool,
     dirs::{DbPath, PlatformPath},
+    dump_stage::setup,
 };
 use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_provider::Transaction;
-use reth_staged_sync::utils::init::init_db;
 use reth_stages::{stages::ExecutionStage, Stage, StageId, UnwindInput};
 use std::ops::DerefMut;
 use tracing::info;
@@ -19,11 +19,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     output_db: &PlatformPath<DbPath>,
     dry_run: bool,
 ) -> Result<()> {
-    assert!(from < to, "FROM block should be bigger than TO block.");
-
-    info!(target: "reth::cli", "Creating separate db at {}", output_db);
-
-    let output_db = init_db(output_db)?;
+    let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;
 
     // Copy input tables. We're not sharing the transaction in case the memory grows too much.
     output_db.update(|tx| {
@@ -40,13 +36,6 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     })??;
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockOmmers, _>(&db_tool.db.tx()?, Some(from), to)
-    })??;
-    output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockTransitionIndex, _>(
-            &db_tool.db.tx()?,
-            Some(from - 1),
-            to + 1,
-        )
     })??;
 
     // Find range of transactions that need to be copied over
@@ -73,12 +62,6 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::TxSenders, _>(&db_tool.db.tx()?, Some(from_tx), to_tx)
     })??;
-
-    // Find the latest block to unwind from
-    let (tip_block_number, _) = db_tool
-        .db
-        .view(|tx| tx.cursor_read::<tables::BlockTransitionIndex>()?.last())??
-        .expect("some");
 
     // Dry-run an unwind to FROM block, so we can get the PlainStorageState and
     // PlainAccountState safely. There might be some state dependency from an address

@@ -10,6 +10,11 @@ use crate::{
     dirs::{DbPath, PlatformPath},
 };
 use clap::Parser;
+use reth_db::{
+    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+};
+use reth_staged_sync::utils::init::init_db;
+use tracing::info;
 
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
@@ -85,4 +90,34 @@ impl Command {
 
         Ok(())
     }
+}
+
+/// Sets up the database and initial state on `BlockTransitionIndex`. Also returns the tip block
+/// number.
+pub(crate) fn setup<DB: Database>(
+    from: u64,
+    to: u64,
+    output_db: &PlatformPath<DbPath>,
+    db_tool: &mut DbTool<'_, DB>,
+) -> eyre::Result<(reth_db::mdbx::Env<reth_db::mdbx::WriteMap>, u64)> {
+    assert!(from < to, "FROM block should be bigger than TO block.");
+
+    info!(target: "reth::cli", "Creating separate db at {}", output_db);
+
+    let output_db = init_db(output_db)?;
+
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::BlockTransitionIndex, _>(
+            &db_tool.db.tx()?,
+            Some(from - 1),
+            to + 1,
+        )
+    })??;
+
+    let (tip_block_number, _) = db_tool
+        .db
+        .view(|tx| tx.cursor_read::<tables::BlockTransitionIndex>()?.last())??
+        .expect("some");
+
+    Ok((output_db, tip_block_number))
 }
