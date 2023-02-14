@@ -22,9 +22,10 @@ pub struct DownloaderMetrics {
     pub total_flushed: Counter,
     /// Number of items that were successfully downloaded
     pub total_downloaded: Counter,
-    /// The number of requests currently in-flight.
+    /// The number of requests (can contain more than 1 item) currently in-flight.
     pub in_flight_requests: Gauge,
-    /// The number of responses in the internal buffer of the downloader.
+    /// The number of responses (can contain more than 1 item) in the internal buffer of the
+    /// downloader.
     pub buffered_responses: Gauge,
     /// The number of out-of-order requests sent by the downloader.
     /// The consumer of the download stream is able to re-request data (headers or bodies) in case
