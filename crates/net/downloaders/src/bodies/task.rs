@@ -1,21 +1,19 @@
 use futures::Stream;
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_interfaces::p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
 };
 use reth_primitives::BlockNumber;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     future::Future,
     ops::Range,
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::{
-    sync::{mpsc, mpsc::UnboundedSender},
-    task::JoinSet,
-};
+use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
@@ -25,16 +23,13 @@ pub struct TaskDownloader {
     #[pin]
     from_downloader: UnboundedReceiverStream<BodyDownloaderResult>,
     to_downloader: UnboundedSender<Range<BlockNumber>>,
-    /// The spawned downloader tasks.
-    ///
-    /// Note: If this type is dropped, the downloader task gets dropped as well.
-    _task: JoinSet<()>,
 }
 
 // === impl TaskDownloader ===
 
 impl TaskDownloader {
-    /// Spawns the given `downloader` and returns a [TaskDownloader] that's connected to that task.
+    /// Spawns the given `downloader` via [tokio::task::spawn] returns a [TaskDownloader] that's
+    /// connected to that task.
     ///
     /// # Panics
     ///
@@ -62,6 +57,16 @@ impl TaskDownloader {
     where
         T: BodyDownloader + 'static,
     {
+        Self::spawn_with(downloader, &TokioTaskExecutor::default())
+    }
+
+    /// Spawns the given `downloader` via the given [TaskSpawner] returns a [TaskDownloader] that's
+    /// connected to that task.
+    pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
+    where
+        T: BodyDownloader + 'static,
+        S: TaskSpawner,
+    {
         let (bodies_tx, bodies_rx) = mpsc::unbounded_channel();
         let (to_downloader, updates_rx) = mpsc::unbounded_channel();
 
@@ -71,14 +76,9 @@ impl TaskDownloader {
             downloader,
         };
 
-        let mut task = JoinSet::<()>::new();
-        task.spawn(downloader);
+        spawner.spawn(async move { downloader.await }.boxed());
 
-        Self {
-            from_downloader: UnboundedReceiverStream::new(bodies_rx),
-            to_downloader,
-            _task: task,
-        }
+        Self { from_downloader: UnboundedReceiverStream::new(bodies_rx), to_downloader }
     }
 }
 
