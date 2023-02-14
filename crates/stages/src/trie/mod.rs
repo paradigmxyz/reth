@@ -1,4 +1,3 @@
-use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
@@ -12,6 +11,7 @@ use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
     H256, KECCAK_EMPTY, U256,
 };
+use reth_provider::Transaction;
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
     EMPTY_STRING_CODE,
@@ -203,7 +203,7 @@ impl DBTrieLoader {
         tx.clear::<tables::StoragesTrie>()?;
 
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
-        let mut walker = accounts_cursor.walk(H256::zero())?;
+        let mut walker = accounts_cursor.walk(None)?;
 
         let db = Arc::new(HashDatabase::new(tx)?);
 
@@ -341,8 +341,8 @@ impl DBTrieLoader {
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
-        let start = (tid_range.start, Address::zero()).into();
-        let end = (tid_range.end, Address::zero()).into();
+        let start = TransitionIdAddress((tid_range.start, Address::zero()));
+        let end = TransitionIdAddress((tid_range.end, Address::zero()));
         let mut walker = storage_cursor.walk_range(start..end)?;
 
         while let Some((TransitionIdAddress((_, address)), StorageEntry { key, .. })) =
@@ -366,6 +366,7 @@ impl DBTrieLoader {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
     use reth_primitives::{
         hex_literal::hex,
@@ -623,7 +624,7 @@ mod tests {
 
     #[test]
     fn arbitrary() {
-        proptest::proptest!(|(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>)| {
+        proptest!(ProptestConfig::with_cases(10), |(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>)| {
             test_with_accounts(accounts);
         });
     }

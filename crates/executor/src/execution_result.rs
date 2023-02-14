@@ -1,6 +1,6 @@
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_primitives::{Account, Address, Receipt, H256, U256};
-use revm::Bytecode;
+use revm::primitives::Bytecode;
 use std::collections::BTreeMap;
 
 /// Execution Result containing vector of transaction changesets

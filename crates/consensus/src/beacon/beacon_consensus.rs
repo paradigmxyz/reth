@@ -50,7 +50,8 @@ impl Consensus for BeaconConsensus {
     }
 
     fn validate_header(&self, header: &SealedHeader, total_difficulty: U256) -> Result<(), Error> {
-        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty) {
+        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
+        {
             // EIP-3675: Upgrade consensus to Proof-of-Stake:
             // https://eips.ethereum.org/EIPS/eip-3675#replacing-difficulty-with-0
             if header.difficulty != U256::ZERO {
@@ -80,7 +81,22 @@ impl Consensus for BeaconConsensus {
         validation::validate_block_standalone(block)
     }
 
-    fn has_block_reward(&self, total_difficulty: U256) -> bool {
-        self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty)
+    fn has_block_reward(&self, total_difficulty: U256, difficulty: U256) -> bool {
+        !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, difficulty)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use reth_interfaces::consensus::Consensus;
+    use reth_primitives::{ChainSpecBuilder, U256};
+
+    use super::BeaconConsensus;
+
+    #[test]
+    fn test_has_block_reward_before_paris() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
+        let (consensus, _) = BeaconConsensus::builder().build(chain_spec);
+        assert!(consensus.has_block_reward(U256::ZERO, U256::ZERO));
     }
 }

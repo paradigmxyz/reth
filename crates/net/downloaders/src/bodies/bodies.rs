@@ -1,6 +1,5 @@
-use crate::metrics::DownloaderMetrics;
-
 use super::queue::BodiesRequestQueue;
+use crate::{bodies::task::TaskDownloader, metrics::DownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -135,7 +134,7 @@ where
                 .ok_or(DownloadError::MissingHeader { block_number: current_block_num })?;
             // Find the block header.
             let (_, header) = header_cursor
-                .seek_exact((number, hash).into())?
+                .seek_exact(number)?
                 .ok_or(DownloadError::MissingHeader { block_number: number })?;
 
             // If the header is not empty, increment the counter
@@ -186,7 +185,7 @@ where
     fn is_terminated(&self) -> bool {
         // There is nothing to request if the range is empty
         let nothing_to_request = self.download_range.is_empty() ||
-            // or all blocks have already been requested. 
+            // or all blocks have already been requested.
             self.in_progress_queue
                 .last_requested_block_number
                 .map(|last| last + 1 == self.download_range.end)
@@ -238,6 +237,19 @@ where
             }
         }
         None
+    }
+}
+
+impl<B, DB> BodiesDownloader<B, DB>
+where
+    B: BodiesClient + 'static,
+    DB: Database,
+    Self: BodyDownloader + 'static,
+{
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
+    /// it.
+    pub fn as_task(self) -> TaskDownloader {
+        TaskDownloader::spawn(self)
     }
 }
 

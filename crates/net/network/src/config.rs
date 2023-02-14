@@ -8,7 +8,7 @@ use crate::{
     NetworkHandle, NetworkManager,
 };
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
-use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET, U256};
+use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_tasks::TaskExecutor;
 use secp256k1::{SecretKey, SECP256K1};
@@ -307,8 +307,9 @@ impl NetworkConfigBuilder {
         let head = head.unwrap_or(Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
-            total_difficulty: U256::ZERO,
             timestamp: 0,
+            difficulty: chain_spec.genesis.difficulty,
+            total_difficulty: chain_spec.genesis.difficulty,
         });
 
         // set the status

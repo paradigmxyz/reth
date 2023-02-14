@@ -7,7 +7,9 @@ use std::{fmt, str::FromStr};
 
 // The chain spec module.
 mod spec;
-pub use spec::{ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA};
+pub use spec::{
+    AllGenesisFormats, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA,
+};
 
 // The chain info module.
 mod info;

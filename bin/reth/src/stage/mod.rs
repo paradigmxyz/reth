@@ -2,23 +2,24 @@
 //!
 //! Stage debugging tool
 use crate::{
+    args::NetworkArgs,
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
-    utils::{chainspec::chain_spec_value_parser, init::init_db},
-    NetworkOpts,
 };
+use clap::{Parser, ValueEnum};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-
 use reth_net_nat::NatResolver;
 use reth_primitives::ChainSpec;
-use reth_staged_sync::Config;
+use reth_provider::Transaction;
+use reth_staged_sync::{
+    utils::{chainspec::chain_spec_value_parser, init::init_db},
+    Config,
+};
 use reth_stages::{
     stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
-    ExecInput, Stage, StageId, Transaction, UnwindInput,
+    ExecInput, Stage, StageId, UnwindInput,
 };
-
-use clap::{Parser, ValueEnum};
 use std::{net::SocketAddr, sync::Arc};
 use tracing::*;
 
@@ -83,7 +84,7 @@ pub struct Command {
     skip_unwind: bool,
 
     #[clap(flatten)]
-    network: NetworkOpts,
+    network: NetworkArgs,
 
     #[arg(long, default_value = "any")]
     nat: NatResolver,
@@ -143,6 +144,7 @@ impl Command {
                         self.network.disable_discovery,
                         None,
                         self.nat,
+                        None,
                     )
                     .start_network()
                     .await?;
@@ -169,10 +171,7 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Senders => {
-                let mut stage = SenderRecoveryStage {
-                    batch_size: config.stages.sender_recovery.batch_size,
-                    commit_threshold: num_blocks,
-                };
+                let mut stage = SenderRecoveryStage { commit_threshold: num_blocks };
 
                 // Unwind first
                 if !self.skip_unwind {

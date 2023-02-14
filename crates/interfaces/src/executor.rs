@@ -25,6 +25,8 @@ pub trait BlockExecutor<T> {
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum Error {
+    #[error("EVM reported invalid transaction:{0}")]
+    EVM(String),
     #[error("Example of error.")]
     VerificationFailed,
     #[error("Fatal internal error")]
@@ -50,8 +52,6 @@ pub enum Error {
     },
     #[error("Block gas used {got} is different from expected gas used {expected}.")]
     BlockGasUsed { got: u64, expected: u64 },
-    #[error("Revm error {error_code}")]
-    EVMError { error_code: u32 },
     #[error("Provider error")]
     ProviderError,
 }

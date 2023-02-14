@@ -1,17 +1,35 @@
 use proc_macro2::TokenStream;
 use quote::quote;
+use syn::{Error, Result};
 
-use crate::utils::has_attribute;
+use crate::utils::{attributes_include, field_ident, is_optional, parse_struct};
 
-pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
-    let body = if let syn::Data::Struct(s) = &ast.data {
-        s
-    } else {
-        panic!("#[derive(RlpDecodable)] is only defined for structs.");
-    };
+pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
+    let body = parse_struct(ast, "RlpDecodable")?;
 
-    let stmts: Vec<_> =
-        body.fields.iter().enumerate().map(|(i, field)| decodable_field(i, field)).collect();
+    let fields = body.fields.iter().enumerate();
+
+    let supports_trailing_opt = attributes_include(&ast.attrs, "trailing");
+
+    let mut encountered_opt_item = false;
+    let mut stmts = Vec::with_capacity(body.fields.len());
+    for (i, field) in fields {
+        let is_opt = is_optional(field);
+        if is_opt {
+            if !supports_trailing_opt {
+                return Err(Error::new_spanned(field, "Optional fields are disabled. Add `#[rlp(trailing)]` attribute to the struct in order to enable"))
+            }
+            encountered_opt_item = true;
+        } else if encountered_opt_item && !attributes_include(&field.attrs, "default") {
+            return Err(Error::new_spanned(
+                field,
+                "All subsequent fields must be either optional or default.",
+            ))
+        }
+
+        stmts.push(decodable_field(i, field, is_opt));
+    }
+
     let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
@@ -45,20 +63,16 @@ pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> TokenStream {
         }
     };
 
-    quote! {
+    Ok(quote! {
         const _: () = {
             extern crate reth_rlp;
             #impl_block
         };
-    }
+    })
 }
 
-pub(crate) fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
-    let body = if let syn::Data::Struct(s) = &ast.data {
-        s
-    } else {
-        panic!("#[derive(RlpEncodableWrapper)] is only defined for structs.");
-    };
+pub(crate) fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> Result<TokenStream> {
+    let body = parse_struct(ast, "RlpEncodableWrapper")?;
 
     assert_eq!(
         body.fields.iter().count(),
@@ -77,25 +91,28 @@ pub(crate) fn impl_decodable_wrapper(ast: &syn::DeriveInput) -> TokenStream {
         }
     };
 
-    quote! {
+    Ok(quote! {
         const _: () = {
             extern crate reth_rlp;
             #impl_block
         };
-    }
+    })
 }
 
-fn decodable_field(index: usize, field: &syn::Field) -> TokenStream {
-    let id = if let Some(ident) = &field.ident {
-        quote! { #ident }
-    } else {
-        let index = syn::Index::from(index);
-        quote! { #index }
-    };
+fn decodable_field(index: usize, field: &syn::Field, is_opt: bool) -> TokenStream {
+    let ident = field_ident(index, field);
 
-    if has_attribute(field, "default") {
-        quote! { #id: Default::default(), }
+    if attributes_include(&field.attrs, "default") {
+        quote! { #ident: Default::default(), }
+    } else if is_opt {
+        quote! {
+            #ident: if started_len - b.len() < rlp_head.payload_length {
+                Some(reth_rlp::Decodable::decode(b)?)
+            } else {
+                None
+            },
+        }
     } else {
-        quote! { #id: reth_rlp::Decodable::decode(b)?, }
+        quote! { #ident: reth_rlp::Decodable::decode(b)?, }
     }
 }

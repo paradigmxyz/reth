@@ -30,3 +30,16 @@ pub mod servers {
         trace::TraceApiServer, web3::Web3ApiServer,
     };
 }
+
+/// re-export of all client traits
+#[cfg(feature = "client")]
+pub use clients::*;
+
+/// Aggregates all client traits.
+#[cfg(feature = "client")]
+pub mod clients {
+    pub use crate::{
+        admin::AdminApiClient, debug::DebugApiClient, engine::EngineApiClient, eth::EthApiClient,
+        net::NetApiClient, trace::TraceApiClient, web3::Web3ApiClient,
+    };
+}

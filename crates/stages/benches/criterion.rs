@@ -16,25 +16,22 @@ criterion_main!(benches);
 
 fn senders(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(2000));
-    group.warm_up_time(std::time::Duration::from_millis(2000));
+
     // don't need to run each stage for that many times
     group.sample_size(10);
 
     for batch in [1000usize, 10_000, 100_000, 250_000] {
         let num_blocks = 10_000;
         let mut stage = SenderRecoveryStage::default();
-        stage.batch_size = batch;
         stage.commit_threshold = num_blocks;
-        let label = format!("SendersRecovery-batch-{}", batch);
+        let label = format!("SendersRecovery-batch-{batch}");
         measure_stage(&mut group, stage, num_blocks, label);
     }
 }
 
 fn tx_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
-    group.measurement_time(std::time::Duration::from_millis(2000));
-    group.warm_up_time(std::time::Duration::from_millis(2000));
+
     // don't need to run each stage for that many times
     group.sample_size(10);
 
@@ -84,7 +81,7 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
             |_| async {
                 let mut stage = stage.clone();
                 let mut db_tx = tx.inner();
-                stage.execute(&mut db_tx, input.clone()).await.unwrap();
+                stage.execute(&mut db_tx, input).await.unwrap();
                 db_tx.commit().unwrap();
             },
         )
@@ -118,8 +115,7 @@ fn txs_testdata(num_blocks: usize) -> PathBuf {
             transaction::{DbTx, DbTxMut},
         };
         tx.commit(|tx| {
-            let (head, _) =
-                tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default().into();
+            let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
             tx.put::<tables::HeaderTD>(head, reth_primitives::U256::from(0).into())
         })
         .unwrap();

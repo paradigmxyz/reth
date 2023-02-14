@@ -86,6 +86,10 @@ arbitrary = [
 ]
 
 [[bench]]
+name = "hash_keys"
+harness = false
+
+[[bench]]
 name = "criterion"
 harness = false
 

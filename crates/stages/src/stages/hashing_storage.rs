@@ -1,6 +1,4 @@
-use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -8,7 +6,8 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Address, StorageEntry, H160, H256, U256};
+use reth_primitives::{keccak256, Address, StorageEntry, H256, U256};
+use reth_provider::Transaction;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -63,7 +62,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             tx.clear::<tables::HashedStorage>()?;
             tx.commit()?;
 
-            let mut first_key = H160::zero();
+            let mut first_key = None;
             loop {
                 let next_key = {
                     let mut storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
@@ -92,7 +91,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 tx.commit()?;
 
                 first_key = match next_key {
-                    Some(key) => key,
+                    Some(key) => Some(key),
                     None => break,
                 };
             }
@@ -104,8 +103,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // changed.
             tx.cursor_read::<tables::StorageChangeSet>()?
                 .walk_range(
-                    (from_transition, Address::zero()).into()..
-                        (to_transition, Address::zero()).into(),
+                    TransitionIdAddress((from_transition, Address::zero()))..
+                        TransitionIdAddress((to_transition, Address::zero())),
                 )?
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
@@ -174,8 +173,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // Aggregate all transition changesets and make list of accounts that have been changed.
         tx.cursor_read::<tables::StorageChangeSet>()?
             .walk_range(
-                (from_transition_rev, Address::zero()).into()..
-                    (to_transition_rev, Address::zero()).into(),
+                TransitionIdAddress((from_transition_rev, Address::zero()))..
+                    TransitionIdAddress((to_transition_rev, Address::zero())),
             )?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
@@ -226,7 +225,7 @@ mod tests {
     use reth_db::{
         cursor::DbCursorRW,
         mdbx::{tx::Tx, WriteMap, RW},
-        models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
+        models::{StoredBlockBody, TransitionIdAddress},
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
@@ -313,8 +312,6 @@ mod tests {
             for progress in iter {
                 // Insert last progress data
                 self.tx.commit(|tx| {
-                    let key: BlockNumHash = (progress.number, progress.hash()).into();
-
                     let body = StoredBlockBody {
                         start_tx_id: tx_id,
                         tx_count: progress.body.len() as u64,
@@ -359,8 +356,8 @@ mod tests {
                         transition_id += 1;
                     }
 
-                    tx.put::<tables::BlockTransitionIndex>(key.number(), transition_id)?;
-                    tx.put::<tables::BlockBodies>(key, body)
+                    tx.put::<tables::BlockTransitionIndex>(progress.number, transition_id)?;
+                    tx.put::<tables::BlockBodies>(progress.number, body)
                 })?;
             }
 
@@ -415,8 +412,7 @@ mod tests {
                         );
                         expected += 1;
                     }
-                    let count =
-                        tx.cursor_dup_read::<tables::HashedStorage>()?.walk(H256::zero())?.count();
+                    let count = tx.cursor_dup_read::<tables::HashedStorage>()?.walk(None)?.count();
 
                     assert_eq!(count, expected);
                     Ok(())

@@ -5,7 +5,7 @@ use crate::{
 };
 use bytes::{BufMut, BytesMut};
 use ethers_core::types::{Block, H256 as EthersH256, H64};
-use reth_codecs::{derive_arbitrary, main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
@@ -24,7 +24,9 @@ pub struct Head {
     pub number: BlockNumber,
     /// The hash of the head block.
     pub hash: H256,
-    /// The total difficulty of the head block.
+    /// The difficulty of the head block.
+    pub difficulty: U256,
+    /// The total difficulty at the head block.
     pub total_difficulty: U256,
     /// The timestamp of the head block.
     pub timestamp: u64,
@@ -123,7 +125,17 @@ impl Header {
 
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
-        self.ommers_hash == EMPTY_LIST_HASH && self.transactions_root == EMPTY_ROOT
+        self.transaction_root_is_empty() && self.ommers_hash_is_empty()
+    }
+
+    /// Check if the ommers hash equals to empty hash list.
+    pub fn ommers_hash_is_empty(&self) -> bool {
+        self.ommers_hash == EMPTY_LIST_HASH
+    }
+
+    /// Check if the transaction root equals to empty root.
+    pub fn transaction_root_is_empty(&self) -> bool {
+        self.transactions_root == EMPTY_ROOT
     }
 
     /// Calculate hash and seal the Header so that it can't be changed.
@@ -229,12 +241,39 @@ impl Decodable for Header {
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[add_arbitrary_tests(rlp)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SealedHeader {
     /// Locked Header fields.
     header: Header,
     /// Locked Header hash.
     hash: BlockHash,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::arbitrary::Arbitrary for SealedHeader {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<SealedHeader>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::{any, Strategy};
+
+        any::<(Header, BlockHash)>()
+            .prop_map(move |(header, _)| {
+                let hash = header.hash_slow();
+                SealedHeader { header, hash }
+            })
+            .boxed()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let header = Header::arbitrary(u)?;
+        let hash = header.hash_slow();
+        Ok(SealedHeader { header, hash })
+    }
 }
 
 impl From<Block<EthersH256>> for SealedHeader {

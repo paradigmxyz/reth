@@ -32,7 +32,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
             Hardfork::Paris,
             ForkCondition::TTD {
                 fork_block: None,
-                total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+                total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
             },
         ),
     ]),
@@ -260,6 +260,37 @@ impl From<EthersGenesis> for ChainSpec {
     }
 }
 
+/// A helper type for compatibility with geth's config
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum AllGenesisFormats {
+    /// The geth genesis format
+    Geth(EthersGenesis),
+    /// The reth genesis format
+    Reth(ChainSpec),
+}
+
+impl From<EthersGenesis> for AllGenesisFormats {
+    fn from(genesis: EthersGenesis) -> Self {
+        Self::Geth(genesis)
+    }
+}
+
+impl From<ChainSpec> for AllGenesisFormats {
+    fn from(genesis: ChainSpec) -> Self {
+        Self::Reth(genesis)
+    }
+}
+
+impl From<AllGenesisFormats> for ChainSpec {
+    fn from(genesis: AllGenesisFormats) -> Self {
+        match genesis {
+            AllGenesisFormats::Geth(genesis) => genesis.into(),
+            AllGenesisFormats::Reth(genesis) => genesis,
+        }
+    }
+}
+
 /// A helper to build custom chain specs
 #[derive(Debug, Default)]
 pub struct ChainSpecBuilder {
@@ -360,7 +391,7 @@ impl ChainSpecBuilder {
 
     /// Enable Paris at genesis.
     pub fn paris_activated(mut self) -> Self {
-        self = self.berlin_activated();
+        self = self.london_activated();
         self.hardforks.insert(
             Hardfork::Paris,
             ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
@@ -441,12 +472,18 @@ impl ForkCondition {
         }
     }
 
-    /// Checks whether the fork condition is satisfied at the given total difficulty.
+    /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
+    /// of a current block.
+    ///
+    /// The fork is considered active if the _previous_ total difficulty is above the threshold.
+    /// To achieve that, we subtract the passed `difficulty` from the current block's total
+    /// difficulty, and check if it's above the Fork Condition's total difficulty (here:
+    /// 58_750_000_000_000_000_000_000)
     ///
     /// This will return false for any condition that is not TTD-based.
-    pub fn active_at_ttd(&self, ttd: U256) -> bool {
+    pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
         if let ForkCondition::TTD { total_difficulty, .. } = self {
-            ttd >= *total_difficulty
+            ttd.saturating_sub(difficulty) >= *total_difficulty
         } else {
             false
         }
@@ -473,7 +510,7 @@ impl ForkCondition {
     pub fn active_at_head(&self, head: &Head) -> bool {
         self.active_at_block(head.number) ||
             self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty)
+            self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.
@@ -501,6 +538,8 @@ impl ForkCondition {
 
 #[cfg(test)]
 mod tests {
+    use revm_primitives::U256;
+
     use crate::{
         Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
         Head, GOERLI, MAINNET, SEPOLIA,
@@ -802,5 +841,25 @@ mod tests {
                 ), // Future Shanghai block
             ],
         );
+    }
+
+    /// Checks that the fork is not active at a terminal ttd block.
+    #[test]
+    fn check_terminal_ttd() {
+        let chainspec = ChainSpecBuilder::mainnet().build();
+
+        // Check that Paris is not active on terminal PoW block #15537393.
+        let terminal_block_ttd = U256::from(58750003716598352816469_u128);
+        let terminal_block_difficulty = U256::from(11055787484078698_u128);
+        assert!(!chainspec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(terminal_block_ttd, terminal_block_difficulty));
+
+        // Check that Paris is active on first PoS block #15537394.
+        let first_pos_block_ttd = U256::from(58750003716598352816469_u128);
+        let first_pos_difficulty = U256::ZERO;
+        assert!(chainspec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(first_pos_block_ttd, first_pos_difficulty));
     }
 }

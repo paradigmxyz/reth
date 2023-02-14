@@ -12,7 +12,7 @@ use crate::{
         models::{
             accounts::{AccountBeforeTx, TransitionIdAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
-            BlockNumHash, ShardedKey,
+            ShardedKey,
         },
     },
 };
@@ -33,14 +33,13 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 27] = [
+pub const TABLES: [(TableType, &str); 26] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
     (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
-    (TableType::Table, NonCanonicalTransactions::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
     (TableType::Table, Receipts::const_name()),
@@ -119,7 +118,7 @@ table!(
 
 table!(
     /// Stores the total difficulty from a block header.
-    ( HeaderTD ) BlockNumHash | CompactU256
+    ( HeaderTD ) BlockNumber | CompactU256
 );
 
 table!(
@@ -129,22 +128,17 @@ table!(
 
 table!(
     /// Stores header bodies.
-    ( Headers ) BlockNumHash | Header
+    ( Headers ) BlockNumber | Header
 );
 
 table!(
     /// Stores block bodies.
-    ( BlockBodies ) BlockNumHash | StoredBlockBody
+    ( BlockBodies ) BlockNumber | StoredBlockBody
 );
 
 table!(
     /// Stores the uncles/ommers of the block.
-    ( BlockOmmers ) BlockNumHash | StoredBlockOmmers
-);
-
-table!(
-    /// Stores the transaction body from non canonical transactions.
-    ( NonCanonicalTransactions ) BlockNumHashTxNumber | TransactionSigned
+    ( BlockOmmers ) BlockNumber | StoredBlockOmmers
 );
 
 table!(
@@ -316,7 +310,5 @@ pub type StageId = Vec<u8>;
 pub type ConfigKey = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type ConfigValue = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type BlockNumHashTxNumber = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type Bytecode = Vec<u8>;
