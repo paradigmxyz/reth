@@ -1,7 +1,7 @@
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Header, U256};
-use std::ops::Range;
+use std::ops::RangeBounds;
 
 /// Client trait for fetching `Header` related data.
 #[auto_impl(&)]
@@ -29,5 +29,5 @@ pub trait HeaderProvider: Send + Sync {
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
 
     /// Get headers in range of block hashes or numbers
-    fn headers_range(&self, range: Range<BlockNumber>) -> Result<Vec<Header>>;
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>>;
 }

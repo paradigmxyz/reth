@@ -211,13 +211,8 @@ where
 
         // If we had any cache misses, query the database starting with the first non-cached block
         if let Some(start_block) = first_non_cached_block {
-            let headers: Vec<Header> = self
-                .inner
-                .client
-                // TODO: make `header_range` accept `RangeInclusive`, so we can pass
-                //  `start_block..=end_block` instead.
-                .headers_range(start_block..(end_block + 1))
-                .to_rpc_result()?;
+            let headers: Vec<Header> =
+                self.inner.client.headers_range(start_block..=end_block).to_rpc_result()?;
 
             // We should receive exactly the amount of blocks missing from the cache
             if headers.len() != (end_block - start_block + 1) as usize {

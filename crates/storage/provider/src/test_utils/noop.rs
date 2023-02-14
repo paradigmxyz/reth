@@ -7,7 +7,7 @@ use reth_primitives::{
     rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, Bytes, ChainInfo, Header,
     StorageKey, StorageValue, H256, U256,
 };
-use std::ops::Range;
+use std::ops::RangeBounds;
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug, Clone, Default, Copy)]
@@ -53,7 +53,7 @@ impl HeaderProvider for NoopProvider {
         Ok(None)
     }
 
-    fn headers_range(&self, _range: Range<BlockNumber>) -> Result<Vec<Header>> {
+    fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
         Ok(vec![])
     }
 }

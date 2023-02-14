@@ -10,7 +10,7 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
     U256,
 };
-use std::{collections::HashMap, ops::Range, sync::Arc};
+use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]
@@ -110,13 +110,12 @@ impl HeaderProvider for MockEthProvider {
         }))
     }
 
-    fn headers_range(&self, range: Range<reth_primitives::BlockNumber>) -> Result<Vec<Header>> {
+    fn headers_range(
+        &self,
+        range: impl RangeBounds<reth_primitives::BlockNumber>,
+    ) -> Result<Vec<Header>> {
         let lock = self.headers.lock();
-        Ok(lock
-            .values()
-            .filter(|header| (range.start..range.end).contains(&header.number))
-            .cloned()
-            .collect())
+        Ok(lock.values().filter(|header| range.contains(&header.number)).cloned().collect())
     }
 }
 
