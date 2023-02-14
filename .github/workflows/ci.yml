@@ -109,7 +109,7 @@ jobs:
           cache-on-failure: true
 
       - name: Run Sync (debug)
-        run: cargo run --${{ matrix.profile }} --bin reth -- node --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 --debug.max-block 100000
+        run: cargo run --profile ${{ matrix.profile }} --bin reth -- node --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 --debug.max-block 100000
 
   fuzz:
     # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
