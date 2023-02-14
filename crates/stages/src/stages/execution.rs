@@ -5,7 +5,7 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::{StoredBlockBody, TransitionIdAddress},
+    models::TransitionIdAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -14,9 +14,7 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_interfaces::provider::Error as ProviderError;
-use reth_primitives::{
-    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, Withdrawal, H256, MAINNET, U256,
-};
+use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, MAINNET, U256};
 use reth_provider::{LatestStateProviderRef, Transaction};
 use std::fmt::Debug;
 use tracing::*;
@@ -95,25 +93,18 @@ impl ExecutionStage {
         // Get block headers and bodies
         let block_batch = headers_cursor
             .walk_range(start_block..=end_block)?
-            .map(
-                |entry| -> Result<
-                    // TODO: simplify this
-                    (Header, U256, StoredBlockBody, Vec<Header>, Option<Vec<Withdrawal>>),
-                    StageError,
-                > {
-                    let (number, header) = entry?;
-                    let (_, td) = td_cursor
-                        .seek_exact(number)?
-                        .ok_or(ProviderError::TotalDifficulty { number })?;
-                    let (_, body) = bodies_cursor
-                        .seek_exact(number)?
-                        .ok_or(ProviderError::BlockBody { number })?;
-                    let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
-                    let withdrawals =
-                        withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);
-                    Ok((header, td.into(), body, stored_ommers.ommers, withdrawals))
-                },
-            )
+            .map(|entry| -> Result<_, StageError> {
+                let (number, header) = entry?;
+                let (_, td) = td_cursor
+                    .seek_exact(number)?
+                    .ok_or(ProviderError::TotalDifficulty { number })?;
+                let (_, body) =
+                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockBody { number })?;
+                let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
+                let withdrawals =
+                    withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);
+                Ok((header, td.into(), body, stored_ommers.ommers, withdrawals))
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Create state provider with cached state
