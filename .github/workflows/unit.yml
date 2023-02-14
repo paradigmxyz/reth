@@ -90,7 +90,7 @@ jobs:
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
       - name: Generate report
-        run: ~/.cargo/bin/cargo-llvm-cov report --lcov --output-path lcov.info
+        run: ~/.cargo/bin/cargo-llvm-cov llvm-cov report --lcov --output-path lcov.info
       - name: Upload coverage data to codecov
         uses: codecov/codecov-action@v3
         with:
