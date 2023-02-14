@@ -59,7 +59,9 @@ runs:
       run: |
         # Prevent the sccache server from terminating due to inactivity
         echo "SCCACHE_IDLE_TIMEOUT=0" >> $GITHUB_ENV
+        # Change this to purge the cache
         echo "SCCACHE_GHA_VERSION=sccache" >> $GITHUB_ENV
+        # If a cache request fails, treat it as a cache miss
         echo "SCCACHE_BYPASS_CHECK=on" >> $GITHUB_ENV
         # Disable incremental builds (they can't be cached)
         echo "CARGO_INCREMENTAL=0" >> $GITHUB_ENV

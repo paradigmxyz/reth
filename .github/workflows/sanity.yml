@@ -22,14 +22,10 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+      - uses: ./.github/actions/rust-bootstrap
         with:
-          toolchain: nightly-2022-12-27
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
+          rust_toolchain: stable
+          rust_target: x86_64-unknown-linux-musl
 
       - name: Install geth
         run: |
@@ -51,6 +47,7 @@ jobs:
       - name: Run tests
         run: cargo nextest run --locked --workspace --all-features
 
+      - uses: ./.github/actions/sccache-finish
       - uses: JasonEtco/create-an-issue@v2
         if: ${{ failure() }}
         env:
@@ -68,11 +65,13 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Install cargo-udeps
-        run: cargo install cargo-udeps --locked
+      - uses: ./.github/actions/rust-bootstrap
+        with:
+          rust_toolchain: stable
+          rust_target: x86_64-unknown-linux-musl
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-udeps
 
       - name: Check for unused dependencies
         run: cargo +nightly udeps --all-features --all-targets
@@ -85,4 +84,4 @@ jobs:
         with:
           update_existing: true
           filename: .github/SANITY_UNUSED_DEPS_ISSUE_TEMPLATE.md
-
+      - uses: ./.github/actions/sccache-finish
