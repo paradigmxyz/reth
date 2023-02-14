@@ -19,7 +19,7 @@ use revm::{
     },
     EVM,
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::AddAssign};
 
 /// Main block executor
 pub struct Executor<'a, DB>
@@ -305,16 +305,18 @@ where
         &mut self,
         withdrawals: &[Withdrawal],
     ) -> Result<BTreeMap<Address, AccountInfoChangeSet>, Error> {
-        withdrawals
-            .iter()
-            .map(|withdrawal| {
-                Ok((
-                    withdrawal.address,
-                    self.account_balance_increment_changeset(
-                        withdrawal.address,
-                        withdrawal.amount_wei(),
-                    )?,
-                ))
+        let mut balance_increments = indexmap::IndexMap::<Address, U256>::default();
+        for withdrawal in withdrawals {
+            balance_increments
+                .entry(withdrawal.address)
+                .or_default()
+                .add_assign(withdrawal.amount_wei());
+        }
+
+        balance_increments
+            .into_iter()
+            .map(|(address, increment)| {
+                Ok((address, self.account_balance_increment_changeset(address, increment)?))
             })
             .collect()
     }
@@ -920,5 +922,30 @@ mod tests {
 
         let block_reward = out.block_reward.unwrap();
         assert_eq!(block_reward.len(), 1);
+        assert_eq!(
+            block_reward.get(&withdrawal_beneficiary),
+            Some(&AccountInfoChangeSet::Created {
+                new: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
+            })
+        );
+
+        // Execute same block again
+        let out =
+            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
+        assert_eq!(out.changesets.len(), 0, "No tx");
+
+        let block_reward = out.block_reward.unwrap();
+        assert_eq!(block_reward.len(), 1);
+        assert_eq!(
+            block_reward.get(&withdrawal_beneficiary),
+            Some(&AccountInfoChangeSet::Changed {
+                old: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
+                new: Account {
+                    nonce: 0,
+                    balance: withdrawal_sum + withdrawal_sum,
+                    bytecode_hash: None
+                },
+            })
+        );
     }
 }

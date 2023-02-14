@@ -72,8 +72,8 @@ impl From<Vec<H256>> for GetBlockBodies {
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
 #[derive_arbitrary(rlp, 10)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
-#[rlp(trailing)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
     pub transactions: Vec<TransactionSigned>,
