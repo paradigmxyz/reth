@@ -86,8 +86,11 @@ jobs:
       - name: Run Ethereum tests
         run: cargo run --release -- test-chain ethtests/BlockchainTests/GeneralStateTests/
 
-  eth-sync-release:
-    name: ethereum blockchain sync (release; 100k blocks)
+  eth-sync:
+    name: ethereum blockchain sync (${{ matrix.profile }}; 100k blocks)
+    strategy:
+      matrix:
+        profile: [release, dev]
     runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error 
@@ -106,30 +109,7 @@ jobs:
           cache-on-failure: true
 
       - name: Run Sync (debug)
-        run: cargo run --bin reth -- node --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 --debug.max-block 100000
-
-  eth-sync-debug:
-    name: ethereum blockchain sync (debug; 100k blocks)
-    runs-on: ubuntu-latest
-    env:
-      RUST_LOG: info,sync=error 
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v2
-
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
-
-      - name: Run Sync
-        run: cargo run --release --bin reth -- node --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 --debug.max-block 100000
-
+        run: cargo run --profile ${{ matrix.profile }} --bin reth -- node --debug.tip 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4 --debug.max-block 100000
 
   fuzz:
     # Skip the Fuzzing Jobs until we make them run fast and reliably. Currently they will
