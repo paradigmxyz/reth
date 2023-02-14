@@ -19,9 +19,8 @@ jobs:
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     runs-on: ubuntu-20.04
     steps:
-      - name: Install Valgrind
-        run: |
-          sudo apt install valgrind
+      - name: Install valgrind
+        uses: taiki-e/install-action@valgrind
 
       - name: Checkout PR sources
         uses: actions/checkout@v3
