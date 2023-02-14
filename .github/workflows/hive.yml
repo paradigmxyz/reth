@@ -40,6 +40,7 @@ jobs:
           path: /tmp/reth_image.tar
 
   run-hive-ethereum-sync:
+    needs: build-reth
     name: build hive tests
     runs-on: ubuntu-latest
     env:
