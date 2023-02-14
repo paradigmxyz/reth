@@ -14,54 +14,17 @@ concurrency:
 
 name: unit
 jobs:
-  build-tests:
-    name: build tests
-    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
-    # See also <https://github.com/foundry-rs/foundry/issues/3827>
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Install toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
-      - name: Install latest nextest release
-        uses: taiki-e/install-action@nextest
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - name: Build and archive tests
-        run: |
-          . <(cargo llvm-cov show-env)
-
-          cargo nextest archive \
-            --locked --workspace --all-features \
-            --archive-file nextest-archive.tar.zst \
-            --lib --bins
-      - name: Upload archive
-        uses: actions/upload-artifact@v3
-        with:
-          name: nextest-archive
-          path: nextest-archive.tar.zst
-
   test:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
     runs-on: ubuntu-20.04
-    needs: build-tests
     strategy:
       matrix:
         partition: [1, 2, 3]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
-
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -72,28 +35,13 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      # This is needed for proc macro tests to work.
-      # Normally, you would not need to install a Rust toolchain at all to run archives, but proc macro tests are
-      # dynamically linked to libtest.
-      #
-      # See https://github.com/nextest-rs/nextest/issues/267
-      - run: |
-          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$(rustc --print sysroot)/lib" >> $GITHUB_ENV
-
-      - name: Download archive
-        uses: actions/download-artifact@v3
-        with:
-          name: nextest-archive
       - name: Run tests
         run: |
-          . <(~/.cargo/bin/cargo-llvm-cov llvm-cov show-env)
-
-          ~/.cargo/bin/cargo-nextest nextest run --archive-file nextest-archive.tar.zst \
+          cargo llvm-cov nextest --lcov --output-path lcov.info \
+            --locked --workspace --all-features \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
-      - name: Generate report
-        run: ~/.cargo/bin/cargo-llvm-cov llvm-cov report --lcov --output-path lcov.info
       - name: Upload coverage data to codecov
         uses: codecov/codecov-action@v3
         with:
