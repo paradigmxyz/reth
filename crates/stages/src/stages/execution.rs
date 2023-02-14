@@ -15,7 +15,7 @@ use reth_executor::{
 };
 use reth_interfaces::provider::Error as ProviderError;
 use reth_primitives::{
-    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, H256, MAINNET, U256,
+    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, Withdrawal, H256, MAINNET, U256,
 };
 use reth_provider::{LatestStateProviderRef, Transaction};
 use std::fmt::Debug;
@@ -85,6 +85,8 @@ impl ExecutionStage {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
         let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
+        // Get block withdrawals.
+        let mut withdrawals_cursor = tx.cursor_read::<tables::BlockWithdrawals>()?;
         // Get transaction of the block that we are executing.
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
@@ -93,16 +95,25 @@ impl ExecutionStage {
         // Get block headers and bodies
         let block_batch = headers_cursor
             .walk_range(start_block..=end_block)?
-            .map(|entry| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
-                let (number, header) = entry?;
-                let (_, td) = td_cursor
-                    .seek_exact(number)?
-                    .ok_or(ProviderError::TotalDifficulty { number })?;
-                let (_, body) =
-                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockBody { number })?;
-                let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
-                Ok((header, td.into(), body, stored_ommers.ommers))
-            })
+            .map(
+                |entry| -> Result<
+                    // TODO: simplify this
+                    (Header, U256, StoredBlockBody, Vec<Header>, Option<Vec<Withdrawal>>),
+                    StageError,
+                > {
+                    let (number, header) = entry?;
+                    let (_, td) = td_cursor
+                        .seek_exact(number)?
+                        .ok_or(ProviderError::TotalDifficulty { number })?;
+                    let (_, body) = bodies_cursor
+                        .seek_exact(number)?
+                        .ok_or(ProviderError::BlockBody { number })?;
+                    let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
+                    let withdrawals =
+                        withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);
+                    Ok((header, td.into(), body, stored_ommers.ommers, withdrawals))
+                },
+            )
             .collect::<Result<Vec<_>, _>>()?;
 
         // Create state provider with cached state
@@ -110,7 +121,7 @@ impl ExecutionStage {
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(block_batch.len());
-        for (header, td, body, ommers) in block_batch.into_iter() {
+        for (header, td, body, ommers, withdrawals) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
 
@@ -144,7 +155,7 @@ impl ExecutionStage {
             trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
             let changeset = reth_executor::executor::execute_and_verify_receipt(
-                &Block { header, body: transactions, ommers, withdrawals: None /* TODO: */ },
+                &Block { header, body: transactions, ommers, withdrawals },
                 td,
                 Some(signers),
                 &self.chain_spec,
