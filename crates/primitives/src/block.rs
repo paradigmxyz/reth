@@ -381,7 +381,7 @@ impl FromStr for BlockNumberOrTag {
             "pending" => Self::Pending,
             _number => {
                 let hex_string = s.trim_start_matches("0x");
-                let number = u64::from_str_radix(&hex_string, 16).map_err(|err| err.to_string());
+                let number = u64::from_str_radix(hex_string, 16).map_err(|err| err.to_string());
                 BlockNumberOrTag::Number(number?)
             }
         };
@@ -417,7 +417,7 @@ pub struct BlockHash {
     pub require_canonical: Option<bool>,
 }
 impl BlockHash {
-    fn from_hash(block_hash: H256, require_canonical: Option<bool>) -> Self {
+    pub fn from_hash(block_hash: H256, require_canonical: Option<bool>) -> Self {
         BlockHash { block_hash, require_canonical }
     }
 }
@@ -449,8 +449,7 @@ mod test {
         let block_hash =
             H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
-        let require_canonical = Some(true);
-        let block_id = BlockId::Hash(BlockHash { block_hash, require_canonical });
+        let block_id = BlockId::Hash(BlockHash::from_hash(block_hash, Some(true)));
         let block_hash_json = serde_json::json!(
             { "blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", "requireCanonical": true }
         );
