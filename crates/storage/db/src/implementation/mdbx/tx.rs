@@ -2,7 +2,7 @@
 
 use super::cursor::Cursor;
 use crate::{
-    table::{Compress, DupSort, Encode, Table, TableImporter},
+    table::{Compress, DupSort, Encode, Table},
     tables::utils::decode_one,
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     Error,
@@ -57,8 +57,6 @@ impl<'a, K: TransactionKind, E: EnvironmentKind> DbTxMutGAT<'a> for Tx<'_, K, E>
     type DupCursorMut<T: DupSort> = Cursor<'a, RW, T>;
 }
 
-impl<'a, E: EnvironmentKind> TableImporter<'a> for Tx<'_, RW, E> {}
-
 impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
     // Iterate over read only values in database.
     fn cursor_read<T: Table>(&self) -> Result<<Self as DbTxGAT<'_>>::Cursor<T>, Error> {
@@ -75,10 +73,6 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
         let result = self.inner.commit().map_err(|e| Error::Commit(e.into()));
         histogram!("tx.commit", start.elapsed());
         result
-    }
-
-    fn drop(self) {
-        drop(self.inner)
     }
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {

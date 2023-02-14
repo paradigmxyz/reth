@@ -332,6 +332,21 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
+        // get all batches for account change
+        // Check if walk and walk_dup would do the same thing
+        let account_changeset_batch = account_changeset
+            .walk_range(from_transition_rev..to_transition_rev)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // revert all changes to PlainState
+        for (_, changeset) in account_changeset_batch.into_iter().rev() {
+            if let Some(account_info) = changeset.info {
+                tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
+            } else {
+                tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
+            }
+        }
+
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
             .walk_range(
@@ -345,31 +360,11 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         for (key, storage) in storage_changeset_batch.into_iter().rev() {
             let address = key.address();
-            if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
-                if v.key == storage.key {
-                    plain_storage_cursor.delete_current()?;
-                }
+            if plain_storage_cursor.seek_by_key_subkey(address, storage.key)?.is_some() {
+                plain_storage_cursor.delete_current()?;
             }
             if storage.value != U256::ZERO {
                 plain_storage_cursor.upsert(address, storage)?;
-            }
-        }
-
-        // Get all batches for account change
-        // Check if walk and walk_dup would do the same thing
-        let account_changeset_batch = account_changeset
-            .walk_range(from_transition_rev..to_transition_rev)?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // revert all changes to PlainState
-        // Needs to happen after the storage unwind, so we don't end up inserting a storage value
-        // into a deleted key (eg. contract creation)
-        for (_, changeset) in account_changeset_batch.into_iter().rev() {
-            if let Some(account_info) = changeset.info {
-                tx.put::<tables::PlainAccountState>(changeset.address, account_info)?;
-            } else {
-                tx.delete::<tables::PlainAccountState>(changeset.address, None)?;
-                tx.delete::<tables::PlainStorageState>(changeset.address, None)?;
             }
         }
 
