@@ -65,9 +65,8 @@ async fn dry_run(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let mut tx = Transaction::new(&output_db)?;
-    let mut stage = StorageHashingStage::default();
+    let mut stage = StorageHashingStage { clean_threshold: 1, ..Default::default() };
 
-    stage.clean_threshold = 1;
     stage
         .execute(
             &mut tx,
