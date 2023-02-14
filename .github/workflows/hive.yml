@@ -76,8 +76,7 @@ jobs:
           go-version: '^1.13.1' # The Go version to download (if necessary) and use.
       - run: go version
 
-      # TODO: change to go build ./hivetests/ or go install
-      - name: Build hive tests
+      - name: Build hive tool
         run: |
           cd hivetests
           go build .
@@ -86,5 +85,8 @@ jobs:
         run: |
           cd hivetests
           ./hive --sim ${{ matrix.sim }} --client reth
-          cat workspace/logs/*simulator*.log
+
+      - name: Print simulator output
+        if: ${{ failure() }}
+        run: cat workspace/logs/*simulator*.log
 
