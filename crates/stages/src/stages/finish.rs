@@ -31,7 +31,7 @@ where
         Self { updater }
     }
 
-    /// Construct a [Head] POD from `block_number`.
+    /// Construct a [Head] from `block_number`.
     fn fetch_head<DB: Database>(
         &self,
         tx: &mut Transaction<'_, DB>,
