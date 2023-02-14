@@ -207,6 +207,9 @@ where
         self.in_progress_queue.clear();
         self.buffered_responses.clear();
         self.queued_bodies.clear();
+
+        self.metrics.in_flight_requests.set(0.);
+        self.metrics.buffered_responses.set(0.);
     }
 
     /// Queues bodies and sets the latest queued block number
@@ -223,6 +226,7 @@ where
 
             if next_block_rng.contains(&expected) {
                 return self.buffered_responses.pop().map(|buffered| {
+                    self.metrics.buffered_responses.decrement(1.);
                     buffered
                         .0
                         .into_iter()
@@ -234,6 +238,7 @@ where
 
             // Drop buffered response since we passed that range
             if *next_block_rng.end() < expected {
+                self.metrics.buffered_responses.decrement(1.);
                 self.buffered_responses.pop();
             }
         }
@@ -318,8 +323,10 @@ where
         loop {
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
+                this.metrics.in_flight_requests.decrement(1.);
                 let response = OrderedBodiesResponse(response);
                 this.buffered_responses.push(response);
+                this.metrics.buffered_responses.increment(1.);
             }
 
             // Loop exit condition
@@ -331,6 +338,7 @@ where
             {
                 match this.next_headers_request() {
                     Ok(Some(request)) => {
+                        this.metrics.in_flight_requests.increment(1.);
                         this.in_progress_queue.push_new_request(
                             Arc::clone(&this.client),
                             Arc::clone(&this.consensus),
