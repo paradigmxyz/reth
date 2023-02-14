@@ -43,8 +43,7 @@ pub trait DbCursorRO<'tx, T: Table> {
     where
         Self: Sized;
 
-    /// Returns an iterator starting at a key greater or equal than `start_key` and ending at a key
-    /// less than `end_key`
+    /// Returns an iterator for the keys in the specified range.
     fn walk_range<'cursor>(
         &'cursor mut self,
         range: impl RangeBounds<T::Key>,

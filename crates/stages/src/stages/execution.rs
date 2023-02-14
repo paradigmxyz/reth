@@ -92,7 +92,7 @@ impl ExecutionStage {
 
         // Get block headers and bodies
         let block_batch = headers_cursor
-            .walk_range(start_block..end_block + 1)?
+            .walk_range(start_block..=end_block)?
             .map(|entry| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
                 let (number, header) = entry?;
                 let (_, td) = td_cursor
