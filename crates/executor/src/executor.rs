@@ -9,7 +9,7 @@ use hashbrown::hash_map::Entry;
 use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Head, Header, Log,
-    Receipt, TransactionSigned, Withdrawal, H160, H256, U256,
+    Receipt, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -93,7 +93,7 @@ where
     /// BTreeMap is used to have sorted values
     fn commit_changes(
         &mut self,
-        changes: hashbrown::HashMap<H160, RevmAccount>,
+        changes: hashbrown::HashMap<Address, RevmAccount>,
     ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
         let db = self.db();
 
@@ -211,7 +211,7 @@ where
         header: &Header,
         total_difficulty: U256,
         ommers: &[Header],
-    ) -> Result<Option<BTreeMap<H160, AccountInfoChangeSet>>, Error> {
+    ) -> Result<Option<BTreeMap<Address, AccountInfoChangeSet>>, Error> {
         // NOTE: Related to Ethereum reward change, for other network this is probably going to be
         // moved to config.
 
@@ -233,7 +233,7 @@ where
             Some(WEI_5ETH)
         }
         .map(|reward| -> Result<_, _> {
-            let mut reward_beneficiaries: BTreeMap<H160, u128> = BTreeMap::new();
+            let mut reward_beneficiaries: BTreeMap<Address, u128> = BTreeMap::new();
             // Calculate Uncle reward
             // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
             for ommer in ommers {
@@ -264,7 +264,7 @@ where
     }
 
     /// Irregular state change at Ethereum DAO hardfork
-    fn dao_fork_changeset(&mut self) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
+    fn dao_fork_changeset(&mut self) -> Result<BTreeMap<Address, AccountInfoChangeSet>, Error> {
         let db = self.db();
 
         let mut drained_balance = U256::ZERO;
@@ -281,7 +281,7 @@ where
                 // assume it is changeset as it is irregular state change
                 Ok((address, AccountInfoChangeSet::Changed { new, old }))
             })
-            .collect::<Result<BTreeMap<H160, AccountInfoChangeSet>, _>>()?;
+            .collect::<Result<BTreeMap<Address, AccountInfoChangeSet>, _>>()?;
 
         // add drained ether to beneficiary.
         let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
@@ -304,7 +304,7 @@ where
     fn withdrawals_changeset(
         &mut self,
         withdrawals: &[Withdrawal],
-    ) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
+    ) -> Result<BTreeMap<Address, AccountInfoChangeSet>, Error> {
         withdrawals
             .iter()
             .map(|withdrawal| {
@@ -525,17 +525,15 @@ pub fn execute<DB: StateProvider>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
+    use super::*;
     use crate::revm_wrap::State;
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
-        SealedBlock, StorageKey, H160, H256, MAINNET, U256,
+        StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
-
-    use super::*;
+    use std::{collections::HashMap, str::FromStr};
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
@@ -597,24 +595,22 @@ mod tests {
         // Got rlp block from: src/GeneralStateTestsFiller/stChainId/chainIdGasCostFiller.json
 
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        let mut block = Block::decode(&mut block_rlp).unwrap();
 
         let mut ommer = Header::default();
-        let ommer_beneficiary = H160(hex!("3000000000000000000000000000000000000000"));
+        let ommer_beneficiary =
+            Address::from_str("3000000000000000000000000000000000000000").unwrap();
         ommer.beneficiary = ommer_beneficiary;
         ommer.number = block.number;
-        let ommers = vec![ommer];
-
-        let block =
-            Block { header: block.header.unseal(), body: block.body, ommers, withdrawals: None };
+        block.ommers = vec![ommer];
 
         let mut db = StateProviderTest::default();
 
-        let account1 = H160(hex!("1000000000000000000000000000000000000000"));
-        let account2 = H160(hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"));
-        let account3 = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
+        let account1 = Address::from_str("1000000000000000000000000000000000000000").unwrap();
+        let account2 = Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap();
+        let account3 = Address::from_str("a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
 
-        // pre staet
+        // pre state
         db.insert_account(
             account1,
             Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None },
@@ -673,7 +669,7 @@ mod tests {
         let cached_acc1 = db.accounts.get(&account1).unwrap();
         assert_eq!(cached_acc1.info.balance, account1_info.balance);
         assert_eq!(cached_acc1.info.nonce, account1_info.nonce);
-        assert!(matches!(cached_acc1.account_state, AccountState::Touched));
+        assert_eq!(cached_acc1.account_state, AccountState::Touched);
         assert_eq!(cached_acc1.storage.len(), 1);
         assert_eq!(cached_acc1.storage.get(&U256::from(1)), Some(&U256::from(2)));
 
@@ -688,7 +684,7 @@ mod tests {
         let cached_acc3 = db.accounts.get(&account3).unwrap();
         assert_eq!(cached_acc3.info.balance, account3_info.balance);
         assert_eq!(cached_acc3.info.nonce, account3_info.nonce);
-        assert!(matches!(cached_acc3.account_state, AccountState::Touched));
+        assert_eq!(cached_acc3.account_state, AccountState::Touched);
         assert_eq!(cached_acc3.storage.len(), 0);
 
         assert_eq!(
@@ -822,11 +818,12 @@ mod tests {
         // Got rlp block from: src/GeneralStateTestsFiller/stArgsZeroOneBalance/suicideNonConst.json
 
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
-        let block = SealedBlock::decode(&mut block_rlp).unwrap();
+        let block = Block::decode(&mut block_rlp).unwrap();
         let mut db = StateProviderTest::default();
 
-        let address_caller = H160(hex!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"));
-        let address_selfdestruct = H160(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87"));
+        let address_caller = Address::from_str("a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
+        let address_selfdestruct =
+            Address::from_str("095e7baea6a6c7c4c2dfeb977efac326af552d87").unwrap();
 
         // pre state
         let pre_account_caller = Account {
@@ -863,8 +860,7 @@ mod tests {
 
         // execute chain and verify receipts
         let out =
-            execute_and_verify_receipt(&block.unseal(), U256::ZERO, None, &chain_spec, &mut db)
-                .unwrap();
+            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
 
         assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
 
@@ -893,5 +889,36 @@ mod tests {
         );
 
         assert!(selfdestroyer_changeset.wipe_storage);
+    }
+
+    // Test vector from https://github.com/ethereum/tests/blob/3156db5389921125bb9e04142d18e0e7b0cf8d64/BlockchainTests/EIPTests/bc4895-withdrawals/twoIdenticalIndexDifferentValidator.json
+    #[test]
+    fn test_withdrawals() {
+        let block_rlp = hex!("f9028cf90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa048cd9a5957e45beebf80278a5208b0cbe975ab4b4adb0da1509c67b26f2be3ffa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a04a220ebe55034d51f8a58175bb504b6ebf883105010a1f6d42e557c18bbd5d69c0c0f86cda808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da018094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da020194c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710");
+        let block = Block::decode(&mut block_rlp.as_slice()).unwrap();
+        let withdrawals = block.withdrawals.as_ref().unwrap();
+        assert_eq!(withdrawals.len(), 4);
+
+        let withdrawal_beneficiary =
+            Address::from_str("c94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
+
+        // spec at shanghai fork
+        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
+
+        let mut db = SubState::new(State::new(StateProviderTest::default()));
+
+        // execute chain and verify receipts
+        let out =
+            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
+        assert_eq!(out.changesets.len(), 0, "No tx");
+
+        let withdrawal_sum = withdrawals.iter().fold(U256::ZERO, |sum, w| sum + w.amount_wei());
+        let beneficiary_account = db.accounts.get(&withdrawal_beneficiary).unwrap();
+        assert_eq!(beneficiary_account.info.balance, withdrawal_sum);
+        assert_eq!(beneficiary_account.info.nonce, 0);
+        assert_eq!(beneficiary_account.account_state, AccountState::StorageCleared);
+
+        let block_reward = out.block_reward.unwrap();
+        assert_eq!(block_reward.len(), 1);
     }
 }
