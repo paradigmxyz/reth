@@ -322,7 +322,7 @@ impl Command {
 
         self.network
             .network_config(config, self.chain.clone())
-            .executor(Some(executor))
+            .with_task_executor(Box::new(executor))
             .set_head(head)
             .build(Arc::new(ShareableDatabase::new(db)))
     }
