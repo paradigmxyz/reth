@@ -239,11 +239,34 @@ mod tests {
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
 
+        // [1, 2]
+        let mut walker = cursor.walk_range(1..=2).unwrap();
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+
+        // [1, ∞)
+        let mut walker = cursor.walk_range(1..).unwrap();
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+
         // [2, 4)
         let mut walker = cursor.walk_range(2..4).unwrap();
         assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
         assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
         assert_eq!(walker.next(), None);
+        // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+
+        // (∞, 3)
+        let mut walker = cursor.walk_range(..3).unwrap();
+        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
     }
