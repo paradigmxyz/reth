@@ -246,7 +246,7 @@ fn txs_testdata(num_blocks: u64) -> PathBuf {
         updated_header.state_root = root;
         *last_block = SealedBlock { header: updated_header.seal(), ..cloned_last };
 
-        tx.insert_blocks(blocks, None).unwrap();
+        tx.insert_blocks(blocks.iter(), None).unwrap();
 
         // initialize TD
         tx.commit(|tx| {
