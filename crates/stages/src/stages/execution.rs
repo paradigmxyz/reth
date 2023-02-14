@@ -360,8 +360,10 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
         for (key, storage) in storage_changeset_batch.into_iter().rev() {
             let address = key.address();
-            if plain_storage_cursor.seek_by_key_subkey(address, storage.key)?.is_some() {
-                plain_storage_cursor.delete_current()?;
+            if let Some(v) = plain_storage_cursor.seek_by_key_subkey(address, storage.key)? {
+                if v.key == storage.key {
+                    plain_storage_cursor.delete_current()?;
+                }
             }
             if storage.value != U256::ZERO {
                 plain_storage_cursor.upsert(address, storage)?;
