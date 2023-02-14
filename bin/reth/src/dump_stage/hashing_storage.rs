@@ -53,7 +53,10 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
         let mut tx = Transaction::new(&output_db)?;
 
         let mut sh = StorageHashingStage::default();
+
+        // Replicate full storage hashing
         sh.clean_threshold = 1;
+
         sh.execute(
             &mut tx,
             reth_stages::ExecInput {
