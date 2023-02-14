@@ -89,6 +89,8 @@ jobs:
           name: nextest-archive
       - name: Run tests
         run: |
+          . <(~/.cargo/bin/cargo-llvm-cov llvm-cov show-env)
+
           ~/.cargo/bin/cargo-nextest nextest run --archive-file nextest-archive.tar.zst \
             --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
