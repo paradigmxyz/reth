@@ -39,7 +39,7 @@ where
     ) -> Result<Head, StageError> {
         let header = tx.get_header(block_number)?;
         let hash = tx.get_block_hash(block_number)?;
-        let total_difficulty = tx.get_td_by_num(block_number)?;
+        let total_difficulty = tx.get_td(block_number)?;
 
         Ok(Head {
             number: block_number,

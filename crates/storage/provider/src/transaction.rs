@@ -148,7 +148,7 @@ where
     }
 
     /// Get the total difficulty for a block.
-    pub fn get_td_by_num(&self, block: BlockNumber) -> Result<U256, TransactionError> {
+    pub fn get_td(&self, block: BlockNumber) -> Result<U256, TransactionError> {
         let td = self
             .get::<tables::HeaderTD>(block)?
             .ok_or(ProviderError::TotalDifficulty { number: block })?;
