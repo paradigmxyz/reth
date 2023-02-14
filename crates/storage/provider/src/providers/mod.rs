@@ -131,15 +131,28 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::StateProviderFactory;
+    use crate::{BlockProvider, StateProviderFactory};
 
     use super::ShareableDatabase;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_primitives::H256;
 
     #[test]
     fn common_history_provider() {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let provider = ShareableDatabase::new(db);
         let _ = provider.latest();
+    }
+
+    #[test]
+    fn default_chain_info() {
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let provider = ShareableDatabase::new(db);
+
+        let chain_info = provider.chain_info().expect("should be ok");
+        assert_eq!(chain_info.best_number, 0);
+        assert_eq!(chain_info.best_hash, H256::zero());
+        assert_eq!(chain_info.last_finalized, None);
+        assert_eq!(chain_info.safe_finalized, None);
     }
 }
