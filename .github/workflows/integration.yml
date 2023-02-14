@@ -18,7 +18,11 @@ jobs:
   test:
     # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
     # See also <https://github.com/foundry-rs/foundry/issues/3827>
+    name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
     runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        partition: [1, 2]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
@@ -50,6 +54,7 @@ jobs:
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info \
             --locked --workspace --all-features \
+            --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
             -E 'kind(test)'
 
       - name: Upload coverage data to codecov
