@@ -185,6 +185,16 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the highest synced block.
+    ///
+    /// This is used to construct the appropriate [`ForkFilter`] and [`Status`] message.
+    ///
+    /// If not set, this defaults to the genesis specified by the current chain specification.
+    pub fn set_head(mut self, head: Head) -> Self {
+        self.head = Some(head);
+        self
+    }
+
     /// Sets the `HelloMessage` to send when connecting to peers.
     ///
     /// ```
@@ -265,6 +275,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the discovery service off on true.
+    // TODO(onbjerg): This name does not imply `true` = disable
     pub fn set_discovery(mut self, disable_discovery: bool) -> Self {
         if disable_discovery {
             self.disable_discovery();
@@ -309,7 +320,7 @@ impl NetworkConfigBuilder {
         let head = head.unwrap_or(Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
-            timestamp: 0,
+            timestamp: chain_spec.genesis.timestamp,
             difficulty: chain_spec.genesis.difficulty,
             total_difficulty: chain_spec.genesis.difficulty,
         });

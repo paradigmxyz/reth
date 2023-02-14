@@ -1,20 +1,12 @@
 //! Configuration files.
-use std::{path::PathBuf, sync::Arc};
-
-use reth_db::database::Database;
 use reth_discv4::Discv4Config;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_network::{
-    config::{mainnet_nodes, rng_secret_key},
-    NetworkConfig, NetworkConfigBuilder, PeersConfig,
-};
-use reth_primitives::{ChainSpec, NodeRecord};
-use reth_provider::ShareableDatabase;
-use reth_tasks::TaskExecutor;
+use reth_network::{config::rng_secret_key, NetworkConfigBuilder, PeersConfig};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
@@ -29,17 +21,11 @@ pub struct Config {
 
 impl Config {
     /// Initializes network config from read data
-    #[allow(clippy::too_many_arguments)]
-    pub fn network_config<DB: Database>(
+    pub fn network_config(
         &self,
-        db: DB,
-        chain_spec: ChainSpec,
-        disable_discovery: bool,
-        bootnodes: Option<Vec<NodeRecord>>,
         nat_resolution_method: reth_net_nat::NatResolver,
         peers_file: Option<PathBuf>,
-        executor: Option<TaskExecutor>,
-    ) -> NetworkConfig<ShareableDatabase<DB>> {
+    ) -> NetworkConfigBuilder {
         let peer_config = self
             .peers
             .clone()
@@ -47,14 +33,7 @@ impl Config {
             .unwrap_or_else(|_| self.peers.clone());
         let discv4 =
             Discv4Config::builder().external_ip_resolver(Some(nat_resolution_method)).clone();
-        NetworkConfigBuilder::new(rng_secret_key())
-            .boot_nodes(bootnodes.unwrap_or_else(mainnet_nodes))
-            .peer_config(peer_config)
-            .discovery(discv4)
-            .chain_spec(chain_spec)
-            .executor(executor)
-            .set_discovery(disable_discovery)
-            .build(Arc::new(ShareableDatabase::new(db)))
+        NetworkConfigBuilder::new(rng_secret_key()).peer_config(peer_config).discovery(discv4)
     }
 }
 

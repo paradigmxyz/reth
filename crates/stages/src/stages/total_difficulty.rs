@@ -13,7 +13,8 @@ use reth_primitives::{ChainSpec, Hardfork, EMPTY_OMMER_ROOT, MAINNET, U256};
 use reth_provider::Transaction;
 use tracing::*;
 
-const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
+/// The [`StageId`] of the total difficulty stage.
+pub const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
 
 /// The total difficulty stage.
 ///
