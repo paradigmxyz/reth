@@ -16,6 +16,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
@@ -508,10 +509,18 @@ where
     H: HeadersClient,
     Self: HeaderDownloader + 'static,
 {
+    /// Spawns the downloader task via [tokio::task::spawn]
+    pub fn into_task(self) -> TaskDownloader {
+        self.into_task_with(&TokioTaskExecutor::default())
+    }
+
     /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
-    /// it.
-    pub fn as_task(self) -> TaskDownloader {
-        TaskDownloader::spawn(self)
+    /// it via the given `spawner`.
+    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
+    where
+        S: TaskSpawner,
+    {
+        TaskDownloader::spawn_with(self, spawner)
     }
 }
 

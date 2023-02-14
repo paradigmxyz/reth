@@ -4220,6 +4220,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-rlp",
+ "reth-tasks",
  "reth-tracing",
  "tempfile",
  "thiserror",
