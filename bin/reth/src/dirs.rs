@@ -170,3 +170,9 @@ impl<D> AsRef<Path> for PlatformPath<D> {
         self.0.as_path()
     }
 }
+
+impl<D> From<PlatformPath<D>> for PathBuf {
+    fn from(value: PlatformPath<D>) -> Self {
+        value.0
+    }
+}
