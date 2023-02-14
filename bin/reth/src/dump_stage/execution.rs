@@ -17,11 +17,30 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
     from: u64,
     to: u64,
     output_db: &PlatformPath<DbPath>,
-    dry_run: bool,
+    should_run: bool,
 ) -> Result<()> {
     let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;
 
-    // Copy input tables. We're not sharing the transaction in case the memory grows too much.
+    import_tables_with_range::<DB>(&output_db, db_tool, from, to)?;
+
+    unwind_and_copy::<DB>(db_tool, from, tip_block_number, &output_db).await?;
+
+    if should_run {
+        dry_run(output_db, to, from).await?;
+    }
+
+    Ok(())
+}
+
+/// Imports all the tables that can be copied over a range.
+fn import_tables_with_range<DB: Database>(
+    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    db_tool: &mut DbTool<'_, DB>,
+    from: u64,
+    to: u64,
+) -> eyre::Result<()> {
+    //  We're not sharing the transaction in case the memory grows too much.
+
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::CanonicalHeaders, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
@@ -59,56 +78,68 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
             to_tx,
         )
     })??;
+
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::TxSenders, _>(&db_tool.db.tx()?, Some(from_tx), to_tx)
     })??;
 
-    // Dry-run an unwind to FROM block, so we can get the PlainStorageState and
-    // PlainAccountState safely. There might be some state dependency from an address
-    // which hasn't been changed in the given range.
-    {
-        let mut unwind_tx = Transaction::new(db_tool.db)?;
-        let mut exec_stage = ExecutionStage::default();
+    Ok(())
+}
 
-        exec_stage
-            .unwind(
-                &mut unwind_tx,
-                UnwindInput { unwind_to: from, stage_progress: tip_block_number, bad_block: None },
-            )
-            .await?;
+/// Dry-run an unwind to FROM block, so we can get the PlainStorageState and
+/// PlainAccountState safely. There might be some state dependency from an address
+/// which hasn't been changed in the given range.
+async fn unwind_and_copy<DB: Database>(
+    db_tool: &mut DbTool<'_, DB>,
+    from: u64,
+    tip_block_number: u64,
+    output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+) -> eyre::Result<()> {
+    let mut unwind_tx = Transaction::new(db_tool.db)?;
+    let mut exec_stage = ExecutionStage::default();
 
-        let unwind_inner_tx = unwind_tx.deref_mut();
+    exec_stage
+        .unwind(
+            &mut unwind_tx,
+            UnwindInput { unwind_to: from, stage_progress: tip_block_number, bad_block: None },
+        )
+        .await?;
 
-        output_db
-            .update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(unwind_inner_tx))??;
-        output_db
-            .update(|tx| tx.import_table::<tables::PlainAccountState, _>(unwind_inner_tx))??;
-        output_db.update(|tx| tx.import_table::<tables::Bytecodes, _>(unwind_inner_tx))??;
+    let unwind_inner_tx = unwind_tx.deref_mut();
 
-        // We don't want to actually commit these changes to our original database.
-        unwind_tx.drop()?;
-    }
+    output_db.update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::PlainAccountState, _>(unwind_inner_tx))??;
+    output_db.update(|tx| tx.import_table::<tables::Bytecodes, _>(unwind_inner_tx))??;
 
-    // Try to re-execute the stage without committing
-    if dry_run {
-        info!(target: "reth::cli", "Executing stage. [dry-run]");
+    unwind_tx.drop()?;
 
-        let mut tx = Transaction::new(&output_db)?;
+    Ok(())
+}
 
-        let mut exec_stage = ExecutionStage::default();
-        exec_stage
-            .execute(
-                &mut tx,
-                reth_stages::ExecInput {
-                    previous_stage: Some((StageId("Another"), to)),
-                    stage_progress: Some(from),
-                },
-            )
-            .await?;
+/// Try to re-execute the stage without committing
+async fn dry_run(
+    output_db: reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
+    to: u64,
+    from: u64,
+) -> eyre::Result<()> {
+    info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-        tx.drop()?;
-        info!(target: "reth::cli", "Success.");
-    }
+    let mut tx = Transaction::new(&output_db)?;
+    let mut exec_stage = ExecutionStage::default();
+
+    exec_stage
+        .execute(
+            &mut tx,
+            reth_stages::ExecInput {
+                previous_stage: Some((StageId("Another"), to)),
+                stage_progress: Some(from),
+            },
+        )
+        .await?;
+
+    tx.drop()?;
+
+    info!(target: "reth::cli", "Success.");
 
     Ok(())
 }
