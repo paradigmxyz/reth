@@ -175,11 +175,8 @@ where
                     }
                 };
 
-                let mut wipe_storage = false;
-
                 new_account.account_state = if account.storage_cleared {
                     new_account.storage.clear();
-                    wipe_storage = true;
                     AccountState::StorageCleared
                 } else {
                     AccountState::Touched
@@ -197,7 +194,11 @@ where
                 // Insert into change.
                 change.insert(
                     address,
-                    AccountChangeSet { account: account_info_changeset, storage, wipe_storage },
+                    AccountChangeSet {
+                        account: account_info_changeset,
+                        storage,
+                        wipe_storage: false,
+                    },
                 );
             }
         }
