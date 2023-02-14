@@ -9,7 +9,7 @@ use hashbrown::hash_map::Entry;
 use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Head, Header, Log,
-    Receipt, TransactionSigned, H160, H256, U256,
+    Receipt, TransactionSigned, Withdrawal, H160, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -206,7 +206,7 @@ where
     }
 
     /// Calculate Block reward changeset
-    pub fn block_reward_changeset(
+    fn block_reward_changeset(
         &mut self,
         header: &Header,
         total_difficulty: U256,
@@ -249,61 +249,22 @@ where
             *reward_beneficiaries.entry(header.beneficiary).or_default() +=
                 reward + (reward >> 5) * ommers.len() as u128;
 
-            //
-            let db = self.db();
-
             // create changesets for beneficiaries rewards (Main block and ommers);
             reward_beneficiaries
                 .into_iter()
-                .map(|(beneficiary, reward)| -> Result<_, _> {
-                    let changeset = db
-                        .load_account(beneficiary)
-                        .map_err(|_| Error::ProviderError)
-                        // if account is present append `Changed` changeset for block reward
-                        .map(|db_acc| {
-                            let old = to_reth_acc(&db_acc.info);
-                            let mut new = old;
-                            new.balance += U256::from(reward);
-                            db_acc.info.balance = new.balance;
-                            match db_acc.account_state {
-                                AccountState::NotExisting => {
-                                    // if account was not existing that means that storage is not
-                                    // present.
-                                    db_acc.account_state = AccountState::StorageCleared;
-
-                                    // if account was not present append `Created` changeset
-                                    AccountInfoChangeSet::Created {
-                                        new: Account {
-                                            nonce: 0,
-                                            balance: new.balance,
-                                            bytecode_hash: None,
-                                        },
-                                    }
-                                }
-
-                                AccountState::StorageCleared |
-                                AccountState::Touched |
-                                AccountState::None => {
-                                    // If account is None that means that EVM didn't touch it.
-                                    // we are changing the state to Touched as account can have
-                                    // storage in db.
-                                    if db_acc.account_state == AccountState::None {
-                                        db_acc.account_state = AccountState::Touched;
-                                    }
-                                    // if account was present, append changed changeset.
-                                    AccountInfoChangeSet::Changed { new, old }
-                                }
-                            }
-                        })?;
-                    Ok((beneficiary, changeset))
+                .map(|(beneficiary, reward)| {
+                    Ok((
+                        beneficiary,
+                        self.account_balance_increment_changeset(beneficiary, U256::from(reward))?,
+                    ))
                 })
-                .collect::<Result<BTreeMap<_, _>, _>>()
+                .collect()
         })
         .transpose()
     }
 
     /// Irregular state change at Ethereum DAO hardfork
-    pub fn dao_fork_changeset(&mut self) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
+    fn dao_fork_changeset(&mut self) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
         let db = self.db();
 
         let mut drained_balance = U256::ZERO;
@@ -338,6 +299,62 @@ where
 
         Ok(changesets)
     }
+
+    /// Calculate withdrawals changeset.
+    fn withdrawals_changeset(
+        &mut self,
+        withdrawals: &[Withdrawal],
+    ) -> Result<BTreeMap<H160, AccountInfoChangeSet>, Error> {
+        withdrawals
+            .iter()
+            .map(|withdrawal| {
+                Ok((
+                    withdrawal.address,
+                    self.account_balance_increment_changeset(
+                        withdrawal.address,
+                        withdrawal.amount_wei(),
+                    )?,
+                ))
+            })
+            .collect()
+    }
+
+    /// Generate balance increment account changeset and mutate account database entry in place.
+    fn account_balance_increment_changeset(
+        &mut self,
+        address: Address,
+        increment: U256,
+    ) -> Result<AccountInfoChangeSet, Error> {
+        let db = self.db();
+        let beneficiary = db.load_account(address).map_err(|_| Error::ProviderError)?;
+        let old = to_reth_acc(&beneficiary.info);
+        // Increment beneficiary balance by mutating db entry in place.
+        beneficiary.info.balance += increment;
+        let new = to_reth_acc(&beneficiary.info);
+        match beneficiary.account_state {
+            AccountState::NotExisting => {
+                // if account was not existing that means that storage is not
+                // present.
+                beneficiary.account_state = AccountState::StorageCleared;
+
+                // if account was not present append `Created` changeset
+                Ok(AccountInfoChangeSet::Created {
+                    new: Account { nonce: 0, balance: new.balance, bytecode_hash: None },
+                })
+            }
+
+            AccountState::StorageCleared | AccountState::Touched | AccountState::None => {
+                // If account is None that means that EVM didn't touch it.
+                // we are changing the state to Touched as account can have
+                // storage in db.
+                if beneficiary.account_state == AccountState::None {
+                    beneficiary.account_state = AccountState::Touched;
+                }
+                // if account was present, append changed changeset.
+                Ok(AccountInfoChangeSet::Changed { new, old })
+            }
+        }
+    }
 }
 
 impl<'a, DB> BlockExecutor<ExecutionResult> for Executor<'a, DB>
@@ -350,7 +367,7 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<ExecutionResult, Error> {
-        let Block { header, body, ommers, withdrawals /* TODO: */ } = block;
+        let Block { header, body, ommers, withdrawals } = block;
         let senders = self.recover_senders(body, senders)?;
 
         self.init_block_env(header, total_difficulty);
@@ -376,13 +393,13 @@ where
             // Execute transaction.
             let out = if self.use_printer_tracer {
                 // execution with inspector.
-                let out = self.evm.inspect(revm::inspectors::CustomPrintTracer::default());
-
-                tracing::trace!(target:"evm","Executed transaction: {:?},
-                    \nExecution output:{out:?}:
-                    \nTransaction data:{transaction:?}
-                    \nenv data:{:?}",transaction.hash(),self.evm.env);
-                out
+                let output = self.evm.inspect(revm::inspectors::CustomPrintTracer::default());
+                tracing::trace!(
+                    target: "evm",
+                    hash = ?transaction.hash(), ?output, ?transaction, env = ?self.evm.env,
+                    "Executed transaction"
+                );
+                output
             } else {
                 // main execution.
                 self.evm.transact()
@@ -427,6 +444,13 @@ where
             let mut irregular_state_changeset = self.dao_fork_changeset()?;
             irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
             block_reward = Some(irregular_state_changeset);
+        }
+
+        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) {
+            let withdrawals = withdrawals.as_ref().unwrap();
+            let mut withdrawals_changeset = self.withdrawals_changeset(withdrawals)?;
+            withdrawals_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
+            block_reward = Some(withdrawals_changeset);
         }
 
         Ok(ExecutionResult { changesets, block_reward })

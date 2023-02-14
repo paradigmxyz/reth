@@ -1,4 +1,4 @@
-use crate::Address;
+use crate::{constants::GWEI_TO_WEI, Address, U256};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 
@@ -14,4 +14,11 @@ pub struct Withdrawal {
     pub address: Address,
     /// Value of the withdrawal in gwei.
     pub amount: u64,
+}
+
+impl Withdrawal {
+    /// Return the withdrawal amount in wei.
+    pub fn amount_wei(&self) -> U256 {
+        U256::from(self.amount) * U256::from(GWEI_TO_WEI)
+    }
 }
