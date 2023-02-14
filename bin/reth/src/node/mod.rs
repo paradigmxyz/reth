@@ -12,7 +12,12 @@ use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
-use reth_db::mdbx::{Env, WriteMap};
+use reth_db::{
+    database::Database,
+    mdbx::{Env, WriteMap},
+    tables,
+    transaction::DbTx,
+};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -42,7 +47,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
+    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -277,16 +282,41 @@ impl Command {
         Ok(handle)
     }
 
+    fn fetch_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
+        db.view(|tx| {
+            let head = FINISH.get_progress(tx)?.unwrap_or_default();
+            let header = tx
+                .get::<tables::Headers>(head)?
+                .expect("the header for the latest block is missing, database is corrupt");
+            let total_difficulty = tx.get::<tables::HeaderTD>(head)?.expect(
+                "the total difficulty for the latest block is missing, database is corrupt",
+            );
+            let hash = tx
+                .get::<tables::CanonicalHeaders>(head)?
+                .expect("the hash for the latest block is missing, database is corrupt");
+            Ok::<Head, reth_interfaces::db::Error>(Head {
+                number: head,
+                hash,
+                difficulty: header.difficulty,
+                total_difficulty: total_difficulty.into(),
+                timestamp: header.timestamp,
+            })
+        })?
+        .map_err(Into::into)
+    }
+
     fn load_network_config(
         &self,
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
+        let head = self.fetch_head(Arc::clone(&db)).expect("the head block is missing");
+
         self.network
             .network_config(config, self.chain.clone())
-            .set_head(Head::default())
             .executor(Some(executor))
+            .set_head(head)
             .build(Arc::new(ShareableDatabase::new(db.clone())))
     }
 
