@@ -28,6 +28,7 @@ pub const BODIES: StageId = StageId("Bodies");
 /// The body stage downloads block bodies for all block headers stored locally in the database.
 ///
 /// # Empty blocks
+
 ///
 /// Blocks with an ommers hash corresponding to no ommers *and* a transaction root corresponding to
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
@@ -116,6 +117,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             let block_number = response.block_number();
             let difficulty = response.difficulty();
 
+            let mut has_withdrawals = false;
             match response {
                 BlockResponse::Full(block) => {
                     body_cursor.append(
@@ -154,6 +156,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     // Write withdrawals if any
                     if let Some(withdrawals) = block.withdrawals {
                         if !withdrawals.is_empty() {
+                            has_withdrawals = true;
                             withdrawals_cursor
                                 .append(block_number, StoredBlockWithdrawals { withdrawals })?;
                         }
@@ -176,7 +179,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .ok_or(ProviderError::TotalDifficulty { number: block_number })?
                 .1;
             let has_reward = self.consensus.has_block_reward(td.into(), difficulty);
-            if has_reward {
+            let has_post_block_transition = has_reward || has_withdrawals;
+            if has_post_block_transition {
                 transition_id += 1;
             }
             block_transition_cursor.append(block_number, transition_id)?;
