@@ -15,34 +15,37 @@ concurrency:
 
 name: hive
 jobs:
-  hive:
-    name: hive tests (stable)
+  build-reth:
+    name: build reth container
     runs-on: ubuntu-latest
-    env:
-      RUST_LOG: info,sync=error
+
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - uses: actions/setup-go@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build and export
+        uses: docker/build-push-action@v4
         with:
-          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
-      - run: go version
+          context: .
+          tags: paradigmxyz/reth:main
+          outputs: type=docker,dest=/tmp/myimage.tar
 
-      # TODO: replace when we are not using a fork
-      - name: Checkout hive
-        uses: actions/checkout@v2
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
         with:
-          repository: onbjerg/hive
-          ref: onbjerg/reth
-          path: hivetests
+          name: myimage
+          path: /tmp/myimage.tar
 
-      - name: Build hive tests
-        run: |
-          cd hivetests
-          ls
-          go build ./hivetests/
+  run-hive-ethereum-sync:
+    name: build hive tests
+    runs-on: ubuntu-latest
+    env:
+      RUST_LOG: info,sync=error
 
+    steps:
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -54,6 +57,18 @@ jobs:
         with:
           cache-on-failure: true
 
-      - name: Build docker container
-        uses: docker/build-push-action@v4
-      - run: docker build hivetests/clients/reth
+      # TODO: replace when we are not using a fork
+      - name: Checkout hive
+        uses: actions/checkout@v2
+        with:
+          repository: onbjerg/hive
+          ref: onbjerg/reth
+          path: hivetests
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
+      - run: go version
+
+      - name: Build hive tests
+        run: go build .
