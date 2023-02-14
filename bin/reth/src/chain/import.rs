@@ -134,11 +134,11 @@ impl ImportCommand {
     {
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(file_client.clone(), consensus.clone())
-            .as_task();
+            .into_task();
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
             .build(file_client.clone(), consensus.clone(), db)
-            .as_task();
+            .into_task();
 
         let mut pipeline = Pipeline::builder()
             .with_sync_state_updater(file_client)

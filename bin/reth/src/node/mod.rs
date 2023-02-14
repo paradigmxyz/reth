@@ -161,7 +161,13 @@ impl Command {
         info!(target: "reth::cli", "Started RPC server");
 
         let (mut pipeline, events) = self
-            .build_networked_pipeline(&mut config, network.clone(), &consensus, db.clone())
+            .build_networked_pipeline(
+                &mut config,
+                network.clone(),
+                &consensus,
+                db.clone(),
+                &ctx.task_executor,
+            )
             .await?;
 
         ctx.task_executor.spawn(handle_events(events));
@@ -186,6 +192,7 @@ impl Command {
         network: NetworkHandle,
         consensus: &Arc<dyn Consensus>,
         db: Arc<Env<WriteMap>>,
+        task_executor: &TaskExecutor,
     ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
     {
         // building network downloaders using the fetch client
@@ -193,11 +200,11 @@ impl Command {
 
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(fetch_client.clone(), consensus.clone())
-            .as_task();
+            .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
             .build(fetch_client.clone(), consensus.clone(), db.clone())
-            .as_task();
+            .into_task_with(task_executor);
 
         let mut pipeline = self
             .build_pipeline(config, header_downloader, body_downloader, network.clone(), consensus)
