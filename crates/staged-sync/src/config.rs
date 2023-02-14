@@ -13,6 +13,7 @@ use reth_network::{
 };
 use reth_primitives::{ChainSpec, NodeRecord};
 use reth_provider::ShareableDatabase;
+use reth_tasks::TaskExecutor;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for the reth node.
@@ -28,6 +29,7 @@ pub struct Config {
 
 impl Config {
     /// Initializes network config from read data
+    #[allow(clippy::too_many_arguments)]
     pub fn network_config<DB: Database>(
         &self,
         db: DB,
@@ -36,6 +38,7 @@ impl Config {
         bootnodes: Option<Vec<NodeRecord>>,
         nat_resolution_method: reth_net_nat::NatResolver,
         peers_file: Option<PathBuf>,
+        executor: Option<TaskExecutor>,
     ) -> NetworkConfig<ShareableDatabase<DB>> {
         let peer_config = self
             .peers
@@ -49,6 +52,7 @@ impl Config {
             .peer_config(peer_config)
             .discovery(discv4)
             .chain_spec(chain_spec)
+            .executor(executor)
             .set_discovery(disable_discovery)
             .build(Arc::new(ShareableDatabase::new(db)))
     }
