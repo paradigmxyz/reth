@@ -12,6 +12,7 @@ pub mod chain;
 pub mod cli;
 pub mod db;
 pub mod dirs;
+pub mod dump_stage;
 pub mod node;
 pub mod p2p;
 pub mod prometheus_exporter;
