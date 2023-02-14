@@ -13,6 +13,7 @@ use reth_downloaders::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
+    p2p::headers::client::NoopStatusUpdater,
     sync::SyncStateUpdater,
 };
 use reth_primitives::ChainSpec;
@@ -142,22 +143,23 @@ impl ImportCommand {
         let mut pipeline = Pipeline::builder()
             .with_sync_state_updater(file_client)
             .add_stages(
-                OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
-                    TotalDifficultyStage {
-                        chain_spec: self.chain.clone(),
-                        commit_threshold: config.stages.total_difficulty.commit_threshold,
-                    },
-                ),
-            )
-            .add_stages(
-                OfflineStages::default()
-                    .set(SenderRecoveryStage {
-                        commit_threshold: config.stages.sender_recovery.commit_threshold,
-                    })
-                    .set(ExecutionStage {
-                        chain_spec: self.chain.clone(),
-                        commit_threshold: config.stages.execution.commit_threshold,
-                    }),
+                DefaultStages::new(
+                    consensus.clone(),
+                    header_downloader,
+                    body_downloader,
+                    NoopStatusUpdater::default(),
+                )
+                .set(TotalDifficultyStage {
+                    chain_spec: self.chain.clone(),
+                    commit_threshold: config.stages.total_difficulty.commit_threshold,
+                })
+                .set(SenderRecoveryStage {
+                    commit_threshold: config.stages.sender_recovery.commit_threshold,
+                })
+                .set(ExecutionStage {
+                    chain_spec: self.chain.clone(),
+                    commit_threshold: config.stages.execution.commit_threshold,
+                }),
             )
             .with_max_block(0)
             .build();

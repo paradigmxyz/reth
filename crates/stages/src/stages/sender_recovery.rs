@@ -19,7 +19,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
+/// The [`StageId`] of the sender recovery stage.
+pub const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them

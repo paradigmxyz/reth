@@ -31,16 +31,19 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, HeaderStage, IndexAccountHistoryStage,
-        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TotalDifficultyStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
+        StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
 use reth_db::database::Database;
 use reth_interfaces::{
     consensus::Consensus,
-    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
+    p2p::{
+        bodies::downloader::BodyDownloader,
+        headers::{client::StatusUpdater, downloader::HeaderDownloader},
+    },
 };
 use reth_primitives::ChainSpec;
 use std::sync::Arc;
@@ -51,27 +54,42 @@ use std::sync::Arc;
 ///
 /// - [`OnlineStages`]
 /// - [`OfflineStages`]
+/// - [`FinishStage`]
 #[derive(Debug)]
-pub struct DefaultStages<H, B> {
+pub struct DefaultStages<H, B, S> {
     /// Configuration for the online stages
     online: OnlineStages<H, B>,
+    /// Configuration for the [`FinishStage`] stage.
+    status_updater: S,
 }
 
-impl<H, B> DefaultStages<H, B> {
+impl<H, B, S> DefaultStages<H, B, S> {
     /// Create a new set of default stages with default values.
-    pub fn new(consensus: Arc<dyn Consensus>, header_downloader: H, body_downloader: B) -> Self {
-        Self { online: OnlineStages::new(consensus, header_downloader, body_downloader) }
+    pub fn new(
+        consensus: Arc<dyn Consensus>,
+        header_downloader: H,
+        body_downloader: B,
+        status_updater: S,
+    ) -> Self {
+        Self {
+            online: OnlineStages::new(consensus, header_downloader, body_downloader),
+            status_updater,
+        }
     }
 }
 
-impl<DB, H, B> StageSet<DB> for DefaultStages<H, B>
+impl<DB, H, B, S> StageSet<DB> for DefaultStages<H, B, S>
 where
     DB: Database,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
+    S: StatusUpdater + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        self.online.builder().add_set(OfflineStages)
+        self.online
+            .builder()
+            .add_set(OfflineStages)
+            .add_stage(FinishStage::new(self.status_updater))
     }
 }
 

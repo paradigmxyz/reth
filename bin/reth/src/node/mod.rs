@@ -12,22 +12,29 @@ use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
 use reth_consensus::beacon::BeaconConsensus;
-use reth_db::mdbx::{Env, WriteMap};
+use reth_db::{
+    database::Database,
+    mdbx::{Env, WriteMap},
+    tables,
+    transaction::DbTx,
+};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader},
+    p2p::{
+        bodies::downloader::BodyDownloader,
+        headers::{client::StatusUpdater, downloader::HeaderDownloader},
+    },
     sync::SyncStateUpdater,
 };
-use reth_net_nat::NatResolver;
 use reth_network::{
     error::NetworkError, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, H256};
+use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
 use reth_staged_sync::{
@@ -40,7 +47,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
+    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -89,9 +96,6 @@ pub struct Command {
     #[clap(flatten)]
     network: NetworkArgs,
 
-    #[arg(long, default_value = "any")]
-    nat: NatResolver,
-
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
@@ -135,8 +139,9 @@ impl Command {
         self.init_trusted_nodes(&mut config);
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let netconf = self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
-        let network = self.start_network(netconf, &ctx.task_executor, ()).await?;
+        let network_config =
+            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
+        let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         // TODO: Use the resolved secret to spawn the Engine API server
@@ -277,22 +282,42 @@ impl Command {
         Ok(handle)
     }
 
+    fn fetch_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
+        db.view(|tx| {
+            let head = FINISH.get_progress(tx)?.unwrap_or_default();
+            let header = tx
+                .get::<tables::Headers>(head)?
+                .expect("the header for the latest block is missing, database is corrupt");
+            let total_difficulty = tx.get::<tables::HeaderTD>(head)?.expect(
+                "the total difficulty for the latest block is missing, database is corrupt",
+            );
+            let hash = tx
+                .get::<tables::CanonicalHeaders>(head)?
+                .expect("the hash for the latest block is missing, database is corrupt");
+            Ok::<Head, reth_interfaces::db::Error>(Head {
+                number: head,
+                hash,
+                difficulty: header.difficulty,
+                total_difficulty: total_difficulty.into(),
+                timestamp: header.timestamp,
+            })
+        })?
+        .map_err(Into::into)
+    }
+
     fn load_network_config(
         &self,
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
-        let peers_file = self.network.persistent_peers_file();
-        config.network_config(
-            db,
-            self.chain.clone(),
-            self.network.disable_discovery,
-            self.network.bootnodes.clone(),
-            self.nat,
-            peers_file,
-            Some(executor),
-        )
+        let head = self.fetch_head(Arc::clone(&db)).expect("the head block is missing");
+
+        self.network
+            .network_config(config, self.chain.clone())
+            .executor(Some(executor))
+            .set_head(head)
+            .build(Arc::new(ShareableDatabase::new(db)))
     }
 
     async fn build_pipeline<H, B, U>(
@@ -306,7 +331,7 @@ impl Command {
     where
         H: HeaderDownloader + 'static,
         B: BodyDownloader + 'static,
-        U: SyncStateUpdater,
+        U: SyncStateUpdater + StatusUpdater + Clone + 'static,
     {
         let stage_conf = &config.stages;
 
@@ -318,17 +343,13 @@ impl Command {
         }
 
         let pipeline = builder
-            .with_sync_state_updater(updater)
+            .with_sync_state_updater(updater.clone())
             .add_stages(
-                OnlineStages::new(consensus.clone(), header_downloader, body_downloader).set(
-                    TotalDifficultyStage {
+                DefaultStages::new(consensus.clone(), header_downloader, body_downloader, updater)
+                    .set(TotalDifficultyStage {
                         chain_spec: self.chain.clone(),
                         commit_threshold: stage_conf.total_difficulty.commit_threshold,
-                    },
-                ),
-            )
-            .add_stages(
-                OfflineStages::default()
+                    })
                     .set(SenderRecoveryStage {
                         commit_threshold: stage_conf.sender_recovery.commit_threshold,
                     })
