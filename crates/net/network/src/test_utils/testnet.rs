@@ -158,9 +158,8 @@ impl Testnet<NoopProvider> {
     /// Creates a new [`Testnet`] with the given number of peers
     pub async fn try_create(num_peers: usize) -> Result<Self, NetworkError> {
         let mut this = Testnet::default();
-        for _ in 0..num_peers {
-            this.add_peer().await?;
-        }
+
+        this.extend_peer_with_config((0..num_peers).map(|_| Default::default())).await?;
         Ok(this)
     }
 
