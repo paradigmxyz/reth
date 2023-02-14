@@ -9,7 +9,7 @@ use hashbrown::hash_map::Entry;
 use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Head, Header, Log,
-    Receipt, TransactionSigned, Withdrawal, H256, U256,
+    Receipt, TransactionSigned, H256, U256,
 };
 use reth_provider::StateProvider;
 use revm::{
@@ -19,7 +19,7 @@ use revm::{
     },
     EVM,
 };
-use std::{collections::BTreeMap, ops::AddAssign};
+use std::collections::{BTreeMap, HashMap};
 
 /// Main block executor
 pub struct Executor<'a, DB>
@@ -205,23 +205,58 @@ where
         (change, new_bytecodes)
     }
 
-    /// Calculate Block reward changeset
-    fn block_reward_changeset(
+    /// Collect all balance changes at the end of the block. Balance changes might include block
+    /// reward, uncle rewards, withdrawals or irregular state changes (DAO fork).
+    fn post_block_balance_increments(
         &mut self,
-        header: &Header,
-        total_difficulty: U256,
-        ommers: &[Header],
-    ) -> Result<Option<BTreeMap<Address, AccountInfoChangeSet>>, Error> {
-        // NOTE: Related to Ethereum reward change, for other network this is probably going to be
-        // moved to config.
+        block: &Block,
+        td: U256,
+    ) -> Result<HashMap<Address, U256>, Error> {
+        let mut balance_increments = HashMap::<Address, U256>::default();
 
-        // From yellowpapper Page 15:
-        // 11.3. Reward Application. The application of rewards to a block involves raising the
-        // balance of the accounts of the beneficiary address of the block and each ommer by
-        // a certain amount. We raise the block’s beneficiary account by Rblock; for each
-        // ommer, we raise the block’s beneficiary by an additional 1/32 of the block reward
-        // and the beneficiary of the ommer gets rewarded depending on the blocknumber.
-        // Formally we define the function Ω:
+        // Collect balance increments for block and uncle rewards.
+        if let Some(reward) = self.get_block_reward(block, td) {
+            // Calculate Uncle reward
+            // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
+            for ommer in block.ommers.iter() {
+                let ommer_reward =
+                    U256::from(((8 + ommer.number - block.number) as u128 * reward) >> 3);
+                // From yellowpaper Page 15:
+                // If there are collisions of the beneficiary addresses between ommers and the
+                // block (i.e. two ommers with the same beneficiary address
+                // or an ommer with the same beneficiary address as the
+                // present block), additions are applied cumulatively
+                *balance_increments.entry(ommer.beneficiary).or_default() += ommer_reward;
+            }
+
+            // Increment balance for main block reward.
+            let block_reward = U256::from(reward + (reward >> 5) * block.ommers.len() as u128);
+            *balance_increments.entry(block.beneficiary).or_default() += block_reward;
+        }
+
+        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
+            if let Some(withdrawals) = block.withdrawals.as_ref() {
+                for withdrawal in withdrawals {
+                    *balance_increments.entry(withdrawal.address).or_default() +=
+                        withdrawal.amount_wei();
+                }
+            }
+        }
+
+        Ok(balance_increments)
+    }
+
+    /// From yellowpapper Page 15:
+    /// 11.3. Reward Application. The application of rewards to a block involves raising the
+    /// balance of the accounts of the beneficiary address of the block and each ommer by
+    /// a certain amount. We raise the block’s beneficiary account by Rblock; for each
+    /// ommer, we raise the block’s beneficiary by an additional 1/32 of the block reward
+    /// and the beneficiary of the ommer gets rewarded depending on the blocknumber.
+    /// Formally we define the function Ω.
+    ///
+    /// NOTE: Related to Ethereum reward change, for other network this is probably going to be
+    /// moved to config.
+    fn get_block_reward(&self, header: &Header, total_difficulty: U256) -> Option<u128> {
         if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
         {
             None
@@ -232,35 +267,6 @@ where
         } else {
             Some(WEI_5ETH)
         }
-        .map(|reward| -> Result<_, _> {
-            let mut reward_beneficiaries: BTreeMap<Address, u128> = BTreeMap::new();
-            // Calculate Uncle reward
-            // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
-            for ommer in ommers {
-                let ommer_reward = ((8 + ommer.number - header.number) as u128 * reward) >> 3;
-                // From yellowpaper Page 15:
-                // If there are collisions of the beneficiary addresses between ommers and the block
-                // (i.e. two ommers with the same beneficiary address or an ommer with the
-                // same beneficiary address as the present block), additions are applied
-                // cumulatively
-                *reward_beneficiaries.entry(ommer.beneficiary).or_default() += ommer_reward;
-            }
-            // insert main block reward
-            *reward_beneficiaries.entry(header.beneficiary).or_default() +=
-                reward + (reward >> 5) * ommers.len() as u128;
-
-            // create changesets for beneficiaries rewards (Main block and ommers);
-            reward_beneficiaries
-                .into_iter()
-                .map(|(beneficiary, reward)| {
-                    Ok((
-                        beneficiary,
-                        self.account_balance_increment_changeset(beneficiary, U256::from(reward))?,
-                    ))
-                })
-                .collect()
-        })
-        .transpose()
     }
 
     /// Irregular state change at Ethereum DAO hardfork
@@ -276,7 +282,7 @@ where
                 let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
                 let old = to_reth_acc(&db_account.info);
                 // drain balance
-                drained_balance += core::mem::take(&mut db_account.info.balance);
+                drained_balance += std::mem::take(&mut db_account.info.balance);
                 let new = to_reth_acc(&db_account.info);
                 // assume it is changeset as it is irregular state change
                 Ok((address, AccountInfoChangeSet::Changed { new, old }))
@@ -298,27 +304,6 @@ where
         changesets.insert(beneficiary, beneficiary_changeset);
 
         Ok(changesets)
-    }
-
-    /// Calculate withdrawals changeset.
-    fn withdrawals_changeset(
-        &mut self,
-        withdrawals: &[Withdrawal],
-    ) -> Result<BTreeMap<Address, AccountInfoChangeSet>, Error> {
-        let mut balance_increments = indexmap::IndexMap::<Address, U256>::default();
-        for withdrawal in withdrawals {
-            balance_increments
-                .entry(withdrawal.address)
-                .or_default()
-                .add_assign(withdrawal.amount_wei());
-        }
-
-        balance_increments
-            .into_iter()
-            .map(|(address, increment)| {
-                Ok((address, self.account_balance_increment_changeset(address, increment)?))
-            })
-            .collect()
     }
 
     /// Generate balance increment account changeset and mutate account database entry in place.
@@ -369,19 +354,18 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<ExecutionResult, Error> {
-        let Block { header, body, ommers, withdrawals } = block;
-        let senders = self.recover_senders(body, senders)?;
+        let senders = self.recover_senders(&block.body, senders)?;
 
-        self.init_block_env(header, total_difficulty);
+        self.init_block_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
         // output of execution
-        let mut changesets = Vec::with_capacity(body.len());
+        let mut tx_changesets = Vec::with_capacity(block.body.len());
 
-        for (transaction, sender) in body.iter().zip(senders.into_iter()) {
+        for (transaction, sender) in block.body.iter().zip(senders.into_iter()) {
             // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = header.gas_limit - cumulative_gas_used;
+            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
                 return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
@@ -420,7 +404,7 @@ where
             let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            changesets.push(TransactionChangeSet {
+            tx_changesets.push(TransactionChangeSet {
                 receipt: Receipt {
                     tx_type: transaction.tx_type(),
                     // Success flag was added in `EIP-658: Embedding transaction status code in
@@ -436,30 +420,25 @@ where
         }
 
         // Check if gas used matches the value set in header.
-        if header.gas_used != cumulative_gas_used {
-            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: header.gas_used })
+        if block.gas_used != cumulative_gas_used {
+            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
         }
 
-        let mut block_reward = self.block_reward_changeset(header, total_difficulty, ommers)?;
-
-        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(header.number) {
-            let mut irregular_state_changeset = self.dao_fork_changeset()?;
-            irregular_state_changeset.extend(block_reward.take().unwrap_or_default().into_iter());
-            block_reward = Some(irregular_state_changeset);
+        let mut block_changesets = BTreeMap::default();
+        let balance_increments = self.post_block_balance_increments(block, total_difficulty)?;
+        for (address, increment) in balance_increments {
+            let changeset = self.account_balance_increment_changeset(address, increment)?;
+            block_changesets.insert(address, changeset);
         }
 
-        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) {
-            if let Some(withdrawals) = withdrawals {
-                if !withdrawals.is_empty() {
-                    let mut withdrawals_changeset = self.withdrawals_changeset(withdrawals)?;
-                    withdrawals_changeset
-                        .extend(block_reward.take().unwrap_or_default().into_iter());
-                    block_reward = Some(withdrawals_changeset);
-                }
+        if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
+            for (address, changeset) in self.dao_fork_changeset()? {
+                // No account collision between rewarded accounts and DAO fork related accounts.
+                block_changesets.insert(address, changeset);
             }
         }
 
-        Ok(ExecutionResult { changesets, block_reward })
+        Ok(ExecutionResult { tx_changesets, block_changesets })
     }
 }
 
@@ -473,7 +452,7 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
 ) -> Result<ExecutionResult, Error> {
     let execution_result = execute(block, total_difficulty, senders, chain_spec, db)?;
 
-    let receipts_iter = execution_result.changesets.iter().map(|changeset| &changeset.receipt);
+    let receipts_iter = execution_result.tx_changesets.iter().map(|changeset| &changeset.receipt);
 
     if chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
         verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
@@ -646,9 +625,9 @@ mod tests {
         let out =
             execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
 
-        assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
+        assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
 
-        let changesets = out.changesets[0].clone();
+        let changesets = out.tx_changesets[0].clone();
         assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
         let account1_info = Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None };
@@ -712,8 +691,8 @@ mod tests {
 
         // check block reward changeset
         assert_eq!(
-            out.block_reward,
-            Some(BTreeMap::from([
+            out.block_changesets,
+            BTreeMap::from([
                 (
                     account2,
                     AccountInfoChangeSet::Changed {
@@ -731,7 +710,7 @@ mod tests {
                         }
                     }
                 )
-            ]))
+            ])
         );
 
         assert_eq!(changesets.new_bytecodes.len(), 0, "No new bytecodes");
@@ -778,7 +757,7 @@ mod tests {
             &mut db,
         )
         .unwrap();
-        assert_eq!(out.changesets.len(), 0, "No tx");
+        assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
         // Check if cache is set
         // beneficiary
@@ -792,8 +771,8 @@ mod tests {
         }
 
         // check changesets
-        let block_reward = out.block_reward.unwrap();
-        let change_set = block_reward.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+        let change_set =
+            out.block_changesets.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
         assert_eq!(
             *change_set,
             AccountInfoChangeSet::Changed {
@@ -802,7 +781,7 @@ mod tests {
             }
         );
         for (i, address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
-            let change_set = block_reward.get(address).unwrap();
+            let change_set = out.block_changesets.get(address).unwrap();
             assert_eq!(
                 *change_set,
                 AccountInfoChangeSet::Changed {
@@ -864,9 +843,9 @@ mod tests {
         let out =
             execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
 
-        assert_eq!(out.changesets.len(), 1, "Should executed one transaction");
+        assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
 
-        let changesets = out.changesets[0].clone();
+        let changesets = out.tx_changesets[0].clone();
         assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
 
         let post_account_caller = Account {
@@ -912,7 +891,7 @@ mod tests {
         // execute chain and verify receipts
         let out =
             execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
-        assert_eq!(out.changesets.len(), 0, "No tx");
+        assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
         let withdrawal_sum = withdrawals.iter().fold(U256::ZERO, |sum, w| sum + w.amount_wei());
         let beneficiary_account = db.accounts.get(&withdrawal_beneficiary).unwrap();
@@ -920,10 +899,9 @@ mod tests {
         assert_eq!(beneficiary_account.info.nonce, 0);
         assert_eq!(beneficiary_account.account_state, AccountState::StorageCleared);
 
-        let block_reward = out.block_reward.unwrap();
-        assert_eq!(block_reward.len(), 1);
+        assert_eq!(out.block_changesets.len(), 1);
         assert_eq!(
-            block_reward.get(&withdrawal_beneficiary),
+            out.block_changesets.get(&withdrawal_beneficiary),
             Some(&AccountInfoChangeSet::Created {
                 new: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
             })
@@ -932,12 +910,11 @@ mod tests {
         // Execute same block again
         let out =
             execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
-        assert_eq!(out.changesets.len(), 0, "No tx");
+        assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
-        let block_reward = out.block_reward.unwrap();
-        assert_eq!(block_reward.len(), 1);
+        assert_eq!(out.block_changesets.len(), 1);
         assert_eq!(
-            block_reward.get(&withdrawal_beneficiary),
+            out.block_changesets.get(&withdrawal_beneficiary),
             Some(&AccountInfoChangeSet::Changed {
                 old: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
                 new: Account {

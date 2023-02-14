@@ -165,7 +165,7 @@ impl ExecutionStage {
             let spurious_dragon_active =
                 self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
             // insert state change set
-            for result in results.changesets.into_iter() {
+            for result in results.tx_changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
@@ -249,20 +249,17 @@ impl ExecutionStage {
                 current_transition_id += 1;
             }
 
-            // If there is block reward we will add account changeset to db
-            if let Some(block_reward_changeset) = results.block_reward {
-                // we are sure that block reward index is present.
-                for (address, changeset) in block_reward_changeset.into_iter() {
-                    trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
-                    changeset.apply_to_db(
-                        &**tx,
-                        address,
-                        current_transition_id,
-                        spurious_dragon_active,
-                    )?;
-                }
-                current_transition_id += 1;
+            // If there are any post block changes, we will add account changesets to db.
+            for (address, changeset) in results.block_changesets.into_iter() {
+                trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
+                changeset.apply_to_db(
+                    &**tx,
+                    address,
+                    current_transition_id,
+                    spurious_dragon_active,
+                )?;
             }
+            current_transition_id += 1;
         }
 
         let done = !capped;

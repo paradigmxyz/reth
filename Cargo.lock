@@ -4301,7 +4301,6 @@ dependencies = [
  "auto_impl 1.0.1",
  "hash-db",
  "hashbrown 0.13.2",
- "indexmap",
  "plain_hasher",
  "reth-db",
  "reth-interfaces",
