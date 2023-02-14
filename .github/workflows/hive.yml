@@ -71,5 +71,5 @@ jobs:
 
       - name: Build hive tests
         run: |
-          ls
+          cd hivetests
           go build .
