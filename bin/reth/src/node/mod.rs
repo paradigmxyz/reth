@@ -122,7 +122,8 @@ impl Command {
 
         self.start_metrics_endpoint()?;
 
-        debug!(target: "reth::cli", chainspec=?self.chain, "Initializing genesis");
+        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+
         init_genesis(db.clone(), self.chain.clone())?;
 
         let consensus = self.init_consensus()?;

@@ -84,7 +84,8 @@ impl ImportCommand {
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
 
-        debug!(target: "reth::cli", chainspec=?self.chain, "Initializing genesis");
+        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
+
         init_genesis(db.clone(), self.chain.clone())?;
 
         // create a new FileClient
