@@ -341,8 +341,8 @@ impl DBTrieLoader {
 
         let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
-        let start = (tid_range.start, Address::zero()).into();
-        let end = (tid_range.end, Address::zero()).into();
+        let start = TransitionIdAddress((tid_range.start, Address::zero()));
+        let end = TransitionIdAddress((tid_range.end, Address::zero()));
         let mut walker = storage_cursor.walk_range(start..end)?;
 
         while let Some((TransitionIdAddress((_, address)), StorageEntry { key, .. })) =
