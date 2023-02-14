@@ -76,12 +76,13 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
 
 impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
-        Ok(ChainInfo {
-            best_hash: Default::default(),
-            best_number: 0,
-            last_finalized: None,
-            safe_finalized: None,
-        })
+        let best_number = self
+            .db
+            .view(|tx| tx.get::<tables::SyncStage>("Finish".as_bytes().to_vec()))?
+            .map_err(Into::<reth_interfaces::db::Error>::into)?
+            .unwrap_or_default();
+        let best_hash = self.block_hash(U256::from(best_number))?.unwrap_or_default();
+        Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
     }
 
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
