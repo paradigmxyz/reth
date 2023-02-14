@@ -88,5 +88,7 @@ jobs:
 
       - name: Print simulator output
         if: ${{ failure() }}
-        run: cat workspace/logs/*simulator*.log
+        run: |
+          ls
+          cat hivetests/workspace/logs/*simulator*.log
 
