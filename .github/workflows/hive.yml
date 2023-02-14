@@ -39,7 +39,7 @@ jobs:
           name: reth_image
           path: /tmp/reth_image.tar
 
-  run-hive-ethereum-sync:
+  build-hive-tests:
     needs: build-reth
     name: build hive tests
     runs-on: ubuntu-latest
@@ -56,11 +56,6 @@ jobs:
           docker load --input /tmp/reth_image.tar
           docker image ls -a
 
-      - uses: actions/setup-go@v3
-        with:
-          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
-      - run: go version
-
       # TODO: replace when we are not using a fork
       - name: Checkout hive
         uses: actions/checkout@v2
@@ -69,7 +64,30 @@ jobs:
           ref: onbjerg/reth
           path: hivetests
 
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
+      - run: |
+        cd hivetests
+        go build .
+
+      # TODO: change to go build ./hivetests/ or go install
       - name: Build hive tests
         run: |
           cd hivetests
           go build .
+
+      - name: Run ethereum/sync hive test
+        run: |
+          ls
+          ./hivetests/hive --sim ethereum/sync --client reth
+
