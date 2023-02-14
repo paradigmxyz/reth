@@ -19,7 +19,7 @@ runs:
       uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ inputs.rust_toolchain }}
-        targets: ${{ input.rust_target }}
+        targets: ${{ inputs.rust_target }}
         components: clippy,llvm-tools-preview,rustfmt
 
     - uses: taiki-e/install-action@v1
