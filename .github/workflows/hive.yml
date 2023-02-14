@@ -33,6 +33,7 @@ jobs:
           tags: paradigmxyz/reth:main
           outputs: type=docker,dest=/tmp/reth_image.tar
 
+      # TODO: turn this into an actual image publish
       - name: Upload reth image
         uses: actions/upload-artifact@v3
         with:
@@ -77,6 +78,6 @@ jobs:
 
       - name: Run ethereum/sync hive test
         run: |
-          ls
-          ./hivetests/hive --sim ethereum/sync --client reth
+          cd hivetests
+          ./hive --sim ethereum/sync --client reth
 
