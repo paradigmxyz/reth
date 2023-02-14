@@ -392,6 +392,7 @@ where
                         .map(Err::<(), HeadersResponseError>)
                         .transpose()?;
                 } else if highest.number > self.existing_local_block_number() {
+                    self.metrics.buffered_responses.increment(1.);
                     // can't validate yet
                     self.buffered_responses.push(OrderedHeadersResponse {
                         headers,
@@ -447,12 +448,14 @@ where
                 Ordering::Equal => {
                     let OrderedHeadersResponse { headers, request, peer_id } =
                         PeekMut::pop(next_response);
+                    self.metrics.buffered_responses.decrement(1.);
 
                     if let Err(err) = self.process_next_headers(request, headers, peer_id) {
                         return Some(err)
                     }
                 }
                 Ordering::Greater => {
+                    self.metrics.buffered_responses.decrement(1.);
                     PeekMut::pop(next_response);
                 }
             }
@@ -468,6 +471,7 @@ where
     fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
         trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
+        self.metrics.in_flight_requests.increment(1.);
     }
 
     fn request_fut(
@@ -493,6 +497,9 @@ where
         self.queued_validated_headers.clear();
         self.buffered_responses.clear();
         self.in_progress_queue.clear();
+
+        self.metrics.in_flight_requests.set(0.);
+        self.metrics.buffered_responses.set(0.);
     }
 
     /// Splits off the next batch of headers
@@ -654,6 +661,7 @@ where
         loop {
             // poll requests
             while let Poll::Ready(Some(outcome)) = this.in_progress_queue.poll_next_unpin(cx) {
+                this.metrics.in_flight_requests.decrement(1.);
                 // handle response
                 if let Err(err) = this.on_headers_outcome(outcome) {
                     this.on_headers_error(err);
