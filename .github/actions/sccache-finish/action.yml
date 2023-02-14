@@ -3,10 +3,6 @@ description: Stops the sccache server and prints stats
 runs:
   using: composite
   steps:
-    - name: Print sccache stats
-      shell: bash
-      run: sccache --show-stats
-
     - name: Stop sccache
       shell: bash
       run: |
