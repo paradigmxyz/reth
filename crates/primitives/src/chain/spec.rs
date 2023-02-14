@@ -4,6 +4,7 @@ use crate::{
     GenesisAccount, Hardfork, Header, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
+use hex_literal::hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -13,6 +14,9 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::mainnet(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
         .expect("Can't deserialize Mainnet genesis json"),
+    genesis_hash: Some(H256(hex!(
+        "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
+    ))),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(1150000)),
@@ -43,6 +47,9 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::goerli(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
         .expect("Can't deserialize Goerli genesis json"),
+    genesis_hash: Some(H256(hex!(
+        "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
+    ))),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Istanbul, ForkCondition::Block(1561651)),
@@ -60,6 +67,9 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::sepolia(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
+    genesis_hash: Some(H256(hex!(
+        "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
+    ))),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -94,6 +104,13 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
 pub struct ChainSpec {
     /// The chain ID
     pub chain: Chain,
+
+    /// The hash of the genesis block.
+    ///
+    /// This acts as a small cache for known chains. If the chain is known, then the genesis hash
+    /// is also known ahead of time, and this will be `Some`.
+    #[serde(skip, default)]
+    pub genesis_hash: Option<H256>,
 
     /// The genesis block
     pub genesis: Genesis,
@@ -140,7 +157,11 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> H256 {
-        self.genesis_header().hash_slow()
+        if let Some(hash) = self.genesis_hash {
+            hash
+        } else {
+            self.genesis_header().hash_slow()
+        }
     }
 
     /// Returns the forks in this specification and their activation conditions.
@@ -256,7 +277,12 @@ impl From<EthersGenesis> for ChainSpec {
             );
         }
 
-        Self { chain: genesis.config.chain_id.into(), genesis: genesis_block, hardforks }
+        Self {
+            chain: genesis.config.chain_id.into(),
+            genesis: genesis_block,
+            genesis_hash: None,
+            hardforks,
+        }
     }
 }
 
@@ -409,6 +435,7 @@ impl ChainSpecBuilder {
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
+            genesis_hash: None,
             hardforks: self.hardforks,
         }
     }
