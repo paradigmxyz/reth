@@ -43,31 +43,23 @@ jobs:
     needs: build-reth
     name: build hive tests
     runs-on: ubuntu-latest
-    env:
-      RUST_LOG: info,sync=error
 
     steps:
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - uses: Swatinem/rust-cache@v1
-        with:
-          cache-on-failure: true
-
       - name: Download reth image
         uses: actions/download-artifact@v3
         with:
           name: reth_image
           path: /tmp
-      -
-        name: Load image
+
+      - name: Load image
         run: |
           docker load --input /tmp/reth_image.tar
           docker image ls -a
+
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
+      - run: go version
 
       # TODO: replace when we are not using a fork
       - name: Checkout hive
@@ -77,10 +69,7 @@ jobs:
           ref: onbjerg/reth
           path: hivetests
 
-      - uses: actions/setup-go@v3
-        with:
-          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
-      - run: go version
-
       - name: Build hive tests
-        run: go build .
+        run: |
+          ls
+          go build .
