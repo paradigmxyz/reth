@@ -8,7 +8,10 @@
 //! reth task management
 
 use crate::shutdown::{signal, Shutdown, Signal};
-use futures_util::{future::select, pin_mut, Future, FutureExt};
+use futures_util::{
+    future::{select, BoxFuture},
+    pin_mut, Future, FutureExt,
+};
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},
@@ -22,6 +25,33 @@ use tracing::error;
 use tracing_futures::Instrument;
 
 pub mod shutdown;
+
+/// A type that can spawn tasks.
+///
+/// The main purpose of this type is to abstract over [TaskExecutor] so it's more convenient to
+/// provide default impls for testing.
+pub trait TaskSpawner: Send + Sync {
+    /// Spawns the task onto the runtime.
+    /// See also [`Handle::spawn`].
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+}
+
+impl TaskSpawner for Box<dyn TaskSpawner> {
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        (**self).spawn(fut)
+    }
+}
+
+/// An [TaskSpawner] that uses [tokio::task::spawn] to execute tasks
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TokioTaskExecutor;
+
+impl TaskSpawner for TokioTaskExecutor {
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        tokio::task::spawn(fut)
+    }
+}
 
 /// Many reth components require to spawn tasks for long-running jobs. For example `discovery`
 /// spawns tasks to handle egress and ingress of udp traffic or `network` that spawns session tasks
@@ -261,6 +291,12 @@ impl TaskExecutor {
             .in_current_span();
 
         self.handle.spawn(task)
+    }
+}
+
+impl TaskSpawner for TaskExecutor {
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.spawn(fut)
     }
 }
 

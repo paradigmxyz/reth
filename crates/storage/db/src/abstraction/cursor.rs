@@ -1,4 +1,7 @@
-use std::{marker::PhantomData, ops::Range};
+use std::{
+    marker::PhantomData,
+    ops::{Bound, RangeBounds},
+};
 
 use crate::{
     common::{IterPairResult, PairResult, ValueOnlyResult},
@@ -40,11 +43,10 @@ pub trait DbCursorRO<'tx, T: Table> {
     where
         Self: Sized;
 
-    /// Returns an iterator starting at a key greater or equal than `start_key` and ending at a key
-    /// less than `end_key`
+    /// Returns an iterator for the keys in the specified range.
     fn walk_range<'cursor>(
         &'cursor mut self,
-        range: Range<T::Key>,
+        range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized;
@@ -203,8 +205,10 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     start: IterPairResult<T>,
-    /// exclusive `key` where to stop the walk.
-    end_key: T::Key,
+    /// `key` where to start the walk.
+    start_key: Bound<T::Key>,
+    /// `key` where to stop the walk.
+    end_key: Bound<T::Key>,
     /// flag whether is ended
     is_done: bool,
     /// Phantom data for 'tx. As it is only used for `DbCursorRO`.
@@ -221,28 +225,46 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
         }
 
         let start = self.start.take();
-        if start.is_some() {
+        if start.is_some() && matches!(self.start_key, Bound::Included(_) | Bound::Unbounded) {
             return start
         }
 
-        let res = self.cursor.next().transpose()?;
-        if let Ok((key, value)) = res {
-            if key < self.end_key {
-                Some(Ok((key, value)))
-            } else {
+        match self.cursor.next().transpose() {
+            Some(Ok((key, value))) => match &self.end_key {
+                Bound::Included(end_key) if &key <= end_key => Some(Ok((key, value))),
+                Bound::Excluded(end_key) if &key < end_key => Some(Ok((key, value))),
+                Bound::Unbounded => Some(Ok((key, value))),
+                _ => {
+                    self.is_done = true;
+                    None
+                }
+            },
+            Some(res @ Err(_)) => Some(res),
+            None if matches!(self.end_key, Bound::Unbounded) => {
                 self.is_done = true;
                 None
             }
-        } else {
-            Some(res)
+            _ => None,
         }
     }
 }
 
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 'tx, T, CURSOR> {
     /// construct RangeWalker
-    pub fn new(cursor: &'cursor mut CURSOR, start: IterPairResult<T>, end_key: T::Key) -> Self {
-        Self { cursor, start, end_key, is_done: false, _tx_phantom: std::marker::PhantomData }
+    pub fn new(
+        cursor: &'cursor mut CURSOR,
+        start: IterPairResult<T>,
+        start_key: Bound<T::Key>,
+        end_key: Bound<T::Key>,
+    ) -> Self {
+        Self {
+            cursor,
+            start,
+            start_key,
+            end_key,
+            is_done: false,
+            _tx_phantom: std::marker::PhantomData,
+        }
     }
 }
 

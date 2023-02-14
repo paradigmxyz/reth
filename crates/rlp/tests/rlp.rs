@@ -30,6 +30,15 @@ struct Test4NumbersGenerics<'a, D: Encodable> {
     d: &'a D,
 }
 
+#[derive(Debug, PartialEq, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
+struct TestOpt {
+    a: u8,
+    b: u64,
+    c: Option<u8>,
+    d: Option<u64>,
+}
+
 fn encoded<T: Encodable>(t: &T) -> BytesMut {
     let mut out = BytesMut::new();
     t.encode(&mut out);
@@ -100,4 +109,22 @@ fn invalid_decode_sideeffect() {
     assert_eq!(Test4Numbers::decode(&mut sl), Err(DecodeError::InputTooShort));
 
     assert_eq!(sl.len(), fixture.len());
+}
+
+#[test]
+fn test_opt_fields_roundtrip() {
+    let expected = hex!("c20102");
+    let item = TestOpt { a: 1, b: 2, c: None, d: None };
+    assert_eq!(&*encoded(&item), expected);
+    assert_eq!(TestOpt::decode(&mut &expected[..]).unwrap(), item);
+
+    let expected = hex!("c3010203");
+    let item = TestOpt { a: 1, b: 2, c: Some(3), d: None };
+    assert_eq!(&*encoded(&item), expected);
+    assert_eq!(TestOpt::decode(&mut &expected[..]).unwrap(), item);
+
+    let expected = hex!("c401020304");
+    let item = TestOpt { a: 1, b: 2, c: Some(3), d: Some(4) };
+    assert_eq!(&*encoded(&item), expected);
+    assert_eq!(TestOpt::decode(&mut &expected[..]).unwrap(), item);
 }
