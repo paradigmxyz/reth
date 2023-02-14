@@ -67,9 +67,7 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: '^1.13.1' # The Go version to download (if necessary) and use.
-      - run: |
-        cd hivetests
-        go build .
+      - run: go version
 
       # TODO: change to go build ./hivetests/ or go install
       - name: Build hive tests
