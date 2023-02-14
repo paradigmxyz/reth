@@ -7,28 +7,38 @@ use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::pubsub::{
     Params, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
 };
-use reth_tasks::TaskExecutor;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 
 /// `Eth` pubsub RPC implementation.
 ///
 /// This handles
-#[derive(Debug, Clone)]
 pub struct EthPubSub<Client, Pool> {
     /// All nested fields bundled together.
     inner: EthPubSubInner<Client, Pool>,
-    /// The executor that's used to spawn subscription tasks.
-    subscription_executor: TaskExecutor,
+    /// The type that's used to spawn subscription tasks.
+    subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl EthPubSub ===
 
 impl<Client, Pool> EthPubSub<Client, Pool> {
     /// Creates a new, shareable instance.
+    ///
+    /// Subscription tasks are spawned via [tokio::task::spawn]
     pub fn new(client: Client, pool: Pool) -> Self {
+        Self::with_spawner(client, pool, Box::<TokioTaskExecutor>::default())
+    }
+
+    /// Creates a new, shareable instance.
+    pub fn with_spawner(
+        client: Client,
+        pool: Pool,
+        subscription_task_spawner: Box<dyn TaskSpawner>,
+    ) -> Self {
         let inner = EthPubSubInner { client, pool };
-        Self { inner, subscription_executor: todo!() }
+        Self { inner, subscription_task_spawner }
     }
 }
 
@@ -46,8 +56,9 @@ where
         sink.accept()?;
 
         let pubsub = self.inner.clone();
-        self.subscription_executor
-            .spawn(async move { handle_accepted(pubsub, sink, kind, params).await });
+        self.subscription_task_spawner.spawn(Box::pin(async move {
+            handle_accepted(pubsub, sink, kind, params).await;
+        }));
 
         Ok(())
     }
@@ -88,8 +99,14 @@ async fn handle_accepted<Client, Pool>(
     }
 }
 
+impl<Client, Pool> std::fmt::Debug for EthPubSub<Client, Pool> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EthPubSub").finish_non_exhaustive()
+    }
+}
+
 /// Container type `EthPubSub`
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct EthPubSubInner<Client, Pool> {
     /// The transaction pool.
     pool: Pool,
