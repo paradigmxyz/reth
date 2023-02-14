@@ -1,6 +1,6 @@
 //! Cursor wrapper for libmdbx-sys.
 
-use std::{borrow::Cow, marker::PhantomData, ops::Range};
+use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
     cursor::{
@@ -94,18 +94,26 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
 
     fn walk_range<'cursor>(
         &'cursor mut self,
-        range: Range<T::Key>,
+        range: impl RangeBounds<T::Key>,
     ) -> Result<RangeWalker<'cursor, 'tx, T, Self>, Error>
     where
         Self: Sized,
     {
-        let start = self
-            .inner
-            .set_range(range.start.encode().as_ref())
-            .map_err(|e| Error::Read(e.into()))?
-            .map(decoder::<T>);
+        let start = match range.start_bound().cloned() {
+            Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
+            Bound::Excluded(key) => {
+                self.inner
+                    .set_range(key.encode().as_ref())
+                    .map_err(|e| Error::Read(e.into()))?
+                    .map(decoder::<T>);
+                self.inner.next()
+            }
+            Bound::Unbounded => self.inner.first(),
+        }
+        .map_err(|e| Error::Read(e.into()))?
+        .map(decoder::<T>);
 
-        Ok(RangeWalker::new(self, start, range.end))
+        Ok(RangeWalker::new(self, start, range.start_bound().cloned(), range.end_bound().cloned()))
     }
 
     fn walk_back<'cursor>(

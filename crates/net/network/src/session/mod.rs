@@ -209,17 +209,24 @@ impl SessionManager {
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
-        self.spawn(start_pending_incoming_session(
-            disconnect_rx,
-            session_id,
-            metered_stream,
-            pending_events,
-            remote_addr,
-            self.secret_key,
-            self.hello_message.clone(),
-            self.status,
-            self.fork_filter.clone(),
-        ));
+        let secret_key = self.secret_key;
+        let hello_message = self.hello_message.clone();
+        let status = self.status;
+        let fork_filter = self.fork_filter.clone();
+        self.spawn(Box::pin(async move {
+            start_pending_incoming_session(
+                disconnect_rx,
+                session_id,
+                metered_stream,
+                pending_events,
+                remote_addr,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+            )
+            .await
+        }));
 
         let handle = PendingSessionHandle {
             disconnect_tx: Some(disconnect_tx),
@@ -235,18 +242,26 @@ impl SessionManager {
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        self.spawn(start_pending_outbound_session(
-            disconnect_rx,
-            pending_events,
-            session_id,
-            remote_addr,
-            remote_peer_id,
-            self.secret_key,
-            self.hello_message.clone(),
-            self.status,
-            self.fork_filter.clone(),
-            self.bandwidth_meter.clone(),
-        ));
+        let secret_key = self.secret_key;
+        let hello_message = self.hello_message.clone();
+        let fork_filter = self.fork_filter.clone();
+        let status = self.status;
+        let band_with_meter = self.bandwidth_meter.clone();
+        self.spawn(Box::pin(async move {
+            start_pending_outbound_session(
+                disconnect_rx,
+                pending_events,
+                session_id,
+                remote_addr,
+                remote_peer_id,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+                band_with_meter,
+            )
+            .await
+        }));
 
         let handle = PendingSessionHandle {
             disconnect_tx: Some(disconnect_tx),

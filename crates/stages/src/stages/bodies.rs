@@ -124,16 +124,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                             tx_count: block.body.len() as u64,
                         },
                     )?;
-                    ommers_cursor.append(
-                        block_number,
-                        StoredBlockOmmers {
-                            ommers: block
-                                .ommers
-                                .into_iter()
-                                .map(|header| header.unseal())
-                                .collect(),
-                        },
-                    )?;
 
                     // Write transactions
                     for transaction in block.body {
@@ -144,6 +134,19 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                         current_tx_id += 1;
                         // Increment transition id for each transaction.
                         transition_id += 1;
+                    }
+
+                    if !block.ommers.is_empty() {
+                        ommers_cursor.append(
+                            block_number,
+                            StoredBlockOmmers {
+                                ommers: block
+                                    .ommers
+                                    .into_iter()
+                                    .map(|header| header.unseal())
+                                    .collect(),
+                            },
+                        )?;
                     }
                 }
                 BlockResponse::Empty(_) => {
@@ -407,7 +410,6 @@ mod tests {
             },
             ExecInput, ExecOutput, UnwindInput,
         };
-        use assert_matches::assert_matches;
         use futures_util::Stream;
         use reth_db::{
             cursor::DbCursorRO,
@@ -536,10 +538,16 @@ mod tests {
                             block_transition_id,
                         )?;
                         tx.put::<tables::BlockBodies>(progress.number, body)?;
-                        if !progress.is_empty() {
+                        if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers { ommers: vec![] },
+                                StoredBlockOmmers {
+                                    ommers: progress
+                                        .ommers
+                                        .iter()
+                                        .map(|o| o.clone().unseal())
+                                        .collect(),
+                                },
                             )?;
                         }
                         Ok(())
@@ -641,14 +649,13 @@ mod tests {
                         );
 
                         let (_, header) = headers_cursor.seek_exact(number)?.expect("to be present");
-                        // Validate that ommers exist
-                        assert_matches!(
-                            ommers_cursor.seek_exact(number),
-                            Ok(ommers) => {
-                                assert!(if header.is_empty() { ommers.is_none() } else { ommers.is_some() })
-                            },
-                            "Block ommers are missing"
-                        );
+                        // Validate that ommers exist if any
+                        let stored_ommers =  ommers_cursor.seek_exact(number)?;
+                        if header.ommers_hash_is_empty() {
+                            assert!(stored_ommers.is_none(), "Unexpected ommers entry");
+                        } else {
+                            assert!(stored_ommers.is_some(), "Missing ommers entry");
+                        }
 
                         for tx_id in body.tx_id_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;

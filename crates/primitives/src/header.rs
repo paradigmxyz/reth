@@ -125,7 +125,17 @@ impl Header {
 
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
-        self.ommers_hash == EMPTY_LIST_HASH && self.transactions_root == EMPTY_ROOT
+        self.transaction_root_is_empty() && self.ommers_hash_is_empty()
+    }
+
+    /// Check if the ommers hash equals to empty hash list.
+    pub fn ommers_hash_is_empty(&self) -> bool {
+        self.ommers_hash == EMPTY_LIST_HASH
+    }
+
+    /// Check if the transaction root equals to empty root.
+    pub fn transaction_root_is_empty(&self) -> bool {
+        self.transactions_root == EMPTY_ROOT
     }
 
     /// Calculate hash and seal the Header so that it can't be changed.

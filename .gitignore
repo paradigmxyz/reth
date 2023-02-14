@@ -24,3 +24,5 @@ crates/stages/testdata
 
 # prometheus data dir
 data/
+
+proptest-regressions/

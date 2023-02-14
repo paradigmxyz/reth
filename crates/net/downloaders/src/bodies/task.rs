@@ -1,21 +1,19 @@
 use futures::Stream;
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_interfaces::p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
 };
 use reth_primitives::BlockNumber;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     future::Future,
     ops::Range,
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::{
-    sync::{mpsc, mpsc::UnboundedSender},
-    task::JoinSet,
-};
+use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
@@ -25,16 +23,13 @@ pub struct TaskDownloader {
     #[pin]
     from_downloader: UnboundedReceiverStream<BodyDownloaderResult>,
     to_downloader: UnboundedSender<Range<BlockNumber>>,
-    /// The spawned downloader tasks.
-    ///
-    /// Note: If this type is dropped, the downloader task gets dropped as well.
-    _task: JoinSet<()>,
 }
 
 // === impl TaskDownloader ===
 
 impl TaskDownloader {
-    /// Spawns the given `downloader` and returns a [TaskDownloader] that's connected to that task.
+    /// Spawns the given `downloader` via [tokio::task::spawn] returns a [TaskDownloader] that's
+    /// connected to that task.
     ///
     /// # Panics
     ///
@@ -62,6 +57,16 @@ impl TaskDownloader {
     where
         T: BodyDownloader + 'static,
     {
+        Self::spawn_with(downloader, &TokioTaskExecutor::default())
+    }
+
+    /// Spawns the given `downloader` via the given [TaskSpawner] returns a [TaskDownloader] that's
+    /// connected to that task.
+    pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
+    where
+        T: BodyDownloader + 'static,
+        S: TaskSpawner,
+    {
         let (bodies_tx, bodies_rx) = mpsc::unbounded_channel();
         let (to_downloader, updates_rx) = mpsc::unbounded_channel();
 
@@ -71,14 +76,9 @@ impl TaskDownloader {
             downloader,
         };
 
-        let mut task = JoinSet::<()>::new();
-        task.spawn(downloader);
+        spawner.spawn(async move { downloader.await }.boxed());
 
-        Self {
-            from_downloader: UnboundedReceiverStream::new(bodies_rx),
-            to_downloader,
-            _task: task,
-        }
+        Self { from_downloader: UnboundedReceiverStream::new(bodies_rx), to_downloader }
     }
 }
 
@@ -111,16 +111,30 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
         let this = self.get_mut();
 
         loop {
-            while let Poll::Ready(Some(range)) = this.updates.poll_next_unpin(cx) {
-                if let Err(err) = this.downloader.set_download_range(range) {
-                    tracing::error!(target: "downloaders::bodies", ?err, "Failed to set download range");
-                    let _ = this.bodies_tx.send(Err(err));
+            loop {
+                match this.updates.poll_next_unpin(cx) {
+                    Poll::Pending => break,
+                    Poll::Ready(None) => {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
+                    }
+                    Poll::Ready(Some(range)) => {
+                        if let Err(err) = this.downloader.set_download_range(range) {
+                            tracing::error!(target: "downloaders::bodies", ?err, "Failed to set download range");
+                            let _ = this.bodies_tx.send(Err(err));
+                        }
+                    }
                 }
             }
 
             match ready!(this.downloader.poll_next_unpin(cx)) {
                 Some(bodies) => {
-                    let _ = this.bodies_tx.send(bodies);
+                    if this.bodies_tx.send(bodies).is_err() {
+                        // channel closed, this means [TaskDownloader] was dropped, so we can also
+                        // exit
+                        return Poll::Ready(())
+                    }
                 }
                 None => return Poll::Pending,
             }
