@@ -189,13 +189,13 @@ impl Command {
 }
 
 /// Wrapper over DB that implements many useful DB queries.
-pub(crate) struct DbTool<'a, DB: Database> {
+struct DbTool<'a, DB: Database> {
     pub(crate) db: &'a DB,
 }
 
 impl<'a, DB: Database> DbTool<'a, DB> {
     /// Takes a DB where the tables have already been created.
-    pub(crate) fn new(db: &'a DB) -> eyre::Result<Self> {
+    fn new(db: &'a DB) -> eyre::Result<Self> {
         Ok(Self { db })
     }
 
