@@ -339,6 +339,7 @@ mod tests {
                 header: transformed.header.seal(),
                 body: transformed.body,
                 ommers: transformed.ommers.into_iter().map(Header::seal).collect(),
+                withdrawals: None, // TODO:
             }
         }
 

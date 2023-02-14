@@ -1,12 +1,15 @@
 use crate::{Header, SealedHeader, TransactionSigned, Withdrawal, H256};
 use reth_codecs::derive_arbitrary;
-use reth_rlp::{Decodable, DecodeError, Encodable};
+use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 /// Ethereum full block.
 #[derive_arbitrary(rlp, 25)]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+)]
+#[rlp(trailing)]
 pub struct Block {
     /// Block header.
     pub header: Header,
@@ -25,25 +28,12 @@ impl Deref for Block {
     }
 }
 
-impl Encodable for Block {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        todo!()
-    }
-
-    fn length(&self) -> usize {
-        todo!()
-    }
-}
-
-impl Decodable for Block {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        todo!()
-    }
-}
-
 /// Sealed Ethereum full block.
 // #[derive_arbitrary(rlp, 10)]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+)]
+#[rlp(trailing)]
 pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,
@@ -74,22 +64,6 @@ impl SealedBlock {
             ommers: self.ommers.into_iter().map(|o| o.unseal()).collect(),
             withdrawals: self.withdrawals,
         }
-    }
-}
-
-impl Encodable for SealedBlock {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        todo!()
-    }
-
-    fn length(&self) -> usize {
-        todo!()
-    }
-}
-
-impl Decodable for SealedBlock {
-    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
-        todo!()
     }
 }
 

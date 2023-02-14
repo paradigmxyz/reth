@@ -4,10 +4,7 @@ use reth_codecs::derive_arbitrary;
 use reth_primitives::{
     Block, BlockHashOrNumber, Header, HeadersDirection, TransactionSigned, Withdrawal, H256,
 };
-use reth_rlp::{
-    length_of_length, Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable,
-    RlpEncodableWrapper,
-};
+use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -74,7 +71,8 @@ impl From<Vec<H256>> for GetBlockBodies {
 // TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
 #[derive_arbitrary(rlp, 10)]
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockBody {
     /// Transactions in the block
@@ -94,57 +92,6 @@ impl BlockBody {
             ommers: self.ommers.clone(),
             withdrawals: self.withdrawals.clone(),
         }
-    }
-
-    fn payload_len(&self) -> usize {
-        let mut length = 0;
-        length += self.transactions.length();
-        length += self.ommers.length();
-        length += self.withdrawals.as_ref().map(|w| w.length()).unwrap_or_default();
-        length
-    }
-}
-
-impl Encodable for BlockBody {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        reth_rlp::Header { list: true, payload_length: self.payload_len() }.encode(out);
-        self.transactions.encode(out);
-        self.ommers.encode(out);
-        if let Some(ref withdrawals) = self.withdrawals {
-            withdrawals.encode(out);
-        }
-    }
-
-    fn length(&self) -> usize {
-        let len = self.payload_len();
-        // RLP header length + payload length
-        len + length_of_length(len)
-    }
-}
-
-impl Decodable for BlockBody {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
-        let rlp_head = reth_rlp::Header::decode(buf)?;
-        if !rlp_head.list {
-            return Err(reth_rlp::DecodeError::UnexpectedString)
-        }
-        let started_len = buf.len();
-        let mut this = Self {
-            transactions: Decodable::decode(buf)?,
-            ommers: Decodable::decode(buf)?,
-            withdrawals: None,
-        };
-        if started_len - buf.len() < rlp_head.payload_length {
-            this.withdrawals = Some(Decodable::decode(buf)?);
-        }
-        let consumed = started_len - buf.len();
-        if consumed != rlp_head.payload_length {
-            return Err(reth_rlp::DecodeError::ListLengthMismatch {
-                expected: rlp_head.payload_length,
-                got: consumed,
-            })
-        }
-        Ok(this)
     }
 }
 
