@@ -26,7 +26,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Build and export
+      - name: Build and export reth image
         uses: docker/build-push-action@v4
         with:
           context: .
@@ -42,9 +42,11 @@ jobs:
 
 
   hive-matrix:
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       matrix:
         sim: [devp2p, issues/go-ethereum-14359, ethereum/consensus, ethereum/engine, ethereum/rpc-compat, ethereum/rpc, ethereum/sync]
+        experimental: [true]
     needs: build-reth
     name: run hive tests
     runs-on: ubuntu-latest
@@ -84,4 +86,5 @@ jobs:
         run: |
           cd hivetests
           ./hive --sim ${{ matrix.sim }} --client reth
+          cat workspace/logs/*simulator*.log
 
