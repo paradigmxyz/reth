@@ -182,7 +182,7 @@ fn measure_stage<S, F>(
 // Helper for generating testdata for the benchmarks.
 // Returns the path to the database file.
 fn txs_testdata(num_blocks: u64) -> PathBuf {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("accs-bench");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
     let txs_range = 100..150;
 
     // number of storage changes per transition
@@ -238,8 +238,6 @@ fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         tx.insert_accounts_and_storages(final_state).unwrap();
 
-        tx.insert_blocks(blocks.iter(), None).unwrap();
-
         // make last block have valid state root
         let root = DBTrieLoader::default().calculate_root(&tx.inner()).unwrap();
         let last_block = blocks.last_mut().unwrap();
@@ -247,6 +245,8 @@ fn txs_testdata(num_blocks: u64) -> PathBuf {
         let mut updated_header = cloned_last.header.unseal();
         updated_header.state_root = root;
         *last_block = SealedBlock { header: updated_header.seal(), ..cloned_last };
+
+        tx.insert_blocks(blocks, None).unwrap();
 
         // initialize TD
         tx.commit(|tx| {
