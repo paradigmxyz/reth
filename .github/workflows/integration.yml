@@ -60,7 +60,7 @@ jobs:
           flags: integration-tests
 
   sync:
-    name: sync test / 100k blocks / ${{ matrix.profile }}
+    name: sync / 100k blocks (${{ matrix.profile }})
     strategy:
       matrix:
         profile: [release, dev]
