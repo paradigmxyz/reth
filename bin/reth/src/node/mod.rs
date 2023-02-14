@@ -317,7 +317,7 @@ impl Command {
             .network_config(config, self.chain.clone())
             .executor(Some(executor))
             .set_head(head)
-            .build(Arc::new(ShareableDatabase::new(db.clone())))
+            .build(Arc::new(ShareableDatabase::new(db)))
     }
 
     async fn build_pipeline<H, B, U>(
