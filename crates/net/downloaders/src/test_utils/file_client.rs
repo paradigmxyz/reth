@@ -112,7 +112,7 @@ impl FileClient {
 
     /// Get the tip hash of the chain.
     pub fn tip(&self) -> Option<H256> {
-        self.headers.get(&(self.headers.len() as u64 - 1)).map(|h| h.hash_slow())
+        self.headers.get(&(self.headers.len() as u64)).map(|h| h.hash_slow())
     }
 
     /// Use the provided bodies as the file client's block body buffer.
