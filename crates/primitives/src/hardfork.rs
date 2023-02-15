@@ -98,6 +98,9 @@ impl Display for Hardfork {
 mod tests {
     use super::*;
 
+    use crate::{Chain, Genesis};
+    use std::collections::BTreeMap;
+
     #[test]
     fn check_hardfork_from_str() {
         let hardfork_str = [
@@ -146,5 +149,17 @@ mod tests {
     #[test]
     fn check_nonexistent_hardfork_from_str() {
         assert!(Hardfork::from_str("not a hardfork").is_err());
+    }
+
+    #[test]
+    fn check_fork_id_chainspec_with_fork_condition_never() {
+        let spec = ChainSpec {
+            chain: Chain::mainnet(),
+            genesis: Genesis::default(),
+            genesis_hash: None,
+            hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
+        };
+
+        assert_eq!(Hardfork::Frontier.fork_id(&spec), None);
     }
 }
