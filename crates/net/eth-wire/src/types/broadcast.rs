@@ -119,6 +119,7 @@ impl From<Vec<H256>> for NewPooledTransactionHashes {
 
 /// Same as [`NewPooledTransactionHashes`] but extends that that beside the transaction hashes, the
 /// node sends the transaction types and their sizes (as defined in EIP-2718) as well.
+#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
