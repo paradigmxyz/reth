@@ -108,8 +108,11 @@ pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
         let mut destination_cursor = self.cursor_write::<T>()?;
         let mut source_cursor = source_tx.cursor_read::<T>()?;
 
-        let from = from.unwrap_or_default();
-        for row in source_cursor.walk_range(from..=to)? {
+        let source_range = match from {
+            Some(from) => source_cursor.walk_range(from..=to),
+            None => source_cursor.walk_range(..=to),
+        };
+        for row in source_range? {
             let (key, value) = row?;
             destination_cursor.append(key, value)?;
         }
