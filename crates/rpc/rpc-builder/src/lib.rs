@@ -527,53 +527,39 @@ impl RpcServerConfig {
     ///
     /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
     pub async fn build(self) -> Result<RpcServer, RpcError> {
+        let mut server = RpcServer::empty();
+
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::UNSPECIFIED,
             DEFAULT_HTTP_RPC_PORT,
         )));
 
-        let mut http_local_addr = None;
-
-        let http_server = if let Some(builder) = self.http_server_config {
-            let server = builder.build(http_socket_addr).await?;
-            http_local_addr = server.local_addr().ok();
-            Some(server)
-        } else {
-            None
-        };
+        if let Some(builder) = self.http_server_config {
+            let http_server = builder.build(http_socket_addr).await?;
+            server.http_local_addr = http_server.local_addr().ok();
+            server.http = Some(http_server);
+        }
 
         let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::UNSPECIFIED,
             DEFAULT_WS_RPC_PORT,
         )));
 
-        let mut ws_local_addr = None;
+        if let Some(builder) = self.ws_server_config {
+            let ws_server = builder.build(ws_socket_addr).await.unwrap();
+            server.ws_local_addr = ws_server.local_addr().ok();
+            server.ws = Some(ws_server);
+        }
 
-        let ws_server = if let Some(builder) = self.ws_server_config {
-            let server = builder.build(ws_socket_addr).await.unwrap();
-            ws_local_addr = server.local_addr().ok();
-            Some(server)
-        } else {
-            None
-        };
-
-        let ipc_server = if let Some(builder) = self.ipc_server_config {
+        if let Some(builder) = self.ipc_server_config {
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
-            let server = builder.build(ipc_path.path())?;
-            Some(server)
-        } else {
-            None
-        };
+            let ipc = builder.build(ipc_path.path())?;
+            server.ipc = Some(ipc);
+        }
 
-        Ok(RpcServer {
-            http_local_addr,
-            ws_local_addr,
-            http: http_server,
-            ws: ws_server,
-            ipc: ipc_server,
-        })
+        Ok(server)
     }
 }
 
@@ -677,6 +663,10 @@ pub struct RpcServer {
 // === impl RpcServer ===
 
 impl RpcServer {
+    fn empty() -> RpcServer {
+        RpcServer { http_local_addr: None, ws_local_addr: None, http: None, ws: None, ipc: None }
+    }
+
     /// Returns the [`SocketAddr`] of the http server if started.
     fn http_local_addr(&self) -> Option<SocketAddr> {
         self.http_local_addr
