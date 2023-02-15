@@ -65,7 +65,7 @@ impl Capability {
         self.name == "eth" && self.version == 67
     }
 
-    /// Whether this is eth v67.
+    /// Whether this is eth v68.
     #[inline]
     pub fn is_eth_v68(&self) -> bool {
         self.name == "eth" && self.version == 68

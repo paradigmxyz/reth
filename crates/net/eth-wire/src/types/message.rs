@@ -2,9 +2,9 @@
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes,
-    NodeData, PooledTransactions, Receipts, Status, Transactions,
+    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{NewPooledTransactionHashes68, SharedTransactions};
+use crate::SharedTransactions;
 use bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};

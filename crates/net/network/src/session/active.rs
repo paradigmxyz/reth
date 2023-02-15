@@ -245,10 +245,7 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
             PeerMessage::PooledTransactions(msg) => {
-                // TODO jinsan
-                // self.queued_outgoing
-                //     .push_back(EthMessage::NewPooledTransactionHashes66(msg).into());
-                todo!()
+                self.queued_outgoing.push_back(EthMessage::NewPooledTransactionHashes(msg).into());
             }
             PeerMessage::EthRequest(req) => {
                 let deadline = self.request_deadline();
