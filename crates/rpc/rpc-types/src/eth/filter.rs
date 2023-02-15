@@ -84,7 +84,7 @@ impl From<SubscriptionId<'_>> for FilterId {
     fn from(value: SubscriptionId<'_>) -> Self {
         match value {
             SubscriptionId::Num(n) => FilterId::Num(n),
-            SubscriptionId::Str(s) => FilterId::Str(s.to_string()),
+            SubscriptionId::Str(s) => FilterId::Str(s.into_owned()),
         }
     }
 }

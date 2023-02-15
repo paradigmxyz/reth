@@ -67,7 +67,7 @@ where
 
     async fn uninstall_filter(&self, id: SubscriptionId<'_>) -> RpcResult<bool> {
         let mut filters = self.inner.active_filters.inner.lock().await;
-        let id = id.into_owned();
+        let id = id.into();
         if filters.remove(&id).is_some() {
             trace!(target: "rpc::eth::filter", ?id, "uninstalled filter");
             Ok(true)
@@ -101,20 +101,20 @@ where
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.client.chain_info().to_rpc_result()?.best_number;
-        let id = self.id_provider.next_id();
+        let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
             id.clone(),
             ActiveFilter { last_poll_block_number, last_poll_timestamp: Instant::now(), kind },
         );
-        Ok(id.into())
+        Ok(id)
     }
 }
 
 /// All active filters
 #[derive(Debug, Clone, Default)]
 pub struct ActiveFilters {
-    inner: Arc<Mutex<HashMap<SubscriptionId<'static>, ActiveFilter>>>,
+    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter>>>,
 }
 
 /// An installed filter
