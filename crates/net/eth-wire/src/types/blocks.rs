@@ -116,6 +116,7 @@ mod test {
     use crate::types::{
         message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     };
+    use bytes::BufMut;
     use hex_literal::hex;
     use reth_primitives::{
         BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction, TransactionKind,

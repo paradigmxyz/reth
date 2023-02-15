@@ -3,10 +3,10 @@ use crate::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::types::{Block, H256 as EthersH256, H64};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, Encodable};
+use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -168,8 +168,12 @@ impl Header {
         length += self.extra_data.length();
         length += self.mix_hash.length();
         length += H64::from_low_u64_be(self.nonce).length();
-        length += self.base_fee_per_gas.map(|fee| U256::from(fee).length()).unwrap_or_default();
+        length += self
+            .base_fee_per_gas
+            .map(|fee| U256::from(fee).length())
+            .unwrap_or(self.withdrawals_root.is_some() as usize);
         length += self.withdrawals_root.map(|root| root.length()).unwrap_or_default();
+
         length
     }
 }
@@ -194,9 +198,15 @@ impl Encodable for Header {
         self.extra_data.encode(out);
         self.mix_hash.encode(out);
         H64::from_low_u64_be(self.nonce).encode(out);
+
+        // Encode base fee. Put empty string if base fee is missing,
+        // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
+        } else if self.withdrawals_root.is_some() {
+            out.put_u8(EMPTY_STRING_CODE);
         }
+
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
         }
@@ -237,7 +247,11 @@ impl Decodable for Header {
             withdrawals_root: None,
         };
         if started_len - buf.len() < rlp_head.payload_length {
-            this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
+            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
+            }
         }
         if started_len - buf.len() < rlp_head.payload_length {
             this.withdrawals_root = Some(Decodable::decode(buf)?);
