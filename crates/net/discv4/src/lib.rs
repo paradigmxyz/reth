@@ -840,6 +840,11 @@ impl Discv4Service {
 
     /// Message handler for an incoming `Ping`
     fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: H256) {
+        if self.is_expired(ping.expire) {
+            // ping's expiration timestamp is in the past
+            return
+        }
+
         // create the record
         let record = NodeRecord {
             address: remote_addr.ip(),
@@ -1020,6 +1025,11 @@ impl Discv4Service {
 
     /// Handler for incoming `FindNode` message
     fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: PeerId) {
+        if self.is_expired(msg.expire) {
+            // ping's expiration timestamp is in the past
+            return
+        }
+
         let key = kad_key(node_id);
 
         match self.kbuckets.entry(&key) {
@@ -1115,6 +1125,10 @@ impl Discv4Service {
     /// Handler for incoming `Neighbours` messages that are handled if they're responses to
     /// `FindNode` requests.
     fn on_neighbours(&mut self, msg: Neighbours, remote_addr: SocketAddr, node_id: PeerId) {
+        if self.is_expired(msg.expire) {
+            // response is expired
+            return
+        }
         // check if this request was expected
         let ctx = match self.pending_find_nodes.entry(node_id) {
             Entry::Occupied(mut entry) => {
@@ -1280,13 +1294,13 @@ impl Discv4Service {
         }
     }
 
-    /// Returns true if the expiration timestamp is considered invalid.
+    /// Returns true if the expiration timestamp is in the past.
     fn is_expired(&self, expiration: u64) -> bool {
-        self.ensure_timestamp(expiration).is_err()
+        self.ensure_not_expired(expiration).is_err()
     }
 
     /// Validate that given timestamp is not expired.
-    fn ensure_timestamp(&self, expiration: u64) -> Result<(), ()> {
+    fn ensure_not_expired(&self, expiration: u64) -> Result<(), ()> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         if self.check_timestamps && expiration < now {
             debug!(target: "discv4", "Expired packet");
