@@ -1,4 +1,4 @@
-use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc, types::SubscriptionId};
+use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::rpc::Filter;
 use reth_rpc_types::{FilterChanges, FilterId, Log};
 
@@ -20,15 +20,15 @@ pub trait EthFilterApi {
 
     /// Returns all filter changes since last poll.
     #[method(name = "eth_getFilterChanges")]
-    async fn filter_changes(&self, id: SubscriptionId<'_>) -> Result<FilterChanges>;
+    async fn filter_changes(&self, id: FilterId) -> Result<FilterChanges>;
 
     /// Returns all logs matching given filter (in a range 'from' - 'to').
     #[method(name = "eth_getFilterLogs")]
-    async fn filter_logs(&self, id: SubscriptionId<'_>) -> Result<Vec<Log>>;
+    async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>>;
 
     /// Uninstalls filter.
     #[method(name = "eth_uninstallFilter")]
-    async fn uninstall_filter(&self, id: SubscriptionId<'_>) -> Result<bool>;
+    async fn uninstall_filter(&self, id: FilterId) -> Result<bool>;
 
     /// Returns logs matching given filter object.
     #[method(name = "eth_getLogs")]

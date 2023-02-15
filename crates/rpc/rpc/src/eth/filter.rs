@@ -3,7 +3,6 @@ use async_trait::async_trait;
 use jsonrpsee::{
     core::RpcResult,
     server::{IdProvider, RandomIntegerIdProvider},
-    types::SubscriptionId,
 };
 use reth_primitives::rpc::Filter;
 use reth_provider::BlockProvider;
@@ -57,17 +56,16 @@ where
         self.inner.install_filter(FilterKind::PendingTransaction).await
     }
 
-    async fn filter_changes(&self, _id: SubscriptionId<'_>) -> RpcResult<FilterChanges> {
+    async fn filter_changes(&self, _id: FilterId) -> RpcResult<FilterChanges> {
         todo!()
     }
 
-    async fn filter_logs(&self, _id: SubscriptionId<'_>) -> RpcResult<Vec<Log>> {
+    async fn filter_logs(&self, _id: FilterId) -> RpcResult<Vec<Log>> {
         todo!()
     }
 
-    async fn uninstall_filter(&self, id: SubscriptionId<'_>) -> RpcResult<bool> {
+    async fn uninstall_filter(&self, id: FilterId) -> RpcResult<bool> {
         let mut filters = self.inner.active_filters.inner.lock().await;
-        let id = id.into();
         if filters.remove(&id).is_some() {
             trace!(target: "rpc::eth::filter", ?id, "uninstalled filter");
             Ok(true)
