@@ -268,4 +268,19 @@ mod tests {
         assert_eq!(capability.version(), 66);
         assert_eq!(capability, SharedCapability::Eth { version: EthVersion::Eth66, offset: 0 });
     }
+
+    #[test]
+    fn capabilities_supports_eth() {
+        let capabilities: Capabilities = vec![
+            Capability::new("eth".into(), 66),
+            Capability::new("eth".into(), 67),
+            Capability::new("eth".into(), 68),
+        ]
+        .into();
+
+        assert!(capabilities.supports_eth());
+        assert!(capabilities.supports_eth_v66());
+        assert!(capabilities.supports_eth_v67());
+        assert!(capabilities.supports_eth_v68());
+    }
 }
