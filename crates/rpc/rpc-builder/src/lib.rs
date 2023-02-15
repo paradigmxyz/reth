@@ -191,18 +191,18 @@ impl Default for RpcModuleBuilder<(), (), ()> {
     }
 }
 
-/// Describes the modules that should be installed
+/// Describes the modules that should be installed.
 ///
 /// # Example
 ///
-/// Create a [RpcModuleConfig] from a selection.
+/// Create a [RpcModuleSelection] from a selection.
 ///
 /// ```
-/// use reth_rpc_builder::{RethRpcModule, RpcModuleConfig};
-/// let config: RpcModuleConfig = vec![RethRpcModule::Eth].into();
+/// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+/// let config: RpcModuleSelection = vec![RethRpcModule::Eth].into();
 /// ```
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub enum RpcModuleConfig {
+pub enum RpcModuleSelection {
     /// Use _all_ available modules.
     All,
     /// The default modules `eth`, `net`, `web3`
@@ -214,29 +214,29 @@ pub enum RpcModuleConfig {
 
 // === impl RpcModuleConfig ===
 
-impl RpcModuleConfig {
+impl RpcModuleSelection {
     /// The standard modules to instantiate by default `eth`, `net`, `web3`
     pub const STANDARD_MODULES: [RethRpcModule; 3] =
         [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
 
     /// Returns a selection of [RethRpcModule] with all [RethRpcModule::VARIANTS].
     pub fn all_modules() -> Vec<RethRpcModule> {
-        RpcModuleConfig::try_from_selection(RethRpcModule::VARIANTS.iter().copied())
+        RpcModuleSelection::try_from_selection(RethRpcModule::VARIANTS.iter().copied())
             .expect("valid selection")
             .into_selection()
     }
 
-    /// Creates a new [RpcModuleConfig::Selection] from the given items.
+    /// Creates a new [RpcModuleSelection::Selection] from the given items.
     ///
     /// # Example
     ///
     /// Create a selection from the [RethRpcModule] string identifiers
     ///
     /// ```
-    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleConfig};
+    ///  use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin"];
-    /// let config = RpcModuleConfig::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleConfig::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
+    /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
+    /// assert_eq!(config, RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin]));
     /// ```
     pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
     where
@@ -245,7 +245,7 @@ impl RpcModuleConfig {
     {
         let selection =
             selection.into_iter().map(TryInto::try_into).collect::<Result<Vec<_>, _>>()?;
-        Ok(RpcModuleConfig::Selection(selection))
+        Ok(RpcModuleSelection::Selection(selection))
     }
 
     /// Creates a new [RpcModule] based on the configured reth modules.
@@ -271,39 +271,39 @@ impl RpcModuleConfig {
     /// Returns an iterator over all configured [RethRpcModule]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
-            RpcModuleConfig::All => Box::new(Self::all_modules().into_iter()),
-            RpcModuleConfig::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
-            RpcModuleConfig::Selection(s) => Box::new(s.iter().copied()),
+            RpcModuleSelection::All => Box::new(Self::all_modules().into_iter()),
+            RpcModuleSelection::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
+            RpcModuleSelection::Selection(s) => Box::new(s.iter().copied()),
         }
     }
 
     /// Returns the list of configured [RethRpcModule]
     pub fn into_selection(self) -> Vec<RethRpcModule> {
         match self {
-            RpcModuleConfig::All => Self::all_modules(),
-            RpcModuleConfig::Selection(s) => s,
-            RpcModuleConfig::Standard => Self::STANDARD_MODULES.to_vec(),
+            RpcModuleSelection::All => Self::all_modules(),
+            RpcModuleSelection::Selection(s) => s,
+            RpcModuleSelection::Standard => Self::STANDARD_MODULES.to_vec(),
         }
     }
 }
 
-impl<I, T> From<I> for RpcModuleConfig
+impl<I, T> From<I> for RpcModuleSelection
 where
     I: IntoIterator<Item = T>,
     T: Into<RethRpcModule>,
 {
     fn from(value: I) -> Self {
-        RpcModuleConfig::Selection(value.into_iter().map(Into::into).collect())
+        RpcModuleSelection::Selection(value.into_iter().map(Into::into).collect())
     }
 }
 
-impl FromStr for RpcModuleConfig {
+impl FromStr for RpcModuleSelection {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let modules = s.split(',');
 
-        RpcModuleConfig::try_from_selection(modules)
+        RpcModuleSelection::try_from_selection(modules)
     }
 }
 
@@ -369,15 +369,15 @@ where
     }
 
     /// Helper function to create a [RpcModule] if it's not `None`
-    fn maybe_module(&mut self, config: Option<&RpcModuleConfig>) -> Option<RpcModule<()>> {
+    fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule<()>> {
         let config = config?;
         let module = self.module(config);
         Some(module)
     }
 
     /// Populates a new [RpcModule] based on the selected [RethRpcModule]s in the given
-    /// [RpcModuleConfig]
-    pub fn module(&mut self, config: &RpcModuleConfig) -> RpcModule<()> {
+    /// [RpcModuleSelection]
+    pub fn module(&mut self, config: &RpcModuleSelection) -> RpcModule<()> {
         let mut module = RpcModule::new(());
         let all_methods = self.reth_methods(config.iter_selection());
         for methods in all_methods {
@@ -577,45 +577,45 @@ impl RpcServerConfig {
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct TransportRpcModuleConfig {
     /// http module configuration
-    http: Option<RpcModuleConfig>,
+    http: Option<RpcModuleSelection>,
     /// ws module configuration
-    ws: Option<RpcModuleConfig>,
+    ws: Option<RpcModuleSelection>,
     /// ipc module configuration
-    ipc: Option<RpcModuleConfig>,
+    ipc: Option<RpcModuleSelection>,
 }
 
 // === impl TransportRpcModuleConfig ===
 
 impl TransportRpcModuleConfig {
     /// Creates a new config with only http set
-    pub fn http(http: impl Into<RpcModuleConfig>) -> Self {
+    pub fn http(http: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_http(http)
     }
 
     /// Creates a new config with only ws set
-    pub fn ws(ws: impl Into<RpcModuleConfig>) -> Self {
+    pub fn ws(ws: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ws(ws)
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(ipc: impl Into<RpcModuleConfig>) -> Self {
+    pub fn ipc(ipc: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ipc(ipc)
     }
 
-    /// Sets the [RpcModuleConfig] for the http transport.
-    pub fn with_http(mut self, http: impl Into<RpcModuleConfig>) -> Self {
+    /// Sets the [RpcModuleSelection] for the http transport.
+    pub fn with_http(mut self, http: impl Into<RpcModuleSelection>) -> Self {
         self.http = Some(http.into());
         self
     }
 
-    /// Sets the [RpcModuleConfig] for the ws transport.
-    pub fn with_ws(mut self, ws: impl Into<RpcModuleConfig>) -> Self {
+    /// Sets the [RpcModuleSelection] for the ws transport.
+    pub fn with_ws(mut self, ws: impl Into<RpcModuleSelection>) -> Self {
         self.ws = Some(ws.into());
         self
     }
 
-    /// Sets the [RpcModuleConfig] for the http transport.
-    pub fn with_ipc(mut self, ipc: impl Into<RpcModuleConfig>) -> Self {
+    /// Sets the [RpcModuleSelection] for the http transport.
+    pub fn with_ipc(mut self, ipc: impl Into<RpcModuleSelection>) -> Self {
         self.ipc = Some(ipc.into());
         self
     }
@@ -838,17 +838,17 @@ mod tests {
 
     #[test]
     fn test_default_selection() {
-        let selection = RpcModuleConfig::Standard.into_selection();
+        let selection = RpcModuleSelection::Standard.into_selection();
         assert_eq!(selection, vec![RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3,])
     }
 
     #[test]
     fn test_create_rpc_module_config() {
         let selection = vec!["eth", "admin"];
-        let config = RpcModuleConfig::try_from_selection(selection).unwrap();
+        let config = RpcModuleSelection::try_from_selection(selection).unwrap();
         assert_eq!(
             config,
-            RpcModuleConfig::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
+            RpcModuleSelection::Selection(vec![RethRpcModule::Eth, RethRpcModule::Admin])
         );
     }
 
@@ -859,7 +859,7 @@ mod tests {
         assert_eq!(
             config,
             TransportRpcModuleConfig {
-                http: Some(RpcModuleConfig::Selection(vec![
+                http: Some(RpcModuleSelection::Selection(vec![
                     RethRpcModule::Eth,
                     RethRpcModule::Admin
                 ])),
