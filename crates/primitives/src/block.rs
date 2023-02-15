@@ -231,12 +231,16 @@ impl<'de> Deserialize<'de> for BlockId {
                 let mut number = None;
                 let mut block_hash = None;
                 let mut require_canonical = None;
-
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "blockNumber" => {
                             if number.is_some() || block_hash.is_some() {
                                 return Err(serde::de::Error::duplicate_field("blockNumber"))
+                            }
+                            if require_canonical.is_some() {
+                                return Err(serde::de::Error::duplicate_field(
+                                    "Unexpected require_canonical field",
+                                ))
                             }
                             number = Some(map.next_value::<BlockNumberOrTag>()?)
                         }
@@ -388,7 +392,6 @@ impl FromStr for BlockNumberOrTag {
         Ok(block)
     }
 }
-
 impl fmt::Display for BlockNumberOrTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -424,6 +427,7 @@ impl BlockHash {
 #[cfg(test)]
 mod test {
     use super::{BlockId, BlockNumberOrTag::*, *};
+    /// Check parsing according to EIP-1898.
     #[test]
     fn can_parse_blockid_u64() {
         let num = serde_json::json!(
@@ -474,6 +478,7 @@ mod test {
             serde_json::json!({"blockNumber": 1, "requireCanonical": true, "blockNumber": 23});
         assert!(serde_json::from_value::<BlockId>(num).is_err());
     }
+    /// Serde tests
     #[test]
     fn serde_blockid_tags() {
         let block_ids = [Latest, Finalized, Safe, Pending].map(|id| BlockId::from(id));
@@ -496,5 +501,43 @@ mod test {
         let serialized = serde_json::to_string(&block_id).unwrap();
         let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, block_id)
+    }
+    #[test]
+    fn serde_rpc_payload_block_tag() {
+        let payload = r#"{"method":"eth_call","params":[{"to":"0xebe8efa441b9302a0d7eaecc277c09d20d684540","data":"0x45848dfc"},"latest"],"id":1,"jsonrpc":"2.0"}"#;
+        let value: serde_json::Value = serde_json::from_str(payload).unwrap();
+        let block_id_param = value.pointer("/params/1").unwrap();
+        let block_id: BlockId = serde_json::from_value::<BlockId>(block_id_param.clone()).unwrap();
+        assert_eq!(BlockId::Number(BlockNumberOrTag::Latest), block_id);
+    }
+    #[test]
+    fn serde_rpc_payload_block_object() {
+        let example_payload = r#"{"method":"eth_call","params":[{"to":"0xebe8efa441b9302a0d7eaecc277c09d20d684540","data":"0x45848dfc"},{"blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"}],"id":1,"jsonrpc":"2.0"}"#;
+        let value: serde_json::Value = serde_json::from_str(example_payload).unwrap();
+        let block_id_param = value.pointer("/params/1").unwrap().to_string();
+        let block_id: BlockId = serde_json::from_str::<BlockId>(&block_id_param).unwrap();
+        let hash =
+            H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+                .unwrap();
+        assert_eq!(BlockId::from(hash.clone()), block_id);
+        let serialized = serde_json::to_string(&BlockId::from(hash)).unwrap();
+        assert_eq!("{\"blockHash\":\"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\"}", serialized)
+    }
+    #[test]
+    #[should_panic]
+    fn serde_rpc_payload_block_number_duplicate_key() {
+        let payload = r#"{"blockNumber": "0x132", "blockNumber": "0x133"}"#;
+        let parsed_block_id = serde_json::from_str::<BlockId>(payload);
+        parsed_block_id.unwrap();
+    }
+    #[test]
+    fn serde_rpc_payload_block_hash() {
+        let payload = r#"{"blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"}"#;
+        let parsed = serde_json::from_str::<BlockId>(payload).unwrap();
+        let expected = BlockId::from(
+            H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+                .unwrap(),
+        );
+        assert_eq!(parsed, expected);
     }
 }
