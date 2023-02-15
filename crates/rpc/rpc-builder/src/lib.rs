@@ -73,8 +73,11 @@ use std::{
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 
-/// The default port for the http/ws server
-pub const DEFAULT_RPC_PORT: u16 = 8545;
+/// The default port for the http server
+pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
+
+/// The default port for the ws server
+pub const DEFAULT_WS_RPC_PORT: u16 = 8546;
 
 /// The default IPC endpoint
 #[cfg(windows)]
@@ -440,8 +443,10 @@ pub struct RpcServerConfig {
     http_server_config: Option<ServerBuilder>,
     /// Configs for WS server
     ws_server_config: Option<ServerBuilder>,
-    /// Address where to bind the http and ws server to
-    http_ws_addr: Option<SocketAddr>,
+    /// Address where to bind the http server to
+    http_addr: Option<SocketAddr>,
+    /// Address where to bind the ws server to
+    ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
     ipc_server_config: Option<IpcServerBuilder>,
     /// The Endpoint where to launch the ipc server
@@ -478,11 +483,19 @@ impl RpcServerConfig {
         self
     }
 
-    /// Configures the [SocketAddr] of the http/ws server
+    /// Configures the [SocketAddr] of the http server
     ///
-    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_RPC_PORT]
-    pub fn with_address(mut self, addr: SocketAddr) -> Self {
-        self.http_ws_addr = Some(addr);
+    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_HTTP_RPC_PORT]
+    pub fn with_http_address(mut self, addr: SocketAddr) -> Self {
+        self.http_addr = Some(addr);
+        self
+    }
+
+    /// Configures the [SocketAddr] of the ws server
+    ///
+    /// Default is [Ipv4Addr::UNSPECIFIED] and [DEFAULT_WS_RPC_PORT]
+    pub fn with_ws_address(mut self, addr: SocketAddr) -> Self {
+        self.ws_addr = Some(addr);
         self
     }
 
@@ -514,27 +527,31 @@ impl RpcServerConfig {
     ///
     /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
     pub async fn build(self) -> Result<RpcServer, RpcError> {
-        let socket_addr = self
-            .http_ws_addr
-            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_RPC_PORT)));
+        let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::UNSPECIFIED,
+            DEFAULT_HTTP_RPC_PORT,
+        )));
 
-        let mut local_addr = None;
+        let mut http_local_addr = None;
 
         let http_server = if let Some(builder) = self.http_server_config {
-            let server = builder.build(socket_addr).await?;
-            if local_addr.is_none() {
-                local_addr = server.local_addr().ok();
-            }
+            let server = builder.build(http_socket_addr).await?;
+            http_local_addr = server.local_addr().ok();
             Some(server)
         } else {
             None
         };
 
+        let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::UNSPECIFIED,
+            DEFAULT_WS_RPC_PORT,
+        )));
+
+        let mut ws_local_addr = None;
+
         let ws_server = if let Some(builder) = self.ws_server_config {
-            let server = builder.build(socket_addr).await.unwrap();
-            if local_addr.is_none() {
-                local_addr = server.local_addr().ok();
-            }
+            let server = builder.build(ws_socket_addr).await.unwrap();
+            ws_local_addr = server.local_addr().ok();
             Some(server)
         } else {
             None
@@ -550,7 +567,13 @@ impl RpcServerConfig {
             None
         };
 
-        Ok(RpcServer { local_addr, http: http_server, ws: ws_server, ipc: ipc_server })
+        Ok(RpcServer {
+            http_local_addr,
+            ws_local_addr,
+            http: http_server,
+            ws: ws_server,
+            ipc: ipc_server,
+        })
     }
 }
 
@@ -639,8 +662,10 @@ impl TransportRpcModules<()> {
 
 /// Container type for each transport ie. http, ws, and ipc server
 pub struct RpcServer {
-    /// The address of the http/ws server
-    local_addr: Option<SocketAddr>,
+    /// The address of the http server
+    http_local_addr: Option<SocketAddr>,
+    /// The address of the ws server
+    ws_local_addr: Option<SocketAddr>,
     /// http server
     http: Option<Server>,
     /// ws server
@@ -652,9 +677,14 @@ pub struct RpcServer {
 // === impl RpcServer ===
 
 impl RpcServer {
-    /// Returns the [`SocketAddr`] of the http/ws server if started.
-    fn local_addr(&self) -> Option<SocketAddr> {
-        self.local_addr
+    /// Returns the [`SocketAddr`] of the http server if started.
+    fn http_local_addr(&self) -> Option<SocketAddr> {
+        self.http_local_addr
+    }
+
+    /// Returns the [`SocketAddr`] of the ws server if started.
+    fn ws_local_addr(&self) -> Option<SocketAddr> {
+        self.ws_local_addr
     }
 
     /// Starts the configured server by spawning the servers on the tokio runtime.
@@ -666,8 +696,13 @@ impl RpcServer {
         modules: TransportRpcModules<()>,
     ) -> Result<RpcServerHandle, RpcError> {
         let TransportRpcModules { http, ws, ipc } = modules;
-        let mut handle =
-            RpcServerHandle { local_addr: self.local_addr, http: None, ws: None, ipc: None };
+        let mut handle = RpcServerHandle {
+            http_local_addr: self.http_local_addr,
+            ws_local_addr: self.ws_local_addr,
+            http: None,
+            ws: None,
+            ipc: None,
+        };
 
         // Start all servers
         if let Some((server, module)) =
@@ -708,7 +743,8 @@ impl std::fmt::Debug for RpcServer {
 #[must_use = "Server stop if dropped"]
 pub struct RpcServerHandle {
     /// The address of the http/ws server
-    local_addr: Option<SocketAddr>,
+    http_local_addr: Option<SocketAddr>,
+    ws_local_addr: Option<SocketAddr>,
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc: Option<ServerHandle>,
@@ -717,9 +753,14 @@ pub struct RpcServerHandle {
 // === impl RpcServerHandle ===
 
 impl RpcServerHandle {
-    /// Returns the [`SocketAddr`] of the http/ws server if started.
-    fn local_addr(&self) -> Option<SocketAddr> {
-        self.local_addr
+    /// Returns the [`SocketAddr`] of the http server if started.
+    fn http_local_addr(&self) -> Option<SocketAddr> {
+        self.http_local_addr
+    }
+
+    /// Returns the [`SocketAddr`] of the ws server if started.
+    fn ws_local_addr(&self) -> Option<SocketAddr> {
+        self.ws_local_addr
     }
 
     /// Tell the server to stop without waiting for the server to stop.
@@ -741,12 +782,12 @@ impl RpcServerHandle {
 
     /// Returns the url to the http server
     pub fn http_url(&self) -> Option<String> {
-        self.local_addr.map(|addr| format!("http://{addr}"))
+        self.http_local_addr.map(|addr| format!("http://{addr}"))
     }
 
     /// Returns the url to the ws server
     pub fn ws_url(&self) -> Option<String> {
-        self.local_addr.map(|addr| format!("ws://{addr}"))
+        self.ws_local_addr.map(|addr| format!("ws://{addr}"))
     }
 
     /// Returns a http client connected to the server.
