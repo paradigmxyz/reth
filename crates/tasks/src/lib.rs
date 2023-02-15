@@ -11,7 +11,7 @@ use crate::shutdown::{signal, Shutdown, Signal};
 use dyn_clone::DynClone;
 use futures_util::{
     future::{select, BoxFuture},
-    pin_mut, Future, FutureExt,
+    pin_mut, Future, FutureExt, TryFutureExt,
 };
 use std::{
     pin::Pin,
@@ -262,7 +262,7 @@ impl TaskExecutor {
         // wrap the task in catch unwind
         let task = std::panic::AssertUnwindSafe(fut)
             .catch_unwind()
-            .map(move |res| {
+            .inspect_err(move |res| {
                 error!("Critical task `{name}` panicked: {res:?}");
                 let _ = panicked_tasks_tx.send(name);
             })
@@ -316,10 +316,11 @@ impl TaskExecutor {
         // wrap the task in catch unwind
         let task = std::panic::AssertUnwindSafe(fut)
             .catch_unwind()
-            .map(move |res| {
+            .inspect_err(move |res| {
                 error!("Critical task `{name}` panicked: {res:?}");
                 let _ = panicked_tasks_tx.send(name);
             })
+            .map(|_| ())
             .in_current_span();
 
         self.handle.spawn(task)
