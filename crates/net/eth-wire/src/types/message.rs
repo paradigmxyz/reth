@@ -66,20 +66,18 @@ impl ProtocolMessage {
                 EthMessage::PooledTransactions(request_pair)
             }
             EthMessageID::GetNodeData => {
-                if version == 66 {
-                    let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
-                    EthMessage::GetNodeData(request_pair)
-                } else {
+                if version >= 67 {
                     return Err(reth_rlp::DecodeError::Custom("invalid message id"))
                 }
+                let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
+                EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
-                if version == 66 {
-                    let request_pair = RequestPair::<NodeData>::decode(buf)?;
-                    EthMessage::NodeData(request_pair)
-                } else {
+                if version >= 67 {
                     return Err(reth_rlp::DecodeError::Custom("invalid message id"))
                 }
+                let request_pair = RequestPair::<NodeData>::decode(buf)?;
+                EthMessage::NodeData(request_pair)
             }
             EthMessageID::GetReceipts => {
                 let request_pair = RequestPair::<GetReceipts>::decode(buf)?;
