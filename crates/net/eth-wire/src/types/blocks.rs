@@ -71,7 +71,7 @@ impl From<Vec<H256>> for GetBlockBodies {
 // TODO(onbjerg): We should have this type in primitives
 /// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
 ///
-/// Withdrawals can be optionally included in the RLP encoded message.
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[derive_arbitrary(rlp, 10)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
