@@ -119,7 +119,6 @@ impl From<Vec<H256>> for NewPooledTransactionHashes {
 
 /// Same as [`NewPooledTransactionHashes`] but extends that that beside the transaction hashes, the
 /// node sends the transaction types and their sizes (as defined in EIP-2718) as well.
-// #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
@@ -132,8 +131,8 @@ pub struct NewPooledTransactionHashes68 {
 }
 
 impl From<(Vec<u8>, Vec<u32>, Vec<H256>)> for NewPooledTransactionHashes68 {
-    fn from(v: (Vec<u8>, Vec<u32>, Vec<H256>)) -> Self {
-        NewPooledTransactionHashes68 { types: v.0, sizes: v.1, hashes: v.2 }
+    fn from((types, sizes, hashes): (Vec<u8>, Vec<u32>, Vec<H256>)) -> Self {
+        NewPooledTransactionHashes68 { types, sizes, hashes }
     }
 }
 
