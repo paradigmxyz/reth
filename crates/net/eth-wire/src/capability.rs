@@ -103,6 +103,7 @@ pub struct Capabilities {
     inner: Vec<Capability>,
     eth_66: bool,
     eth_67: bool,
+    eth_68: bool,
 }
 
 impl Capabilities {
@@ -121,7 +122,7 @@ impl Capabilities {
     /// Whether the peer supports `eth` sub-protocol.
     #[inline]
     pub fn supports_eth(&self) -> bool {
-        self.eth_67 || self.eth_66
+        self.eth_67 || self.eth_66 || self.eth_68
     }
 
     /// Whether this peer supports eth v66 protocol.
@@ -135,6 +136,12 @@ impl Capabilities {
     pub fn supports_eth_v67(&self) -> bool {
         self.eth_67
     }
+
+    /// Whether this peer supports eth v68 protocol.
+    #[inline]
+    pub fn supports_eth_v68(&self) -> bool {
+        self.eth_68
+    }
 }
 
 impl From<Vec<Capability>> for Capabilities {
@@ -142,6 +149,7 @@ impl From<Vec<Capability>> for Capabilities {
         Self {
             eth_66: value.iter().any(Capability::is_eth_v66),
             eth_67: value.iter().any(Capability::is_eth_v67),
+            eth_68: value.iter().any(Capability::is_eth_v68),
             inner: value,
         }
     }
@@ -160,6 +168,7 @@ impl Decodable for Capabilities {
         Ok(Self {
             eth_66: inner.iter().any(Capability::is_eth_v66),
             eth_67: inner.iter().any(Capability::is_eth_v67),
+            eth_68: inner.iter().any(Capability::is_eth_v68),
             inner,
         })
     }
