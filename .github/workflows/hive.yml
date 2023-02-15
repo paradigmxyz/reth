@@ -15,76 +15,87 @@ concurrency:
 
 name: hive
 jobs:
-  build-reth:
+  prepare:
     name: build reth container
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
+      - run: mkdir artifacts
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-
       - name: Build and export reth image
         uses: docker/build-push-action@v4
         with:
           context: .
           tags: paradigmxyz/reth:main
-          outputs: type=docker,dest=/tmp/reth_image.tar
-
-      # TODO: turn this into an actual image publish
-      - name: Upload reth image
-        uses: actions/upload-artifact@v3
-        with:
-          name: reth_image
-          path: /tmp/reth_image.tar
-
-
-  hive-matrix:
-    continue-on-error: ${{ matrix.experimental }}
-    strategy:
-      matrix:
-        sim: [devp2p, issues/go-ethereum-14359, ethereum/consensus, ethereum/engine, ethereum/rpc-compat, ethereum/rpc, ethereum/sync]
-        experimental: [true]
-    needs: build-reth
-    name: run hive tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download reth image
-        uses: actions/download-artifact@v3
-        with:
-          name: reth_image
-          path: /tmp
-
-      - name: Load image
-        run: |
-          docker load --input /tmp/reth_image.tar
-          docker image ls -a
+          outputs: type=docker,dest=./artifacts/reth_image.tar
 
       # TODO: replace when we are not using a fork
-      - name: Checkout hive
+      - name: Checkout hive tests
         uses: actions/checkout@v23
         with:
           repository: onbjerg/hive
           ref: onbjerg/reth
           path: hivetests
-
       - uses: actions/setup-go@v3
         with:
-          go-version: '^1.13.1' # The Go version to download (if necessary) and use.
+          go-version: '^1.13.1'
       - run: go version
-
       - name: Build hive tool
         run: |
           cd hivetests
           go build .
+          mv ./hive ../artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: artifacts
+          path: ./artifacts
+
+
+  test:
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      matrix:
+        sim: [devp2p, issues/go-ethereum-14359, ethereum/consensus, ethereum/engine, ethereum/rpc-compat, ethereum/rpc, ethereum/sync]
+        experimental: [true]
+      fail-fast: false
+    needs: prepare
+    name: run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: artifacts
+          path: /tmp
+
+      - name: Load Docker image
+        run: |
+          docker load --input /tmp/reth_image.tar
+          docker image ls -a
+      - name: Move hive binary
+        run: |
+          mv /tmp/hive /usr/local/bin
+          chmod +x /usr/local/bin/hive
+
+      # TODO: replace when we are not using a fork
+      - name: Checkout hive tests
+        uses: actions/checkout@v3
+        with:
+          repository: onbjerg/hive
+          ref: onbjerg/reth
+          path: hivetests
 
       - name: Run ${{ matrix.sim }} simulator
         run: |
           cd hivetests
-          ./hive --sim ${{ matrix.sim }} --client reth
+          hive --sim ${{ matrix.sim }} --client reth
 
       - name: Print simulator output
         if: ${{ failure() }}
