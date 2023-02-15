@@ -6,9 +6,8 @@ use crate::{
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables};
 use reth_provider::Transaction;
-use reth_stages::{stages::StorageHashingStage, Stage, StageId, UnwindInput};
+use reth_stages::{stages::StorageHashingStage, Stage, UnwindInput};
 use std::ops::DerefMut;
-use tracing::info;
 
 pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
@@ -17,14 +16,13 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
     output_db: &PlatformPath<DbPath>,
     should_run: bool,
 ) -> Result<()> {
+    if should_run {
+        eyre::bail!("StorageHashing stage does not support dry run.")
+    }
+
     let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;
 
     unwind_and_copy::<DB>(db_tool, from, tip_block_number, &output_db).await?;
-
-    // Try to re-execute the stage without committing
-    if should_run {
-        dry_run(output_db, to, from).await?;
-    }
 
     Ok(())
 }
@@ -52,34 +50,6 @@ async fn unwind_and_copy<DB: Database>(
     output_db.update(|tx| tx.import_dupsort::<tables::StorageChangeSet, _>(unwind_inner_tx))??;
 
     unwind_tx.drop()?;
-
-    Ok(())
-}
-
-/// Try to re-execute the stage without committing
-async fn dry_run(
-    output_db: reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
-    to: u64,
-    from: u64,
-) -> eyre::Result<()> {
-    info!(target: "reth::cli", "Executing stage. [dry-run]");
-
-    let mut tx = Transaction::new(&output_db)?;
-    let mut stage = StorageHashingStage { clean_threshold: 1, ..Default::default() };
-
-    stage
-        .execute(
-            &mut tx,
-            reth_stages::ExecInput {
-                previous_stage: Some((StageId("Another"), to)),
-                stage_progress: Some(from),
-            },
-        )
-        .await?;
-
-    tx.drop()?;
-
-    info!(target: "reth::cli", "Success.");
 
     Ok(())
 }
