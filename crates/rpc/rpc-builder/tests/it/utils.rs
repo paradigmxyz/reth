@@ -1,7 +1,8 @@
 use reth_network_api::test_utils::NoopNetwork;
 use reth_provider::test_utils::NoopProvider;
 use reth_rpc_builder::{
-    RpcModuleBuilder, RpcModuleConfig, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
+    RpcModuleBuilder, RpcModuleSelection, RpcServerConfig, RpcServerHandle,
+    TransportRpcModuleConfig,
 };
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -12,7 +13,7 @@ pub fn test_address() -> SocketAddr {
 }
 
 /// Launches a new server with http only with the given modules
-pub async fn launch_http(modules: impl Into<RpcModuleConfig>) -> RpcServerHandle {
+pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::http(modules));
     server
@@ -22,7 +23,7 @@ pub async fn launch_http(modules: impl Into<RpcModuleConfig>) -> RpcServerHandle
 }
 
 /// Launches a new server with ws only with the given modules
-pub async fn launch_ws(modules: impl Into<RpcModuleConfig>) -> RpcServerHandle {
+pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::ws(modules));
     server
@@ -32,7 +33,7 @@ pub async fn launch_ws(modules: impl Into<RpcModuleConfig>) -> RpcServerHandle {
 }
 
 /// Launches a new server with http and ws and with the given modules
-pub async fn launch_http_ws(modules: impl Into<RpcModuleConfig>) -> RpcServerHandle {
+pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let modules = modules.into();
     let server = builder.build(TransportRpcModuleConfig::ws(modules.clone()).with_http(modules));
