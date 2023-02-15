@@ -71,6 +71,8 @@ pub struct Header {
     pub uncle_hash: H256,
     /// Base fee per gas.
     pub base_fee_per_gas: Option<JsonU256>,
+    /// Withdrawals root.
+    pub withdrawals_root: Option<H256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -93,7 +95,7 @@ impl From<Header> for SealedHeader {
                 state_root: value.state_root,
                 parent_hash: value.parent_hash,
                 logs_bloom: value.bloom,
-                withdrawals_root: None,
+                withdrawals_root: value.withdrawals_root,
             },
             value.hash,
         )
