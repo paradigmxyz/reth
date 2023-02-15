@@ -212,10 +212,11 @@ where
                             this.on_error(error, Some(peer_id));
                         }
                     }
-                    Err(error) if matches!(error, RequestError::ChannelClosed) => {
-                        return Poll::Ready(Err(error.into()))
-                    }
                     Err(error) => {
+                        if error.is_channel_closed() {
+                            return Poll::Ready(Err(error.into()))
+                        }
+
                         this.on_error(error.into(), None);
                     }
                 }
