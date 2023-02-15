@@ -162,4 +162,16 @@ mod tests {
 
         assert_eq!(Hardfork::Frontier.fork_id(&spec), None);
     }
+
+    #[test]
+    fn check_fork_filter_chainspec_with_fork_condition_never() {
+        let spec = ChainSpec {
+            chain: Chain::mainnet(),
+            genesis: Genesis::default(),
+            genesis_hash: None,
+            hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
+        };
+
+        assert_eq!(Hardfork::Shanghai.fork_filter(&spec), None);
+    }
 }
