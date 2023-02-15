@@ -1,7 +1,8 @@
 //! Additional helpers for converting errors.
 
 use jsonrpsee::core::{Error as RpcError, RpcResult};
-use std::fmt::Display;
+use reth_interfaces::Result as RethResult;
+use std::{error::Error, fmt::Display};
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {
@@ -131,14 +132,48 @@ pub(crate) fn rpc_err(code: i32, msg: impl Into<String>, data: Option<&[u8]>) ->
     ))
 }
 
+pub(crate) trait ToRpcResultExt<T, Err> {
+    type Output;
+    type Error;
+
+    fn output_or_rpc_err(self, err: Self::Error) -> RpcResult<Self::Output>;
+}
+
+impl<T, Err> ToRpcResultExt<T, Err> for RethResult<Option<T>>
+where
+    T: Clone,
+    Err: Error + Into<RpcError>,
+    Self: Sized,
+{
+    type Output = T;
+    type Error = Err;
+
+    fn output_or_rpc_err(self, err: Err) -> RpcResult<Self::Output> {
+        match self {
+            Ok(block) => match block {
+                Some(value) => Ok(value),
+                None => Err(err.into()),
+            },
+            Err(err) => Err(internal_rpc_err(err.to_string())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    use crate::eth::error::EthApiError;
+
     use super::*;
 
     fn assert_rpc_result<Ok, Err, T: ToRpcResult<Ok, Err>>() {}
 
     fn to_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Ok> {
         Ok(o)
+    }
+
+    fn to_optional_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Option<Ok>> {
+        Ok(Some(o))
     }
 
     #[test]
@@ -149,5 +184,14 @@ mod tests {
         let rpc_res = res.map_internal_err(|_| "This is a message");
         let val = rpc_res.unwrap();
         assert_eq!(val, 100);
+    }
+
+    #[test]
+    fn can_convert_block_result_to_rpc() {
+        let res = to_optional_reth_err(5);
+
+        let rpc_res = res.output_or_rpc_err(EthApiError::UnknownBlockNumber);
+        let val = rpc_res.unwrap();
+        assert_eq!(val, 5);
     }
 }
