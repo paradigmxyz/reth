@@ -101,13 +101,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut highest_block = input.stage_progress.unwrap_or_default();
         debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
 
-        let downloaded_bodies = match self.downloader.try_next().await? {
-            Some(downloaded_bodies) => downloaded_bodies,
-            None => {
-                info!(target: "sync::stages::bodies", stage_progress = highest_block, "Download stream exhausted");
-                return Ok(ExecOutput { stage_progress: highest_block, done: true })
-            }
-        };
+        let downloaded_bodies =
+            self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
 
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
         for response in downloaded_bodies {
