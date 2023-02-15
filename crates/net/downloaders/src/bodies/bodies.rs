@@ -324,9 +324,18 @@ where
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
                 this.metrics.in_flight_requests.decrement(1.);
-                let response = OrderedBodiesResponse(response);
-                this.buffered_responses.push(response);
-                this.metrics.buffered_responses.increment(1.);
+                match response {
+                    Ok(response) => {
+                        let response = OrderedBodiesResponse(response);
+                        this.buffered_responses.push(response);
+                        this.metrics.buffered_responses.increment(1.);
+                    }
+                    Err(error) => {
+                        tracing::error!(target: "downloaders::bodies", ?error, "Request failed");
+                        this.clear();
+                        return Poll::Ready(Some(Err(error)))
+                    }
+                };
             }
 
             // Loop exit condition
