@@ -90,6 +90,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
                 total_difficulty: U256::from(17_000_000_000_000_000u64),
             },
         ),
+        (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
     ]),
 });
 
@@ -737,7 +738,11 @@ mod tests {
                 ),
                 (
                     Head { number: 1735371, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 0 },
+                    ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
+                ),
+                (
+                    Head { number: 1735372, timestamp: 1677557090, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 0 },
                 ),
             ],
         );
