@@ -5,7 +5,7 @@ use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
-        error::{DownloadError, DownloadResult},
+        error::{DownloadError, DownloadResult, RequestError},
         priority::Priority,
     },
 };
@@ -212,7 +212,12 @@ where
                             this.on_error(error, Some(peer_id));
                         }
                     }
-                    Err(error) => return Poll::Ready(Err(error.into())),
+                    Err(error) if matches!(error, RequestError::ChannelClosed) => {
+                        return Poll::Ready(Err(error.into()))
+                    }
+                    Err(error) => {
+                        this.on_error(error.into(), None);
+                    }
                 }
             }
 
