@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
 /// Ethereum full block.
+///
+/// Withdrawals can be optionally included in the RLP encoded message.
 #[derive_arbitrary(rlp, 25)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
@@ -29,7 +31,9 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
-// #[derive_arbitrary(rlp, 10)]
+///
+/// Withdrawals can be optionally included in the RLP encoded message.
+#[derive_arbitrary(rlp, 10)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
