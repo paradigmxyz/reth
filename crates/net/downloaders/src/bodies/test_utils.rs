@@ -26,7 +26,7 @@ pub(crate) fn zip_blocks<'a>(
                     header: header.clone(),
                     body: body.transactions,
                     ommers: body.ommers.into_iter().map(|o| o.seal()).collect(),
-                    withdrawals: None, /* TODO: */
+                    withdrawals: body.withdrawals,
                 })
             }
         })

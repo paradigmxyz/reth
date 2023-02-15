@@ -1,6 +1,6 @@
 use reth_primitives::{
     Address, BigEndianHash, Bloom, Bytes, ChainSpec, ChainSpecBuilder, Header as RethHeader,
-    JsonU256, SealedHeader, H160, H256, H64, U256, U64,
+    JsonU256, SealedHeader, Withdrawal, H160, H256, H64,
 };
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
@@ -127,16 +127,6 @@ pub struct TransactionSequence {
     exception: String,
     raw_bytes: Bytes,
     valid: String,
-}
-
-/// Withdrawal in block
-#[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Withdrawal {
-    index: U64,
-    validator_index: U64,
-    address: Address,
-    amount: U256,
 }
 
 /// Ethereum blockchain test data state.
