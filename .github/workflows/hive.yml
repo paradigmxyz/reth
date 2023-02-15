@@ -29,6 +29,8 @@ jobs:
           context: .
           tags: paradigmxyz/reth:main
           outputs: type=docker,dest=./artifacts/reth_image.tar
+          cache-from: type=gha
+          cache-to: typa=gha,mode=max
 
       # TODO: replace when we are not using a fork
       - name: Checkout hive tests
