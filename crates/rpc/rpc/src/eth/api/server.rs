@@ -7,8 +7,8 @@ use crate::{
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
-    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
-    Address, BlockNumber, Bytes, H256, H64, U256, U64,
+    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId, BlockNumber},
+    Address, Bytes, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;

@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to blocks.
 
 use crate::{eth::error::EthResult, EthApi};
-use reth_primitives::{rpc::BlockId, BlockNumber, H256};
+use reth_primitives::{rpc::BlockId, H256};
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::RichBlock;
 
@@ -27,7 +27,7 @@ where
 
     pub(crate) async fn block_by_number(
         &self,
-        number: BlockNumber,
+        number: u64,
         _full: bool,
     ) -> EthResult<Option<RichBlock>> {
         let block = self.client().block(BlockId::Number(number.into()))?;
