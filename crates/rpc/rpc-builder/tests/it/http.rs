@@ -28,7 +28,7 @@ fn is_unimplemented(err: Error) -> bool {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }
-        _ => return false,
+        _ => false,
     }
 }
 
