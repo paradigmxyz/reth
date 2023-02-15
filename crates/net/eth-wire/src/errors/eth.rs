@@ -13,6 +13,8 @@ pub enum EthStreamError {
     EthHandshakeError(#[from] EthHandshakeError),
     #[error("message size ({0}) exceeds max length (10MB)")]
     MessageTooBig(usize),
+    #[error("TransactionHashes invalid len of fields: {0} {1} {2}")]
+    TransactionHashesInvalidLenOfFields(usize, usize, usize),
 }
 
 // === impl EthStreamError ===

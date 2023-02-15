@@ -24,7 +24,6 @@ pub enum EthVersion {
 }
 
 impl EthVersion {
-    // TODO 17?
     /// Returns the total number of messages the protocol version supports.
     pub fn total_messages(&self) -> u8 {
         match self {
