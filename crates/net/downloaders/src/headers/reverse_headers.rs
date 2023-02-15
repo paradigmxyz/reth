@@ -813,7 +813,6 @@ struct HeadersResponseError {
 }
 
 impl HeadersResponseError {
-
     /// Returns true if the error was caused by a closed channel to the network.
     fn is_channel_closed(&self) -> bool {
         if let DownloadError::RequestError(ref err) = self.error {
@@ -821,7 +820,6 @@ impl HeadersResponseError {
         }
         false
     }
-
 }
 
 /// The block to which we want to close the gap: (local head...sync target]
