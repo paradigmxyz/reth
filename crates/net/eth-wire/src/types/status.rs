@@ -76,6 +76,7 @@ impl Status {
             .chain(spec.chain)
             .genesis(spec.genesis_hash())
             .blockhash(head.hash)
+            .total_difficulty(head.total_difficulty)
             .forkid(spec.fork_id(head))
     }
 }
