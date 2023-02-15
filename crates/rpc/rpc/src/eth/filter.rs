@@ -8,7 +8,7 @@ use jsonrpsee::{
 use reth_primitives::rpc::Filter;
 use reth_provider::BlockProvider;
 use reth_rpc_api::EthFilterApiServer;
-use reth_rpc_types::{FilterChanges, Log};
+use reth_rpc_types::{FilterChanges, FilterId, Log};
 use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
@@ -45,15 +45,15 @@ where
     Client: BlockProvider + 'static,
     Pool: TransactionPool + 'static,
 {
-    async fn new_filter(&self, filter: Filter) -> RpcResult<SubscriptionId<'static>> {
+    async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::Log(filter)).await
     }
 
-    async fn new_block_filter(&self) -> RpcResult<SubscriptionId<'static>> {
+    async fn new_block_filter(&self) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::Block).await
     }
 
-    async fn new_pending_transaction_filter(&self) -> RpcResult<SubscriptionId<'static>> {
+    async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::PendingTransaction).await
     }
 
@@ -99,7 +99,7 @@ where
     Pool: TransactionPool + 'static,
 {
     /// Installs a new filter and returns the new identifier.
-    async fn install_filter(&self, kind: FilterKind) -> RpcResult<SubscriptionId<'static>> {
+    async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.client.chain_info().to_rpc_result()?.best_number;
         let id = self.id_provider.next_id();
         let mut filters = self.active_filters.inner.lock().await;
@@ -107,7 +107,7 @@ where
             id.clone(),
             ActiveFilter { last_poll_block_number, last_poll_timestamp: Instant::now(), kind },
         );
-        Ok(id)
+        Ok(id.into())
     }
 }
 

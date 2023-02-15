@@ -4688,6 +4688,7 @@ name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "jsonrpsee",
  "reth-network-api",
  "reth-primitives",
  "reth-rlp",

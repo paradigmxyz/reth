@@ -1,22 +1,22 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc, types::SubscriptionId};
 use reth_primitives::rpc::Filter;
-use reth_rpc_types::{FilterChanges, Log};
+use reth_rpc_types::{FilterChanges, FilterId, Log};
 
 /// Rpc Interface for poll-based ethereum filter API.
 #[cfg_attr(not(feature = "client"), rpc(server))]
-#[cfg_attr(feature = "client", rpc(server))] // TODO(mattsse) make it work with SubscriptionId lifetime
+#[cfg_attr(feature = "client", rpc(server, client))]
 pub trait EthFilterApi {
     /// Creates anew filter and returns its id.
     #[method(name = "eth_newFilter")]
-    async fn new_filter(&self, filter: Filter) -> Result<SubscriptionId<'static>>;
+    async fn new_filter(&self, filter: Filter) -> Result<FilterId>;
 
     /// Creates a new block filter and returns its id.
     #[method(name = "eth_newBlockFilter")]
-    async fn new_block_filter(&self) -> Result<SubscriptionId<'static>>;
+    async fn new_block_filter(&self) -> Result<FilterId>;
 
     /// Creates a pending transaction filter and returns its id.
     #[method(name = "eth_newPendingTransactionFilter")]
-    async fn new_pending_transaction_filter(&self) -> Result<SubscriptionId<'static>>;
+    async fn new_pending_transaction_filter(&self) -> Result<FilterId>;
 
     /// Returns all filter changes since last poll.
     #[method(name = "eth_getFilterChanges")]
