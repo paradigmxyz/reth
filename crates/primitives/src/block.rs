@@ -524,6 +524,16 @@ mod test {
         assert_eq!("{\"blockHash\":\"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\"}", serialized)
     }
     #[test]
+    fn serde_rpc_payload_block_number() {
+        let example_payload = r#"{"method":"eth_call","params":[{"to":"0xebe8efa441b9302a0d7eaecc277c09d20d684540","data":"0x45848dfc"},{"blockNumber": "0x0"}],"id":1,"jsonrpc":"2.0"}"#;
+        let value: serde_json::Value = serde_json::from_str(example_payload).unwrap();
+        let block_id_param = value.pointer("/params/1").unwrap().to_string();
+        let block_id: BlockId = serde_json::from_str::<BlockId>(&block_id_param).unwrap();
+        assert_eq!(BlockId::from(0u64), block_id);
+        let serialized = serde_json::to_string(&BlockId::from(0u64)).unwrap();
+        assert_eq!("\"0x0\"", serialized)
+    }
+    #[test]
     #[should_panic]
     fn serde_rpc_payload_block_number_duplicate_key() {
         let payload = r#"{"blockNumber": "0x132", "blockNumber": "0x133"}"#;
