@@ -24,9 +24,11 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use discv5::{
     kbucket,
-    kbucket::{BucketInsertResult, Distance, Entry as BucketEntry, KBucketsTable, NodeStatus, MAX_NODES_PER_BUCKET, },
+    kbucket::{
+        BucketInsertResult, Distance, Entry as BucketEntry, KBucketsTable, NodeStatus,
+        MAX_NODES_PER_BUCKET,
+    },
     ConnectionDirection, ConnectionState,
-
 };
 use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
@@ -876,7 +878,7 @@ impl Discv4Service {
                         // mark as new insert if insert was successful
                         is_new_insert = true;
                     }
-                    _=> {
+                    _ => {
                         // insert unsuccessful but we still want to send the pong
                     }
                 }
