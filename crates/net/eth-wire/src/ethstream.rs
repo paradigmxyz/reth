@@ -336,7 +336,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
-            let mut stream = EthStream::new(stream);
+            let mut stream = EthStream::new(68, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -345,7 +345,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = PassthroughCodec::default().framed(outgoing);
-        let mut client_stream = EthStream::new(sink);
+        let mut client_stream = EthStream::new(68, sink);
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -371,7 +371,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-            let mut stream = EthStream::new(stream);
+            let mut stream = EthStream::new(68, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -385,7 +385,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
-        let mut client_stream = EthStream::new(outgoing);
+        let mut client_stream = EthStream::new(68, outgoing);
 
         client_stream.send(test_msg).await.unwrap();
 
