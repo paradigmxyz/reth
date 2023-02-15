@@ -15,9 +15,7 @@ concurrency:
 name: hive
 jobs:
   prepare:
-    name: build reth container
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
