@@ -237,7 +237,7 @@ where
 
             // We should receive exactly the amount of blocks missing from the cache
             if headers.len() != (end_block - start_block + 1) as usize {
-                return Err(EthApiError::BadDatabaseIntegrity.into())
+                return Err(EthApiError::InvalidBlockRange.into())
             }
 
             for header in headers {

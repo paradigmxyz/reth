@@ -67,7 +67,7 @@ where
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
-    EthApiClient::fee_history(client, 1, (block_number + 2).into(), None).await.unwrap();
+    EthApiClient::fee_history(client, 0, block_number.into(), None).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));

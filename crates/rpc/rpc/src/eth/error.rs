@@ -25,8 +25,6 @@ pub(crate) enum EthApiError {
     UnknownBlockNumber,
     #[error("Invalid block range")]
     InvalidBlockRange,
-    #[error("Bad database integrity")]
-    BadDatabaseIntegrity,
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
