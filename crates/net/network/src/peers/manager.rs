@@ -570,6 +570,21 @@ impl PeersManager {
         }
         Some((*best_peer.0, best_peer.1))
     }
+    //tick function to update reputation of all connected peers
+    fn tick(&mut self, now: Instant) {
+        let mut peers = self.peers.iter_mut().filter(|(_, peer)| {
+                         peer.state.is_connected() &&
+                         !peer.is_banned() &&
+                        (!self.connect_trusted_nodes_only || peer.is_trusted())
+                        })
+        // loop over all _connected_ peers
+        for peer in peers {
+        // update reputation via seconds connected
+           let up_time (now - peer.last_tick).as_secs() as i32;
+           peer.reputation + up_time;
+           peer.last_tick = now;
+        }
+    }
 
     /// If there's capacity for new outbound connections, this will queue new
     /// [`PeerAction::Connect`] actions.
@@ -579,7 +594,6 @@ impl PeersManager {
     fn fill_outbound_slots(&mut self) {
         // as long as there a slots available try to fill them with the best peers
         while self.connection_info.has_out_capacity() {
-            let current = Instant::now()
             let action = {
                 let (peer_id, peer) = match self.best_unconnected() {
                     Some(peer) => peer,
@@ -595,7 +609,6 @@ impl PeersManager {
 
                 peer.state = PeerConnectionState::Out;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr }
-                Peer.connection_time = Peer.connection_time + current.elapsed()
             };
 
             self.connection_info.inc_out();
@@ -736,8 +749,8 @@ pub struct Peer {
     kind: PeerKind,
     /// Counts number of times the peer was backed off   
     backoff_counter: u32,
-    ///total time for the connection in active state in milliseconds
-    connection_time: Duration,
+    ///last tick timestamp of the connection
+    last_tick: Instant,
 }
 
 // === impl Peer ===
