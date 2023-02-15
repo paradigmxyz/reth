@@ -499,7 +499,6 @@ impl RpcServerConfig {
         self
     }
 
-
     /// Configures the ipc server
     pub fn with_ipc(mut self, mut config: IpcServerBuilder) -> Self {
         self.ipc_server_config = Some(config);
@@ -528,11 +527,12 @@ impl RpcServerConfig {
     ///
     /// Note: The server ist not started and does nothing unless polled, See also [RpcServer::start]
     pub async fn build(self) -> Result<RpcServer, RpcError> {
-        let http_socket_addr = self
-            .http_addr
-            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_HTTP_RPC_PORT)));
+        let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::UNSPECIFIED,
+            DEFAULT_HTTP_RPC_PORT,
+        )));
 
-        let mut http_local_addr = None;    
+        let mut http_local_addr = None;
 
         let http_server = if let Some(builder) = self.http_server_config {
             let server = builder.build(http_socket_addr).await?;
@@ -542,9 +542,10 @@ impl RpcServerConfig {
             None
         };
 
-        let ws_socket_addr = self
-            .ws_addr
-            .unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_WS_RPC_PORT)));
+        let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::UNSPECIFIED,
+            DEFAULT_WS_RPC_PORT,
+        )));
 
         let mut ws_local_addr = None;
 
@@ -566,7 +567,13 @@ impl RpcServerConfig {
             None
         };
 
-        Ok(RpcServer { http_local_addr, ws_local_addr, http: http_server, ws: ws_server, ipc: ipc_server })
+        Ok(RpcServer {
+            http_local_addr,
+            ws_local_addr,
+            http: http_server,
+            ws: ws_server,
+            ipc: ipc_server,
+        })
     }
 }
 
@@ -689,8 +696,13 @@ impl RpcServer {
         modules: TransportRpcModules<()>,
     ) -> Result<RpcServerHandle, RpcError> {
         let TransportRpcModules { http, ws, ipc } = modules;
-        let mut handle =
-            RpcServerHandle { http_local_addr: self.http_local_addr, ws_local_addr: self.ws_local_addr, http: None, ws: None, ipc: None };
+        let mut handle = RpcServerHandle {
+            http_local_addr: self.http_local_addr,
+            ws_local_addr: self.ws_local_addr,
+            http: None,
+            ws: None,
+            ipc: None,
+        };
 
         // Start all servers
         if let Some((server, module)) =
