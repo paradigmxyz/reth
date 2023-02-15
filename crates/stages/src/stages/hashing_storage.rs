@@ -276,8 +276,14 @@ mod tests {
 
         // Set up the runner
         let mut runner = StorageHashingTestRunner::default();
-        // set low threshold so we hash the whole storage
+
+        // set low clean threshold so we hash the whole storage
         runner.set_clean_threshold(1);
+
+        // set low commit threshold so we force each entry to be a tx.commit and make sure we don't
+        // hang on one key. Seed execution inserts more than one storage entry per address.
+        runner.set_commit_threshold(1);
+
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -361,16 +367,19 @@ mod tests {
                             .get_mut(rand::random::<usize>() % n_accounts as usize)
                             .unwrap();
 
-                        let new_entry = StorageEntry {
-                            key: keccak256([rand::random::<u8>()]),
-                            value: U256::from(rand::random::<u8>() % 30 + 1),
-                        };
-                        self.insert_storage_entry(
-                            tx,
-                            (transition_id, *addr).into(),
-                            new_entry,
-                            progress.header.number == stage_progress,
-                        )?;
+                        for _ in 0..2 {
+                            let new_entry = StorageEntry {
+                                key: keccak256([rand::random::<u8>()]),
+                                value: U256::from(rand::random::<u8>() % 30 + 1),
+                            };
+                            self.insert_storage_entry(
+                                tx,
+                                (transition_id, *addr).into(),
+                                new_entry,
+                                progress.header.number == stage_progress,
+                            )?;
+                        }
+
                         tx_id += 1;
                         transition_id += 1;
                         Ok(())
@@ -425,6 +434,10 @@ mod tests {
     impl StorageHashingTestRunner {
         fn set_clean_threshold(&mut self, threshold: u64) {
             self.clean_threshold = threshold;
+        }
+
+        fn set_commit_threshold(&mut self, threshold: u64) {
+            self.commit_threshold = threshold;
         }
 
         fn check_hashed_storage(&self) -> Result<(), TestRunnerError> {
