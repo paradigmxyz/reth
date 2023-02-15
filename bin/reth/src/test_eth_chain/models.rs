@@ -92,7 +92,7 @@ impl From<Header> for SealedHeader {
                 ommers_hash: value.uncle_hash,
                 state_root: value.state_root,
                 parent_hash: value.parent_hash,
-                logs_bloom: Bloom::default(), // TODO: ?
+                logs_bloom: value.bloom,
                 withdrawals_root: None,
             },
             value.hash,

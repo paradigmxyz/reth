@@ -112,7 +112,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
                 ForkSpec::MergeEOF |
                 ForkSpec::MergeMeterInitCode |
                 ForkSpec::MergePush0 |
-                ForkSpec::Shanghai | // TODO:
+                ForkSpec::Shanghai |
                 ForkSpec::Unknown
         ) {
             continue
@@ -138,8 +138,8 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         let mut last_block = None;
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
             let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
+            reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
             last_block = Some(decoded.number);
-            reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?; // TODO:
             Ok(())
         })?;
 
