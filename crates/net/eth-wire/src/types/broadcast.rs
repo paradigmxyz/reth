@@ -117,6 +117,22 @@ impl From<Vec<H256>> for NewPooledTransactionHashes {
     }
 }
 
+// TODO document
+// #[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NewPooledTransactionHashes68 {
+    pub types: Vec<u8>,
+    pub sizes: Vec<u32>,
+    pub hashes: Vec<H256>,
+}
+
+impl From<(Vec<u8>, Vec<u32>, Vec<H256>)> for NewPooledTransactionHashes68 {
+    fn from(v: (Vec<u8>, Vec<u32>, Vec<H256>)) -> Self {
+        NewPooledTransactionHashes68 { types: v.0, sizes: v.1, hashes: v.2 }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

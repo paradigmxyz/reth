@@ -51,7 +51,7 @@ pub mod fuzz_rlp {
     use reth_eth_wire::{
         BlockBodies, BlockHeaders, DisconnectReason, GetBlockBodies, GetBlockHeaders, GetNodeData,
         GetPooledTransactions, GetReceipts, HelloMessage, NewBlock, NewBlockHashes,
-        NewPooledTransactionHashes, NodeData, P2PMessage, PooledTransactions, Receipts, Status,
+        NewPooledTransactionHashes68, NodeData, P2PMessage, PooledTransactions, Receipts, Status,
         Transactions,
     };
     use reth_primitives::{BlockHashOrNumber, TransactionSigned};

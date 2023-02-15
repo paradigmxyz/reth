@@ -181,6 +181,14 @@ impl ActiveSession {
             EthMessage::NewPooledTransactionHashes(msg) => {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg)).into()
             }
+            EthMessage::NewPooledTransactionHashes68(msg) => {
+                if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
+                    // TODO how to return err
+                    // return fmt.Errorf("%w: message %v: invalid len of fields: %v %v %v",
+                    // errDecode, msg, len(ann.Hashes), len(ann.Types), len(ann.Sizes))
+                }
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.hashes.into())).into()
+            }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
             }
@@ -237,7 +245,10 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
             PeerMessage::PooledTransactions(msg) => {
-                self.queued_outgoing.push_back(EthMessage::NewPooledTransactionHashes(msg).into());
+                // TODO jinsan
+                // self.queued_outgoing
+                //     .push_back(EthMessage::NewPooledTransactionHashes66(msg).into());
+                todo!()
             }
             PeerMessage::EthRequest(req) => {
                 let deadline = self.request_deadline();
@@ -929,6 +940,7 @@ mod tests {
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             for _ in 0..num_messages {
                 client_stream
+                    // TODO jinsan
                     .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(
                         vec![],
                     )))
@@ -1028,6 +1040,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
 
+        // TODO jinsan
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             client_stream
                 .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(vec![])))

@@ -7,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_primitives::ForkFilter;
-use reth_rlp::{Decodable, Encodable};
+use reth_rlp::Encodable;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -74,7 +74,7 @@ where
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
         }
 
-        let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
+        let msg = match ProtocolMessage::decode_message(status.version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
                 tracing::debug!("rlp decode error in eth handshake: msg={their_msg:x}");
@@ -118,7 +118,7 @@ where
 
                 // now we can create the `EthStream` because the peer has successfully completed
                 // the handshake
-                let stream = EthStream::new(self.inner);
+                let stream = EthStream::new(status.version, self.inner);
 
                 Ok((stream, resp))
             }
@@ -134,6 +134,7 @@ where
 #[pin_project]
 #[derive(Debug)]
 pub struct EthStream<S> {
+    version: u8,
     #[pin]
     inner: S,
 }
@@ -141,8 +142,8 @@ pub struct EthStream<S> {
 impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
-    pub fn new(inner: S) -> Self {
-        Self { inner }
+    pub fn new(version: u8, inner: S) -> Self {
+        Self { version, inner }
     }
 
     /// Returns the underlying stream.
@@ -201,7 +202,7 @@ where
             return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
         }
 
-        let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
+        let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => {
                 tracing::debug!("rlp decode error: msg={bytes:x}");

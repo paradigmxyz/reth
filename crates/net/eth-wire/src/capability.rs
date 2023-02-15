@@ -64,6 +64,12 @@ impl Capability {
     pub fn is_eth_v67(&self) -> bool {
         self.name == "eth" && self.version == 67
     }
+
+    /// Whether this is eth v67.
+    #[inline]
+    pub fn is_eth_v68(&self) -> bool {
+        self.name == "eth" && self.version == 68
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -226,6 +232,15 @@ pub enum SharedCapabilityError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_eth_68() {
+        let capability = SharedCapability::new("eth", 68, 0).unwrap();
+
+        assert_eq!(capability.name(), "eth");
+        assert_eq!(capability.version(), 68);
+        assert_eq!(capability, SharedCapability::Eth { version: EthVersion::Eth68, offset: 0 });
+    }
 
     #[test]
     fn from_eth_67() {
