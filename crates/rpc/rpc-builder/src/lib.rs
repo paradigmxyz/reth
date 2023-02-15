@@ -358,7 +358,6 @@ pub struct RethModuleRegistry<Client, Pool, Network> {
 // === impl RethModuleRegistry ===
 
 impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network> {
-
     /// Creates a new, empty instance.
     pub fn new(client: Client, pool: Pool, network: Network) -> Self {
         Self { client, pool, network, eth_api: None, modules: Default::default() }
@@ -380,19 +379,20 @@ impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network> {
 }
 
 impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network>
-    where
-        Network: NetworkInfo + Peers + Clone + 'static,
+where
+    Network: NetworkInfo + Peers + Clone + 'static,
 {
-
     /// Register Admin Namespace
-    pub fn register_admin(&mut self) -> &mut Self  {
-        self.modules.insert(RethRpcModule::Admin,  AdminApi::new(self.network.clone()).into_rpc().into());
+    pub fn register_admin(&mut self) -> &mut Self {
+        self.modules
+            .insert(RethRpcModule::Admin, AdminApi::new(self.network.clone()).into_rpc().into());
         self
     }
 
     /// Register Web3 Namespace
-    pub fn register_web3(&mut self)  -> &mut Self {
-        self.modules.insert(RethRpcModule::Web3,  Web3Api::new(self.network.clone()).into_rpc().into());
+    pub fn register_web3(&mut self) -> &mut Self {
+        self.modules
+            .insert(RethRpcModule::Web3, Web3Api::new(self.network.clone()).into_rpc().into());
         self
     }
 }
@@ -403,25 +403,27 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
-
     /// Register Eth Namespace
-    pub fn register_eth(&mut self)  -> &mut Self {
+    pub fn register_eth(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
-        self.modules.insert(RethRpcModule::Eth,  eth_api.into_rpc().into());
+        self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
         self
     }
 
     /// Register Debug Namespace
-    pub fn register_debug(&mut self)  -> &mut Self {
+    pub fn register_debug(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
-        self.modules.insert(RethRpcModule::Debug,  DebugApi::new(eth_api).into_rpc().into());
+        self.modules.insert(RethRpcModule::Debug, DebugApi::new(eth_api).into_rpc().into());
         self
     }
 
     /// Register Net Namespace
     pub fn register_net(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
-        self.modules.insert(RethRpcModule::Net,  NetApi::new(self.network.clone(), eth_api).into_rpc().into());
+        self.modules.insert(
+            RethRpcModule::Net,
+            NetApi::new(self.network.clone(), eth_api).into_rpc().into(),
+        );
         self
     }
 
