@@ -101,6 +101,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut highest_block = input.stage_progress.unwrap_or_default();
         debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
 
+        // Task downloader can return `None` only if the response relaying channel was closed. This
+        // is a fatal error to prevent the pipeline from running forever.
         let downloaded_bodies =
             self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
 
