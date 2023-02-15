@@ -96,9 +96,7 @@ impl Display for Hardfork {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use crate::Hardfork;
+    use super::*;
 
     #[test]
     fn check_hardfork_from_str() {
@@ -118,7 +116,7 @@ mod tests {
             "arrowglacier",
             "grayglacier",
             "PARIS",
-            "ShAnGhAI"
+            "ShAnGhAI",
         ];
         let expected_hardforks = [
             Hardfork::Frontier,
@@ -136,16 +134,17 @@ mod tests {
             Hardfork::ArrowGlacier,
             Hardfork::GrayGlacier,
             Hardfork::Paris,
-            Hardfork::Shanghai
+            Hardfork::Shanghai,
         ];
 
-        let hardforks: Vec<Hardfork> = hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
+        let hardforks: Vec<Hardfork> =
+            hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
 
         assert_eq!(hardforks, expected_hardforks);
     }
 
     #[test]
-    fn check_unexisting_hardfork_from_str() {
+    fn check_nonexistent_hardfork_from_str() {
         assert!(Hardfork::from_str("not a hardfork").is_err());
     }
 }
