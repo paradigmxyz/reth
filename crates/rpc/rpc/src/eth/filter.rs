@@ -3,12 +3,11 @@ use async_trait::async_trait;
 use jsonrpsee::{
     core::RpcResult,
     server::{IdProvider, RandomIntegerIdProvider},
-    types::SubscriptionId,
 };
 use reth_primitives::rpc::Filter;
 use reth_provider::BlockProvider;
 use reth_rpc_api::EthFilterApiServer;
-use reth_rpc_types::{FilterChanges, Log};
+use reth_rpc_types::{FilterChanges, FilterId, Log};
 use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tokio::sync::Mutex;
@@ -45,29 +44,28 @@ where
     Client: BlockProvider + 'static,
     Pool: TransactionPool + 'static,
 {
-    async fn new_filter(&self, filter: Filter) -> RpcResult<SubscriptionId<'static>> {
+    async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::Log(filter)).await
     }
 
-    async fn new_block_filter(&self) -> RpcResult<SubscriptionId<'static>> {
+    async fn new_block_filter(&self) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::Block).await
     }
 
-    async fn new_pending_transaction_filter(&self) -> RpcResult<SubscriptionId<'static>> {
+    async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::PendingTransaction).await
     }
 
-    async fn filter_changes(&self, _id: SubscriptionId<'_>) -> RpcResult<FilterChanges> {
+    async fn filter_changes(&self, _id: FilterId) -> RpcResult<FilterChanges> {
         todo!()
     }
 
-    async fn filter_logs(&self, _id: SubscriptionId<'_>) -> RpcResult<Vec<Log>> {
+    async fn filter_logs(&self, _id: FilterId) -> RpcResult<Vec<Log>> {
         todo!()
     }
 
-    async fn uninstall_filter(&self, id: SubscriptionId<'_>) -> RpcResult<bool> {
+    async fn uninstall_filter(&self, id: FilterId) -> RpcResult<bool> {
         let mut filters = self.inner.active_filters.inner.lock().await;
-        let id = id.into_owned();
         if filters.remove(&id).is_some() {
             trace!(target: "rpc::eth::filter", ?id, "uninstalled filter");
             Ok(true)
@@ -99,9 +97,9 @@ where
     Pool: TransactionPool + 'static,
 {
     /// Installs a new filter and returns the new identifier.
-    async fn install_filter(&self, kind: FilterKind) -> RpcResult<SubscriptionId<'static>> {
+    async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.client.chain_info().to_rpc_result()?.best_number;
-        let id = self.id_provider.next_id();
+        let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
             id.clone(),
@@ -114,7 +112,7 @@ where
 /// All active filters
 #[derive(Debug, Clone, Default)]
 pub struct ActiveFilters {
-    inner: Arc<Mutex<HashMap<SubscriptionId<'static>, ActiveFilter>>>,
+    inner: Arc<Mutex<HashMap<FilterId, ActiveFilter>>>,
 }
 
 /// An installed filter
