@@ -5,7 +5,7 @@ use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
-        error::{DownloadError, DownloadResult, RequestResult},
+        error::{DownloadError, DownloadResult},
         priority::Priority,
     },
 };
