@@ -3,7 +3,7 @@
 use futures::pin_mut;
 use reth_tasks::{TaskExecutor, TaskManager};
 use std::{future::Future, time::Duration};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// Used to execute cli commands
 #[derive(Default, Debug)]
@@ -39,6 +39,7 @@ impl CliRunner {
 
         // give all tasks that are now being shut down some time to finish before tokio leaks them
         // see [Runtime::shutdown_timeout](tokio::runtime::Runtime::shutdown_timeout)
+        warn!(target: "reth::cli", "Received shutdown signal, waiting up to 30 seconds for tasks.");
         tokio_runtime.shutdown_timeout(Duration::from_secs(30));
 
         Ok(())
