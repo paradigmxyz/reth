@@ -32,7 +32,7 @@ jobs:
 
       # TODO: replace when we are not using a fork
       - name: Checkout hive tests
-        uses: actions/checkout@v23
+        uses: actions/checkout@v3
         with:
           repository: onbjerg/hive
           ref: onbjerg/reth
