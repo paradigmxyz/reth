@@ -238,8 +238,8 @@ impl<'de> Deserialize<'de> for BlockId {
                                 return Err(serde::de::Error::duplicate_field("blockNumber"))
                             }
                             if require_canonical.is_some() {
-                                return Err(serde::de::Error::duplicate_field(
-                                    "Unexpected require_canonical field",
+                                return Err(serde::de::Error::custom(
+                                    "Non-valid require_canonical field",
                                 ))
                             }
                             number = Some(map.next_value::<BlockNumberOrTag>()?)
