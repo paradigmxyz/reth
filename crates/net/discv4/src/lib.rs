@@ -24,7 +24,10 @@ use crate::{
 use bytes::{Bytes, BytesMut};
 use discv5::{
     kbucket,
-    kbucket::{Distance, Entry as BucketEntry, KBucketsTable, NodeStatus, MAX_NODES_PER_BUCKET},
+    kbucket::{
+        BucketInsertResult, Distance, Entry as BucketEntry, KBucketsTable, NodeStatus,
+        MAX_NODES_PER_BUCKET,
+    },
     ConnectionDirection, ConnectionState,
 };
 use enr::{Enr, EnrBuilder};
@@ -854,7 +857,7 @@ impl Discv4Service {
         //
         // Note: we only mark if the node is absent because the `last 12h` condition is handled by
         // the ping interval
-        let mut was_absent = false;
+        let mut is_new_insert = false;
 
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => entry.value_mut().update_with_enr(ping.enr_sq),
@@ -863,17 +866,22 @@ impl Discv4Service {
                 let mut node = NodeEntry::new(record);
                 node.last_enr_seq = ping.enr_sq;
 
-                let _ = entry.insert(
+                match entry.insert(
                     node,
                     NodeStatus {
                         direction: ConnectionDirection::Incoming,
                         // mark as disconnected until endpoint proof established on pong
                         state: ConnectionState::Disconnected,
                     },
-                );
-
-                // unknown node, send ping
-                was_absent = true;
+                ) {
+                    BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
+                        // mark as new insert if insert was successful
+                        is_new_insert = true;
+                    }
+                    _ => {
+                        // insert unsuccessful but we still want to send the pong
+                    }
+                }
 
                 None
             }
@@ -892,7 +900,7 @@ impl Discv4Service {
         self.send_packet(msg, remote_addr);
 
         // if node was absent also send a ping to establish the endpoint proof from our end
-        if was_absent {
+        if is_new_insert {
             self.try_ping(record, PingReason::Initial);
         } else {
             // Request ENR if included in the ping
