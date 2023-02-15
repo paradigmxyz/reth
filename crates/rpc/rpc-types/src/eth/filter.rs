@@ -1,5 +1,5 @@
 use crate::Log;
-use jsonrpsee::types::SubscriptionId;
+use jsonrpsee_types::SubscriptionId;
 use reth_primitives::H256;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
