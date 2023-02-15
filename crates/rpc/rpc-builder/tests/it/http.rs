@@ -1,7 +1,5 @@
 //! Standalone http tests
 
-use std::collections::HashSet;
-
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::{
     core::{
@@ -12,8 +10,8 @@ use jsonrpsee::{
 };
 use reth_primitives::{
     hex_literal::hex,
-    rpc::{BlockId, BlockNumber as RpcBlockNumber},
-    Address, BlockNumber, Bytes, NodeRecord, H256, H64, U256,
+    rpc::{BlockId, BlockNumber},
+    Address, Bytes, NodeRecord, H256, H64, U256,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -21,6 +19,7 @@ use reth_rpc_api::{
 };
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Index, TransactionRequest};
+use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
     match err {
@@ -169,7 +168,7 @@ async fn test_basic_debug_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    let block_id = BlockId::Number(RpcBlockNumber::default());
+    let block_id = BlockId::Number(BlockNumber::default());
 
     assert!(is_unimplemented(DebugApiClient::raw_header(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::raw_block(client, block_id).await.err().unwrap()));
@@ -193,7 +192,7 @@ async fn test_basic_trace_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    let block_id = BlockId::Number(RpcBlockNumber::default());
+    let block_id = BlockId::Number(BlockNumber::default());
     let trace_filter = TraceFilter {
         from_block: None,
         to_block: None,
