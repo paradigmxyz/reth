@@ -93,3 +93,59 @@ impl Display for Hardfork {
         write!(f, "{self:?}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use crate::Hardfork;
+
+    #[test]
+    fn check_hardfork_from_str() {
+        let hardfork_str = [
+            "frOntier",
+            "homEstead",
+            "dao",
+            "tAngerIne",
+            "spurIousdrAgon",
+            "byzAntium",
+            "constantinople",
+            "petersburg",
+            "istanbul",
+            "muirglacier",
+            "bErlin",
+            "lonDon",
+            "arrowglacier",
+            "grayglacier",
+            "PARIS",
+            "ShAnGhAI"
+        ];
+        let expected_hardforks = [
+            Hardfork::Frontier,
+            Hardfork::Homestead,
+            Hardfork::Dao,
+            Hardfork::Tangerine,
+            Hardfork::SpuriousDragon,
+            Hardfork::Byzantium,
+            Hardfork::Constantinople,
+            Hardfork::Petersburg,
+            Hardfork::Istanbul,
+            Hardfork::MuirGlacier,
+            Hardfork::Berlin,
+            Hardfork::London,
+            Hardfork::ArrowGlacier,
+            Hardfork::GrayGlacier,
+            Hardfork::Paris,
+            Hardfork::Shanghai
+        ];
+
+        let hardforks: Vec<Hardfork> = hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
+
+        assert_eq!(hardforks, expected_hardforks);
+    }
+
+    #[test]
+    fn check_unexisting_hardfork_from_str() {
+        assert!(Hardfork::from_str("not a hardfork").is_err());
+    }
+}
