@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -65,7 +65,7 @@ jobs:
 
       # TODO: replace when we are not using a fork
       - name: Checkout hive
-        uses: actions/checkout@v2
+        uses: actions/checkout@v23
         with:
           repository: onbjerg/hive
           ref: onbjerg/reth
