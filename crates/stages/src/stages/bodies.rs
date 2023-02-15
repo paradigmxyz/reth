@@ -476,7 +476,7 @@ mod tests {
                 BlockBody {
                     transactions: block.body.clone(),
                     ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
-                    withdrawals: None, // TODO:
+                    withdrawals: block.withdrawals.clone(),
                 },
             )
         }
@@ -796,7 +796,7 @@ mod tests {
                             header,
                             body: body.transactions,
                             ommers: body.ommers.into_iter().map(|h| h.seal()).collect(),
-                            withdrawals: None, // TODO:
+                            withdrawals: body.withdrawals,
                         }));
                     }
 
