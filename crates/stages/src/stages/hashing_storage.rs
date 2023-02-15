@@ -74,23 +74,25 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                     let mut storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
                     while !remaining.is_zero() {
                         hashed_batch.extend(
-                            storage.walk_dup(current_key, current_subkey)?.take(remaining).map(
-                                |res| {
-                                    let (address, slot) = res.expect("should not fail");
+                            storage
+                                .walk_dup(current_key, current_subkey)?
+                                .take(remaining)
+                                .map(|res| {
+                                    res.map(|(address, slot)| {
+                                        // Address caching for the first iteration when current_key
+                                        // is None
+                                        let keccak_address =
+                                            if let Some(keccak_address) = keccak_address {
+                                                keccak_address
+                                            } else {
+                                                keccak256(address)
+                                            };
 
-                                    // Address caching for the first iteration when current_key is
-                                    // None
-                                    let keccak_address =
-                                        if let Some(keccak_address) = keccak_address {
-                                            keccak_address
-                                        } else {
-                                            keccak256(address)
-                                        };
-
-                                    // TODO cache map keccak256(slot.key) ?
-                                    ((keccak_address, keccak256(slot.key)), slot.value)
-                                },
-                            ),
+                                        // TODO cache map keccak256(slot.key) ?
+                                        ((keccak_address, keccak256(slot.key)), slot.value)
+                                    })
+                                })
+                                .collect::<Result<BTreeMap<_, _>, _>>()?,
                         );
 
                         remaining = self.commit_threshold as usize - hashed_batch.len();
