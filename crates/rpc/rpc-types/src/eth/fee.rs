@@ -1,6 +1,8 @@
 use lru::LruCache;
+use parking_lot::Mutex;
 use reth_primitives::{BlockNumber, H256, U256};
 use serde::{Deserialize, Serialize};
+use std::{num::NonZeroUsize, sync::Arc};
 
 /// Response type for `eth_feeHistory`
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -23,7 +25,15 @@ pub struct FeeHistory {
 }
 
 /// LRU cache for `eth_feeHistory` RPC method. Block Number => Fee History.
-pub type FeeHistoryCache = LruCache<BlockNumber, FeeHistoryCacheItem>;
+#[derive(Clone, Debug)]
+pub struct FeeHistoryCache(pub Arc<Mutex<LruCache<BlockNumber, FeeHistoryCacheItem>>>);
+
+impl FeeHistoryCache {
+    /// Creates a new LRU Cache that holds at most cap items.
+    pub fn new(cap: NonZeroUsize) -> Self {
+        Self(Arc::new(Mutex::new(LruCache::new(cap))))
+    }
+}
 
 /// [FeeHistoryCache] item.
 #[derive(Clone, Debug)]

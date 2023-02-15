@@ -14,7 +14,6 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
-use parking_lot::Mutex;
 use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
@@ -61,7 +60,7 @@ pub trait EthApiSpec: Send + Sync {
 pub struct EthApi<Client, Pool, Network> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Client, Pool, Network>>,
-    fee_history_cache: Arc<Mutex<FeeHistoryCache>>,
+    fee_history_cache: FeeHistoryCache,
 }
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
@@ -70,9 +69,9 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
         let inner = EthApiInner { client, pool, network, signers: Default::default() };
         Self {
             inner: Arc::new(inner),
-            fee_history_cache: Arc::new(Mutex::new(FeeHistoryCache::new(
+            fee_history_cache: FeeHistoryCache::new(
                 NonZeroUsize::new(FEE_HISTORY_CACHE_LIMIT).unwrap(),
-            ))),
+            ),
         }
     }
 

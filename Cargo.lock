@@ -4607,7 +4607,6 @@ dependencies = [
  "hyper",
  "jsonrpsee",
  "jsonwebtoken",
- "parking_lot 0.12.1",
  "pin-project",
  "rand 0.8.5",
  "reth-interfaces",
@@ -4683,6 +4682,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "lru 0.9.0",
+ "parking_lot 0.12.1",
  "reth-network-api",
  "reth-primitives",
  "reth-rlp",
