@@ -2,7 +2,10 @@
 
 use jsonrpsee::core::{Error as RpcError, RpcResult};
 use reth_interfaces::Result as RethResult;
+use reth_primitives::Block;
 use std::{error::Error, fmt::Display};
+
+use crate::eth::error::EthApiError;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {
@@ -132,27 +135,20 @@ pub(crate) fn rpc_err(code: i32, msg: impl Into<String>, data: Option<&[u8]>) ->
     ))
 }
 
-pub(crate) trait ToRpcResultExt<T, Err> {
+pub(crate) trait ToRpcResultExt {
     type Output;
-    type Error;
 
-    fn output_or_rpc_err(self, err: Self::Error) -> RpcResult<Self::Output>;
+    fn output_or_rpc_err(self) -> RpcResult<Self::Output>;
 }
 
-impl<T, Err> ToRpcResultExt<T, Err> for RethResult<Option<T>>
-where
-    T: Clone,
-    Err: Error + Into<RpcError>,
-    Self: Sized,
-{
-    type Output = T;
-    type Error = Err;
+impl ToRpcResultExt for RethResult<Option<Block>> {
+    type Output = Block;
 
-    fn output_or_rpc_err(self, err: Err) -> RpcResult<Self::Output> {
+    fn output_or_rpc_err(self) -> RpcResult<Self::Output> {
         match self {
             Ok(block) => match block {
                 Some(value) => Ok(value),
-                None => Err(err.into()),
+                None => Err(EthApiError::UnknownBlockNumber.into()),
             },
             Err(err) => Err(internal_rpc_err(err.to_string())),
         }
@@ -161,8 +157,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
-    use crate::eth::error::EthApiError;
 
     use super::*;
 
@@ -184,14 +178,5 @@ mod tests {
         let rpc_res = res.map_internal_err(|_| "This is a message");
         let val = rpc_res.unwrap();
         assert_eq!(val, 100);
-    }
-
-    #[test]
-    fn can_convert_block_result_to_rpc() {
-        let res = to_optional_reth_err(5);
-
-        let rpc_res = res.output_or_rpc_err(EthApiError::UnknownBlockNumber);
-        let val = rpc_res.unwrap();
-        assert_eq!(val, 5);
     }
 }
