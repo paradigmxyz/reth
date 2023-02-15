@@ -620,7 +620,7 @@ where
         // The downloader boundaries (local head and sync target) have to be set in order
         // to start downloading data.
         if this.local_head.is_none() || this.sync_target.is_none() {
-            tracing::trace!(
+            trace!(
                 target: "downloaders::headers",
                 head=?this.local_block_number(),
                 sync_target=?this.sync_target,
@@ -635,6 +635,11 @@ where
             match req.poll_unpin(cx) {
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
+                        if err.is_channel_closed() {
+                            // download channel closed which means the network was dropped
+                            return Poll::Ready(None)
+                        }
+
                         this.penalize_peer(err.peer_id, &err.error);
                         this.metrics.increment_errors(&err.error);
                         this.sync_target_request =
@@ -664,6 +669,10 @@ where
                 this.metrics.in_flight_requests.decrement(1.);
                 // handle response
                 if let Err(err) = this.on_headers_outcome(outcome) {
+                    if err.is_channel_closed() {
+                        // download channel closed which means the network was dropped
+                        return Poll::Ready(None)
+                    }
                     this.on_headers_error(err);
                 }
             }
@@ -801,6 +810,16 @@ struct HeadersResponseError {
     request: HeadersRequest,
     peer_id: Option<PeerId>,
     error: DownloadError,
+}
+
+impl HeadersResponseError {
+    /// Returns true if the error was caused by a closed channel to the network.
+    fn is_channel_closed(&self) -> bool {
+        if let DownloadError::RequestError(ref err) = self.error {
+            return err.is_channel_closed()
+        }
+        false
+    }
 }
 
 /// The block to which we want to close the gap: (local head...sync target]
