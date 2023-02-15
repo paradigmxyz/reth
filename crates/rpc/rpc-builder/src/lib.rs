@@ -265,7 +265,7 @@ impl RpcModuleSelection {
         Network: NetworkInfo + Peers + Clone + 'static,
     {
         let mut registry = RethModuleRegistry::new(client, pool, network);
-        registry.module(self)
+        registry.module_for(self)
     }
 
     /// Returns an iterator over all configured [RethRpcModule]
@@ -357,27 +357,86 @@ pub struct RethModuleRegistry<Client, Pool, Network> {
 
 // === impl RethModuleRegistry ===
 
+impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network> {
+    /// Creates a new, empty instance.
+    pub fn new(client: Client, pool: Pool, network: Network) -> Self {
+        Self { client, pool, network, eth_api: None, modules: Default::default() }
+    }
+
+    /// Returns all installed methods
+    pub fn methods(&self) -> Vec<Methods> {
+        self.modules.values().cloned().collect()
+    }
+
+    /// Returns a merged RpcModule
+    pub fn module(&self) -> RpcModule<()> {
+        let mut module = RpcModule::new(());
+        for methods in self.modules.values().cloned() {
+            module.merge(methods).expect("No conflicts");
+        }
+        module
+    }
+}
+
+impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network>
+where
+    Network: NetworkInfo + Peers + Clone + 'static,
+{
+    /// Register Admin Namespace
+    pub fn register_admin(&mut self) -> &mut Self {
+        self.modules
+            .insert(RethRpcModule::Admin, AdminApi::new(self.network.clone()).into_rpc().into());
+        self
+    }
+
+    /// Register Web3 Namespace
+    pub fn register_web3(&mut self) -> &mut Self {
+        self.modules
+            .insert(RethRpcModule::Web3, Web3Api::new(self.network.clone()).into_rpc().into());
+        self
+    }
+}
+
 impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
-    /// Creates a new, empty instance
-    pub fn new(client: Client, pool: Pool, network: Network) -> Self {
-        Self { client, pool, network, eth_api: None, modules: Default::default() }
+    /// Register Eth Namespace
+    pub fn register_eth(&mut self) -> &mut Self {
+        let eth_api = self.eth_api();
+        self.modules.insert(RethRpcModule::Eth, eth_api.into_rpc().into());
+        self
+    }
+
+    /// Register Debug Namespace
+    pub fn register_debug(&mut self) -> &mut Self {
+        let eth_api = self.eth_api();
+        self.modules.insert(RethRpcModule::Debug, DebugApi::new(eth_api).into_rpc().into());
+        self
+    }
+
+    /// Register Net Namespace
+    pub fn register_net(&mut self) -> &mut Self {
+        let eth_api = self.eth_api();
+        self.modules.insert(
+            RethRpcModule::Net,
+            NetApi::new(self.network.clone(), eth_api).into_rpc().into(),
+        );
+        self
     }
 
     /// Helper function to create a [RpcModule] if it's not `None`
     fn maybe_module(&mut self, config: Option<&RpcModuleSelection>) -> Option<RpcModule<()>> {
         let config = config?;
-        let module = self.module(config);
+        let module = self.module_for(config);
         Some(module)
     }
 
     /// Populates a new [RpcModule] based on the selected [RethRpcModule]s in the given
     /// [RpcModuleSelection]
-    pub fn module(&mut self, config: &RpcModuleSelection) -> RpcModule<()> {
+    pub fn module_for(&mut self, config: &RpcModuleSelection) -> RpcModule<()> {
         let mut module = RpcModule::new(());
         let all_methods = self.reth_methods(config.iter_selection());
         for methods in all_methods {
