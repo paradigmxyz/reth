@@ -2,6 +2,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Attribute, DataStruct, Error, Field, Meta, NestedMeta, Result, Type, TypePath};
 
+pub(crate) const EMPTY_STRING_CODE: u8 = 0x80;
+
 pub(crate) fn parse_struct<'a>(
     ast: &'a syn::DeriveInput,
     derive_attr: &str,

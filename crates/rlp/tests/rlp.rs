@@ -127,4 +127,9 @@ fn test_opt_fields_roundtrip() {
     let item = TestOpt { a: 1, b: 2, c: Some(3), d: Some(4) };
     assert_eq!(&*encoded(&item), expected);
     assert_eq!(TestOpt::decode(&mut &expected[..]).unwrap(), item);
+
+    let expected = hex!("c401028004");
+    let item = TestOpt { a: 1, b: 2, c: None, d: Some(4) };
+    assert_eq!(&*encoded(&item), expected);
+    assert_eq!(TestOpt::decode(&mut &expected[..]).unwrap(), item);
 }
