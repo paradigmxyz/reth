@@ -1,4 +1,5 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -24,7 +25,7 @@ pub struct StorageHashingStage {
     /// The threshold (in number of state transitions) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of blocks to process before committing.
+    /// The maximum number of slots to process before committing.
     pub commit_threshold: u64,
 }
 
@@ -62,38 +63,72 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             tx.clear::<tables::HashedStorage>()?;
             tx.commit()?;
 
-            let mut first_key = None;
+            let mut current_key = None;
+            let mut current_subkey = None;
+            let mut keccak_address = None;
+
             loop {
-                let next_key = {
+                let mut hashed_batch = BTreeMap::new();
+                let mut remaining = self.commit_threshold as usize;
+                {
                     let mut storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+                    while !remaining.is_zero() {
+                        hashed_batch.extend(
+                            storage.walk_dup(current_key, current_subkey)?.take(remaining).map(
+                                |res| {
+                                    let (address, slot) = res.expect("should not fail");
 
-                    let hashed_batch = storage
-                        .walk(first_key)?
-                        .take(self.commit_threshold as usize)
-                        .map(|res| {
-                            res.map(|(address, slot)| {
-                                // both account address and storage slot key are hashed for merkle
-                                // tree.
-                                ((keccak256(address), keccak256(slot.key)), slot.value)
-                            })
-                        })
-                        .collect::<Result<BTreeMap<_, _>, _>>()?;
+                                    // Address caching for the first iteration when current_key is
+                                    // None
+                                    let keccak_address =
+                                        if let Some(keccak_address) = keccak_address {
+                                            keccak_address
+                                        } else {
+                                            keccak256(address)
+                                        };
 
-                    // next key of iterator
-                    let next_key = storage.next()?;
+                                    // TODO cache map keccak256(slot.key) ?
+                                    ((keccak_address, keccak256(slot.key)), slot.value)
+                                },
+                            ),
+                        );
 
-                    // iterate and put presorted hashed slots
-                    hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
-                        tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
-                    })?;
-                    next_key.map(|(key, _)| key)
-                };
+                        remaining = self.commit_threshold as usize - hashed_batch.len();
+
+                        if let Some((address, slot)) = storage.next_dup()? {
+                            // There's still some remaining elements on this key, so we need to save
+                            // the cursor position for the next
+                            // iteration
+
+                            current_key = Some(address);
+                            current_subkey = Some(slot.key);
+                        } else {
+                            // Go to the next key
+                            current_key = storage.next_no_dup()?.map(|(key, _)| key);
+                            current_subkey = None;
+
+                            // Cache keccak256(address) for the next key if it exists
+                            if let Some(address) = current_key {
+                                keccak_address = Some(keccak256(address));
+                            } else {
+                                // We have reached the end of table
+                                break
+                            }
+                        }
+                    }
+                }
+
+                // iterate and put presorted hashed slots
+                hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
+                    tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
+                })?;
+
                 tx.commit()?;
 
-                first_key = match next_key {
-                    Some(key) => Some(key),
-                    None => break,
-                };
+                // We have reached the end of table
+                if current_key.is_none() {
+                    break
+                }
             }
         } else {
             let mut plain_storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
