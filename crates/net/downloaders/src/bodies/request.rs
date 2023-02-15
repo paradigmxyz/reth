@@ -192,14 +192,14 @@ impl<B> Future for BodiesRequestFuture<B>
 where
     B: BodiesClient + 'static,
 {
-    type Output = Vec<BlockResponse>;
+    type Output = DownloadResult<Vec<BlockResponse>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
         loop {
             if this.headers.is_empty() {
-                return Poll::Ready(std::mem::take(&mut this.buffer))
+                return Poll::Ready(Ok(std::mem::take(&mut this.buffer)))
             }
 
             // Check if there is a pending requests. It might not exist if all
@@ -213,6 +213,10 @@ where
                         }
                     }
                     Err(error) => {
+                        if error.is_channel_closed() {
+                            return Poll::Ready(Err(error.into()))
+                        }
+
                         this.on_error(error.into(), None);
                     }
                 }
@@ -255,7 +259,10 @@ mod tests {
         )
         .with_headers(headers.clone());
 
-        assert_eq!(fut.await, headers.into_iter().map(BlockResponse::Empty).collect::<Vec<_>>());
+        assert_eq!(
+            fut.await.unwrap(),
+            headers.into_iter().map(BlockResponse::Empty).collect::<Vec<_>>()
+        );
         assert_eq!(client.times_requested(), 0);
     }
 
@@ -277,7 +284,7 @@ mod tests {
         )
         .with_headers(headers.clone());
 
-        assert_eq!(fut.await, zip_blocks(headers.iter(), &mut bodies));
+        assert_eq!(fut.await.unwrap(), zip_blocks(headers.iter(), &mut bodies));
         assert_eq!(
             client.times_requested(),
             // div_ceild
