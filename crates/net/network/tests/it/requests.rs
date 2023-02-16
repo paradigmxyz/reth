@@ -70,7 +70,8 @@ async fn test_get_body() {
 
         let blocks = res.unwrap().1;
         assert_eq!(blocks.len(), 1);
-        let expected = BlockBody { transactions: block.body, ommers: block.ommers };
+        let expected =
+            BlockBody { transactions: block.body, ommers: block.ommers, withdrawals: None };
         assert_eq!(blocks[0], expected);
     }
 }

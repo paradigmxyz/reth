@@ -118,8 +118,6 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
             continue
         }
 
-        // if matches!(suite.pre, State(RootOrState::Root(_))) {}
-
         let pre_state = suite.pre.0;
 
         debug!(target: "reth::cli", name, network = ?suite.network, "Running test");
@@ -134,14 +132,14 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         // insert genesis
         let header: SealedHeader = suite.genesis_block_header.into();
-        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![] };
+        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![], withdrawals: None };
         reth_provider::insert_canonical_block(&tx, &genesis_block, has_block_reward)?;
 
         let mut last_block = None;
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
             let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-            last_block = Some(decoded.number);
             reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
+            last_block = Some(decoded.number);
             Ok(())
         })?;
 

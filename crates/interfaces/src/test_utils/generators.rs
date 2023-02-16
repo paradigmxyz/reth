@@ -136,6 +136,7 @@ pub fn random_block(
         .seal(),
         body: transactions,
         ommers: ommers.into_iter().map(|ommer| ommer.seal()).collect(),
+        withdrawals: None,
     }
 }
 
