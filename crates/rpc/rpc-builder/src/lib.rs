@@ -441,7 +441,7 @@ where
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder>,
-
+    /// Configs for JSON-RPC that allow Corsdomains
     http_cors_domain_server_config: Option<ServerBuilder<Stack<CorsLayer, Identity>>>,
     /// Configs for WS server
     ws_server_config: Option<ServerBuilder>,
@@ -458,7 +458,7 @@ pub struct RpcServerConfig {
 impl RpcServerConfig {
     /// Creates a new config with only http set
     pub fn http(config: ServerBuilder) -> Self {
-        Self::default().with_http(config)
+        Self::default().with_http(config, None)
     }
 
     /// Creates a new config with only ws set
@@ -470,35 +470,38 @@ impl RpcServerConfig {
     pub fn ipc(config: IpcServerBuilder) -> Self {
         Self::default().with_ipc(config)
     }
-
     /// Configures the http server
-    pub fn with_http(mut self, config: ServerBuilder) -> Self {
-        self.http_server_config = Some(config.http_only());
-        self
-    }
-
-    // Confiugures the http server with cors domain
-    pub fn with_http_cors_domain(mut self, config: ServerBuilder, domains: Vec<&str>) -> Self {
-
-        let origins = domains.into_iter().map(|domain| {
-            domain.parse().unwrap()
-        }).collect::<Vec<HeaderValue>>();
-    // Add a CORS middleware for handling HTTP requests.
-	// This middleware does affect the response, including appropriate
-	// headers to satisfy CORS. Because any origins are allowed, the
-	// "Access-Control-Allow-Origin: *" header is appended to the response.
-	let cors = CorsLayer::new()
-    // Allow `POST` when accessing the resource
-    .allow_methods([Method::POST])
-    // Allow requests from any origin
-    .allow_origin(origins)
-    .allow_headers([hyper::header::CONTENT_TYPE]);
-
-    // let test = "http://example.com".parse::<HeaderValue>().unwrap();
-
-    let middleware = tower::ServiceBuilder::new().layer(cors);    
-    
-    self.http_cors_domain_server_config = Some(config.set_middleware(middleware).http_only());
+    pub fn with_http(mut self, config: ServerBuilder, domains: Option<&String>) -> Self {
+        if let Some(domains) = domains {
+            match domains.as_str() {
+                "*" => {
+                    let cors = CorsLayer::new()
+                    .allow_methods([Method::GET, Method::POST])
+                    .allow_origin(Any)
+                    .allow_headers(Any);
+                    
+                    let middleware = tower::ServiceBuilder::new().layer(cors); 
+                    self.http_cors_domain_server_config = Some(config.set_middleware(middleware).http_only());
+                },
+                "" => {
+                    self.http_server_config = Some(config.http_only());
+                },
+                _ => {
+                    let domains_vec = domains.split(",").collect::<Vec<&str>>();
+                    let origins = domains_vec.into_iter().map(|domain| {
+                        domain.parse().unwrap()
+                    }).collect::<Vec<HeaderValue>>();
+                
+                    let cors = CorsLayer::new()
+                    .allow_methods([Method::GET, Method::POST])
+                    .allow_origin(origins)
+                    .allow_headers(Any);
+                    
+                    let middleware = tower::ServiceBuilder::new().layer(cors); 
+                    self.http_cors_domain_server_config = Some(config.set_middleware(middleware).http_only());
+                }
+            }
+        }
         self
     }
 
@@ -807,17 +810,6 @@ impl std::fmt::Debug for RpcServerHandle {
             .field("ipc", &self.ipc.is_some())
             .finish()
     }
-}
-
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub enum RpcCorsConfig {
-    /// Use _all_ available modules.
-    All,
-    /// The default modules `eth`, `net`, `web3`
-    #[default]
-    None,
-    /// Only use the configured modules.
-    Selection(Vec<RethRpcModule>),
 }
 
 #[cfg(test)]

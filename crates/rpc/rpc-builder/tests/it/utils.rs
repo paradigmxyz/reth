@@ -39,7 +39,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleConfig>) -> RpcServerHan
     server
         .start_server(
             RpcServerConfig::ws(Default::default())
-                .with_http(Default::default())
+                .with_http(Default::default(),None)
                 .with_address(test_address()),
         )
         .await
