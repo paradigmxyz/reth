@@ -169,6 +169,48 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 
 <br>
 
+## AccountHashingStage
+* TODO: explain stage
+<br>
+
+## StorageHashingStage
+* TODO: explain stage
+<br>
+
+## IndexAccountHistoryStage
+* TODO: explain stage
+<br>
+
+## IndexStorageHistoryStage
+* TODO: explain stage
+<br>
+
+## MerkleExecuteStage
+* TODO: explain stage
+<br>
+
+## MerkleUnwindStage
+* TODO: explain stage
+<br>
+
+## SenderRecoveryStage
+* TODO: explain stage
+<br>
+
+## TotalDifficultyStage
+* TODO: explain stage
+<br>
+
+## TransactionLookupStage
+* TODO: explain stage
+<br>
+
+
+## FinishStage
+* TODO: explain stage
+<br>
+
+
 # Next Chapter
 
 Now that we have covered all of the stages that are currently included in the `Pipeline`, you know how the Reth client stays synced with the chain tip and updates the database with all of the new headers, bodies, senders and state changes. While this chapter provides an overview on how the pipeline stages work, the following chapters will dive deeper into the database, the networking stack and other exciting corners of the Reth codebase. Feel free to check out any parts of the codebase mentioned in this chapter, and when you are ready, the next chapter will dive into the `database`.
