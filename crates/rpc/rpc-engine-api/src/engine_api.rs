@@ -85,12 +85,17 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let transactions_root = proofs::calculate_transaction_root(transactions.iter());
+
+        let withdrawals_root =
+            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w.iter()));
+
         let header = Header {
             parent_hash: payload.parent_hash,
             beneficiary: payload.fee_recipient,
             state_root: payload.state_root,
             transactions_root,
             receipts_root: payload.receipts_root,
+            withdrawals_root,
             logs_bloom: payload.logs_bloom,
             number: payload.block_number.as_u64(),
             gas_limit: payload.gas_limit.as_u64(),
@@ -113,7 +118,12 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             })
         }
 
-        Ok(SealedBlock { header, body: transactions, ommers: Default::default() })
+        Ok(SealedBlock {
+            header,
+            body: transactions,
+            withdrawals: payload.withdrawals,
+            ommers: Default::default(),
+        })
     }
 
     /// Called to retrieve the latest state of the network, validate new blocks, and maintain
@@ -333,6 +343,7 @@ mod tests {
                 header: transformed.header.seal(),
                 body: transformed.body,
                 ommers: transformed.ommers.into_iter().map(Header::seal).collect(),
+                withdrawals: transformed.withdrawals,
             }
         }
 

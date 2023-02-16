@@ -5,7 +5,7 @@ use crate::{
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::{StoredBlockBody, TransitionIdAddress},
+    models::TransitionIdAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -14,9 +14,7 @@ use reth_executor::{
     revm_wrap::{State, SubState},
 };
 use reth_interfaces::provider::Error as ProviderError;
-use reth_primitives::{
-    Address, Block, ChainSpec, Hardfork, Header, StorageEntry, H256, MAINNET, U256,
-};
+use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, MAINNET, U256};
 use reth_provider::{LatestStateProviderRef, Transaction};
 use std::fmt::Debug;
 use tracing::*;
@@ -85,6 +83,8 @@ impl ExecutionStage {
         let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         // Get ommers with canonical hashes.
         let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
+        // Get block withdrawals.
+        let mut withdrawals_cursor = tx.cursor_read::<tables::BlockWithdrawals>()?;
         // Get transaction of the block that we are executing.
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
@@ -93,7 +93,7 @@ impl ExecutionStage {
         // Get block headers and bodies
         let block_batch = headers_cursor
             .walk_range(start_block..=end_block)?
-            .map(|entry| -> Result<(Header, U256, StoredBlockBody, Vec<Header>), StageError> {
+            .map(|entry| -> Result<_, StageError> {
                 let (number, header) = entry?;
                 let (_, td) = td_cursor
                     .seek_exact(number)?
@@ -101,7 +101,9 @@ impl ExecutionStage {
                 let (_, body) =
                     bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockBody { number })?;
                 let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
-                Ok((header, td.into(), body, stored_ommers.ommers))
+                let withdrawals =
+                    withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);
+                Ok((header, td.into(), body, stored_ommers.ommers, withdrawals))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -110,7 +112,7 @@ impl ExecutionStage {
 
         // Fetch transactions, execute them and generate results
         let mut block_change_patches = Vec::with_capacity(block_batch.len());
-        for (header, td, body, ommers) in block_batch.into_iter() {
+        for (header, td, body, ommers, withdrawals) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
 
@@ -144,7 +146,7 @@ impl ExecutionStage {
             trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
             let changeset = reth_executor::executor::execute_and_verify_receipt(
-                &Block { header, body: transactions, ommers },
+                &Block { header, body: transactions, ommers, withdrawals },
                 td,
                 Some(signers),
                 &self.chain_spec,
@@ -163,7 +165,7 @@ impl ExecutionStage {
             let spurious_dragon_active =
                 self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
             // insert state change set
-            for result in results.changesets.into_iter() {
+            for result in results.tx_changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {
                     let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
                     // apply account change to db. Updates AccountChangeSet and PlainAccountState
@@ -247,20 +249,17 @@ impl ExecutionStage {
                 current_transition_id += 1;
             }
 
-            // If there is block reward we will add account changeset to db
-            if let Some(block_reward_changeset) = results.block_reward {
-                // we are sure that block reward index is present.
-                for (address, changeset) in block_reward_changeset.into_iter() {
-                    trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
-                    changeset.apply_to_db(
-                        &**tx,
-                        address,
-                        current_transition_id,
-                        spurious_dragon_active,
-                    )?;
-                }
-                current_transition_id += 1;
+            // If there are any post block changes, we will add account changesets to db.
+            for (address, changeset) in results.block_changesets.into_iter() {
+                trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
+                changeset.apply_to_db(
+                    &**tx,
+                    address,
+                    current_transition_id,
+                    spurious_dragon_active,
+                )?;
             }
+            current_transition_id += 1;
         }
 
         let done = !capped;

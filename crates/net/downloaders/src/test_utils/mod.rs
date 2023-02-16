@@ -30,6 +30,7 @@ pub(crate) fn generate_bodies(
                 BlockBody {
                     transactions: block.body,
                     ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                    withdrawals: block.withdrawals,
                 },
             )
         })

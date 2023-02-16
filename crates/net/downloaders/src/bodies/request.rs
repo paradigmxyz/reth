@@ -171,6 +171,7 @@ where
                     header: next_header,
                     body: next_body.transactions,
                     ommers: next_body.ommers.into_iter().map(|header| header.seal()).collect(),
+                    withdrawals: next_body.withdrawals,
                 };
 
                 if let Err(error) = self.consensus.pre_validate_block(&block) {
