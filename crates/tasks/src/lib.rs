@@ -8,7 +8,11 @@
 //! reth task management
 
 use crate::shutdown::{signal, Shutdown, Signal};
-use futures_util::{future::select, pin_mut, Future, FutureExt};
+use dyn_clone::DynClone;
+use futures_util::{
+    future::{select, BoxFuture},
+    pin_mut, Future, FutureExt, TryFutureExt,
+};
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},
@@ -22,6 +26,64 @@ use tracing::error;
 use tracing_futures::Instrument;
 
 pub mod shutdown;
+
+/// A type that can spawn tasks.
+///
+/// The main purpose of this type is to abstract over [TaskExecutor] so it's more convenient to
+/// provide default impls for testing.
+///
+///
+/// # Examples
+///
+/// Use the [TokioTaskExecutor] that spawns with [tokio::task::spawn]
+///
+/// ```
+/// # async fn t() {
+///  use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+/// let executor = TokioTaskExecutor::default();
+///
+/// let task = executor.spawn(Box::pin(async {
+///     // -- snip --
+/// }));
+/// task.await.unwrap();
+/// # }
+/// ```
+///
+/// Use the [TaskExecutor] that spawns task directly onto the tokio runtime via the [Handle].
+///
+/// ```
+/// # use reth_tasks::TaskManager;
+/// fn t() {
+///  use reth_tasks::TaskSpawner;
+/// let rt = tokio::runtime::Runtime::new().unwrap();
+/// let manager = TaskManager::new(rt.handle().clone());
+/// let executor = manager.executor();
+/// let task = TaskSpawner::spawn(&executor, Box::pin(async {
+///     // -- snip --
+/// }));
+/// rt.block_on(task).unwrap();
+/// # }
+/// ```
+///
+/// The [TaskSpawner] trait is [DynClone] so `Box<dyn TaskSpawner>` are also `Clone`.
+pub trait TaskSpawner: Send + Sync + std::fmt::Debug + DynClone {
+    /// Spawns the task onto the runtime.
+    /// See also [`Handle::spawn`].
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+}
+
+dyn_clone::clone_trait_object!(TaskSpawner);
+
+/// An [TaskSpawner] that uses [tokio::task::spawn] to execute tasks
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TokioTaskExecutor;
+
+impl TaskSpawner for TokioTaskExecutor {
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        tokio::task::spawn(fut)
+    }
+}
 
 /// Many reth components require to spawn tasks for long-running jobs. For example `discovery`
 /// spawns tasks to handle egress and ingress of udp traffic or `network` that spawns session tasks
@@ -200,7 +262,7 @@ impl TaskExecutor {
         // wrap the task in catch unwind
         let task = std::panic::AssertUnwindSafe(fut)
             .catch_unwind()
-            .map(move |res| {
+            .inspect_err(move |res| {
                 error!("Critical task `{name}` panicked: {res:?}");
                 let _ = panicked_tasks_tx.send(name);
             })
@@ -254,13 +316,20 @@ impl TaskExecutor {
         // wrap the task in catch unwind
         let task = std::panic::AssertUnwindSafe(fut)
             .catch_unwind()
-            .map(move |res| {
+            .inspect_err(move |res| {
                 error!("Critical task `{name}` panicked: {res:?}");
                 let _ = panicked_tasks_tx.send(name);
             })
+            .map(|_| ())
             .in_current_span();
 
         self.handle.spawn(task)
+    }
+}
+
+impl TaskSpawner for TaskExecutor {
+    fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        self.spawn(fut)
     }
 }
 
@@ -276,6 +345,20 @@ enum TaskKind {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn test_cloneable() {
+        #[derive(Clone)]
+        struct ExecutorWrapper {
+            _e: Box<dyn TaskSpawner>,
+        }
+
+        let executor: Box<dyn TaskSpawner> = Box::<TokioTaskExecutor>::default();
+        let _e = dyn_clone::clone_box(&*executor);
+
+        let e = ExecutorWrapper { _e };
+        let _e2 = e;
+    }
 
     #[test]
     fn test_critical() {

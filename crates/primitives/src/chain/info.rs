@@ -3,9 +3,9 @@ use crate::{BlockNumber, H256};
 /// Current status of the blockchain's head.
 #[derive(Debug, Eq, PartialEq)]
 pub struct ChainInfo {
-    /// Best block hash.
+    /// The block hash of the highest fully synced block.
     pub best_hash: H256,
-    /// Best block number.
+    /// The block number of the highest fully synced block.
     pub best_number: BlockNumber,
     /// Last block that was finalized.
     pub last_finalized: Option<BlockNumber>,

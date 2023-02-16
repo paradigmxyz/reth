@@ -6,8 +6,10 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
+use std::ops::RangeBounds;
 
 mod state;
+use reth_db::cursor::DbCursorRO;
 pub use state::{
     chain::ChainState,
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
@@ -63,6 +65,18 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
             }
         })?
     }
+
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+        self.db
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::Headers>()?;
+                cursor
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
+    }
 }
 
 impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
@@ -76,12 +90,13 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
 
 impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
-        Ok(ChainInfo {
-            best_hash: Default::default(),
-            best_number: 0,
-            last_finalized: None,
-            safe_finalized: None,
-        })
+        let best_number = self
+            .db
+            .view(|tx| tx.get::<tables::SyncStage>("Finish".as_bytes().to_vec()))?
+            .map_err(Into::<reth_interfaces::db::Error>::into)?
+            .unwrap_or_default();
+        let best_hash = self.block_hash(U256::from(best_number))?.unwrap_or_default();
+        Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
     }
 
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
@@ -130,15 +145,28 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::StateProviderFactory;
+    use crate::{BlockProvider, StateProviderFactory};
 
     use super::ShareableDatabase;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_primitives::H256;
 
     #[test]
     fn common_history_provider() {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let provider = ShareableDatabase::new(db);
         let _ = provider.latest();
+    }
+
+    #[test]
+    fn default_chain_info() {
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let provider = ShareableDatabase::new(db);
+
+        let chain_info = provider.chain_info().expect("should be ok");
+        assert_eq!(chain_info.best_number, 0);
+        assert_eq!(chain_info.best_hash, H256::zero());
+        assert_eq!(chain_info.last_finalized, None);
+        assert_eq!(chain_info.safe_finalized, None);
     }
 }

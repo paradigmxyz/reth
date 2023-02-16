@@ -1,5 +1,5 @@
 use reth_db::{
-    models::{StoredBlockBody, StoredBlockOmmers},
+    models::{StoredBlockBody, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -34,10 +34,12 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     )?;
 
     // insert body ommers data
-    tx.put::<tables::BlockOmmers>(
-        block.number,
-        StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
-    )?;
+    if !block.ommers.is_empty() {
+        tx.put::<tables::BlockOmmers>(
+            block.number,
+            StoredBlockOmmers { ommers: block.ommers.iter().map(|h| h.as_ref().clone()).collect() },
+        )?;
+    }
 
     let (mut current_tx_id, mut transition_id) =
         if let Some(parent_tx_num_transition_id) = parent_tx_num_transition_id {
@@ -70,7 +72,18 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         current_tx_id += 1;
     }
 
-    if has_block_reward {
+    let mut has_withdrawals = false;
+    if let Some(withdrawals) = block.withdrawals.clone() {
+        if !withdrawals.is_empty() {
+            has_withdrawals = true;
+            tx.put::<tables::BlockWithdrawals>(
+                block.number,
+                StoredBlockWithdrawals { withdrawals },
+            )?;
+        }
+    }
+
+    if has_block_reward || has_withdrawals {
         transition_id += 1;
     }
     tx.put::<tables::BlockTransitionIndex>(block.number, transition_id)?;

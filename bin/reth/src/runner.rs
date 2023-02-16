@@ -3,7 +3,7 @@
 use futures::pin_mut;
 use reth_tasks::{TaskExecutor, TaskManager};
 use std::{future::Future, time::Duration};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// Used to execute cli commands
 #[derive(Default, Debug)]
@@ -24,18 +24,22 @@ impl CliRunner {
     ) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>>,
-        E: Send + Sync + From<std::io::Error> + 'static,
+        E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
         let AsyncCliRunner { context, task_manager, tokio_runtime } = AsyncCliRunner::new()?;
 
         // Executes the command until it finished or ctrl-c was fired
-        tokio_runtime.block_on(run_until_ctrl_c(command(context)))?;
+        let task_manager = tokio_runtime.block_on(run_to_completion_or_panic(
+            task_manager,
+            run_until_ctrl_c(command(context)),
+        ))?;
         // after the command has finished or exit signal was received we drop the task manager which
         // fires the shutdown signal to all tasks spawned via the task executor
         drop(task_manager);
 
         // give all tasks that are now being shut down some time to finish before tokio leaks them
         // see [Runtime::shutdown_timeout](tokio::runtime::Runtime::shutdown_timeout)
+        warn!(target: "reth::cli", "Received shutdown signal, waiting up to 30 seconds for tasks.");
         tokio_runtime.shutdown_timeout(Duration::from_secs(30));
 
         Ok(())
@@ -85,7 +89,25 @@ pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
     tokio::runtime::Builder::new_multi_thread().enable_all().build()
 }
 
-/// Runs the future to completion or until a `ctrl-c` was received.
+/// Runs the given future to completion or until a critical task panicked
+async fn run_to_completion_or_panic<F, E>(mut tasks: TaskManager, fut: F) -> Result<TaskManager, E>
+where
+    F: Future<Output = Result<(), E>>,
+    E: Send + Sync + From<reth_tasks::PanickedTaskError> + 'static,
+{
+    {
+        pin_mut!(fut);
+        tokio::select! {
+            err = &mut tasks => {
+                return Err(err.into())
+            },
+            res = fut => res?,
+        }
+    }
+    Ok(tasks)
+}
+
+/// Runs the future to completion or until a `ctrl-c` is received.
 async fn run_until_ctrl_c<F, E>(fut: F) -> Result<(), E>
 where
     F: Future<Output = Result<(), E>>,

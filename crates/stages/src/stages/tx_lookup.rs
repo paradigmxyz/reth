@@ -11,7 +11,8 @@ use reth_db::{
 use reth_provider::Transaction;
 use tracing::*;
 
-const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
+/// The [`StageId`] of the transaction lookup stage.
+pub const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 
 /// The transaction lookup stage.
 ///

@@ -29,13 +29,14 @@ mod peer;
 mod receipt;
 mod storage;
 mod transaction;
+mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
 
 pub use account::Account;
 pub use bits::H512;
-pub use block::{Block, BlockHashOrNumber, SealedBlock};
+pub use block::{Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
@@ -61,6 +62,7 @@ pub use transaction::{
     Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
     TxEip2930, TxLegacy, TxType,
 };
+pub use withdrawal::Withdrawal;
 
 /// A block hash.
 pub type BlockHash = H256;
@@ -68,9 +70,6 @@ pub type BlockHash = H256;
 pub type BlockNumber = u64;
 /// An Ethereum address.
 pub type Address = H160;
-// TODO(onbjerg): Is this not the same as [BlockHash]?
-/// BlockId is Keccak hash of the header
-pub type BlockID = H256;
 /// A transaction hash is a kecack hash of an RLP encoded signed transaction.
 pub type TxHash = H256;
 /// The sequence number of all existing transactions.

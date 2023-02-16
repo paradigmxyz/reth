@@ -25,7 +25,7 @@ use reth_net_common::{
     stream::HasRemoteAddr,
 };
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
-use reth_tasks::TaskExecutor;
+use reth_tasks::TaskSpawner;
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -77,7 +77,7 @@ pub(crate) struct SessionManager {
     /// Size of the command buffer per session.
     session_command_buffer: usize,
     /// The executor for spawned tasks.
-    executor: Option<TaskExecutor>,
+    executor: Box<dyn TaskSpawner>,
     /// All pending session that are currently handshaking, exchanging `Hello`s.
     ///
     /// Events produced during the authentication phase are reported to this manager. Once the
@@ -110,7 +110,7 @@ impl SessionManager {
     pub(crate) fn new(
         secret_key: SecretKey,
         config: SessionsConfig,
-        executor: Option<TaskExecutor>,
+        executor: Box<dyn TaskSpawner>,
         status: Status,
         hello_message: HelloMessage,
         fork_filter: ForkFilter,
@@ -169,11 +169,7 @@ impl SessionManager {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        if let Some(ref executor) = self.executor {
-            executor.spawn(async move { f.await });
-        } else {
-            tokio::task::spawn(async move { f.await });
-        }
+        self.executor.spawn(async move { f.await }.boxed());
     }
 
     /// Invoked on a received status update.
@@ -209,17 +205,24 @@ impl SessionManager {
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
-        self.spawn(start_pending_incoming_session(
-            disconnect_rx,
-            session_id,
-            metered_stream,
-            pending_events,
-            remote_addr,
-            self.secret_key,
-            self.hello_message.clone(),
-            self.status,
-            self.fork_filter.clone(),
-        ));
+        let secret_key = self.secret_key;
+        let hello_message = self.hello_message.clone();
+        let status = self.status;
+        let fork_filter = self.fork_filter.clone();
+        self.spawn(async move {
+            start_pending_incoming_session(
+                disconnect_rx,
+                session_id,
+                metered_stream,
+                pending_events,
+                remote_addr,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+            )
+            .await
+        });
 
         let handle = PendingSessionHandle {
             disconnect_tx: Some(disconnect_tx),
@@ -235,18 +238,26 @@ impl SessionManager {
         let session_id = self.next_id();
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        self.spawn(start_pending_outbound_session(
-            disconnect_rx,
-            pending_events,
-            session_id,
-            remote_addr,
-            remote_peer_id,
-            self.secret_key,
-            self.hello_message.clone(),
-            self.status,
-            self.fork_filter.clone(),
-            self.bandwidth_meter.clone(),
-        ));
+        let secret_key = self.secret_key;
+        let hello_message = self.hello_message.clone();
+        let fork_filter = self.fork_filter.clone();
+        let status = self.status;
+        let band_with_meter = self.bandwidth_meter.clone();
+        self.spawn(async move {
+            start_pending_outbound_session(
+                disconnect_rx,
+                pending_events,
+                session_id,
+                remote_addr,
+                remote_peer_id,
+                secret_key,
+                hello_message,
+                status,
+                fork_filter,
+                band_with_meter,
+            )
+            .await
+        });
 
         let handle = PendingSessionHandle {
             disconnect_tx: Some(disconnect_tx),

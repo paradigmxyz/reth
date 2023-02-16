@@ -10,7 +10,7 @@ use crate::{
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, DEFAULT_DISCOVERY_PORT};
 use reth_primitives::{ChainSpec, ForkFilter, Head, NodeRecord, PeerId, MAINNET};
 use reth_provider::{BlockProvider, HeaderProvider};
-use reth_tasks::TaskExecutor;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashSet,
@@ -68,7 +68,7 @@ pub struct NetworkConfig<C> {
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    pub executor: Option<TaskExecutor>,
+    pub executor: Box<dyn TaskSpawner>,
     /// The `Status` message to send to peers at the beginning.
     pub status: Status,
     /// Sets the hello message for the p2p handshake in RLPx
@@ -145,7 +145,7 @@ pub struct NetworkConfigBuilder {
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
     #[serde(skip)]
-    executor: Option<TaskExecutor>,
+    executor: Option<Box<dyn TaskSpawner>>,
     /// Sets the hello message for the p2p handshake in RLPx
     hello_message: Option<HelloMessage>,
     /// Head used to start set for the fork filter and status.
@@ -185,6 +185,16 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the highest synced block.
+    ///
+    /// This is used to construct the appropriate [`ForkFilter`] and [`Status`] message.
+    ///
+    /// If not set, this defaults to the genesis specified by the current chain specification.
+    pub fn set_head(mut self, head: Head) -> Self {
+        self.head = Some(head);
+        self
+    }
+
     /// Sets the `HelloMessage` to send when connecting to peers.
     ///
     /// ```
@@ -209,7 +219,9 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the executor to use for spawning tasks.
-    pub fn executor(mut self, executor: TaskExecutor) -> Self {
+    ///
+    /// If `None`, then [tokio::spawn] is used for spawning tasks.
+    pub fn with_task_executor(mut self, executor: Box<dyn TaskSpawner>) -> Self {
         self.executor = Some(executor);
         self
     }
@@ -263,6 +275,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the discovery service off on true.
+    // TODO(onbjerg): This name does not imply `true` = disable
     pub fn set_discovery(mut self, disable_discovery: bool) -> Self {
         if disable_discovery {
             self.disable_discovery();
@@ -307,7 +320,7 @@ impl NetworkConfigBuilder {
         let head = head.unwrap_or(Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
-            timestamp: 0,
+            timestamp: chain_spec.genesis.timestamp,
             difficulty: chain_spec.genesis.difficulty,
             total_difficulty: chain_spec.genesis.difficulty,
         });
@@ -344,7 +357,7 @@ impl NetworkConfigBuilder {
             chain_spec,
             block_import: Box::<ProofOfStakeBlockImport>::default(),
             network_mode,
-            executor,
+            executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
             status,
             hello_message,
             fork_filter,

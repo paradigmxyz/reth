@@ -281,14 +281,13 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let SealedBlock { header, body, ommers } =
+            let SealedBlock { header, body, ommers, withdrawals } =
                 random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
 
             header.state_root =
                 self.generate_initial_trie(accounts.iter().map(|(k, v)| (*k, *v)))?;
-
-            let sealed_head = SealedBlock { header: header.seal(), body, ommers };
+            let sealed_head = SealedBlock { header: header.seal(), body, ommers, withdrawals };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];

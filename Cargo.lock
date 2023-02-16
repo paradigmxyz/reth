@@ -724,6 +724,7 @@ checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 name = "codecs-derive"
 version = "0.1.0"
 dependencies = [
+ "convert_case 0.6.0",
  "parity-scale-codec",
  "proc-macro2 1.0.50",
  "quote 1.0.23",
@@ -1377,6 +1378,12 @@ dependencies = [
  "socket2",
  "winapi",
 ]
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9b0705efd4599c15a38151f4721f7bc388306f61084d3bfd50bd07fbca5cb60"
 
 [[package]]
 name = "ecdsa"
@@ -4109,6 +4116,7 @@ dependencies = [
 name = "reth-consensus"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -4220,6 +4228,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-rlp",
+ "reth-tasks",
  "reth-tracing",
  "tempfile",
  "thiserror",
@@ -4617,6 +4626,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-rpc-types",
+ "reth-tasks",
  "reth-transaction-pool",
  "secp256k1 0.26.0",
  "serde",
@@ -4681,12 +4691,15 @@ name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "jsonrpsee-types",
+ "lru 0.9.0",
  "reth-network-api",
  "reth-primitives",
  "reth-rlp",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -4715,6 +4728,7 @@ dependencies = [
  "reth-provider",
  "reth-staged-sync",
  "reth-stages",
+ "reth-tasks",
  "reth-tracing",
  "secp256k1 0.24.3",
  "serde",
@@ -4772,6 +4786,7 @@ dependencies = [
 name = "reth-tasks"
 version = "0.1.0"
 dependencies = [
+ "dyn-clone",
  "futures-util",
  "thiserror",
  "tokio",
