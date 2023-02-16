@@ -4,7 +4,7 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::SharedTransactions;
+use crate::{EthVersion, SharedTransactions};
 use bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
@@ -22,7 +22,10 @@ pub struct ProtocolMessage {
 
 impl ProtocolMessage {
     /// Create a new ProtocolMessage from a message type and message rlp bytes.
-    pub fn decode_message(version: u8, buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+    pub fn decode_message(
+        version: EthVersion,
+        buf: &mut &[u8],
+    ) -> Result<Self, reth_rlp::DecodeError> {
         let message_type = EthMessageID::decode(buf)?;
 
         let message = match message_type {
@@ -33,7 +36,7 @@ impl ProtocolMessage {
             EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
-                if version >= 68 {
+                if version >= EthVersion::Eth68 {
                     EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68::decode(
                         buf,
                     )?)
@@ -66,14 +69,14 @@ impl ProtocolMessage {
                 EthMessage::PooledTransactions(request_pair)
             }
             EthMessageID::GetNodeData => {
-                if version >= 67 {
+                if version >= EthVersion::Eth67 {
                     return Err(reth_rlp::DecodeError::Custom("invalid message id"))
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
-                if version >= 67 {
+                if version >= EthVersion::Eth67 {
                     return Err(reth_rlp::DecodeError::Custom("invalid message id"))
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;

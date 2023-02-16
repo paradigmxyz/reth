@@ -2,6 +2,7 @@ use crate::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     types::{EthMessage, ProtocolMessage, Status},
+    EthVersion,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
@@ -74,7 +75,8 @@ where
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
         }
 
-        let msg = match ProtocolMessage::decode_message(status.version, &mut their_msg.as_ref()) {
+        let version = EthVersion::try_from(status.version)?;
+        let msg = match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
                 tracing::debug!("rlp decode error in eth handshake: msg={their_msg:x}");
@@ -118,7 +120,7 @@ where
 
                 // now we can create the `EthStream` because the peer has successfully completed
                 // the handshake
-                let stream = EthStream::new(status.version, self.inner);
+                let stream = EthStream::new(version, self.inner);
 
                 Ok((stream, resp))
             }
@@ -134,7 +136,7 @@ where
 #[pin_project]
 #[derive(Debug)]
 pub struct EthStream<S> {
-    version: u8,
+    version: EthVersion,
     #[pin]
     inner: S,
 }
@@ -142,7 +144,7 @@ pub struct EthStream<S> {
 impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
-    pub fn new(version: u8, inner: S) -> Self {
+    pub fn new(version: EthVersion, inner: S) -> Self {
         Self { version, inner }
     }
 
@@ -336,7 +338,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
-            let mut stream = EthStream::new(68, stream);
+            let mut stream = EthStream::new(EthVersion::Eth67, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -345,7 +347,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = PassthroughCodec::default().framed(outgoing);
-        let mut client_stream = EthStream::new(68, sink);
+        let mut client_stream = EthStream::new(EthVersion::Eth67, sink);
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -371,7 +373,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-            let mut stream = EthStream::new(68, stream);
+            let mut stream = EthStream::new(EthVersion::Eth67, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -385,7 +387,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
-        let mut client_stream = EthStream::new(68, outgoing);
+        let mut client_stream = EthStream::new(EthVersion::Eth67, outgoing);
 
         client_stream.send(test_msg).await.unwrap();
 

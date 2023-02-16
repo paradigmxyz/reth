@@ -11,7 +11,7 @@ pub struct ParseVersionError(String);
 
 /// The `eth` protocol version.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EthVersion {
     /// The `eth` protocol version 66.
     Eth66 = 66,
