@@ -11,6 +11,8 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # https://stackoverflow.com/a/43541732/5204678
 
   grafana:
     image: grafana/grafana
