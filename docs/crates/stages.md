@@ -50,19 +50,27 @@ To get a better idea of what is happening at each part of the pipeline, lets wal
 ## HeaderStage
 
 <!-- TODO: Cross-link to eth/65 chapter when it's written -->
-The `HeaderStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the local head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with that block's height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. The `HeaderStage` contains a `downloader` attribute, which is a type that implements the `HeaderDownloader` trait. The `stream()` method from this trait is used to fetch headers from the network.
+The `HeaderStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the local head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with that block's height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. The `HeaderStage` contains a `downloader` attribute, which is a type that implements the `HeaderDownloader` trait. A `HeaderDownloader` is a `Stream` that returns batches for headers.
 
 [File: crates/interfaces/src/p2p/headers/downloader.rs](https://github.com/paradigmxyz/reth/blob/main/crates/interfaces/src/p2p/headers/downloader.rs)
 ```rust,ignore
-pub trait HeaderDownloader: Downloader {
-    /// Stream the headers
-    fn stream(&self, head: SealedHeader, tip: H256) -> DownloadStream<'_, SealedHeader>;
-
-    /// Validate whether the header is valid in relation to it's parent
-    fn validate(&self, header: &SealedHeader, parent: &SealedHeader) -> DownloadResult<()> {
-        validate_header_download(self.consensus(), header, parent)?;
-        Ok(())
+pub trait HeaderDownloader: Send + Sync + Stream<Item = Vec<SealedHeader>> + Unpin {
+    /// Updates the gap to sync which ranges from local head to the sync target
+    ///
+    /// See also [HeaderDownloader::update_sync_target] and [HeaderDownloader::update_local_head]
+    fn update_sync_gap(&mut self, head: SealedHeader, target: SyncTarget) {
+        self.update_local_head(head);
+        self.update_sync_target(target);
     }
+
+    /// Updates the block number of the local database
+    fn update_local_head(&mut self, head: SealedHeader);
+
+    /// Updates the target we want to sync to
+    fn update_sync_target(&mut self, target: SyncTarget);
+
+    /// Sets the headers batch size that the Stream should return.
+    fn set_batch_size(&mut self, limit: usize);
 }
 ```
 
