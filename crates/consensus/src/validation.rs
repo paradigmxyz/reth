@@ -45,6 +45,7 @@ pub fn validate_header_standalone(
         return Err(Error::BaseFeeMissing)
     }
 
+    // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
         header.withdrawals_root.is_none()
     {
@@ -197,6 +198,7 @@ pub fn validate_block_standalone(block: &SealedBlock, chain_spec: &ChainSpec) ->
         })
     }
 
+    // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
         let withdrawals = block.withdrawals.as_ref().ok_or(Error::BodyWithdrawalsMissing)?;
         let withdrawals_root =
