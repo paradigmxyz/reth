@@ -8,13 +8,13 @@ pub mod storage_sharded_key;
 
 pub use accounts::*;
 pub use blocks::*;
-use reth_primitives::{Address, H256};
 pub use sharded_key::ShardedKey;
 
 use crate::{
     table::{Decode, Encode},
     Error,
 };
+use reth_primitives::{bytes::Bytes, Address, H256};
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {
@@ -31,8 +31,8 @@ macro_rules! impl_uints {
 
             impl Decode for $name
             {
-                fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, Error> {
-                    let value: bytes::Bytes = value.into();
+                fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
+                    let value: Bytes = value.into();
                     Ok(
                         $name::from_be_bytes(
                             value.as_ref().try_into().map_err(|_| Error::DecodeError)?
@@ -54,7 +54,7 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, Error> {
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         Ok(value.into().to_vec())
     }
 }
@@ -67,7 +67,7 @@ impl Encode for Address {
 }
 
 impl Decode for Address {
-    fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, Error> {
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         Ok(Address::from_slice(&value.into()[..]))
     }
 }
@@ -79,7 +79,7 @@ impl Encode for H256 {
 }
 
 impl Decode for H256 {
-    fn decode<B: Into<bytes::Bytes>>(value: B) -> Result<Self, Error> {
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
         Ok(H256::from_slice(&value.into()[..]))
     }
 }

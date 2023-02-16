@@ -5,9 +5,11 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use bytes::Bytes;
 use reth_codecs::Compact;
-use reth_primitives::{Account, Address, TransitionId};
+use reth_primitives::{
+    bytes::{BufMut, Bytes},
+    Account, Address, TransitionId,
+};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
@@ -25,7 +27,7 @@ pub struct AccountBeforeTx {
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for AccountBeforeTx {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact(self, buf: &mut impl BufMut) -> usize {
         // for now put full bytes and later compress it.
         buf.put_slice(&self.address.to_fixed_bytes()[..]);
         self.info.to_compact(buf) + 32
@@ -88,7 +90,7 @@ impl Encode for TransitionIdAddress {
 
 impl Decode for TransitionIdAddress {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        let value: bytes::Bytes = value.into();
+        let value: Bytes = value.into();
 
         let num =
             u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);

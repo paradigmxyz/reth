@@ -326,9 +326,11 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use bytes::{Bytes, BytesMut};
         use reth_interfaces::test_utils::generators::random_header;
-        use reth_primitives::Block;
+        use reth_primitives::{
+            bytes::{Bytes, BytesMut},
+            Block,
+        };
         use reth_rlp::DecodeError;
 
         fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> SealedBlock {

@@ -21,7 +21,6 @@ use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
-use bytes::{Bytes, BytesMut};
 use discv5::{
     kbucket,
     kbucket::{
@@ -32,7 +31,10 @@ use discv5::{
 };
 use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
-use reth_primitives::{ForkId, PeerId, H256};
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    ForkId, PeerId, H256,
+};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
