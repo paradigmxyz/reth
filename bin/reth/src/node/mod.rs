@@ -155,9 +155,10 @@ impl Command {
             network.clone(),
             TransportRpcModuleConfig::default()
                 .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
-            RpcServerConfig::default().with_http(Default::default(), self.rpc.http_corsdomain.as_ref()),
+            RpcServerConfig::default()
+                .with_http(Default::default(), self.rpc.http_corsdomain.as_ref()),
         )
-        .await?; 
+        .await?;
         info!(target: "reth::cli", "Started RPC server");
 
         let (mut pipeline, events) = self

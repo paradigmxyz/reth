@@ -51,15 +51,13 @@
 //! }
 //! ```
 
+use hyper::{http::HeaderValue, Method};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
-    core::{server::rpc_module::Methods, Error as RpcError, server::host_filtering::AllowHosts},
+    core::{server::host_filtering::AllowHosts, server::rpc_module::Methods, Error as RpcError},
     server::{Server, ServerHandle},
     RpcModule,
 };
-use hyper::{Method, http::HeaderValue};
-use tower_http::cors::{Any, CorsLayer};
-use tower::layer::util::{Stack, Identity};
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, Peers};
@@ -75,6 +73,8 @@ use std::{
     str::FromStr,
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::{Any, CorsLayer};
 
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
@@ -540,29 +540,32 @@ impl RpcServerConfig {
             match domains.as_str() {
                 "*" => {
                     let cors = CorsLayer::new()
-                    .allow_methods([Method::GET, Method::POST])
-                    .allow_origin(Any)
-                    .allow_headers(Any);
-                    
-                    let middleware = tower::ServiceBuilder::new().layer(cors); 
-                    self.http_cors_domain_server_config = Some(config.set_middleware(middleware).http_only());
-                },
+                        .allow_methods([Method::GET, Method::POST])
+                        .allow_origin(Any)
+                        .allow_headers(Any);
+
+                    let middleware = tower::ServiceBuilder::new().layer(cors);
+                    self.http_cors_domain_server_config =
+                        Some(config.set_middleware(middleware).http_only());
+                }
                 "" => {
                     self.http_server_config = Some(config.http_only());
-                },
+                }
                 _ => {
                     let domains_vec = domains.split(",").collect::<Vec<&str>>();
-                    let origins = domains_vec.into_iter().map(|domain| {
-                        domain.parse().unwrap()
-                    }).collect::<Vec<HeaderValue>>();
-                
+                    let origins = domains_vec
+                        .into_iter()
+                        .map(|domain| domain.parse().unwrap())
+                        .collect::<Vec<HeaderValue>>();
+
                     let cors = CorsLayer::new()
-                    .allow_methods([Method::GET, Method::POST])
-                    .allow_origin(origins)
-                    .allow_headers(Any);
-                    
-                    let middleware = tower::ServiceBuilder::new().layer(cors); 
-                    self.http_cors_domain_server_config = Some(config.set_middleware(middleware).http_only());
+                        .allow_methods([Method::GET, Method::POST])
+                        .allow_origin(origins)
+                        .allow_headers(Any);
+
+                    let middleware = tower::ServiceBuilder::new().layer(cors);
+                    self.http_cors_domain_server_config =
+                        Some(config.set_middleware(middleware).http_only());
                 }
             }
         }
