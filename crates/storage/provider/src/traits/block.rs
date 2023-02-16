@@ -2,7 +2,7 @@ use super::BlockHashProvider;
 use reth_interfaces::Result;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Block, ChainInfo, H256, U256,
+    Block, ChainInfo, H256,
 };
 
 /// Api trait for fetching `Block` related data.
@@ -38,7 +38,7 @@ pub trait BlockProvider: BlockHashProvider + Send + Sync {
                     return Ok(Some(self.chain_info()?.best_hash))
                 }
                 self.convert_block_number(num)?
-                    .map(|num| self.block_hash(U256::from(num)))
+                    .map(|num| self.block_hash(num))
                     .transpose()
                     .map(|maybe_hash| maybe_hash.flatten())
             }

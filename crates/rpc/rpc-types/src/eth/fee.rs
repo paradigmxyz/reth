@@ -38,9 +38,8 @@ impl FeeHistoryCache {
 /// [FeeHistoryCache] item.
 #[derive(Clone, Debug)]
 pub struct FeeHistoryCacheItem {
-    /// Block hash (`None` if it wasn't the oldest block in `eth_feeHistory` response where
-    /// cache is populated)
-    pub hash: Option<H256>,
+    /// Block hash
+    pub hash: H256,
     /// Block base fee per gas. Zero for pre-EIP-1559 blocks.
     pub base_fee_per_gas: U256,
     /// Block gas used ratio. Calculated as the ratio of `gasUsed` and `gasLimit`.

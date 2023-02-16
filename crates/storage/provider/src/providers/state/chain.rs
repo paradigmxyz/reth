@@ -15,16 +15,16 @@ use std::marker::PhantomData;
 /// `Pending|Latest|Number|Hash`.
 ///
 /// Note: The lifetime of this type is limited by the type that created it.
-pub struct ChainState<'a> {
-    inner: Box<dyn StateProvider>,
+pub struct ChainState<'a, S: StateProvider> {
+    inner: Box<S>,
     _phantom: PhantomData<&'a ()>,
 }
 
 // == impl ChainState ===
 
-impl<'a> ChainState<'a> {
+impl<'a, S: StateProvider> ChainState<'a, S> {
     /// Wraps the given [StateProvider]
-    pub fn new(inner: Box<dyn StateProvider>) -> Self {
+    pub fn new(inner: Box<S>) -> Self {
         Self { inner, _phantom: Default::default() }
     }
 
@@ -36,15 +36,15 @@ impl<'a> ChainState<'a> {
 }
 
 // Delegates all provider impls to the boxed [StateProvider]
-delegate_provider_impls!(ChainState<'a>);
+delegate_provider_impls!(ChainState<'a, S> where [S: StateProvider]);
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn assert_state_provider<T: StateProvider>() {}
+    fn assert_state_provider<S: StateProvider>() {}
     #[allow(unused)]
-    fn assert_chain_state_provider<'txn>() {
-        assert_state_provider::<ChainState<'txn>>();
+    fn assert_chain_state_provider<'txn, S: StateProvider>() {
+        assert_state_provider::<ChainState<'txn, S>>();
     }
 }

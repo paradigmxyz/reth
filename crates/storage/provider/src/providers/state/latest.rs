@@ -2,10 +2,14 @@ use crate::{
     providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
     StateProvider,
 };
-use reth_db::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use reth_db::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    tables,
+    transaction::DbTx,
+};
 use reth_interfaces::Result;
-use reth_primitives::{Account, Address, Bytes, StorageKey, StorageValue, H256, U256};
-use std::marker::PhantomData;
+use reth_primitives::{Account, Address, BlockNumber, Bytes, StorageKey, StorageValue, H256};
+use std::{marker::PhantomData, ops::RangeBounds};
 
 /// State provider over latest state that takes tx reference.
 pub struct LatestStateProviderRef<'a, 'b, TX: DbTx<'a>> {
@@ -31,8 +35,20 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for LatestStateProviderRef<'a, 'b, TX
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for LatestStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        self.db.get::<tables::CanonicalHeaders>(number.to::<u64>()).map_err(Into::into)
+    fn block_hash(&self, number: u64) -> Result<Option<H256>> {
+        self.db.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
+    }
+
+    fn canonical_hashes_range<R: RangeBounds<BlockNumber>>(&self, range: R) -> Result<Vec<H256>> {
+        self.db
+            .cursor_read::<tables::CanonicalHeaders>()
+            .map(|mut cursor| {
+                cursor
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
     }
 }
 

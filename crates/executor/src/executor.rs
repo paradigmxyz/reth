@@ -497,12 +497,12 @@ pub fn execute<DB: StateProvider>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, ops::RangeBounds};
 
     use crate::revm_wrap::State;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
-        SealedBlock, StorageKey, H160, H256, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, Address, BlockNumber, Bytes, ChainSpecBuilder,
+        ForkCondition, SealedBlock, StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
@@ -513,7 +513,7 @@ mod tests {
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
         contracts: HashMap<H256, Bytes>,
-        block_hash: HashMap<U256, H256>,
+        block_hash: HashMap<u64, H256>,
     }
 
     impl StateProviderTest {
@@ -542,8 +542,19 @@ mod tests {
     }
 
     impl BlockHashProvider for StateProviderTest {
-        fn block_hash(&self, number: U256) -> reth_interfaces::Result<Option<H256>> {
+        fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
+        }
+
+        fn canonical_hashes_range<R: RangeBounds<BlockNumber>>(
+            &self,
+            range: R,
+        ) -> reth_interfaces::Result<Vec<H256>> {
+            Ok(self
+                .block_hash
+                .iter()
+                .filter_map(|(block, hash)| if range.contains(block) { Some(*hash) } else { None })
+                .collect())
         }
     }
 

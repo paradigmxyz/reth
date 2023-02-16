@@ -120,20 +120,26 @@ impl HeaderProvider for MockEthProvider {
 }
 
 impl BlockHashProvider for MockEthProvider {
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+    fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         let lock = self.blocks.lock();
 
         let hash =
-            lock.iter().find_map(
-                |(hash, b)| {
-                    if b.number == number.to::<u64>() {
-                        Some(*hash)
-                    } else {
-                        None
-                    }
-                },
-            );
+            lock.iter().find_map(|(hash, b)| if b.number == number { Some(*hash) } else { None });
         Ok(hash)
+    }
+
+    fn canonical_hashes_range<R: RangeBounds<reth_primitives::BlockNumber>>(
+        &self,
+        range: R,
+    ) -> Result<Vec<H256>> {
+        let lock = self.blocks.lock();
+
+        Ok(lock
+            .iter()
+            .filter_map(
+                |(hash, block)| if range.contains(&block.number) { Some(*hash) } else { None },
+            )
+            .collect())
     }
 }
 

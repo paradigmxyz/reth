@@ -199,13 +199,23 @@ where
             return Ok(FeeHistory::default())
         }
 
-        let Some(end_block) = self.inner.client.block_number_for_id(newest_block).to_rpc_result()? else { return Err(EthApiError::UnknownBlockNumber.into())};
+        let head_block = self.inner.client.chain_info().to_rpc_result()?.best_number;
+
+        let Some(end_block) = self.inner.client.block_number_for_id(newest_block).to_rpc_result()? else { return Err(EthApiError::RequestedBlockBeyondHead(head_block).into())};
 
         if end_block < block_count {
-            return Err(EthApiError::InvalidBlockRange.into())
+            return Err(EthApiError::RequestedBlockBeyondHead(head_block).into())
         }
 
         let start_block = end_block - block_count;
+
+        let block_hashes =
+            self.inner.client.canonical_hashes_range(start_block..=end_block).to_rpc_result()?;
+
+        // We should receive exactly the amount of blocks
+        if block_hashes.len() != (end_block - start_block + 1) as usize {
+            return Err(EthApiError::InvalidBlockRange.into())
+        }
 
         let mut fee_history_cache = self.fee_history_cache.0.lock().await;
 
@@ -217,16 +227,22 @@ where
 
         let mut first_non_cached_block = None;
         let mut last_non_cached_block = None;
-        for block in start_block..=end_block {
-            // Check if block exists in cache, and move it to the head of the list if so
-            if let Some(fee_history_cache_item) = fee_history_cache.get(&block) {
-                fee_history_cache_items.insert(block, fee_history_cache_item.clone());
-            } else {
-                // If block doesn't exist in cache, set it as a first non-cached block to query it
-                // from the database
-                first_non_cached_block.get_or_insert(block);
-                // And last non-cached block, so we could query the database until we reach it
-                last_non_cached_block = Some(block);
+        for (block, block_hash) in (start_block..=end_block).zip(block_hashes.iter()) {
+            // Check if block with the matching hash exists in cache, and move it to the head of the
+            // list if so
+            match fee_history_cache.get(&block) {
+                Some(fee_history_cache_item @ FeeHistoryCacheItem { hash, .. })
+                    if hash == block_hash =>
+                {
+                    fee_history_cache_items.insert(block, fee_history_cache_item.clone());
+                }
+                _ => {
+                    // If block doesn't exist in cache, set it as a first non-cached block to query
+                    // it from the database
+                    first_non_cached_block.get_or_insert(block);
+                    // And last non-cached block, so we could query the database until we reach it
+                    last_non_cached_block = Some(block);
+                }
             }
         }
 
@@ -243,14 +259,14 @@ where
                 return Err(EthApiError::InvalidBlockRange.into())
             }
 
-            for header in headers {
+            for (i, header) in headers.iter().enumerate() {
                 let base_fee_per_gas = header.base_fee_per_gas.
                         unwrap_or_default(). // Zero for pre-EIP-1559 blocks
                         try_into().unwrap(); // u64 -> U256 won't fail
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
                 let fee_history_cache_item = FeeHistoryCacheItem {
-                    hash: None,
+                    hash: block_hashes[(end_block - start_block) as usize + i],
                     base_fee_per_gas,
                     gas_used_ratio,
                     reward: None, // TODO: calculate rewards per transaction
@@ -263,12 +279,6 @@ where
             }
         }
 
-        let oldest_block_hash =
-            self.inner.client.block_hash(start_block.try_into().unwrap()).to_rpc_result()?.unwrap();
-
-        fee_history_cache_items.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
-        fee_history_cache.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
-
         // `fee_history_cache_items` now contains full requested block range (populated from both
         // cache and database), so we can iterate over it in order and populate the response fields
         Ok(FeeHistory {
@@ -280,7 +290,9 @@ where
                 .values()
                 .map(|item| item.gas_used_ratio)
                 .collect(),
-            oldest_block: U256::from_be_bytes(oldest_block_hash.0),
+            oldest_block: U256::from_be_bytes(
+                fee_history_cache_items.first_key_value().unwrap().1.hash.0,
+            ),
             reward: None,
         })
     }
