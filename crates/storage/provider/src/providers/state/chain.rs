@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 ///
 /// Note: The lifetime of this type is limited by the type that created it.
 pub struct ChainState<'a, S: StateProvider> {
-    inner: Box<S>,
+    inner: S,
     _phantom: PhantomData<&'a ()>,
 }
 
@@ -24,18 +24,18 @@ pub struct ChainState<'a, S: StateProvider> {
 
 impl<'a, S: StateProvider> ChainState<'a, S> {
     /// Wraps the given [StateProvider]
-    pub fn new(inner: Box<S>) -> Self {
+    pub fn new(inner: S) -> Self {
         Self { inner, _phantom: Default::default() }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     fn as_ref(&self) -> impl StateProvider + '_ {
-        &*self.inner
+        &self.inner
     }
 }
 
-// Delegates all provider impls to the boxed [StateProvider]
+// Delegates all provider impls to the [StateProvider]
 delegate_provider_impls!(ChainState<'a, S> where [S: StateProvider]);
 
 #[cfg(test)]
