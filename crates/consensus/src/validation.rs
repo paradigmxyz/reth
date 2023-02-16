@@ -211,6 +211,18 @@ pub fn validate_block_standalone(block: &SealedBlock, chain_spec: &ChainSpec) ->
                 expected: *header_withdrawals_root,
             })
         }
+
+        // Validate that withdrawal index is monotonically increasing within a block.
+        if let Some(first) = withdrawals.first() {
+            let mut prev_index = first.index;
+            for withdrawal in withdrawals.iter().skip(1) {
+                let expected = prev_index + 1;
+                if expected != withdrawal.index {
+                    return Err(Error::WithdrawalIndexInvalid { got: withdrawal.index, expected })
+                }
+                prev_index = withdrawal.index;
+            }
+        }
     }
 
     Ok(())
@@ -372,13 +384,13 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
     use reth_interfaces::Result;
     use reth_primitives::{
-        hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
-        TransactionSigned, MAINNET, U256,
+        hex_literal::hex, proofs, Account, Address, BlockHash, Bytes, ChainSpecBuilder, Header,
+        Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
-
-    use super::*;
 
     #[test]
     fn calculate_base_fee_success() {
@@ -576,6 +588,49 @@ mod tests {
                 &MAINNET,
             ),
             Err(Error::TransactionNonceNotConsistent.into())
+        );
+    }
+
+    #[test]
+    fn valid_withdrawal_index() {
+        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
+
+        let create_block_with_withdrawals = |indexes: &[u64]| {
+            let withdrawals = indexes
+                .iter()
+                .map(|idx| Withdrawal { index: *idx, ..Default::default() })
+                .collect::<Vec<_>>();
+            SealedBlock {
+                header: Header {
+                    withdrawals_root: Some(proofs::calculate_withdrawals_root(withdrawals.iter())),
+                    ..Default::default()
+                }
+                .seal(),
+                withdrawals: Some(withdrawals),
+                ..Default::default()
+            }
+        };
+
+        // Single withdrawal
+        let block = create_block_with_withdrawals(&[1]);
+        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+
+        // Multiple increasing withdrawals
+        let block = create_block_with_withdrawals(&[1, 2, 3]);
+        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
+        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+
+        // Invalid withdrawal index
+        let block = create_block_with_withdrawals(&[100, 102]);
+        assert_matches!(
+            validate_block_standalone(&block, &chain_spec),
+            Err(Error::WithdrawalIndexInvalid { .. })
+        );
+        let block = create_block_with_withdrawals(&[5, 6, 7, 9]);
+        assert_matches!(
+            validate_block_standalone(&block, &chain_spec),
+            Err(Error::WithdrawalIndexInvalid { .. })
         );
     }
 }

@@ -126,6 +126,8 @@ pub enum Error {
     WithdrawalsRootMissing,
     #[error("Unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
+    #[error("Withdrawal index #{got} is invalid. Expected: #{expected}.")]
+    WithdrawalIndexInvalid { got: u64, expected: u64 },
     #[error("Missing withdrawals")]
     BodyWithdrawalsMissing,
 }
