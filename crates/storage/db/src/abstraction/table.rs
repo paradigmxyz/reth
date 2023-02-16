@@ -3,7 +3,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     Error,
 };
-use bytes::Bytes;
+use reth_primitives::bytes::Bytes;
 use serde::Serialize;
 use std::{
     fmt::Debug,

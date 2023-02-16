@@ -175,7 +175,7 @@ impl Command {
         // Run pipeline
         let (rx, tx) = tokio::sync::oneshot::channel();
         info!(target: "reth::cli", "Starting sync pipeline");
-        ctx.task_executor.spawn_critical("pipeline task", async move {
+        ctx.task_executor.spawn_critical_blocking("pipeline task", async move {
             let res = pipeline.run(db.clone()).await;
             let _ = rx.send(res);
         });

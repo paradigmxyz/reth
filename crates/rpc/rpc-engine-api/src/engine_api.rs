@@ -108,8 +108,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             ommers_hash: EMPTY_LIST_HASH,
             difficulty: Default::default(),
             nonce: Default::default(),
-        };
-        let header = header.seal();
+        }
+        .seal_slow();
 
         if payload.block_hash != header.hash() {
             return Err(EngineApiError::PayloadBlockHash {
@@ -326,9 +326,11 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use bytes::{Bytes, BytesMut};
         use reth_interfaces::test_utils::generators::random_header;
-        use reth_primitives::Block;
+        use reth_primitives::{
+            bytes::{Bytes, BytesMut},
+            Block,
+        };
         use reth_rlp::DecodeError;
 
         fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> SealedBlock {
@@ -340,9 +342,9 @@ mod tests {
             transformed.header.ommers_hash =
                 proofs::calculate_ommers_root(transformed.ommers.iter());
             SealedBlock {
-                header: transformed.header.seal(),
+                header: transformed.header.seal_slow(),
                 body: transformed.body,
-                ommers: transformed.ommers.into_iter().map(Header::seal).collect(),
+                ommers: transformed.ommers.into_iter().map(Header::seal_slow).collect(),
                 withdrawals: transformed.withdrawals,
             }
         }

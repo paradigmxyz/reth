@@ -1,7 +1,9 @@
 //! Codec for reading raw block bodies from a file.
 use super::FileClientError;
-use bytes::{Buf, BytesMut};
-use reth_primitives::Block;
+use reth_primitives::{
+    bytes::{Buf, BytesMut},
+    Block,
+};
 use reth_rlp::{Decodable, Encodable};
 use tokio_util::codec::{Decoder, Encoder};
 

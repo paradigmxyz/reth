@@ -3,10 +3,12 @@
 //! This basis of this file has been taken from the discv5 codebase:
 //! <https://github.com/sigp/discv5>
 
-use bytes::{Bytes, BytesMut};
 use reth_net_common::ban_list::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
-use reth_primitives::NodeRecord;
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    NodeRecord,
+};
 use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
@@ -26,7 +28,7 @@ pub struct Discv4Config {
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
     pub udp_ingress_message_buffer: usize,
-    /// The number of allowed failures for `FindNode` requests. Default: 1.
+    /// The number of allowed failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
     /// 300sec, 5min.
@@ -116,7 +118,7 @@ impl Default for Discv4Config {
             udp_egress_message_buffer: 1024,
             /// Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
-            max_find_node_failures: 2,
+            max_find_node_failures: 5,
             ping_interval: Duration::from_secs(300),
             /// unified expiration and timeout durations, mirrors geth's `expiration` duration
             ping_expiration: Duration::from_secs(20),

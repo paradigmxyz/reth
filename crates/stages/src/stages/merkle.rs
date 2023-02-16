@@ -287,7 +287,7 @@ mod tests {
 
             header.state_root =
                 self.generate_initial_trie(accounts.iter().map(|(k, v)| (*k, *v)))?;
-            let sealed_head = SealedBlock { header: header.seal(), body, ommers, withdrawals };
+            let sealed_head = SealedBlock { header: header.seal_slow(), body, ommers, withdrawals };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
