@@ -168,11 +168,15 @@ impl Header {
         length += self.extra_data.length();
         length += self.mix_hash.length();
         length += H64::from_low_u64_be(self.nonce).length();
-        length += self
-            .base_fee_per_gas
-            .map(|fee| U256::from(fee).length())
-            .unwrap_or(self.withdrawals_root.is_some() as usize);
-        length += self.withdrawals_root.map(|root| root.length()).unwrap_or_default();
+
+        if let Some(base_fee) = self.base_fee_per_gas {
+            length += U256::from(base_fee).length();
+        } else if self.withdrawals_root.is_some() {
+            length += 1; // EMTY STRING CODE
+        }
+        if let Some(root) = self.withdrawals_root {
+            length += root.length();
+        }
 
         length
     }
