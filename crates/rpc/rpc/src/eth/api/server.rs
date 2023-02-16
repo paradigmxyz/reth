@@ -136,11 +136,11 @@ where
 
     async fn storage_at(
         &self,
-        _address: Address,
-        _index: U256,
-        _block_number: Option<BlockId>,
+        address: Address,
+        index: U256,
+        block_number: Option<BlockId>,
     ) -> Result<H256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::storage_at(self, address, index, block_number)?)
     }
 
     async fn transaction_count(

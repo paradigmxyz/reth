@@ -46,7 +46,7 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
         // Returns None if acc doesn't exist
         match self.basic_account(addr)? {
             Some(acc) => Ok(Some(acc.balance)),
-            None => return Ok(None),
+            None => Ok(None),
         }
     }
 
@@ -58,7 +58,7 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
         // Returns None if acc doesn't exist
         match self.basic_account(addr)? {
             Some(acc) => Ok(Some(acc.nonce)),
-            None => return Ok(None),
+            None => Ok(None),
         }
     }
 }
