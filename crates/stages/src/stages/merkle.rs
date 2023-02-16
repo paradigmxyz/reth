@@ -282,7 +282,7 @@ mod tests {
                 random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
             header.state_root = self.generate_initial_trie(&accounts)?;
-            let sealed_head = SealedBlock { header: header.seal(), body, ommers, withdrawals };
+            let sealed_head = SealedBlock { header: header.seal_slow(), body, ommers, withdrawals };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];

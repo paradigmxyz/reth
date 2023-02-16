@@ -765,7 +765,7 @@ mod tests {
                             let (num, hash) = entry?;
                             let (_, header) =
                                 header_cursor.seek_exact(num)?.expect("missing header");
-                            headers.push(SealedHeader::new(header, hash));
+                            headers.push(header.seal(hash));
                         }
                         Ok(headers)
                     })??);
@@ -792,7 +792,7 @@ mod tests {
                         response.push(BlockResponse::Full(SealedBlock {
                             header,
                             body: body.transactions,
-                            ommers: body.ommers.into_iter().map(|h| h.seal()).collect(),
+                            ommers: body.ommers.into_iter().map(|h| h.seal_slow()).collect(),
                             withdrawals: body.withdrawals,
                         }));
                     }
