@@ -2,10 +2,12 @@
 use crate::{
     codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
 };
-use bytes::Bytes;
 use futures::{ready, Sink, SinkExt};
 use reth_net_common::stream::HasRemoteAddr;
-use reth_primitives::H512 as PeerId;
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    H512 as PeerId,
+};
 use secp256k1::SecretKey;
 use std::{
     fmt::Debug,
@@ -104,7 +106,7 @@ impl<Io> Stream for ECIESStream<Io>
 where
     Io: AsyncRead + Unpin,
 {
-    type Item = Result<bytes::BytesMut, io::Error>;
+    type Item = Result<BytesMut, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match ready!(self.project().stream.poll_next(cx)) {

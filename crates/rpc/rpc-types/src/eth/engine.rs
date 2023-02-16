@@ -2,8 +2,9 @@
 
 #![allow(missing_docs)]
 
-use bytes::BytesMut;
-use reth_primitives::{Address, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64};
+use reth_primitives::{
+    bytes::BytesMut, Address, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64,
+};
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 

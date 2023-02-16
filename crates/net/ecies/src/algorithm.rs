@@ -7,12 +7,14 @@ use crate::{
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
-use bytes::{BufMut, Bytes, BytesMut};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
 use educe::Educe;
 use rand::{thread_rng, Rng};
-use reth_primitives::{H128, H256, H512 as PeerId};
+use reth_primitives::{
+    bytes::{BufMut, Bytes, BytesMut},
+    H128, H256, H512 as PeerId,
+};
 use reth_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},

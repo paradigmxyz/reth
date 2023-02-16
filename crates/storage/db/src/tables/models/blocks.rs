@@ -7,9 +7,8 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use bytes::Bytes;
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, Withdrawal, H256};
+use reth_primitives::{bytes::Bytes, BlockHash, BlockNumber, Header, TxNumber, Withdrawal, H256};
 use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.
@@ -128,7 +127,7 @@ impl Encode for BlockNumHash {
 
 impl Decode for BlockNumHash {
     fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        let value: bytes::Bytes = value.into();
+        let value: Bytes = value.into();
 
         let num =
             u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);
