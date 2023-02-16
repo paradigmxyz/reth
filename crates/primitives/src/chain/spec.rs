@@ -426,6 +426,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Shanghai at genesis.
+    pub fn shanghai_activated(mut self) -> Self {
+        self = self.paris_activated();
+        self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics

@@ -45,6 +45,15 @@ pub fn validate_header_standalone(
         return Err(Error::BaseFeeMissing)
     }
 
+    // EIP-4895: Beacon chain push withdrawals as operations
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp) &&
+        header.withdrawals_root.is_none()
+    {
+        return Err(Error::WithdrawalsRootMissing)
+    } else if header.withdrawals_root.is_some() {
+        return Err(Error::WithdrawalsRootUnexpected)
+    }
+
     Ok(())
 }
 
@@ -167,7 +176,7 @@ pub fn validate_all_transaction_regarding_block_and_nonces<
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(block: &SealedBlock) -> Result<(), Error> {
+pub fn validate_block_standalone(block: &SealedBlock, chain_spec: &ChainSpec) -> Result<(), Error> {
     // Check ommers hash
     // TODO(onbjerg): This should probably be accessible directly on [Block]
     let ommers_hash =
@@ -187,6 +196,33 @@ pub fn validate_block_standalone(block: &SealedBlock) -> Result<(), Error> {
             got: transaction_root,
             expected: block.header.transactions_root,
         })
+    }
+
+    // EIP-4895: Beacon chain push withdrawals as operations
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
+        let withdrawals = block.withdrawals.as_ref().ok_or(Error::BodyWithdrawalsMissing)?;
+        let withdrawals_root =
+            reth_primitives::proofs::calculate_withdrawals_root(withdrawals.iter());
+        let header_withdrawals_root =
+            block.withdrawals_root.as_ref().ok_or(Error::WithdrawalsRootMissing)?;
+        if withdrawals_root != *header_withdrawals_root {
+            return Err(Error::BodyWithdrawalsRootDiff {
+                got: withdrawals_root,
+                expected: *header_withdrawals_root,
+            })
+        }
+
+        // Validate that withdrawal index is monotonically increasing within a block.
+        if let Some(first) = withdrawals.first() {
+            let mut prev_index = first.index;
+            for withdrawal in withdrawals.iter().skip(1) {
+                let expected = prev_index + 1;
+                if expected != withdrawal.index {
+                    return Err(Error::WithdrawalIndexInvalid { got: withdrawal.index, expected })
+                }
+                prev_index = withdrawal.index;
+            }
+        }
     }
 
     Ok(())
@@ -326,7 +362,7 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
     chain_spec: &ChainSpec,
 ) -> RethResult<()> {
     validate_header_standalone(&block.header, chain_spec)?;
-    validate_block_standalone(block)?;
+    validate_block_standalone(block, chain_spec)?;
     let parent = validate_block_regarding_chain(block, &provider)?;
     validate_header_regarding_parent(&parent, &block.header, chain_spec)?;
 
@@ -348,14 +384,14 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
     use reth_interfaces::Result;
     use reth_primitives::{
-        hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
-        TransactionSigned, MAINNET, U256,
+        hex_literal::hex, proofs, Account, Address, BlockHash, Bytes, ChainSpecBuilder, Header,
+        Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
     use std::ops::RangeBounds;
-
-    use super::*;
 
     #[test]
     fn calculate_base_fee_success() {
@@ -447,6 +483,7 @@ mod tests {
         let signer = Address::zero();
         TransactionSignedEcRecovered::from_signed_transaction(tx, signer)
     }
+
     /// got test block
     fn mock_block() -> (SealedBlock, Header) {
         // https://etherscan.io/block/15867168 where transaction root and receipts root are cleared
@@ -469,6 +506,7 @@ mod tests {
             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
+            withdrawals_root: None
         };
         // size: 0x9b5
 
@@ -481,7 +519,7 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal(), body, ommers }, parent)
+        (SealedBlock { header: header.seal(), body, ommers, withdrawals: None }, parent)
     }
 
     #[test]
@@ -555,6 +593,49 @@ mod tests {
                 &MAINNET,
             ),
             Err(Error::TransactionNonceNotConsistent.into())
+        );
+    }
+
+    #[test]
+    fn valid_withdrawal_index() {
+        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
+
+        let create_block_with_withdrawals = |indexes: &[u64]| {
+            let withdrawals = indexes
+                .iter()
+                .map(|idx| Withdrawal { index: *idx, ..Default::default() })
+                .collect::<Vec<_>>();
+            SealedBlock {
+                header: Header {
+                    withdrawals_root: Some(proofs::calculate_withdrawals_root(withdrawals.iter())),
+                    ..Default::default()
+                }
+                .seal(),
+                withdrawals: Some(withdrawals),
+                ..Default::default()
+            }
+        };
+
+        // Single withdrawal
+        let block = create_block_with_withdrawals(&[1]);
+        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+
+        // Multiple increasing withdrawals
+        let block = create_block_with_withdrawals(&[1, 2, 3]);
+        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
+        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+
+        // Invalid withdrawal index
+        let block = create_block_with_withdrawals(&[100, 102]);
+        assert_matches!(
+            validate_block_standalone(&block, &chain_spec),
+            Err(Error::WithdrawalIndexInvalid { .. })
+        );
+        let block = create_block_with_withdrawals(&[5, 6, 7, 9]);
+        assert_matches!(
+            validate_block_standalone(&block, &chain_spec),
+            Err(Error::WithdrawalIndexInvalid { .. })
         );
     }
 }

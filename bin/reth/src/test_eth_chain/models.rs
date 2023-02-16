@@ -1,6 +1,6 @@
 use reth_primitives::{
     Address, BigEndianHash, Bloom, Bytes, ChainSpec, ChainSpecBuilder, Header as RethHeader,
-    JsonU256, SealedHeader, H160, H256, H64, U256, U64,
+    JsonU256, SealedHeader, Withdrawal, H160, H256, H64,
 };
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
@@ -71,6 +71,8 @@ pub struct Header {
     pub uncle_hash: H256,
     /// Base fee per gas.
     pub base_fee_per_gas: Option<JsonU256>,
+    /// Withdrawals root.
+    pub withdrawals_root: Option<H256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -92,7 +94,8 @@ impl From<Header> for SealedHeader {
                 ommers_hash: value.uncle_hash,
                 state_root: value.state_root,
                 parent_hash: value.parent_hash,
-                logs_bloom: Bloom::default(), // TODO: ?
+                logs_bloom: value.bloom,
+                withdrawals_root: value.withdrawals_root,
             },
             value.hash,
         )
@@ -126,16 +129,6 @@ pub struct TransactionSequence {
     exception: String,
     raw_bytes: Bytes,
     valid: String,
-}
-
-/// Withdrawal in block
-#[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Withdrawal {
-    index: U64,
-    validator_index: U64,
-    address: Address,
-    amount: U256,
 }
 
 /// Ethereum blockchain test data state.

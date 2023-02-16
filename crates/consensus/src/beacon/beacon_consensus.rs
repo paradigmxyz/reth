@@ -78,7 +78,7 @@ impl Consensus for BeaconConsensus {
     }
 
     fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error> {
-        validation::validate_block_standalone(block)
+        validation::validate_block_standalone(block, &self.chain_spec)
     }
 
     fn has_block_reward(&self, total_difficulty: U256, difficulty: U256) -> bool {
