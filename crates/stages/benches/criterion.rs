@@ -10,10 +10,15 @@ use reth_stages::{
 };
 use std::path::PathBuf;
 
+mod perf;
+
 mod setup;
 
-// criterion_group!(benches, account_hashing, transaction_lookup, senders, total_difficulty);
-criterion_group!(benches, account_hashing);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100));
+    targets = account_hashing //, transaction_lookup, senders, total_difficulty
+}
 criterion_main!(benches);
 
 fn account_hashing(c: &mut Criterion) {
