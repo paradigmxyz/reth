@@ -77,10 +77,10 @@ async fn run(
     info!(target: "reth::cli", "Executing stage.");
 
     let mut tx = Transaction::new(&output_db)?;
-    let mut exec_stage = AccountHashingStage::default();
-
-    // Forces hashing from scratch
-    exec_stage.clean_threshold = 1;
+    let mut exec_stage = AccountHashingStage {
+        clean_threshold: 1, // Forces hashing from scratch
+        ..Default::default()
+    };
 
     exec_stage
         .execute(
