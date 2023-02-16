@@ -487,8 +487,7 @@ impl Discv4Service {
 
     /// Returns true if there's a lookup in progress
     fn is_lookup_in_progress(&self) -> bool {
-        !self.pending_find_nodes.is_empty() ||
-            self.pending_pings.values().any(|ping| ping.reason.is_find_node())
+        !self.pending_find_nodes.is_empty()
     }
 
     /// Returns the current enr sequence
@@ -1011,11 +1010,6 @@ impl Discv4Service {
             PingReason::RePing => {
                 self.update_on_reping(node, pong.enr_sq);
             }
-            PingReason::FindNode(target) => {
-                // Received a pong for a discovery request
-                self.update_on_pong(node, pong.enr_sq);
-                self.respond_closest(target, remote_addr);
-            }
             PingReason::Lookup(node, ctx) => {
                 self.update_on_pong(node, pong.enr_sq);
                 self.find_node(&node, ctx);
@@ -1023,7 +1017,7 @@ impl Discv4Service {
         }
     }
 
-    /// Handler for incoming `FindNode` message
+    /// Handler for an incoming `FindNode` message
     fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: PeerId) {
         if self.is_expired(msg.expire) {
             // ping's expiration timestamp is in the past
@@ -1043,27 +1037,11 @@ impl Discv4Service {
                     self.respond_closest(msg.id, remote_addr)
                 }
             }
-            kbucket::Entry::Absent(entry) => {
-                // try to ping again
-                let node = NodeRecord {
-                    address: remote_addr.ip(),
-                    tcp_port: remote_addr.port(),
-                    udp_port: remote_addr.port(),
-                    id: node_id,
-                }
-                .into_ipv4_mapped();
-                let val = NodeEntry::new(node);
-                let _ = entry.insert(
-                    val,
-                    NodeStatus {
-                        direction: ConnectionDirection::Outgoing,
-                        state: ConnectionState::Disconnected,
-                    },
-                );
-
-                self.try_ping(node, PingReason::FindNode(msg.id))
+            kbucket::Entry::Absent(_) => {
+                // no existing endpoint proof
+                // > To guard against traffic amplification attacks, Neighbors replies should only be sent if the sender of FindNode has been verified by the endpoint proof procedure.
             }
-            _ => (),
+            kbucket::Entry::SelfEntry => {}
         }
     }
 
@@ -1860,22 +1838,8 @@ enum PingReason {
     Initial,
     /// Re-ping a peer..
     RePing,
-    /// Ping issued to adhere to endpoint proof procedure
-    ///
-    /// Once the expected PONG is received, the endpoint proof is complete and the find node can be
-    /// answered.
-    FindNode(PeerId),
     /// Part of a lookup to ensure endpoint is proven.
     Lookup(NodeRecord, LookupContext),
-}
-
-// === impl PingReason ===
-
-impl PingReason {
-    /// Whether this ping was created in order to issue a find node
-    fn is_find_node(&self) -> bool {
-        matches!(self, PingReason::FindNode(_))
-    }
 }
 
 /// Represents node related updates state changes in the underlying node table
