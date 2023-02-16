@@ -1,4 +1,8 @@
-use crate::Error;
+use crate::{
+    abstraction::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    transaction::{DbTx, DbTxMut},
+    Error,
+};
 use bytes::Bytes;
 use serde::Serialize;
 use std::{
@@ -75,4 +79,59 @@ pub trait DupSort: Table {
     ///
     /// Upstream docs: <https://libmdbx.dqdkfa.ru/usage.html#autotoc_md48>
     type SubKey: Key;
+}
+
+/// Allows duplicating tables across databases
+pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
+    /// Imports all table data from another transaction.
+    fn import_table<T: Table, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), Error> {
+        let mut destination_cursor = self.cursor_write::<T>()?;
+
+        for kv in source_tx.cursor_read::<T>()?.walk(None)? {
+            let (k, v) = kv?;
+            destination_cursor.append(k, v)?;
+        }
+
+        Ok(())
+    }
+
+    /// Imports table data from another transaction within a range.
+    fn import_table_with_range<T: Table, R: DbTx<'tx>>(
+        &self,
+        source_tx: &R,
+        from: Option<<T as Table>::Key>,
+        to: <T as Table>::Key,
+    ) -> Result<(), Error>
+    where
+        T::Key: Default,
+    {
+        let mut destination_cursor = self.cursor_write::<T>()?;
+        let mut source_cursor = source_tx.cursor_read::<T>()?;
+
+        let source_range = match from {
+            Some(from) => source_cursor.walk_range(from..=to),
+            None => source_cursor.walk_range(..=to),
+        };
+        for row in source_range? {
+            let (key, value) = row?;
+            destination_cursor.append(key, value)?;
+        }
+
+        Ok(())
+    }
+
+    /// Imports all dupsort data from another transaction.
+    fn import_dupsort<T: DupSort, R: DbTx<'tx>>(&self, source_tx: &R) -> Result<(), Error> {
+        let mut destination_cursor = self.cursor_dup_write::<T>()?;
+        let mut cursor = source_tx.cursor_dup_read::<T>()?;
+
+        while let Some((k, _)) = cursor.next_no_dup()? {
+            for kv in cursor.walk_dup(Some(k), None)? {
+                let (k, v) = kv?;
+                destination_cursor.append_dup(k, v)?;
+            }
+        }
+
+        Ok(())
+    }
 }

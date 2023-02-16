@@ -26,30 +26,29 @@
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
-//! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient};
+//! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient, TestStatusUpdater};
 //! # use reth_primitives::PeerId;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
-//! #    consensus.clone(),
-//! #    Arc::new(TestHeadersClient::default())
+//! #    Arc::new(TestHeadersClient::default()),
+//! #    consensus.clone()
 //! # );
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::zero(), vec![]).into()) }),
 //! #    consensus.clone(),
 //! #    create_test_rw_db()
 //! # );
+//! # let (status_updater, _) = TestStatusUpdater::new();
 //! // Create a pipeline that can fully sync
 //! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
 //! Pipeline::builder()
 //!     .add_stages(
-//!         DefaultStages::new(consensus, headers_downloader, bodies_downloader)
+//!         DefaultStages::new(consensus, headers_downloader, bodies_downloader, status_updater)
 //!     )
 //!     .build();
-//! #
 //! ```
-mod db;
 mod error;
 mod id;
 mod pipeline;
@@ -69,7 +68,6 @@ pub mod stages;
 
 pub mod sets;
 
-pub use db::Transaction;
 pub use error::*;
 pub use id::*;
 pub use pipeline::*;

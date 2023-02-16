@@ -168,7 +168,7 @@ impl Stream for TestDownload {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
-                        resp.1.into_iter().skip(1).map(|h| h.seal()).collect::<Vec<_>>();
+                        resp.1.into_iter().skip(1).map(Header::seal_slow).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
@@ -298,12 +298,27 @@ impl TestConsensus {
     }
 }
 
-/// Nil status updater for testing
-#[derive(Debug, Clone, Default)]
-pub struct TestStatusUpdater;
+/// Status updater for testing.
+///
+/// [`TestStatusUpdater::new()`] creates a new [`TestStatusUpdater`] that is **not** shareable. This
+/// struct wraps the sender side of a [`tokio::sync::watch`] channel. The receiving side of the
+/// channel (which is shareable by cloning it) is also returned.
+#[derive(Debug)]
+pub struct TestStatusUpdater(tokio::sync::watch::Sender<Head>);
+
+impl TestStatusUpdater {
+    /// Create a new test status updater and a receiver to listen to status updates on.
+    pub fn new() -> (Self, tokio::sync::watch::Receiver<Head>) {
+        let (tx, rx) = tokio::sync::watch::channel(Head::default());
+
+        (Self(tx), rx)
+    }
+}
 
 impl StatusUpdater for TestStatusUpdater {
-    fn update_status(&self, _: Head) {}
+    fn update_status(&self, head: Head) {
+        self.0.send(head).expect("could not send status update");
+    }
 }
 
 #[async_trait::async_trait]
@@ -340,7 +355,7 @@ impl Consensus for TestConsensus {
         }
     }
 
-    fn has_block_reward(&self, _: U256) -> bool {
+    fn has_block_reward(&self, _: U256, _: U256) -> bool {
         true
     }
 }

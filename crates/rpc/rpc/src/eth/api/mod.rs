@@ -9,9 +9,12 @@ use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
-    Address, ChainInfo, H256, U64,
+    Address, ChainInfo, TransactionSigned, H256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
+use std::num::NonZeroUsize;
+
+use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
@@ -19,6 +22,9 @@ mod block;
 mod server;
 mod state;
 mod transactions;
+
+/// Cache limit of block-level fee history for `eth_feeHistory` RPC method.
+const FEE_HISTORY_CACHE_LIMIT: usize = 2048;
 
 /// `Eth` API trait.
 ///
@@ -36,6 +42,9 @@ pub trait EthApiSpec: Send + Sync {
 
     /// Returns a list of addresses owned by client.
     fn accounts(&self) -> Vec<Address>;
+
+    /// Returns the transaction by hash
+    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<TransactionSigned>>;
 }
 
 /// `Eth` API implementation.
@@ -51,13 +60,19 @@ pub trait EthApiSpec: Send + Sync {
 pub struct EthApi<Client, Pool, Network> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Client, Pool, Network>>,
+    fee_history_cache: FeeHistoryCache,
 }
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     /// Creates a new, shareable instance.
     pub fn new(client: Client, pool: Pool, network: Network) -> Self {
         let inner = EthApiInner { client, pool, network, signers: Default::default() };
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+            fee_history_cache: FeeHistoryCache::new(
+                NonZeroUsize::new(FEE_HISTORY_CACHE_LIMIT).unwrap(),
+            ),
+        }
     }
 
     /// Returns the inner `Client`
@@ -174,6 +189,10 @@ where
 
     fn accounts(&self) -> Vec<Address> {
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
+    }
+
+    async fn transaction_by_hash(&self, _hash: H256) -> Result<Option<TransactionSigned>> {
+        todo!()
     }
 }
 

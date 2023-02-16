@@ -42,7 +42,8 @@ impl_compression_for_compact!(
     StorageEntry,
     StorageTrieEntry,
     StoredBlockBody,
-    StoredBlockOmmers
+    StoredBlockOmmers,
+    StoredBlockWithdrawals
 );
 impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);
 impl_compression_for_compact!(CompactU256);

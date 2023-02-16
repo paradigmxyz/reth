@@ -1,6 +1,5 @@
-use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use num_traits::Zero;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -8,7 +7,8 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Address, StorageEntry, H160, H256, U256};
+use reth_primitives::{keccak256, Address, StorageEntry, H256, U256};
+use reth_provider::Transaction;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -25,7 +25,7 @@ pub struct StorageHashingStage {
     /// The threshold (in number of state transitions) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of blocks to process before committing.
+    /// The maximum number of slots to process before committing.
     pub commit_threshold: u64,
 }
 
@@ -63,38 +63,74 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             tx.clear::<tables::HashedStorage>()?;
             tx.commit()?;
 
-            let mut first_key = H160::zero();
+            let mut current_key = None;
+            let mut current_subkey = None;
+            let mut keccak_address = None;
+
             loop {
-                let next_key = {
+                let mut hashed_batch = BTreeMap::new();
+                let mut remaining = self.commit_threshold as usize;
+                {
                     let mut storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
+                    while !remaining.is_zero() {
+                        hashed_batch.extend(
+                            storage
+                                .walk_dup(current_key, current_subkey)?
+                                .take(remaining)
+                                .map(|res| {
+                                    res.map(|(address, slot)| {
+                                        // Address caching for the first iteration when current_key
+                                        // is None
+                                        let keccak_address =
+                                            if let Some(keccak_address) = keccak_address {
+                                                keccak_address
+                                            } else {
+                                                keccak256(address)
+                                            };
 
-                    let hashed_batch = storage
-                        .walk(first_key)?
-                        .take(self.commit_threshold as usize)
-                        .map(|res| {
-                            res.map(|(address, slot)| {
-                                // both account address and storage slot key are hashed for merkle
-                                // tree.
-                                ((keccak256(address), keccak256(slot.key)), slot.value)
-                            })
-                        })
-                        .collect::<Result<BTreeMap<_, _>, _>>()?;
+                                        // TODO cache map keccak256(slot.key) ?
+                                        ((keccak_address, keccak256(slot.key)), slot.value)
+                                    })
+                                })
+                                .collect::<Result<BTreeMap<_, _>, _>>()?,
+                        );
 
-                    // next key of iterator
-                    let next_key = storage.next()?;
+                        remaining = self.commit_threshold as usize - hashed_batch.len();
 
-                    // iterate and put presorted hashed slots
-                    hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
-                        tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
-                    })?;
-                    next_key.map(|(key, _)| key)
-                };
+                        if let Some((address, slot)) = storage.next_dup()? {
+                            // There's still some remaining elements on this key, so we need to save
+                            // the cursor position for the next
+                            // iteration
+
+                            current_key = Some(address);
+                            current_subkey = Some(slot.key);
+                        } else {
+                            // Go to the next key
+                            current_key = storage.next_no_dup()?.map(|(key, _)| key);
+                            current_subkey = None;
+
+                            // Cache keccak256(address) for the next key if it exists
+                            if let Some(address) = current_key {
+                                keccak_address = Some(keccak256(address));
+                            } else {
+                                // We have reached the end of table
+                                break
+                            }
+                        }
+                    }
+                }
+
+                // iterate and put presorted hashed slots
+                hashed_batch.into_iter().try_for_each(|((addr, key), value)| {
+                    tx.put::<tables::HashedStorage>(addr, StorageEntry { key, value })
+                })?;
+
                 tx.commit()?;
 
-                first_key = match next_key {
-                    Some(key) => key,
-                    None => break,
-                };
+                // We have reached the end of table
+                if current_key.is_none() {
+                    break
+                }
             }
         } else {
             let mut plain_storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
@@ -104,8 +140,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             // changed.
             tx.cursor_read::<tables::StorageChangeSet>()?
                 .walk_range(
-                    (from_transition, Address::zero()).into()..
-                        (to_transition, Address::zero()).into(),
+                    TransitionIdAddress((from_transition, Address::zero()))..
+                        TransitionIdAddress((to_transition, Address::zero())),
                 )?
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
@@ -174,8 +210,8 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         // Aggregate all transition changesets and make list of accounts that have been changed.
         tx.cursor_read::<tables::StorageChangeSet>()?
             .walk_range(
-                (from_transition_rev, Address::zero()).into()..
-                    (to_transition_rev, Address::zero()).into(),
+                TransitionIdAddress((from_transition_rev, Address::zero()))..
+                    TransitionIdAddress((to_transition_rev, Address::zero())),
             )?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
@@ -226,7 +262,7 @@ mod tests {
     use reth_db::{
         cursor::DbCursorRW,
         mdbx::{tx::Tx, WriteMap, RW},
-        models::{BlockNumHash, StoredBlockBody, TransitionIdAddress},
+        models::{StoredBlockBody, TransitionIdAddress},
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
@@ -242,8 +278,14 @@ mod tests {
 
         // Set up the runner
         let mut runner = StorageHashingTestRunner::default();
-        // set low threshold so we hash the whole storage
+
+        // set low clean threshold so we hash the whole storage
         runner.set_clean_threshold(1);
+
+        // set low commit threshold so we force each entry to be a tx.commit and make sure we don't
+        // hang on one key. Seed execution inserts more than one storage entry per address.
+        runner.set_commit_threshold(1);
+
         let input = ExecInput {
             previous_stage: Some((PREV_STAGE_ID, previous_stage)),
             stage_progress: Some(stage_progress),
@@ -313,8 +355,6 @@ mod tests {
             for progress in iter {
                 // Insert last progress data
                 self.tx.commit(|tx| {
-                    let key: BlockNumHash = (progress.number, progress.hash()).into();
-
                     let body = StoredBlockBody {
                         start_tx_id: tx_id,
                         tx_count: progress.body.len() as u64,
@@ -329,16 +369,19 @@ mod tests {
                             .get_mut(rand::random::<usize>() % n_accounts as usize)
                             .unwrap();
 
-                        let new_entry = StorageEntry {
-                            key: keccak256([rand::random::<u8>()]),
-                            value: U256::from(rand::random::<u8>() % 30 + 1),
-                        };
-                        self.insert_storage_entry(
-                            tx,
-                            (transition_id, *addr).into(),
-                            new_entry,
-                            progress.header.number == stage_progress,
-                        )?;
+                        for _ in 0..2 {
+                            let new_entry = StorageEntry {
+                                key: keccak256([rand::random::<u8>()]),
+                                value: U256::from(rand::random::<u8>() % 30 + 1),
+                            };
+                            self.insert_storage_entry(
+                                tx,
+                                (transition_id, *addr).into(),
+                                new_entry,
+                                progress.header.number == stage_progress,
+                            )?;
+                        }
+
                         tx_id += 1;
                         transition_id += 1;
                         Ok(())
@@ -359,8 +402,8 @@ mod tests {
                         transition_id += 1;
                     }
 
-                    tx.put::<tables::BlockTransitionIndex>(key.number(), transition_id)?;
-                    tx.put::<tables::BlockBodies>(key, body)
+                    tx.put::<tables::BlockTransitionIndex>(progress.number, transition_id)?;
+                    tx.put::<tables::BlockBodies>(progress.number, body)
                 })?;
             }
 
@@ -395,6 +438,10 @@ mod tests {
             self.clean_threshold = threshold;
         }
 
+        fn set_commit_threshold(&mut self, threshold: u64) {
+            self.commit_threshold = threshold;
+        }
+
         fn check_hashed_storage(&self) -> Result<(), TestRunnerError> {
             self.tx
                 .query(|tx| {
@@ -415,8 +462,7 @@ mod tests {
                         );
                         expected += 1;
                     }
-                    let count =
-                        tx.cursor_dup_read::<tables::HashedStorage>()?.walk(H256::zero())?.count();
+                    let count = tx.cursor_dup_read::<tables::HashedStorage>()?.walk(None)?.count();
 
                     assert_eq!(count, expected);
                     Ok(())

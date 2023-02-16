@@ -103,7 +103,7 @@ async fn init_geth() -> (CliqueGethInstance, ChainSpec) {
         .into();
     let remote_genesis = SealedHeader::from(clique.provider.remote_genesis_block().await.unwrap());
 
-    let local_genesis = chainspec.genesis_header().seal();
+    let local_genesis = chainspec.genesis_header().seal(chainspec.genesis_hash());
     assert_eq!(local_genesis, remote_genesis, "genesis blocks should match, we computed {local_genesis:#?} but geth computed {remote_genesis:#?}");
 
     // === create many blocks ===

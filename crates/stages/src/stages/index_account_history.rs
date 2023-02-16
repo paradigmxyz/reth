@@ -1,6 +1,4 @@
-use crate::{
-    db::Transaction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -10,12 +8,14 @@ use reth_db::{
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
+use reth_provider::Transaction;
 
 use reth_primitives::{Address, TransitionId};
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
-const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistory");
+/// The [`StageId`] of the account history indexing stage.
+pub const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistory");
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
@@ -59,7 +59,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let account_changesets = tx
             .cursor_read::<tables::AccountChangeSet>()?
-            .walk(from_transition)?
+            .walk(Some(from_transition))?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition).unwrap_or_default())
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -122,7 +122,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         let account_changeset = tx
             .cursor_read::<tables::AccountChangeSet>()?
-            .walk(from_transition_rev)?
+            .walk(Some(from_transition_rev))?
             .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition_rev).unwrap_or_default())
             .collect::<Result<Vec<_>, _>>()?;
 

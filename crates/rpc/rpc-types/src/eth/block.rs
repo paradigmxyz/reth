@@ -1,5 +1,10 @@
+//! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
-use reth_primitives::{Address, Bloom, Bytes, H256, H64, U256};
+use reth_primitives::{
+    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as RethHeader, Withdrawal, H256, H64,
+    U256,
+};
+use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -11,6 +16,14 @@ pub enum BlockTransactions {
     Hashes(Vec<H256>),
     /// Full transactions
     Full(Vec<Transaction>),
+}
+
+/// Error that can occur when converting other types to blocks
+#[derive(Debug, thiserror::Error)]
+pub enum BlockError {
+    /// A transaction failed sender recovery
+    #[error("transaction failed sender recovery")]
+    InvalidSignature,
 }
 
 /// Block representation
@@ -31,6 +44,85 @@ pub struct Block {
     /// Base Fee for post-EIP1559 blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
+    /// Withdrawals
+    pub withdrawals: Option<Vec<Withdrawal>>,
+}
+
+impl Block {
+    /// Create a new block response from a [primitive block](reth_primitives::Block), using the
+    /// total difficulty to populate its field in the rpc response.
+    pub fn from_block_full(
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+    ) -> Result<Self, BlockError> {
+        let block_hash = block.header.hash_slow();
+        let header_length = block.header.length();
+        let block_length = block.length();
+        let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
+
+        let RethHeader {
+            parent_hash,
+            ommers_hash,
+            beneficiary,
+            state_root,
+            transactions_root,
+            receipts_root,
+            logs_bloom,
+            difficulty,
+            number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            mix_hash,
+            nonce,
+            base_fee_per_gas,
+            extra_data,
+            withdrawals_root,
+        } = block.header;
+
+        let header = Header {
+            hash: Some(block_hash),
+            parent_hash,
+            uncles_hash: ommers_hash,
+            author: beneficiary,
+            miner: beneficiary,
+            state_root,
+            transactions_root,
+            receipts_root,
+            withdrawals_root,
+            number: Some(U256::from(number)),
+            gas_used: U256::from(gas_used),
+            gas_limit: U256::from(gas_limit),
+            extra_data,
+            logs_bloom,
+            timestamp: U256::from(timestamp),
+            difficulty,
+            mix_hash,
+            nonce: Some(nonce.to_be_bytes().into()),
+            size: Some(U256::from(header_length)),
+        };
+
+        let mut transactions = Vec::with_capacity(block.body.len());
+        for (idx, tx) in block.body.iter().enumerate() {
+            let signed_tx = tx.clone().into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
+            transactions.push(Transaction::from_recovered_with_block_context(
+                signed_tx,
+                block_hash,
+                number,
+                U256::from(idx),
+            ))
+        }
+
+        Ok(Self {
+            header,
+            uncles,
+            transactions: BlockTransactions::Full(transactions),
+            base_fee_per_gas: base_fee_per_gas.map(U256::from),
+            total_difficulty,
+            size: Some(U256::from(block_length)),
+            withdrawals: block.withdrawals,
+        })
+    }
 }
 
 /// Block header representation.
@@ -54,6 +146,8 @@ pub struct Header {
     pub transactions_root: H256,
     /// Transactions receipts root hash
     pub receipts_root: H256,
+    /// Withdrawals root hash
+    pub withdrawals_root: Option<H256>,
     /// Block number
     pub number: Option<U256>,
     /// Gas Used

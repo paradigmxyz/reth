@@ -1,7 +1,7 @@
 use reth_primitives::BlockNumber;
 
 /// Determines the control flow during pipeline execution.
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) enum ControlFlow {
     /// An unwind was requested and must be performed before continuing.
     Unwind {
@@ -13,7 +13,7 @@ pub(crate) enum ControlFlow {
     /// The pipeline is allowed to continue executing stages.
     Continue {
         /// The progress of the last stage
-        progress: u64,
+        progress: BlockNumber,
     },
     NoProgress,
 }

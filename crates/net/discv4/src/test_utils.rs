@@ -216,9 +216,8 @@ pub async fn create_discv4_with_config(config: Discv4Config) -> (Discv4, Discv4S
     let socket = SocketAddr::from_str("0.0.0.0:0").unwrap();
     let (secret_key, pk) = SECP256K1.generate_keypair(&mut rng);
     let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
-    let external_addr = reth_net_nat::external_ip().await.unwrap_or_else(|| socket.ip());
     let local_enr =
-        NodeRecord { address: external_addr, tcp_port: socket.port(), udp_port: socket.port(), id };
+        NodeRecord { address: socket.ip(), tcp_port: socket.port(), udp_port: socket.port(), id };
     Discv4::bind(socket, local_enr, secret_key, config).await.unwrap()
 }
 

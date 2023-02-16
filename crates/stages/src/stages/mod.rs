@@ -2,6 +2,8 @@
 mod bodies;
 /// The execution stage that generates state diff.
 mod execution;
+/// The finish stage
+mod finish;
 /// Account hashing stage.
 mod hashing_account;
 /// Storage hashing stage.
@@ -16,6 +18,8 @@ mod index_storage_history;
 mod merkle;
 /// The sender recovery stage.
 mod sender_recovery;
+/// Helper types for working with streams.
+mod stream;
 /// The total difficulty stage
 mod total_difficulty;
 /// The transaction lookup stage
@@ -23,6 +27,7 @@ mod tx_lookup;
 
 pub use bodies::*;
 pub use execution::*;
+pub use finish::*;
 pub use hashing_account::*;
 pub use hashing_storage::*;
 pub use headers::*;

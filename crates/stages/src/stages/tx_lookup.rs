@@ -1,6 +1,6 @@
 use crate::{
-    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -8,9 +8,11 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_provider::Transaction;
 use tracing::*;
 
-const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
+/// The [`StageId`] of the transaction lookup stage.
+pub const TRANSACTION_LOOKUP: StageId = StageId("TransactionLookup");
 
 /// The transaction lookup stage.
 ///
@@ -56,24 +58,43 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         let mut cursor_bodies = tx.cursor_read::<tables::BlockBodies>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
-        let start_key = tx.get_block_numhash(start_block)?;
 
         // Walk over block bodies within a specified range.
-        let bodies = cursor_bodies.walk(start_key)?.take_while(|entry| {
-            entry
-                .as_ref()
-                .map(|(block_num_hash, _)| block_num_hash.number() <= end_block)
-                .unwrap_or_default()
+        let bodies = cursor_bodies.walk(Some(start_block))?.take_while(|entry| {
+            entry.as_ref().map(|(num, _)| *num <= end_block).unwrap_or_default()
         });
 
-        // Collect tranasctions for each body and insert the reverse lookup for hash -> tx_id.
+        // Collect transactions for each body
+        let mut tx_list = vec![];
         for body_entry in bodies {
             let (_, body) = body_entry?;
-            let transactions = tx_cursor.walk(body.start_tx_id)?.take(body.tx_count as usize);
+            let transactions = tx_cursor.walk(Some(body.start_tx_id))?.take(body.tx_count as usize);
 
             for tx_entry in transactions {
                 let (id, transaction) = tx_entry?;
-                tx.put::<tables::TxHashNumber>(transaction.hash(), id)?;
+                tx_list.push((transaction.hash(), id));
+            }
+        }
+
+        // Sort before inserting the reverse lookup for hash -> tx_id.
+        tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
+
+        let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
+
+        // If the last inserted element in the database is smaller than the first in our set, then
+        // we can just append into the DB. This probably only ever happens during sync, on
+        // the first table insertion.
+        let append = tx_list
+            .first()
+            .zip(txhash_cursor.last()?)
+            .map(|((first, _), (last, _))| &last < first)
+            .unwrap_or_default();
+
+        for (tx_hash, id) in tx_list {
+            if append {
+                txhash_cursor.append(tx_hash, id)?;
+            } else {
+                txhash_cursor.insert(tx_hash, id)?;
             }
         }
 
@@ -94,8 +115,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut rev_walker = body_cursor.walk_back(None)?;
-        while let Some((key, body)) = rev_walker.next().transpose()? {
-            if key.number() <= input.unwind_to {
+        while let Some((number, body)) = rev_walker.next().transpose()? {
+            if number <= input.unwind_to {
                 break
             }
 
@@ -224,8 +245,8 @@ mod tests {
         ///
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxHashNumber] is not empty.
-        fn ensure_no_hash_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body_by_num(block);
+        fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
+            let body_result = self.tx.inner().get_block_body(number);
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_index(),
@@ -278,9 +299,8 @@ mod tests {
                         return Ok(())
                     }
 
-                    let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
                     let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
-                    body_cursor.seek_exact((start_block, start_hash).into())?;
+                    body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_id_range() {

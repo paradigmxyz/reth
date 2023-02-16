@@ -13,8 +13,9 @@ use reth_primitives::{
     keccak256, Account as RethAccount, Address, ChainSpec, ForkCondition, Hardfork, JsonU256,
     SealedBlock, SealedHeader, StorageEntry, H256, U256,
 };
+use reth_provider::Transaction;
 use reth_rlp::Decodable;
-use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId, Transaction};
+use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -117,8 +118,6 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
             continue
         }
 
-        // if matches!(suite.pre, State(RootOrState::Root(_))) {}
-
         let pre_state = suite.pre.0;
 
         debug!(target: "reth::cli", name, network = ?suite.network, "Running test");
@@ -133,14 +132,14 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         // insert genesis
         let header: SealedHeader = suite.genesis_block_header.into();
-        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![] };
+        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![], withdrawals: None };
         reth_provider::insert_canonical_block(&tx, &genesis_block, has_block_reward)?;
 
         let mut last_block = None;
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
             let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-            last_block = Some(decoded.number);
             reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
+            last_block = Some(decoded.number);
             Ok(())
         })?;
 
@@ -174,7 +173,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         let storage = db.view(|tx| -> Result<_, DbError> {
             let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-            let walker = cursor.first()?.map(|first| cursor.walk(first.0)).transpose()?;
+            let walker = cursor.first()?.map(|first| cursor.walk(Some(first.0))).transpose()?;
             Ok(walker.map(|mut walker| {
                 let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
                 while let Some(Ok((address, slot))) = walker.next() {
@@ -210,7 +209,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
             }
             Some(RootOrState::State(state)) => db.view(|tx| -> eyre::Result<()> {
                 let mut cursor = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-                let walker = cursor.first()?.map(|first| cursor.walk(first.0)).transpose()?;
+                let walker = cursor.first()?.map(|first| cursor.walk(Some(first.0))).transpose()?;
                 let storage = walker.map(|mut walker| {
                     let mut map: HashMap<Address, HashMap<U256, U256>> = HashMap::new();
                     while let Some(Ok((address, slot))) = walker.next() {

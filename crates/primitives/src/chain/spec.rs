@@ -4,6 +4,7 @@ use crate::{
     GenesisAccount, Hardfork, Header, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
+use hex_literal::hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -13,6 +14,9 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::mainnet(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
         .expect("Can't deserialize Mainnet genesis json"),
+    genesis_hash: Some(H256(hex!(
+        "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
+    ))),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(1150000)),
@@ -32,7 +36,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
             Hardfork::Paris,
             ForkCondition::TTD {
                 fork_block: None,
-                total_difficulty: U256::from(58_750_000_000_000_000_000_000u128),
+                total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
             },
         ),
     ]),
@@ -43,6 +47,9 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::goerli(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
         .expect("Can't deserialize Goerli genesis json"),
+    genesis_hash: Some(H256(hex!(
+        "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
+    ))),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Istanbul, ForkCondition::Block(1561651)),
@@ -60,6 +67,9 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     chain: Chain::sepolia(),
     genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
         .expect("Can't deserialize Sepolia genesis json"),
+    genesis_hash: Some(H256(hex!(
+        "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
+    ))),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
         (Hardfork::Homestead, ForkCondition::Block(0)),
@@ -80,6 +90,7 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
                 total_difficulty: U256::from(17_000_000_000_000_000u64),
             },
         ),
+        (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
     ]),
 });
 
@@ -94,6 +105,13 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
 pub struct ChainSpec {
     /// The chain ID
     pub chain: Chain,
+
+    /// The hash of the genesis block.
+    ///
+    /// This acts as a small cache for known chains. If the chain is known, then the genesis hash
+    /// is also known ahead of time, and this will be `Some`.
+    #[serde(skip, default)]
+    pub genesis_hash: Option<H256>,
 
     /// The genesis block
     pub genesis: Genesis,
@@ -140,7 +158,11 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> H256 {
-        self.genesis_header().hash_slow()
+        if let Some(hash) = self.genesis_hash {
+            hash
+        } else {
+            self.genesis_header().hash_slow()
+        }
     }
 
     /// Returns the forks in this specification and their activation conditions.
@@ -256,7 +278,43 @@ impl From<EthersGenesis> for ChainSpec {
             );
         }
 
-        Self { chain: genesis.config.chain_id.into(), genesis: genesis_block, hardforks }
+        Self {
+            chain: genesis.config.chain_id.into(),
+            genesis: genesis_block,
+            genesis_hash: None,
+            hardforks,
+        }
+    }
+}
+
+/// A helper type for compatibility with geth's config
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum AllGenesisFormats {
+    /// The geth genesis format
+    Geth(EthersGenesis),
+    /// The reth genesis format
+    Reth(ChainSpec),
+}
+
+impl From<EthersGenesis> for AllGenesisFormats {
+    fn from(genesis: EthersGenesis) -> Self {
+        Self::Geth(genesis)
+    }
+}
+
+impl From<ChainSpec> for AllGenesisFormats {
+    fn from(genesis: ChainSpec) -> Self {
+        Self::Reth(genesis)
+    }
+}
+
+impl From<AllGenesisFormats> for ChainSpec {
+    fn from(genesis: AllGenesisFormats) -> Self {
+        match genesis {
+            AllGenesisFormats::Geth(genesis) => genesis.into(),
+            AllGenesisFormats::Reth(genesis) => genesis,
+        }
     }
 }
 
@@ -360,11 +418,18 @@ impl ChainSpecBuilder {
 
     /// Enable Paris at genesis.
     pub fn paris_activated(mut self) -> Self {
-        self = self.berlin_activated();
+        self = self.london_activated();
         self.hardforks.insert(
             Hardfork::Paris,
             ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
         );
+        self
+    }
+
+    /// Enable Shanghai at genesis.
+    pub fn shanghai_activated(mut self) -> Self {
+        self = self.paris_activated();
+        self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
         self
     }
 
@@ -378,6 +443,7 @@ impl ChainSpecBuilder {
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
+            genesis_hash: None,
             hardforks: self.hardforks,
         }
     }
@@ -441,12 +507,18 @@ impl ForkCondition {
         }
     }
 
-    /// Checks whether the fork condition is satisfied at the given total difficulty.
+    /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
+    /// of a current block.
+    ///
+    /// The fork is considered active if the _previous_ total difficulty is above the threshold.
+    /// To achieve that, we subtract the passed `difficulty` from the current block's total
+    /// difficulty, and check if it's above the Fork Condition's total difficulty (here:
+    /// 58_750_000_000_000_000_000_000)
     ///
     /// This will return false for any condition that is not TTD-based.
-    pub fn active_at_ttd(&self, ttd: U256) -> bool {
+    pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
         if let ForkCondition::TTD { total_difficulty, .. } = self {
-            ttd >= *total_difficulty
+            ttd.saturating_sub(difficulty) >= *total_difficulty
         } else {
             false
         }
@@ -473,7 +545,7 @@ impl ForkCondition {
     pub fn active_at_head(&self, head: &Head) -> bool {
         self.active_at_block(head.number) ||
             self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty)
+            self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.
@@ -501,6 +573,8 @@ impl ForkCondition {
 
 #[cfg(test)]
 mod tests {
+    use revm_primitives::U256;
+
     use crate::{
         Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
         Head, GOERLI, MAINNET, SEPOLIA,
@@ -671,7 +745,11 @@ mod tests {
                 ),
                 (
                     Head { number: 1735371, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 0 },
+                    ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
+                ),
+                (
+                    Head { number: 1735372, timestamp: 1677557090, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 0 },
                 ),
             ],
         );
@@ -802,5 +880,25 @@ mod tests {
                 ), // Future Shanghai block
             ],
         );
+    }
+
+    /// Checks that the fork is not active at a terminal ttd block.
+    #[test]
+    fn check_terminal_ttd() {
+        let chainspec = ChainSpecBuilder::mainnet().build();
+
+        // Check that Paris is not active on terminal PoW block #15537393.
+        let terminal_block_ttd = U256::from(58750003716598352816469_u128);
+        let terminal_block_difficulty = U256::from(11055787484078698_u128);
+        assert!(!chainspec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(terminal_block_ttd, terminal_block_difficulty));
+
+        // Check that Paris is active on first PoS block #15537394.
+        let first_pos_block_ttd = U256::from(58750003716598352816469_u128);
+        let first_pos_difficulty = U256::ZERO;
+        assert!(chainspec
+            .fork(Hardfork::Paris)
+            .active_at_ttd(first_pos_block_ttd, first_pos_difficulty));
     }
 }

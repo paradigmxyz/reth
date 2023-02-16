@@ -29,16 +29,18 @@ mod peer;
 mod receipt;
 mod storage;
 mod transaction;
+mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
 
 pub use account::Account;
 pub use bits::H512;
-pub use block::{Block, BlockHashOrNumber, SealedBlock};
+pub use block::{Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::{
-    Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA,
+    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
+    MAINNET, SEPOLIA,
 };
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
@@ -60,6 +62,7 @@ pub use transaction::{
     Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
     TxEip2930, TxLegacy, TxType,
 };
+pub use withdrawal::Withdrawal;
 
 /// A block hash.
 pub type BlockHash = H256;
@@ -67,9 +70,6 @@ pub type BlockHash = H256;
 pub type BlockNumber = u64;
 /// An Ethereum address.
 pub type Address = H160;
-// TODO(onbjerg): Is this not the same as [BlockHash]?
-/// BlockId is Keccak hash of the header
-pub type BlockID = H256;
 /// A transaction hash is a kecack hash of an RLP encoded signed transaction.
 pub type TxHash = H256;
 /// The sequence number of all existing transactions.
@@ -86,8 +86,9 @@ pub type TransitionId = u64;
 pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, H128, H64, U64},
+    utils as rpc_utils,
 };
-pub use revm_interpreter::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
+pub use revm_primitives::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
 
 #[doc(hidden)]
 mod __reexport {

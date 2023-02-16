@@ -13,6 +13,7 @@ reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
 reth-eth-wire = { path = "../eth-wire" }
 reth-db = { path = "../../storage/db" }
+reth-tasks = { path = "../../tasks" }
 reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # async
@@ -32,6 +33,7 @@ reth-rlp = { path = "../../rlp", optional = true }
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
 bytes = { version = "1", optional = true }
 tempfile = { version = "3.3", optional = true }
+itertools = { version = "0.10", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../../storage/db", features = ["test-utils"] }
@@ -42,10 +44,11 @@ assert_matches = "1.5.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 reth-rlp = { path = "../../rlp" }
+itertools = "0.10"
 bytes = "1"
 
 thiserror = "1"
 tempfile = "3.3"
 
 [features]
-test-utils = ["dep:reth-rlp", "dep:thiserror", "dep:tokio-util", "dep:tempfile", "dep:bytes"]
+test-utils = ["dep:reth-rlp", "dep:thiserror", "dep:tokio-util", "dep:tempfile", "dep:bytes", "dep:itertools"]

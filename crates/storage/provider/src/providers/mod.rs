@@ -6,38 +6,46 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
-use std::sync::Arc;
+use std::ops::RangeBounds;
 
-mod historical;
-pub use historical::{HistoricalStateProvider, HistoricalStateProviderRef};
-
-mod latest;
-pub use latest::{LatestStateProvider, LatestStateProviderRef};
+mod state;
+use reth_db::cursor::DbCursorRO;
+pub use state::{
+    chain::ChainState,
+    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
+    latest::{LatestStateProvider, LatestStateProviderRef},
+};
 
 /// A common provider that fetches data from a database.
 ///
 /// This provider implements most provider or provider factory traits.
 pub struct ShareableDatabase<DB> {
     /// Database
-    db: Arc<DB>,
+    db: DB,
 }
 
 impl<DB> ShareableDatabase<DB> {
     /// create new database provider
-    pub fn new(db: Arc<DB>) -> Self {
+    pub fn new(db: DB) -> Self {
         Self { db }
     }
 }
 
-impl<DB> Clone for ShareableDatabase<DB> {
+impl<DB: Clone> Clone for ShareableDatabase<DB> {
     fn clone(&self) -> Self {
-        Self { db: Arc::clone(&self.db) }
+        Self { db: self.db.clone() }
     }
 }
 
 impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     fn header(&self, block_hash: &BlockHash) -> Result<Option<Header>> {
-        self.db.view(|tx| tx.get::<tables::Headers>((0, *block_hash).into()))?.map_err(Into::into)
+        self.db.view(|tx| {
+            if let Some(num) = tx.get::<tables::HeaderNumbers>(*block_hash)? {
+                Ok(tx.get::<tables::Headers>(num)?)
+            } else {
+                Ok(None)
+            }
+        })?
     }
 
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
@@ -49,12 +57,25 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     }
 
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
-        if let Some(num) = self.db.view(|tx| tx.get::<tables::HeaderNumbers>(*hash))?? {
-            let td = self.db.view(|tx| tx.get::<tables::HeaderTD>((num, *hash).into()))??;
-            Ok(td.map(|v| v.0))
-        } else {
-            Ok(None)
-        }
+        self.db.view(|tx| {
+            if let Some(num) = tx.get::<tables::HeaderNumbers>(*hash)? {
+                Ok(tx.get::<tables::HeaderTD>(num)?.map(|td| td.0))
+            } else {
+                Ok(None)
+            }
+        })?
+    }
+
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+        self.db
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::Headers>()?;
+                cursor
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
     }
 }
 
@@ -69,12 +90,13 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
 
 impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
-        Ok(ChainInfo {
-            best_hash: Default::default(),
-            best_number: 0,
-            last_finalized: None,
-            safe_finalized: None,
-        })
+        let best_number = self
+            .db
+            .view(|tx| tx.get::<tables::SyncStage>("Finish".as_bytes().to_vec()))?
+            .map_err(Into::<reth_interfaces::db::Error>::into)?
+            .unwrap_or_default();
+        let best_hash = self.block_hash(U256::from(best_number))?.unwrap_or_default();
+        Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
     }
 
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
@@ -112,19 +134,6 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         let block_number =
             tx.get::<tables::HeaderNumbers>(block_hash)?.ok_or(Error::BlockHash { block_hash })?;
 
-        // check if block is canonical or not. Only canonical blocks have changesets.
-        let canonical_block_hash = tx
-            .get::<tables::CanonicalHeaders>(block_number)?
-            .ok_or(Error::BlockCanonical { block_number, block_hash })?;
-        if canonical_block_hash != block_hash {
-            return Err(Error::NonCanonicalBlock {
-                block_number,
-                received_hash: block_hash,
-                expected_hash: canonical_block_hash,
-            }
-            .into())
-        }
-
         // get transition id
         let transition = tx
             .get::<tables::BlockTransitionIndex>(block_number)?
@@ -136,15 +145,28 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::StateProviderFactory;
+    use crate::{BlockProvider, StateProviderFactory};
 
     use super::ShareableDatabase;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
+    use reth_primitives::H256;
 
     #[test]
     fn common_history_provider() {
         let db = create_test_db::<WriteMap>(EnvKind::RW);
         let provider = ShareableDatabase::new(db);
         let _ = provider.latest();
+    }
+
+    #[test]
+    fn default_chain_info() {
+        let db = create_test_db::<WriteMap>(EnvKind::RW);
+        let provider = ShareableDatabase::new(db);
+
+        let chain_info = provider.chain_info().expect("should be ok");
+        assert_eq!(chain_info.best_number, 0);
+        assert_eq!(chain_info.best_hash, H256::zero());
+        assert_eq!(chain_info.last_finalized, None);
+        assert_eq!(chain_info.safe_finalized, None);
     }
 }

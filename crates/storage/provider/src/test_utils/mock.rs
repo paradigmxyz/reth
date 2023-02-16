@@ -1,4 +1,7 @@
-use crate::{AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider};
+use crate::{
+    AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider,
+    StateProviderFactory,
+};
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -7,7 +10,7 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
     U256,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]
@@ -106,6 +109,14 @@ impl HeaderProvider for MockEthProvider {
                 .fold(target.difficulty, |td, h| td + h.difficulty)
         }))
     }
+
+    fn headers_range(
+        &self,
+        range: impl RangeBounds<reth_primitives::BlockNumber>,
+    ) -> Result<Vec<Header>> {
+        let lock = self.headers.lock();
+        Ok(lock.values().filter(|header| range.contains(&header.number)).cloned().collect())
+    }
 }
 
 impl BlockHashProvider for MockEthProvider {
@@ -183,5 +194,25 @@ impl StateProvider for MockEthProvider {
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
+    }
+}
+
+impl StateProviderFactory for MockEthProvider {
+    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
+    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
+
+    fn latest(&self) -> Result<Self::LatestSP<'_>> {
+        Ok(self)
+    }
+
+    fn history_by_block_number(
+        &self,
+        _block: reth_primitives::BlockNumber,
+    ) -> Result<Self::HistorySP<'_>> {
+        todo!()
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+        todo!()
     }
 }

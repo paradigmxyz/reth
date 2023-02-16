@@ -12,7 +12,8 @@ use crate::{
         models::{
             accounts::{AccountBeforeTx, TransitionIdAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
-            BlockNumHash, ShardedKey,
+            storage_sharded_key::StorageShardedKey,
+            ShardedKey, StoredBlockBody, StoredBlockWithdrawals,
         },
     },
 };
@@ -20,8 +21,6 @@ use reth_primitives::{
     Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
     StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
-
-use self::models::{storage_sharded_key::StorageShardedKey, StoredBlockBody};
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
@@ -40,7 +39,7 @@ pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, Headers::const_name()),
     (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
-    (TableType::Table, NonCanonicalTransactions::const_name()),
+    (TableType::Table, BlockWithdrawals::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
     (TableType::Table, Receipts::const_name()),
@@ -119,7 +118,7 @@ table!(
 
 table!(
     /// Stores the total difficulty from a block header.
-    ( HeaderTD ) BlockNumHash | CompactU256
+    ( HeaderTD ) BlockNumber | CompactU256
 );
 
 table!(
@@ -129,22 +128,22 @@ table!(
 
 table!(
     /// Stores header bodies.
-    ( Headers ) BlockNumHash | Header
+    ( Headers ) BlockNumber | Header
 );
 
 table!(
     /// Stores block bodies.
-    ( BlockBodies ) BlockNumHash | StoredBlockBody
+    ( BlockBodies ) BlockNumber | StoredBlockBody
 );
 
 table!(
     /// Stores the uncles/ommers of the block.
-    ( BlockOmmers ) BlockNumHash | StoredBlockOmmers
+    ( BlockOmmers ) BlockNumber | StoredBlockOmmers
 );
 
 table!(
-    /// Stores the transaction body from non canonical transactions.
-    ( NonCanonicalTransactions ) BlockNumHashTxNumber | TransactionSigned
+    /// Stores the block withdrawals.
+    ( BlockWithdrawals ) BlockNumber | StoredBlockWithdrawals
 );
 
 table!(
@@ -316,7 +315,5 @@ pub type StageId = Vec<u8>;
 pub type ConfigKey = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type ConfigValue = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type BlockNumHashTxNumber = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type Bytecode = Vec<u8>;

@@ -1,5 +1,6 @@
 //! A headers downloader that can handle multiple requests concurrently.
 
+use super::task::TaskDownloader;
 use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
@@ -15,6 +16,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap},
@@ -199,7 +201,7 @@ where
         let mut validated = Vec::with_capacity(headers.len());
 
         for parent in headers {
-            let parent = parent.seal();
+            let parent = parent.seal_slow();
 
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -295,7 +297,7 @@ where
                     })
                 }
 
-                let target = headers.remove(0).seal();
+                let target = headers.remove(0).seal_slow();
 
                 if target.hash() != sync_target_hash {
                     return Err(HeadersResponseError {
@@ -357,6 +359,8 @@ where
                 // validate the response
                 let highest = &headers[0];
 
+                trace!(target: "downloaders::headers", requested_block_number, highest=?highest.number, "Validating non-empty headers response");
+
                 if highest.number != requested_block_number {
                     return Err(HeadersResponseError {
                         request,
@@ -388,6 +392,7 @@ where
                         .map(Err::<(), HeadersResponseError>)
                         .transpose()?;
                 } else if highest.number > self.existing_local_block_number() {
+                    self.metrics.buffered_responses.increment(1.);
                     // can't validate yet
                     self.buffered_responses.push(OrderedHeadersResponse {
                         headers,
@@ -443,12 +448,14 @@ where
                 Ordering::Equal => {
                     let OrderedHeadersResponse { headers, request, peer_id } =
                         PeekMut::pop(next_response);
+                    self.metrics.buffered_responses.decrement(1.);
 
                     if let Err(err) = self.process_next_headers(request, headers, peer_id) {
                         return Some(err)
                     }
                 }
                 Ordering::Greater => {
+                    self.metrics.buffered_responses.decrement(1.);
                     PeekMut::pop(next_response);
                 }
             }
@@ -462,7 +469,9 @@ where
 
     /// Starts a request future
     fn submit_request(&mut self, request: HeadersRequest, priority: Priority) {
+        trace!(target: "downloaders::headers", ?request, "Submitting headers request");
         self.in_progress_queue.push(self.request_fut(request, priority));
+        self.metrics.in_flight_requests.increment(1.);
     }
 
     fn request_fut(
@@ -488,6 +497,9 @@ where
         self.queued_validated_headers.clear();
         self.buffered_responses.clear();
         self.in_progress_queue.clear();
+
+        self.metrics.in_flight_requests.set(0.);
+        self.metrics.buffered_responses.set(0.);
     }
 
     /// Splits off the next batch of headers
@@ -496,6 +508,26 @@ where
         let mut rem = self.queued_validated_headers.split_off(batch_size);
         std::mem::swap(&mut rem, &mut self.queued_validated_headers);
         rem
+    }
+}
+
+impl<H> ReverseHeadersDownloader<H>
+where
+    H: HeadersClient,
+    Self: HeaderDownloader + 'static,
+{
+    /// Spawns the downloader task via [tokio::task::spawn]
+    pub fn into_task(self) -> TaskDownloader {
+        self.into_task_with(&TokioTaskExecutor::default())
+    }
+
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
+    /// it via the given `spawner`.
+    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
+    where
+        S: TaskSpawner,
+    {
+        TaskDownloader::spawn_with(self, spawner)
     }
 }
 
@@ -588,7 +620,7 @@ where
         // The downloader boundaries (local head and sync target) have to be set in order
         // to start downloading data.
         if this.local_head.is_none() || this.sync_target.is_none() {
-            tracing::trace!(
+            trace!(
                 target: "downloaders::headers",
                 head=?this.local_block_number(),
                 sync_target=?this.sync_target,
@@ -603,6 +635,11 @@ where
             match req.poll_unpin(cx) {
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
+                        if err.is_channel_closed() {
+                            // download channel closed which means the network was dropped
+                            return Poll::Ready(None)
+                        }
+
                         this.penalize_peer(err.peer_id, &err.error);
                         this.metrics.increment_errors(&err.error);
                         this.sync_target_request =
@@ -629,8 +666,13 @@ where
         loop {
             // poll requests
             while let Poll::Ready(Some(outcome)) = this.in_progress_queue.poll_next_unpin(cx) {
+                this.metrics.in_flight_requests.decrement(1.);
                 // handle response
                 if let Err(err) = this.on_headers_outcome(outcome) {
+                    if err.is_channel_closed() {
+                        // download channel closed which means the network was dropped
+                        return Poll::Ready(None)
+                    }
                     this.on_headers_error(err);
                 }
             }
@@ -770,6 +812,16 @@ struct HeadersResponseError {
     error: DownloadError,
 }
 
+impl HeadersResponseError {
+    /// Returns true if the error was caused by a closed channel to the network.
+    fn is_channel_closed(&self) -> bool {
+        if let DownloadError::RequestError(ref err) = self.error {
+            return err.is_channel_closed()
+        }
+        false
+    }
+}
+
 /// The block to which we want to close the gap: (local head...sync target]
 #[derive(Debug, Default)]
 struct SyncTargetBlock {
@@ -872,8 +924,8 @@ impl ReverseHeadersDownloaderBuilder {
     /// and header client implementations
     pub fn build<H>(
         self,
-        consensus: Arc<dyn Consensus>,
         client: Arc<H>,
+        consensus: Arc<dyn Consensus>,
     ) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,
@@ -945,7 +997,7 @@ mod tests {
         let genesis = SealedHeader::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -956,7 +1008,7 @@ mod tests {
         assert!(downloader.sync_target_request.is_some());
 
         downloader.sync_target_request.take();
-        let target = SyncTarget::Gap(SealedHeader::new(Default::default(), H256::random()));
+        let target = SyncTarget::Gap(Header::default().seal(H256::random()));
         downloader.update_sync_target(target);
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
@@ -973,14 +1025,14 @@ mod tests {
         let header = SealedHeader::default();
 
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(header.clone());
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
         downloader.queued_validated_headers.push(header.clone());
         let mut next = header.as_ref().clone();
         next.number += 1;
-        downloader.update_local_head(SealedHeader::new(next, H256::random()));
+        downloader.update_local_head(next.seal(H256::random()));
         assert!(downloader.queued_validated_headers.is_empty());
     }
 
@@ -1014,7 +1066,7 @@ mod tests {
         let start = 1000;
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .request_limit(batch_size)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(genesis);
         downloader.update_sync_target(SyncTarget::Tip(H256::random()));
 
@@ -1064,7 +1116,7 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(3)
             .request_limit(3)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 
@@ -1096,7 +1148,7 @@ mod tests {
         let mut downloader = ReverseHeadersDownloaderBuilder::default()
             .stream_batch_size(1)
             .request_limit(1)
-            .build(Arc::new(TestConsensus::default()), Arc::clone(&client));
+            .build(Arc::clone(&client), Arc::new(TestConsensus::default()));
         downloader.update_local_head(p3.clone());
         downloader.update_sync_target(SyncTarget::Tip(p0.hash()));
 

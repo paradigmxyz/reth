@@ -163,6 +163,11 @@ impl PeersManager {
         PeersHandle { manager_tx: self.manager_tx.clone() }
     }
 
+    /// Returns an iterator over all peers
+    pub(crate) fn iter_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
+        self.peers.iter().map(|(peer_id, v)| NodeRecord::new(v.addr, *peer_id))
+    }
+
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
     /// returns an error if the inbound ip address is on the ban list or
@@ -638,9 +643,7 @@ impl PeersManager {
                         let _ = tx.send(self.peers.get(&peer).cloned());
                     }
                     PeerCommand::GetPeers(tx) => {
-                        let _ = tx.send(
-                            self.peers.iter().map(|(k, v)| NodeRecord::new(v.addr, *k)).collect(),
-                        );
+                        let _ = tx.send(self.iter_peers().collect());
                     }
                 }
             }
@@ -1239,7 +1242,7 @@ mod test {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
         let backoff_durations =
-            PeerBackoffDurations { low: Duration::from_secs(3), ..Default::default() };
+            PeerBackoffDurations { low: Duration::from_millis(200), ..Default::default() };
         let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr, None);
@@ -1302,8 +1305,11 @@ mod test {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
 
-        let backoff_durations =
-            PeerBackoffDurations { high: Duration::from_secs(3), ..Default::default() };
+        let backoff_durations = PeerBackoffDurations {
+            high: Duration::from_millis(200),
+            low: Duration::from_millis(200),
+            ..Default::default()
+        };
         let config = PeersConfig { backoff_durations, ..Default::default() };
         let mut peers = PeersManager::new(config);
         peers.add_peer(peer, socket_addr, None);

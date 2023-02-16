@@ -78,8 +78,10 @@ where
         &mut self,
         configs: impl IntoIterator<Item = PeerConfig<C>>,
     ) -> Result<(), NetworkError> {
-        for config in configs {
-            self.add_peer_with_config(config).await?;
+        let peers = configs.into_iter().map(|c| async { c.launch().await }).collect::<Vec<_>>();
+        let peers = futures::future::join_all(peers).await;
+        for peer in peers {
+            self.peers.push(peer?);
         }
         Ok(())
     }
@@ -156,9 +158,8 @@ impl Testnet<NoopProvider> {
     /// Creates a new [`Testnet`] with the given number of peers
     pub async fn try_create(num_peers: usize) -> Result<Self, NetworkError> {
         let mut this = Testnet::default();
-        for _ in 0..num_peers {
-            this.add_peer().await?;
-        }
+
+        this.extend_peer_with_config((0..num_peers).map(|_| Default::default())).await?;
         Ok(this)
     }
 
@@ -277,6 +278,14 @@ impl<C> PeerConfig<C>
 where
     C: BlockProvider + HeaderProvider,
 {
+    /// Launches the network and returns the [Peer] that manages it
+    pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
+        let PeerConfig { config, client, secret_key } = self;
+        let network = NetworkManager::new(config).await?;
+        let peer = Peer { network, client, secret_key, request_handler: None };
+        Ok(peer)
+    }
+
     /// Initialize the network with a random secret key, allowing the devp2p and discovery to bind
     /// to any available IP and port.
     pub fn new(client: Arc<C>) -> Self {
@@ -309,6 +318,7 @@ where
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .discovery_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .no_dns_discovery()
+            .no_discv4_discovery()
     }
 }
 

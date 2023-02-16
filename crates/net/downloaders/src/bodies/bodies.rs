@@ -1,6 +1,5 @@
-use crate::metrics::DownloaderMetrics;
-
 use super::queue::BodiesRequestQueue;
+use crate::{bodies::task::TaskDownloader, metrics::DownloaderMetrics};
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -17,6 +16,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
@@ -135,7 +135,7 @@ where
                 .ok_or(DownloadError::MissingHeader { block_number: current_block_num })?;
             // Find the block header.
             let (_, header) = header_cursor
-                .seek_exact((number, hash).into())?
+                .seek_exact(number)?
                 .ok_or(DownloadError::MissingHeader { block_number: number })?;
 
             // If the header is not empty, increment the counter
@@ -144,7 +144,7 @@ where
             }
 
             // Add header to the result collection
-            headers.push(SealedHeader::new(header, hash));
+            headers.push(header.seal(hash));
 
             // Increment current block number
             current_block_num += 1;
@@ -186,7 +186,7 @@ where
     fn is_terminated(&self) -> bool {
         // There is nothing to request if the range is empty
         let nothing_to_request = self.download_range.is_empty() ||
-            // or all blocks have already been requested. 
+            // or all blocks have already been requested.
             self.in_progress_queue
                 .last_requested_block_number
                 .map(|last| last + 1 == self.download_range.end)
@@ -207,6 +207,9 @@ where
         self.in_progress_queue.clear();
         self.buffered_responses.clear();
         self.queued_bodies.clear();
+
+        self.metrics.in_flight_requests.set(0.);
+        self.metrics.buffered_responses.set(0.);
     }
 
     /// Queues bodies and sets the latest queued block number
@@ -223,6 +226,7 @@ where
 
             if next_block_rng.contains(&expected) {
                 return self.buffered_responses.pop().map(|buffered| {
+                    self.metrics.buffered_responses.decrement(1.);
                     buffered
                         .0
                         .into_iter()
@@ -234,10 +238,32 @@ where
 
             // Drop buffered response since we passed that range
             if *next_block_rng.end() < expected {
+                self.metrics.buffered_responses.decrement(1.);
                 self.buffered_responses.pop();
             }
         }
         None
+    }
+}
+
+impl<B, DB> BodiesDownloader<B, DB>
+where
+    B: BodiesClient + 'static,
+    DB: Database,
+    Self: BodyDownloader + 'static,
+{
+    /// Spawns the downloader task via [tokio::task::spawn]
+    pub fn into_task(self) -> TaskDownloader {
+        self.into_task_with(&TokioTaskExecutor::default())
+    }
+
+    /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
+    /// it via the given spawner.
+    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
+    where
+        S: TaskSpawner,
+    {
+        TaskDownloader::spawn_with(self, spawner)
     }
 }
 
@@ -297,8 +323,19 @@ where
         loop {
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
-                let response = OrderedBodiesResponse(response);
-                this.buffered_responses.push(response);
+                this.metrics.in_flight_requests.decrement(1.);
+                match response {
+                    Ok(response) => {
+                        let response = OrderedBodiesResponse(response);
+                        this.buffered_responses.push(response);
+                        this.metrics.buffered_responses.increment(1.);
+                    }
+                    Err(error) => {
+                        tracing::error!(target: "downloaders::bodies", ?error, "Request failed");
+                        this.clear();
+                        return Poll::Ready(Some(Err(error)))
+                    }
+                };
             }
 
             // Loop exit condition
@@ -310,6 +347,7 @@ where
             {
                 match this.next_headers_request() {
                     Ok(Some(request)) => {
+                        this.metrics.in_flight_requests.increment(1.);
                         this.in_progress_queue.push_new_request(
                             Arc::clone(&this.client),
                             Arc::clone(&this.consensus),
@@ -547,6 +585,7 @@ mod tests {
                     BlockBody {
                         transactions: block.body,
                         ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                        withdrawals: None,
                     },
                 )
             })

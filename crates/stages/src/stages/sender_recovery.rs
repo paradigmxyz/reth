@@ -1,30 +1,32 @@
 use crate::{
-    db::Transaction, exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
-use itertools::Itertools;
-use rayon::prelude::*;
+use futures_util::StreamExt;
+
+use crate::stages::stream::SequentialPairStream;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
-    Error as DbError,
 };
 use reth_primitives::TxNumber;
+use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
-const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
+/// The [`StageId`] of the sender recovery stage.
+pub const SENDER_RECOVERY: StageId = StageId("SenderRecovery");
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
 /// in [`TxSenders`][reth_db::tables::TxSenders] table.
 #[derive(Clone, Debug)]
 pub struct SenderRecoveryStage {
-    /// The size of the chunk for parallel sender recovery
-    pub batch_size: usize,
     /// The size of inserted items after which the control
     /// flow will be returned to the pipeline for commit
     pub commit_threshold: u64,
@@ -32,20 +34,7 @@ pub struct SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { batch_size: 250000, commit_threshold: 10000 }
-    }
-}
-
-// TODO(onbjerg): Should unwind
-#[derive(Error, Debug)]
-enum SenderRecoveryStageError {
-    #[error("Sender recovery failed for transaction {tx}.")]
-    SenderRecovery { tx: TxNumber },
-}
-
-impl From<SenderRecoveryStageError> for StageError {
-    fn from(error: SenderRecoveryStageError) -> Self {
-        StageError::Fatal(Box::new(error))
+        Self { commit_threshold: 10000 }
     }
 }
 
@@ -70,10 +59,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             exec_or_return!(input, self.commit_threshold, "sync::stages::sender_recovery");
 
         // Look up the start index for the transaction range
-        let start_tx_index = tx.get_block_body_by_num(start_block)?.start_tx_id;
+        let start_tx_index = tx.get_block_body(start_block)?.start_tx_id;
 
         // Look up the end index for transaction range (inclusive)
-        let end_tx_index = tx.get_block_body_by_num(end_block)?.last_tx_index();
+        let end_tx_index = tx.get_block_body(end_block)?.last_tx_index();
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
@@ -87,26 +76,38 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor over the transactions
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Walk the transactions from start to end index (inclusive)
-        let entries = tx_cursor.walk_range(start_tx_index..end_tx_index + 1)?;
+        let entries = tx_cursor.walk_range(start_tx_index..=end_tx_index)?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
-        for chunk in &entries.chunks(self.batch_size) {
-            let transactions = chunk.collect::<Result<Vec<_>, DbError>>()?;
-            // Recover signers for the chunk in parallel
-            let recovered = transactions
-                .into_par_iter()
-                .map(|(tx_id, transaction)| {
-                    trace!(target: "sync::stages::sender_recovery", tx_id, hash = ?transaction.hash(), "Recovering sender");
-                    let signer =
-                        transaction.recover_signer().ok_or_else::<StageError, _>(|| {
-                            SenderRecoveryStageError::SenderRecovery { tx: tx_id }.into()
-                        })?;
+
+        // a channel to receive results from a rayon job
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        // spawn recovery jobs onto the default rayon threadpool and send the result through the
+        // channel
+        for entry in entries {
+            let (tx_id, transaction) = entry?;
+            let tx = tx.clone();
+            rayon::spawn_fifo(move || {
+                trace!(target: "sync::stages::sender_recovery", tx_id, hash = ?transaction.hash(), "Recovering sender");
+                let res = if let Some(signer) = transaction.recover_signer() {
                     Ok((tx_id, signer))
-                })
-                .collect::<Result<Vec<_>, StageError>>()?;
-            // Append the signers to the table
-            recovered.into_iter().try_for_each(|(id, sender)| senders_cursor.append(id, sender))?;
+                } else {
+                    Err(StageError::from(SenderRecoveryStageError::SenderRecovery { tx: tx_id }))
+                };
+                // send the result back
+                let _ = tx.send(res);
+            });
+        }
+        drop(tx);
+
+        let mut recovered_senders =
+            SequentialPairStream::new(start_tx_index, UnboundedReceiverStream::new(rx));
+
+        while let Some(recovered) = recovered_senders.next().await {
+            let (id, sender) = recovered?;
+            senders_cursor.append(id, sender)?;
         }
 
         let done = !capped;
@@ -122,9 +123,22 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, "Unwinding");
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.get_block_body_by_num(input.unwind_to)?.last_tx_index();
+        let latest_tx_id = tx.get_block_body(input.unwind_to)?.last_tx_index();
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
+    }
+}
+
+// TODO(onbjerg): Should unwind
+#[derive(Error, Debug)]
+enum SenderRecoveryStageError {
+    #[error("Sender recovery failed for transaction {tx}.")]
+    SenderRecovery { tx: TxNumber },
+}
+
+impl From<SenderRecoveryStageError> for StageError {
+    fn from(error: SenderRecoveryStageError) -> Self {
+        StageError::Fatal(Box::new(error))
     }
 }
 
@@ -240,7 +254,7 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body_by_num(block);
+            let body_result = self.tx.inner().get_block_body(block);
             match body_result {
                 Ok(body) => self
                     .tx
@@ -264,7 +278,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            SenderRecoveryStage { batch_size: 100, commit_threshold: self.threshold }
+            SenderRecoveryStage { commit_threshold: self.threshold }
         }
     }
 
@@ -294,9 +308,8 @@ mod tests {
                         return Ok(())
                     }
 
-                    let start_hash = tx.get::<tables::CanonicalHeaders>(start_block)?.unwrap();
                     let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
-                    body_cursor.seek_exact((start_block, start_hash).into())?;
+                    body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_id_range() {
