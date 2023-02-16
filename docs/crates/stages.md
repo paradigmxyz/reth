@@ -154,13 +154,13 @@ Finally, after all headers, bodies and senders are added to the database, the `E
 
 [File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs)
 ```rust,ignore
-reth_executor::executor::execute_and_verify_receipt(
-    header,
-    &recovered_transactions,
-    ommers,
-    &self.config,
-    state_provider,
-)
+pub fn execute_and_verify_receipt<DB: StateProvider>(
+    block: &Block,
+    total_difficulty: U256,
+    senders: Option<Vec<Address>>,
+    chain_spec: &ChainSpec,
+    db: &mut SubState<DB>,
+) -> Result<ExecutionResult, Error>
 ```
 
 After all headers and their corresponding transactions have been executed, all of the resulting state changes are applied to the database, updating account balances, account bytecode and other state changes. After applying all of the execution state changes, if there was a block reward, it is applied to the validator's account. 
