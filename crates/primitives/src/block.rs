@@ -184,6 +184,15 @@ impl From<BlockHash> for BlockId {
     }
 }
 
+impl From<BlockHashOrNumber> for BlockId {
+    fn from(value: BlockHashOrNumber) -> Self {
+        match value {
+            BlockHashOrNumber::Hash(hash) => H256::from(hash.0).into(),
+            BlockHashOrNumber::Number(number) => number.into(),
+        }
+    }
+}
+
 impl Serialize for BlockId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

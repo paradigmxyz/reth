@@ -22,8 +22,9 @@ pub(crate) enum EthApiError {
     #[error(transparent)]
     PoolError(GethTxPoolError),
     #[error("Unknown block number")]
-    // TODO return -32602 here
     UnknownBlockNumber,
+    #[error("Invalid block range")]
+    InvalidBlockRange,
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
@@ -32,7 +33,7 @@ pub(crate) enum EthApiError {
 impl From<EthApiError> for RpcError {
     fn from(value: EthApiError) -> Self {
         match value {
-            EthApiError::UnknownBlockNumber => {
+            EthApiError::UnknownBlockNumber | EthApiError::InvalidBlockRange => {
                 rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
             }
             err => internal_rpc_err(err.to_string()),

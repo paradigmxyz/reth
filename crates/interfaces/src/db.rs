@@ -25,7 +25,7 @@ pub enum Error {
     /// Failed to initiate a cursor.
     #[error("Initialization of cursor errored with code: {0:?}")]
     InitCursor(u32),
-    /// Failed to decode a key from a table..
+    /// Failed to decode a key from a table.
     #[error("Error decoding value.")]
     DecodeError,
 }
