@@ -110,9 +110,8 @@ impl<E: EnvironmentKind> Deref for Env<E> {
 /// Collection of database test utilities
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {
+    use super::*;
     use reth_libmdbx::WriteMap;
-
-    use super::{Env, EnvKind, EnvironmentKind, Path};
     use std::sync::Arc;
 
     /// Error during database creation
@@ -269,6 +268,39 @@ mod tests {
         assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
+
+        // (∞, ∞)
+        let mut walker = cursor.walk_range(..).unwrap();
+        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
+    }
+
+    #[test]
+    fn db_cursor_walk_range_invalid() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT (0, 0), (1, 0), (2, 0), (3, 0)
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 2, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        // start bound greater than end bound
+        let res = cursor.walk_range(3..1);
+        assert!(matches!(res, Err(Error::Read(2))));
+
+        // start bound greater than end bound
+        let res = cursor.walk_range(15..=2);
+        assert!(matches!(res, Err(Error::Read(2))));
     }
 
     #[test]
@@ -329,6 +361,45 @@ mod tests {
         assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
         assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
         assert_eq!(walker.next(), None);
+    }
+
+    #[test]
+    fn db_walk_back() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+
+        // PUT (0, 0), (1, 0), (3, 0)
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        vec![0, 1, 3]
+            .into_iter()
+            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, H256::zero()))
+            .expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+
+        let mut reverse_walker = cursor.walk_back(Some(1)).unwrap();
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
+
+        let mut reverse_walker = cursor.walk_back(Some(2)).unwrap();
+        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
+
+        let mut reverse_walker = cursor.walk_back(Some(4)).unwrap();
+        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
+
+        let mut reverse_walker = cursor.walk_back(None).unwrap();
+        assert_eq!(reverse_walker.next(), Some(Ok((3, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(reverse_walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(reverse_walker.next(), None);
     }
 
     #[test]
