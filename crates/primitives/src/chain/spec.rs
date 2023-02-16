@@ -279,12 +279,12 @@ impl From<EthersGenesis> for ChainSpec {
         }
 
         // Time-based hardforks
-        let time_hardfork_opts = vec![
-            (Hardfork::Shanghai, genesis.config.shanghai_time),
-        ];
+        let time_hardfork_opts = vec![(Hardfork::Shanghai, genesis.config.shanghai_time)];
         let time_hardforks = time_hardfork_opts
             .iter()
-            .filter_map(|(hardfork, opt)| opt.map(|time| (*hardfork, ForkCondition::Timestamp(time))))
+            .filter_map(|(hardfork, opt)| {
+                opt.map(|time| (*hardfork, ForkCondition::Timestamp(time)))
+            })
             .collect::<BTreeMap<_, _>>();
 
         hardforks.extend(time_hardforks);
@@ -983,20 +983,50 @@ mod tests {
         let chainspec = ChainSpec::from(genesis);
 
         // assert a bunch of hardforks that should be set
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Homestead).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Tangerine).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::SpuriousDragon).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Byzantium).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Constantinople).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Petersburg).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Homestead).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Tangerine).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::SpuriousDragon).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Byzantium).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Constantinople).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Petersburg).unwrap(),
+            &ForkCondition::Block(0)
+        );
         assert_eq!(chainspec.hardforks.get(&Hardfork::Istanbul).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::MuirGlacier).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::MuirGlacier).unwrap(),
+            &ForkCondition::Block(0)
+        );
         assert_eq!(chainspec.hardforks.get(&Hardfork::Berlin).unwrap(), &ForkCondition::Block(0));
         assert_eq!(chainspec.hardforks.get(&Hardfork::London).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::ArrowGlacier).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::GrayGlacier).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::ArrowGlacier).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::GrayGlacier).unwrap(),
+            &ForkCondition::Block(0)
+        );
 
         // including time based hardforks
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Shanghai).unwrap(), &ForkCondition::Timestamp(0));
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Shanghai).unwrap(),
+            &ForkCondition::Timestamp(0)
+        );
     }
 }
