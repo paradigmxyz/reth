@@ -375,6 +375,7 @@ mod tests {
     async fn test_fee_history() {
         let eth_api = EthApi::new(NoopProvider::default(), testing_pool(), NoopNetwork::default());
 
+        // Invalid block range because no blocks are mocked, but we request 1 block in the past
         let response = eth_api.fee_history(1.into(), BlockNumber::Latest.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
@@ -415,17 +416,22 @@ mod tests {
 
         let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
 
+        // Requested block beyond head because `newest_block` is the latest mocked block,
+        // but we request `new
         let response = eth_api.fee_history(1.into(), (newest_block + 1).into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
+        // Invalid block range because `newest_block` blocks mocked,
+        // but we request `newest_block + 1` blocks in the past
         let response =
             eth_api.fee_history((newest_block + 1).into(), newest_block.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
+        // Success
         let fee_history =
             eth_api.fee_history(block_count.into(), newest_block.into(), None).await.unwrap();
 
