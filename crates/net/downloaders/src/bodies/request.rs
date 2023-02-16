@@ -170,7 +170,7 @@ where
                 let block = SealedBlock {
                     header: next_header,
                     body: next_body.transactions,
-                    ommers: next_body.ommers.into_iter().map(|header| header.seal()).collect(),
+                    ommers: next_body.ommers.into_iter().map(|h| h.seal_slow()).collect(),
                     withdrawals: next_body.withdrawals,
                 };
 
