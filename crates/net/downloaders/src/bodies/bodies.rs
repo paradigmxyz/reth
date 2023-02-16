@@ -585,6 +585,7 @@ mod tests {
                     BlockBody {
                         transactions: block.body,
                         ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                        withdrawals: None,
                     },
                 )
             })

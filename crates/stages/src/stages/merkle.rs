@@ -278,11 +278,11 @@ mod tests {
             let n_accounts = 31;
             let mut accounts = random_contract_account_range(&mut (0..n_accounts));
 
-            let SealedBlock { header, body, ommers } =
+            let SealedBlock { header, body, ommers, withdrawals } =
                 random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
             header.state_root = self.generate_initial_trie(&accounts)?;
-            let sealed_head = SealedBlock { header: header.seal(), body, ommers };
+            let sealed_head = SealedBlock { header: header.seal(), body, ommers, withdrawals };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];

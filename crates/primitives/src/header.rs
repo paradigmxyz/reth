@@ -3,10 +3,10 @@ use crate::{
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
     BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
 };
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use ethers_core::types::{Block, H256 as EthersH256, H64};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
-use reth_rlp::{length_of_length, Decodable, Encodable};
+use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 
@@ -48,13 +48,14 @@ pub struct Header {
     /// executed and finalisations applied; formally Hr.
     pub state_root: H256,
     /// The Keccak 256-bit hash of the root node of the trie structure populated with each
-    /// transaction in the transactions list portion of the
-    /// block; formally Ht.
+    /// transaction in the transactions list portion of the block; formally Ht.
     pub transactions_root: H256,
-    /// The Keccak 256-bit hash of the root
-    /// node of the trie structure populated with the receipts of each transaction in the
-    /// transactions list portion of the block; formally He.
+    /// The Keccak 256-bit hash of the root node of the trie structure populated with the receipts
+    /// of each transaction in the transactions list portion of the block; formally He.
     pub receipts_root: H256,
+    /// The Keccak 256-bit hash of the withdrawals list portion of this block.
+    /// <https://eips.ethereum.org/EIPS/eip-4895>
+    pub withdrawals_root: Option<H256>,
     /// The Bloom filter composed from indexable information (logger address and log topics)
     /// contained in each log entry from the receipt of each transaction in the transactions list;
     /// formally Hb.
@@ -110,6 +111,7 @@ impl Default for Header {
             mix_hash: Default::default(),
             nonce: 0,
             base_fee_per_gas: None,
+            withdrawals_root: None,
         }
     }
 }
@@ -125,7 +127,12 @@ impl Header {
 
     /// Checks if the header is empty - has no transactions and no ommers
     pub fn is_empty(&self) -> bool {
-        self.transaction_root_is_empty() && self.ommers_hash_is_empty()
+        let txs_and_ommers_empty = self.transaction_root_is_empty() && self.ommers_hash_is_empty();
+        if let Some(withdrawals_root) = self.withdrawals_root {
+            txs_and_ommers_empty && withdrawals_root == EMPTY_ROOT
+        } else {
+            txs_and_ommers_empty
+        }
     }
 
     /// Check if the ommers hash equals to empty hash list.
@@ -161,7 +168,16 @@ impl Header {
         length += self.extra_data.length();
         length += self.mix_hash.length();
         length += H64::from_low_u64_be(self.nonce).length();
-        length += self.base_fee_per_gas.map(|fee| U256::from(fee).length()).unwrap_or_default();
+
+        if let Some(base_fee) = self.base_fee_per_gas {
+            length += U256::from(base_fee).length();
+        } else if self.withdrawals_root.is_some() {
+            length += 1; // EMTY STRING CODE
+        }
+        if let Some(root) = self.withdrawals_root {
+            length += root.length();
+        }
+
         length
     }
 }
@@ -186,8 +202,17 @@ impl Encodable for Header {
         self.extra_data.encode(out);
         self.mix_hash.encode(out);
         H64::from_low_u64_be(self.nonce).encode(out);
+
+        // Encode base fee. Put empty string if base fee is missing,
+        // but withdrawals root is present.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
+        } else if self.withdrawals_root.is_some() {
+            out.put_u8(EMPTY_STRING_CODE);
+        }
+
+        if let Some(ref root) = self.withdrawals_root {
+            root.encode(out);
         }
     }
 
@@ -223,10 +248,17 @@ impl Decodable for Header {
             mix_hash: Decodable::decode(buf)?,
             nonce: H64::decode(buf)?.to_low_u64_be(),
             base_fee_per_gas: None,
+            withdrawals_root: None,
         };
-        let consumed = started_len - buf.len();
-        if consumed < rlp_head.payload_length {
-            this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
+        if started_len - buf.len() < rlp_head.payload_length {
+            if buf.first().map(|b| *b == EMPTY_STRING_CODE).unwrap_or_default() {
+                buf.advance(1)
+            } else {
+                this.base_fee_per_gas = Some(U256::decode(buf)?.to::<u64>());
+            }
+        }
+        if started_len - buf.len() < rlp_head.payload_length {
+            this.withdrawals_root = Some(Decodable::decode(buf)?);
         }
         let consumed = started_len - buf.len();
         if consumed != rlp_head.payload_length {
@@ -493,6 +525,7 @@ mod tests {
             mix_hash: H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
+            withdrawals_root: None,
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }
@@ -518,10 +551,56 @@ mod tests {
         assert_eq!(header, expected);
 
         // make sure the hash matches
-        let expected_hash = H256::from_slice(
-            &hex::decode("8c2f2af15b7b563b6ab1e09bed0e9caade7ed730aec98b70a993597a797579a9")
-                .unwrap(),
-        );
+        let expected_hash =
+            H256::from_str("8c2f2af15b7b563b6ab1e09bed0e9caade7ed730aec98b70a993597a797579a9")
+                .unwrap();
+        assert_eq!(header.hash_slow(), expected_hash);
+    }
+
+    // Test vector from: https://github.com/ethereum/tests/blob/970503935aeb76f59adfa3b3224aabf25e77b83d/BlockchainTests/ValidBlocks/bcExample/shanghaiExample.json#L15-L34
+    #[test]
+    fn test_decode_block_header_with_withdrawals() {
+        let data = hex::decode("f9021ca018db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa095efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5a071e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fba0ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff830125b882079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a027f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973").unwrap();
+        let expected = Header {
+            parent_hash: H256::from_str(
+                "18db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17",
+            )
+            .unwrap(),
+            beneficiary: Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap(),
+            state_root: H256::from_str(
+                "95efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5",
+            )
+            .unwrap(),
+            transactions_root: H256::from_str(
+                "71e515dd89e8a7973402c2e11646081b4e2209b2d3a1550df5095289dabcb3fb",
+            )
+            .unwrap(),
+            receipts_root: H256::from_str(
+                "ed9c51ea52c968e552e370a77a41dac98606e98b915092fb5f949d6452fce1c4",
+            )
+            .unwrap(),
+            number: 0x01,
+            gas_limit: 0x7fffffffffffffff,
+            gas_used: 0x0125b8,
+            timestamp: 0x079e,
+            extra_data: Bytes::from_str("42").unwrap(),
+            mix_hash: H256::from_str(
+                "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            )
+            .unwrap(),
+            base_fee_per_gas: Some(0x09),
+            withdrawals_root: Some(
+                H256::from_str("27f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973")
+                    .unwrap(),
+            ),
+            ..Default::default()
+        };
+        let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
+        assert_eq!(header, expected);
+
+        let expected_hash =
+            H256::from_str("85fdec94c534fa0a1534720f167b899d1fc268925c71c0cbf5aaa213483f5a69")
+                .unwrap();
         assert_eq!(header.hash_slow(), expected_hash);
     }
 

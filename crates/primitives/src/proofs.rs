@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    keccak256, Address, Bytes, GenesisAccount, Header, Log, Receipt, TransactionSigned, H256,
+    keccak256, Address, Bytes, GenesisAccount, Header, Log, Receipt, TransactionSigned, Withdrawal,
+    H256,
 };
 use bytes::BytesMut;
 use hash_db::Hasher;
@@ -44,6 +45,17 @@ pub fn calculate_transaction_root<'a>(
         let mut tx_rlp = Vec::new();
         tx.encode_inner(&mut tx_rlp, false);
         tx_rlp
+    }))
+}
+
+/// Calculates the root hash of the withdrawals.
+pub fn calculate_withdrawals_root<'a>(
+    withdrawals: impl IntoIterator<Item = &'a Withdrawal>,
+) -> H256 {
+    ordered_trie_root::<KeccakHasher, _>(withdrawals.into_iter().map(|withdrawal| {
+        let mut withdrawal_rlp = Vec::new();
+        withdrawal.encode(&mut withdrawal_rlp);
+        withdrawal_rlp
     }))
 }
 
@@ -96,7 +108,7 @@ mod tests {
     };
     use reth_rlp::Decodable;
 
-    use super::EMPTY_ROOT;
+    use super::{calculate_withdrawals_root, EMPTY_ROOT};
 
     #[test]
     fn check_transaction_root() {
@@ -105,7 +117,7 @@ mod tests {
         let block: Block = Block::decode(block_rlp).unwrap();
 
         let tx_root = calculate_transaction_root(block.body.iter());
-        assert_eq!(block.transactions_root, tx_root, "Should be same");
+        assert_eq!(block.transactions_root, tx_root, "Must be the same");
     }
 
     #[test]
@@ -125,6 +137,29 @@ mod tests {
             root,
             H256(hex!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"))
         );
+    }
+
+    #[test]
+    fn check_withdrawals_root() {
+        // Single withdrawal, amount 0
+        // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/amountIs0.json
+        let data = &hex!("f90238f90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0046119afb1ab36aaa8f66088677ed96cd62762f6d3e65642898e189fbe702d51a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a048a703da164234812273ea083e4ec3d09d028300cd325b46a6a75402e5a7ab95c0c0d9d8808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b80");
+        let block: Block = Block::decode(&mut data.as_slice()).unwrap();
+        assert!(block.withdrawals.is_some());
+        let withdrawals = block.withdrawals.as_ref().unwrap();
+        assert_eq!(withdrawals.len(), 1);
+        let withdrawals_root = calculate_withdrawals_root(withdrawals.iter());
+        assert_eq!(block.withdrawals_root, Some(withdrawals_root));
+
+        // 4 withdrawals, identical indices
+        // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/twoIdenticalIndex.json
+        let data = &hex!("f9028cf90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0ccf7b62d616c2ad7af862d67b9dcd2119a90cebbff8c3cd1e5d7fc99f8755774a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a0a95b9a7b58a6b3cb4001eb0be67951c5517141cb0183a255b5cae027a7b10b36c0c0f86cda808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da018094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710");
+        let block: Block = Block::decode(&mut data.as_slice()).unwrap();
+        assert!(block.withdrawals.is_some());
+        let withdrawals = block.withdrawals.as_ref().unwrap();
+        assert_eq!(withdrawals.len(), 4);
+        let withdrawals_root = calculate_withdrawals_root(withdrawals.iter());
+        assert_eq!(block.withdrawals_root, Some(withdrawals_root));
     }
 
     #[test]
