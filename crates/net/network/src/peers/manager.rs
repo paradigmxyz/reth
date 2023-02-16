@@ -570,19 +570,17 @@ impl PeersManager {
         }
         Some((*best_peer.0, best_peer.1))
     }
+
     //tick function to update reputation of all connected peers
     fn tick(&mut self, now: Instant) {
-        let mut peers = self.peers.iter_mut().filter(|(_, peer)| {
-                         peer.state.is_connected() &&
-                         !peer.is_banned() &&
-                        (!self.connect_trusted_nodes_only || peer.is_trusted())
-                        })
+        let peers = self.peers.iter_mut().filter(|(_, peer)| {
+                         peer.state.is_connected()});
         // loop over all _connected_ peers
         for peer in peers {
         // update reputation via seconds connected
-           let up_time (now - peer.last_tick).as_secs() as i32;
-           peer.reputation + up_time;
-           peer.last_tick = now;
+           let time_since_last_tick = (now - peer.1.last_tick).as_secs() as i32;
+           peer.1.reputation += time_since_last_tick;
+           peer.1.last_tick = now;
         }
     }
 
@@ -773,7 +771,7 @@ impl Peer {
             remove_after_disconnect: false,
             kind: Default::default(),
             backoff_counter: 0,
-            connection_time
+            last_tick: Instant::now(),
         }
     }
 
