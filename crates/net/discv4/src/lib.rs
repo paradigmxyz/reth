@@ -1041,7 +1041,7 @@ impl Discv4Service {
                 // no existing endpoint proof
                 // > To guard against traffic amplification attacks, Neighbors replies should only be sent if the sender of FindNode has been verified by the endpoint proof procedure.
             }
-            kbucket::Entry::SelfEntry => {},
+            kbucket::Entry::SelfEntry => {}
         }
     }
 
