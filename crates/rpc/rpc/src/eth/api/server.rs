@@ -209,12 +209,12 @@ where
 
         let start_block = end_block - block_count;
 
-        // Query canonical block hashes for the whole block range to compare them against cache.
-        // We need it due to the possibility of reorgs when block numbers match but hashes don't.
+        // Query canonical block hashes for the whole block range to compare them against cache
+        // We need it due to the possibility of reorgs when block numbers match but hashes don't
         let block_hashes =
             self.inner.client.canonical_hashes_range(start_block..=end_block).to_rpc_result()?;
 
-        // We should receive exactly the amount of blocks
+        // We should receive exactly the amount of blocks specified by the passed range
         if block_hashes.len() != (end_block - start_block + 1) as usize {
             return Err(EthApiError::InvalidBlockRange.into())
         }
@@ -250,14 +250,17 @@ where
 
         // If we had any cache misses, query the database starting with the first non-cached block
         // and ending with the last
-        if let (Some(start_block), Some(end_block)) =
+        if let (Some(start_non_cached_block), Some(end_non_cahced_block)) =
             (first_non_cached_block, last_non_cached_block)
         {
-            let headers: Vec<Header> =
-                self.inner.client.headers_range(start_block..=end_block).to_rpc_result()?;
+            let headers: Vec<Header> = self
+                .inner
+                .client
+                .headers_range(start_non_cached_block..=end_non_cahced_block)
+                .to_rpc_result()?;
 
             // We should receive exactly the amount of blocks missing from the cache
-            if headers.len() != (end_block - start_block + 1) as usize {
+            if headers.len() != (end_non_cahced_block - start_non_cached_block + 1) as usize {
                 return Err(EthApiError::InvalidBlockRange.into())
             }
 
@@ -268,7 +271,7 @@ where
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
                 let fee_history_cache_item = FeeHistoryCacheItem {
-                    hash: block_hashes[(end_block - start_block) as usize + i],
+                    hash: block_hashes[(start_non_cached_block - start_block) as usize + i],
                     base_fee_per_gas,
                     gas_used_ratio,
                     reward: None, // TODO: calculate rewards per transaction
@@ -411,6 +414,11 @@ mod tests {
         }
 
         let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
+
+        let response = eth_api.fee_history(1.into(), (newest_block + 1).into(), None).await;
+        assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
+        let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
+        assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         let response =
             eth_api.fee_history((newest_block + 1).into(), newest_block.into(), None).await;
