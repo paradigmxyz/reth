@@ -4,10 +4,13 @@ The `stages` lib plays a central role in syncing the node, maintaining state, up
 
 [File: crates/stages/src/pipeline.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/pipeline.rs)
 ```rust,ignore
-pub struct Pipeline<DB: Database> {
-    stages: Vec<QueuedStage<DB>>,
+pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
+    stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
-    events_sender: MaybeSender<PipelineEvent>,
+    listeners: PipelineEventListeners,
+    sync_state_updater: Option<U>,
+    progress: PipelineProgress,
+    metrics: Metrics,
 }
 ```
 
