@@ -47,6 +47,7 @@ To get a better idea of what is happening at each part of the pipeline, lets wal
 
 <br>
 
+
 ## HeaderStage
 
 <!-- TODO: Cross-link to eth/65 chapter when it's written -->
@@ -91,6 +92,10 @@ Each `SealedHeader` is then validated to ensure that it has the proper parent. N
 
 This process continues until all of the headers have been downloaded and written to the database. Finally, the total difficulty of the chain's head is updated and the function returns `Ok(ExecOutput { stage_progress, done: true })`, signaling that the header sync has completed successfully. 
 
+<br>
+
+## TotalDifficultyStage
+* TODO: explain stage
 <br>
 
 ## BodyStage
@@ -185,7 +190,7 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 * TODO: explain stage
 <br>
 
-## IndexAccountHistoryStage
+## TransactionLookupStage
 * TODO: explain stage
 <br>
 
@@ -193,11 +198,7 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 * TODO: explain stage
 <br>
 
-## TotalDifficultyStage
-* TODO: explain stage
-<br>
-
-## TransactionLookupStage
+## IndexAccountHistoryStage
 * TODO: explain stage
 <br>
 
