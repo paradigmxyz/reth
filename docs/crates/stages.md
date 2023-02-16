@@ -165,10 +165,10 @@ pub fn execute_and_verify_receipt<DB: StateProvider>(
 
 After all headers and their corresponding transactions have been executed, all of the resulting state changes are applied to the database, updating account balances, account bytecode and other state changes. After applying all of the execution state changes, if there was a block reward, it is applied to the validator's account. 
 
-At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOutput { done: is_done, reached_tip: true, stage_progress: last_block })` signaling a successful completion of the `ExecutionStage`.
+At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOutput { stage_progress: end_block, done })` signaling a successful completion of the `ExecutionStage`.
 
 <br>
-
+<!-- TODO: other stages -->
 # Next Chapter
 
 Now that we have covered all of the stages that are currently included in the `Pipeline`, you know how the Reth client stays synced with the chain tip and updates the database with all of the new headers, bodies, senders and state changes. While this chapter provides an overview on how the pipeline stages work, the following chapters will dive deeper into the database, the networking stack and other exciting corners of the Reth codebase. Feel free to check out any parts of the codebase mentioned in this chapter, and when you are ready, the next chapter will dive into the `database`.
