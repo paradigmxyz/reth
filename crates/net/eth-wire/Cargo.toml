@@ -8,6 +8,7 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [dependencies]
+bytes = "1.4"
 thiserror = "1"
 serde = { version = "1", optional = true }
 

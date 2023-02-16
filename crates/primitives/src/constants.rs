@@ -12,6 +12,9 @@ pub const EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR: u64 = 8;
 /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
 
+/// Multiplier for converting gwei to wei.
+pub const GWEI_TO_WEI: u64 = 1_000_000_000;
+
 /// The Ethereum mainnet genesis hash.
 pub const MAINNET_GENESIS: H256 =
     H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));
