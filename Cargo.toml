@@ -37,3 +37,7 @@ members = [
     "crates/transaction-pool",
 ]
 default-members = ["bin/reth"]
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm" }
+revm-primitives = { git = "https://github.com/bluealloy/revm" }
