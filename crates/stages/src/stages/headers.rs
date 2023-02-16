@@ -194,14 +194,10 @@ where
         self.downloader.update_sync_gap(gap.local_head, gap.target);
 
         // The downloader returns the headers in descending order starting from the tip
-        // down to the local head (latest block in db)
-        let downloaded_headers = match self.downloader.next().await {
-            Some(downloaded_headers) => downloaded_headers,
-            None => {
-                info!(target: "sync::stages::headers", stage_progress = current_progress, target = ?tip, "Download stream exhausted");
-                return Ok(ExecOutput { stage_progress: current_progress, done: true })
-            }
-        };
+        // down to the local head (latest block in db).
+        // Task downloader can return `None` only if the response relaying channel was closed. This
+        // is a fatal error to prevent the pipeline from running forever.
+        let downloaded_headers = self.downloader.next().await.ok_or(StageError::ChannelClosed)?;
 
         info!(target: "sync::stages::headers", len = downloaded_headers.len(), "Received headers");
 
