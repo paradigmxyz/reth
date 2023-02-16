@@ -804,6 +804,12 @@ impl Discv4Service {
         }
     }
 
+    /// Replaces a node by removing the `to_remove` first and then pinging the `record`.
+    fn replace_node(&mut self, to_remove: PeerId, record: NodeRecord) {
+        self.remove_node(to_remove);
+        self.add_node(record)
+    }
+
     /// If the node's not in the table yet, this will add it to the table and start the endpoint
     /// proof by sending a ping to the node.
     pub fn add_node(&mut self, record: NodeRecord) {
@@ -864,6 +870,15 @@ impl Discv4Service {
         // the ping interval
         let mut is_new_insert = false;
 
+        // the pong message
+        let pong = Message::Pong(Pong {
+            // we use the actual address of the peer
+            to: record.into(),
+            echo: hash,
+            expire: ping.expire,
+            enr_sq: self.enr_seq(),
+        });
+
         let old_enr = match self.kbuckets.entry(&key) {
             kbucket::Entry::Present(mut entry, _) => entry.value_mut().update_with_enr(ping.enr_sq),
             kbucket::Entry::Pending(mut entry, _) => entry.value().update_with_enr(ping.enr_sq),
@@ -883,7 +898,31 @@ impl Discv4Service {
                         // mark as new insert if insert was successful
                         is_new_insert = true;
                     }
-                    _ => {
+                    BucketInsertResult::Full => {
+                        // we have received a ping, but the corresponding bucket for the peer is already full, we cannot add more peers to this bucket.
+                        // Following the spec
+                        // > If the bucket already contains k entries, the least recently seen node in the bucket, N₂, needs to be revalidated by sending a Ping packet. If no reply is received from N₂ it is considered dead, removed and N₁ added to the front of the bucket.
+
+                        // send pong to follow protocol.
+                        self.send_packet(pong, remote_addr);
+
+                        if let Some(bucket) = self.kbuckets.get_bucket(&key) {
+                            let mut iter =  bucket.iter();
+                            let mut oldest = iter.next().expect("bucket is full");
+                            for node in  iter {
+                                if node.value.last_seen < oldest.value.last_seen {
+                                    oldest = node;
+                                }
+                            }
+
+                            // then ping oldest
+                            self.try_ping(oldest.value.record, PingReason::ReplaceWithNodeOnNoPong(record));
+                        }
+                        return
+                    }
+                    BucketInsertResult::FailedFilter |
+                    BucketInsertResult::TooManyIncoming |
+                    BucketInsertResult::NodeExists => {
                         // insert unsuccessful but we still want to send the pong
                     }
                 }
@@ -895,14 +934,7 @@ impl Discv4Service {
 
         // send the pong first, but the PONG and optionally PING don't need to be send in a
         // particular order
-        let msg = Message::Pong(Pong {
-            // we use the actual address of the peer
-            to: record.into(),
-            echo: hash,
-            expire: ping.expire,
-            enr_sq: self.enr_seq(),
-        });
-        self.send_packet(msg, remote_addr);
+        self.send_packet(pong, remote_addr);
 
         // if node was absent also send a ping to establish the endpoint proof from our end
         if is_new_insert {
@@ -1019,6 +1051,10 @@ impl Discv4Service {
             PingReason::Lookup(node, ctx) => {
                 self.update_on_pong(node, pong.enr_sq);
                 self.find_node(&node, ctx);
+            }
+            PingReason::ReplaceWithNodeOnNoPong(_) => {
+                // received a pong in time, so we don't replace the node
+                self.update_on_pong(node, pong.enr_sq);
             }
         }
     }
@@ -1227,7 +1263,7 @@ impl Discv4Service {
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
             if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
-                failed_pings.push(*node_id);
+                failed_pings.push((*node_id, ping_request.reason.as_replacement()));
                 return false
             }
             true
@@ -1236,8 +1272,12 @@ impl Discv4Service {
         debug!(target: "discv4", num=%failed_pings.len(), "evicting nodes due to failed pong");
 
         // remove nodes that failed to pong
-        for node_id in failed_pings {
-            self.remove_node(node_id);
+        for (node_id, replacement) in failed_pings {
+            if let Some(to_insert) = replacement {
+                self.replace_node(node_id, to_insert);
+            } else {
+                self.remove_node(node_id);
+            }
         }
 
         self.evict_failed_neighbours(now);
@@ -1862,11 +1902,21 @@ enum PingReason {
     FindNode(PeerId),
     /// Part of a lookup to ensure endpoint is proven.
     Lookup(NodeRecord, LookupContext),
+    /// If at the bucket is full, we re-ping the oldest and try to insert the `pending` if we don't
+    /// receive a pong
+    ReplaceWithNodeOnNoPong(NodeRecord),
 }
 
 // === impl PingReason ===
 
 impl PingReason {
+    fn as_replacement(&self) -> Option<NodeRecord> {
+        match self {
+            PingReason::ReplaceWithNodeOnNoPong(n) => Some(*n),
+            _ => None,
+        }
+    }
+
     /// Whether this ping was created in order to issue a find node
     fn is_find_node(&self) -> bool {
         matches!(self, PingReason::FindNode(_))
@@ -1876,10 +1926,10 @@ impl PingReason {
 /// Represents node related updates state changes in the underlying node table
 #[derive(Debug, Clone)]
 pub enum DiscoveryUpdate {
-    /// Received a [`ForkId`] via EIP-868 for the given [`NodeRecord`].
-    EnrForkId(NodeRecord, ForkId),
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
+    /// Received a [`ForkId`] via EIP-868 for the given [`NodeRecord`].
+    EnrForkId(NodeRecord, ForkId),
     /// Node that was removed from the table
     Removed(PeerId),
     /// A series of updates
