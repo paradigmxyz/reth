@@ -24,7 +24,7 @@ async-trait = "0.1.57"
 thiserror = "1.0.37"
 auto_impl = "1.0"
 tokio = { version = "1.21.2", features = ["sync"] }
-bytes = "1.2"
+bytes = "1.4"
 futures = "0.3.25"
 tokio-stream = "0.1.11"
 rand = "0.8.5"

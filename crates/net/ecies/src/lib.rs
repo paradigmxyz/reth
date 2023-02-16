@@ -17,7 +17,10 @@ pub use error::ECIESError;
 
 mod codec;
 
-use reth_primitives::H512 as PeerId;
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    H512 as PeerId,
+};
 
 /// Raw egress values for an ECIES protocol
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,7 +30,7 @@ pub enum EgressECIESValue {
     /// The ACK message being sent out
     Ack,
     /// The message being sent out (wrapped bytes)
-    Message(bytes::Bytes),
+    Message(Bytes),
 }
 
 /// Raw ingress values for an ECIES protocol
@@ -38,5 +41,5 @@ pub enum IngressECIESValue {
     /// Receiving an ACK message
     Ack,
     /// Receiving a message
-    Message(bytes::BytesMut),
+    Message(BytesMut),
 }

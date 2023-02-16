@@ -31,7 +31,6 @@ metrics = "0.20.1"
 thiserror = { version = "1", optional = true }
 reth-rlp = { path = "../../rlp", optional = true }
 tokio-util = { version = "0.7", features = ["codec"], optional = true }
-bytes = { version = "1", optional = true }
 tempfile = { version = "3.3", optional = true }
 itertools = { version = "0.10", optional = true }
 
@@ -45,10 +44,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 reth-rlp = { path = "../../rlp" }
 itertools = "0.10"
-bytes = "1"
 
 thiserror = "1"
 tempfile = "3.3"
 
 [features]
-test-utils = ["dep:reth-rlp", "dep:thiserror", "dep:tokio-util", "dep:tempfile", "dep:bytes", "dep:itertools"]
+test-utils = ["dep:reth-rlp", "dep:thiserror", "dep:tokio-util", "dep:tempfile", "dep:itertools"]

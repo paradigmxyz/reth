@@ -4,8 +4,7 @@ use crate::{
     table::{Compress, Decompress},
     Error,
 };
-use bytes::Bytes;
-use reth_primitives::IntegerList;
+use reth_primitives::{bytes::Bytes, IntegerList};
 
 impl Compress for IntegerList {
     type Compressed = Vec<u8>;
