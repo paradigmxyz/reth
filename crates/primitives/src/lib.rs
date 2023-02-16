@@ -91,6 +91,9 @@ pub use ethers_core::{
 };
 pub use revm_primitives::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
 
+pub use enr::EnrError;
+pub use secp256k1::SecretKey;
+
 #[doc(hidden)]
 mod __reexport {
     pub use hex;

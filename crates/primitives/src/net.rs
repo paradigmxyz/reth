@@ -1,4 +1,5 @@
 use crate::PeerId;
+use enr::{EnrBuilder, EnrKey};
 use reth_rlp::RlpDecodable;
 use reth_rlp_derive::RlpEncodable;
 use secp256k1::{SecretKey, SECP256K1};
@@ -85,6 +86,23 @@ impl NodeRecord {
     #[must_use]
     pub fn udp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.udp_port)
+    }
+
+    /// Convert the node record to an [Enr]
+    pub fn into_enr_builder<K: EnrKey>(self) -> EnrBuilder<K> {
+        let mut builder = EnrBuilder::new("v4");
+
+        builder.ip(self.address);
+
+        if self.address.is_ipv4() {
+            builder.udp4(self.udp_port);
+            builder.tcp4(self.tcp_port);
+        } else {
+            builder.udp6(self.udp_port);
+            builder.tcp6(self.tcp_port);
+        }
+
+        builder
     }
 }
 

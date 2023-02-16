@@ -34,7 +34,7 @@ use reth_network::{
     error::NetworkError, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
+use reth_primitives::{BlockNumber, ChainSpec, EnrError, Head, SecretKey, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
 use reth_staged_sync::{
@@ -274,12 +274,13 @@ impl Command {
         C: BlockProvider + HeaderProvider + 'static,
     {
         let client = config.client.clone();
+        let secret_key = config.secret_key;
         let (handle, network, _txpool, eth) =
             NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
 
         let known_peers_file = self.network.persistent_peers_file();
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| async move {
-            run_network_until_shutdown(shutdown, network, known_peers_file).await
+            run_network_until_shutdown(shutdown, network, &secret_key, known_peers_file).await
         });
 
         task_executor.spawn_critical("p2p eth request handler", async move { eth.await });
@@ -376,6 +377,7 @@ impl Command {
 async fn run_network_until_shutdown<C>(
     shutdown: reth_tasks::shutdown::Shutdown,
     network: NetworkManager<C>,
+    secret_key: &SecretKey,
     persistent_peers_file: Option<PathBuf>,
 ) where
     C: BlockProvider + HeaderProvider + 'static,
@@ -388,16 +390,27 @@ async fn run_network_until_shutdown<C>(
     }
 
     if let Some(file_path) = persistent_peers_file {
-        let known_peers = network.all_peers().collect::<Vec<_>>();
-        if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
-            trace!(target : "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            match std::fs::write(&file_path, known_peers) {
-                Ok(_) => {
-                    info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
+        let known_peers = network
+            .all_peers()
+            .map(|p| p.into_enr_builder().build(secret_key))
+            .collect::<Result<Vec<_>, EnrError>>();
+
+        match known_peers {
+            Ok(known_peers) => {
+                if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
+                    trace!(target : "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
+                    match std::fs::write(&file_path, known_peers) {
+                        Ok(_) => {
+                            info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
+                        }
+                        Err(err) => {
+                            warn!(target: "reth::cli", ?err, peers_file=?file_path, "Failed to write network peers to file");
+                        }
+                    }
                 }
-                Err(err) => {
-                    warn!(target: "reth::cli", ?err, peers_file=?file_path, "Failed to write network peers to file");
-                }
+            }
+            Err(err) => {
+                warn!(target: "reth::cli", ?err, peers_file=?file_path, "Failed to write network peers to file")
             }
         }
     }
