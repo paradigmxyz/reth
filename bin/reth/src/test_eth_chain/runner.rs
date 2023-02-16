@@ -90,7 +90,8 @@ pub fn should_skip(path: &Path) -> bool {
     }
 
     // Ignore outdated EOF tests that haven't been updated for Cancun yet.
-    if path.to_string_lossy().contains(&*Path::new("EIPTests").join("stEOF").to_string_lossy()) {
+    let eof_path = Path::new("EIPTests").join("stEOF");
+    if path.to_string_lossy().contains(&*eof_path.to_string_lossy()) {
         return true
     }
 
