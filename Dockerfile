@@ -14,10 +14,8 @@ COPY . reth
 # Build reth
 RUN cd reth && cargo build --all --locked --profile $BUILD_PROFILE
 
-# Use alpine as the release image
-FROM frolvlad/alpine-glibc
-
-RUN apk add --no-cache linux-headers
+# Use Ubuntu as the release image
+FROM ubuntu
 
 # Copy the built reth binary from the previous stage
 COPY --from=builder /reth/target/release/reth /usr/local/bin/reth
