@@ -23,9 +23,16 @@ fn account_hashing(c: &mut Criterion) {
     group.sample_size(10);
 
     let num_blocks = 10_000;
-    let (path, stage) = setup::account_hashing(num_blocks);
+    let (path, stage, execution_range) = setup::prepare_account_hashing(num_blocks);
 
-    measure_stage_with_path(&mut group, stage, num_blocks, path, "AccountHashing".to_string());
+    measure_stage_with_path(
+        &mut group,
+        stage,
+        num_blocks,
+        path,
+        "AccountHashing".to_string(),
+        execution_range,
+    );
 }
 
 fn senders(c: &mut Criterion) {
@@ -72,11 +79,15 @@ fn measure_stage_with_path<S: Clone + Default + Stage<Env<WriteMap>>>(
     num_blocks: u64,
     path: PathBuf,
     label: String,
+    execution_range: Option<(ExecInput, UnwindInput)>,
 ) {
     let tx = TestTransaction::new(&path);
 
-    let mut input = ExecInput::default();
-    input.previous_stage = Some((StageId("Another"), num_blocks));
+    let (input, unwind) = execution_range.unwrap_or_else(|| {
+        let mut input = ExecInput::default();
+        input.previous_stage = Some((StageId("Another"), num_blocks));
+        (input, UnwindInput::default())
+    });
 
     group.bench_function(label, move |b| {
         b.to_async(FuturesExecutor).iter_with_setup(
@@ -87,7 +98,7 @@ fn measure_stage_with_path<S: Clone + Default + Stage<Env<WriteMap>>>(
                     let mut db_tx = tx.inner();
 
                     // Clear previous run
-                    stage.unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+                    stage.unwind(&mut db_tx, unwind).await.unwrap();
 
                     db_tx.commit().unwrap();
                 });
@@ -109,5 +120,5 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
     label: String,
 ) {
     let path = setup::txs_testdata(num_blocks as usize);
-    measure_stage_with_path(group, stage, num_blocks, path, label)
+    measure_stage_with_path(group, stage, num_blocks, path, label, None)
 }
