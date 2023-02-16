@@ -149,7 +149,10 @@ impl Default for Status {
 mod tests {
     use ethers_core::types::Chain as NamedChain;
     use hex_literal::hex;
-    use reth_primitives::{Chain, ForkHash, ForkId, H256, U256};
+    use rand::Rng;
+    use reth_primitives::{
+        Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, H256, U256,
+    };
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
@@ -265,5 +268,63 @@ mod tests {
         };
         let status = Status::decode(&mut &data[..]).unwrap();
         assert_eq!(status, expected);
+    }
+
+    #[test]
+    fn init_custom_status_fields() {
+        let head_hash = H256::random();
+        let mut rng = rand::thread_rng();
+        let total_difficulty = U256::from(rng.gen::<u64>());
+
+        // create a genesis that has a random part, so we can check that the hash is preserved
+        let genesis = Genesis { nonce: rng.gen::<u64>(), ..Default::default() };
+
+        // build head
+        let head = Head {
+            number: u64::MAX,
+            hash: head_hash,
+            difficulty: U256::from(13337),
+            total_difficulty,
+            timestamp: u64::MAX,
+        };
+
+        // add a few hardforks
+        let hardforks = vec![
+            (Hardfork::Tangerine, ForkCondition::Block(1)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(2)),
+            (Hardfork::Byzantium, ForkCondition::Block(3)),
+            (Hardfork::MuirGlacier, ForkCondition::Block(5)),
+            (Hardfork::London, ForkCondition::Block(8)),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(13)),
+        ];
+
+        let mut chainspec = ChainSpec::builder().genesis(genesis).chain(Chain::Id(1337));
+
+        for (fork, condition) in &hardforks {
+            chainspec = chainspec.with_fork(*fork, *condition);
+        }
+
+        let spec = chainspec.build();
+
+        // calculate proper forkid to check against
+        let genesis_hash = spec.genesis_hash();
+        let mut forkhash = ForkHash::from(genesis_hash);
+        for (_, condition) in hardforks {
+            forkhash += match condition {
+                ForkCondition::Block(n) => n,
+                ForkCondition::Timestamp(n) => n,
+                _ => unreachable!("only block and timestamp forks are used in this test"),
+            }
+        }
+
+        let forkid = ForkId { hash: forkhash, next: 0 };
+
+        let status = Status::spec_builder(&spec, &head).build();
+
+        assert_eq!(status.chain, Chain::Id(1337));
+        assert_eq!(status.forkid, forkid);
+        assert_eq!(status.total_difficulty, total_difficulty);
+        assert_eq!(status.blockhash, head_hash);
+        assert_eq!(status.genesis, genesis_hash);
     }
 }
