@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         // INSERT (failure)
-        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(Error::Write(4294936497)));
+        assert_eq!(cursor.insert(key_to_insert, H256::zero()), Err(Error::Write(-30799)));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, H256::zero()))));
 
         tx.commit().expect(ERROR_COMMIT);
@@ -467,7 +467,7 @@ mod tests {
         let key_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(4294936878)));
+        assert_eq!(cursor.append(key_to_append, H256::zero()), Err(Error::Write(-30418)));
         assert_eq!(cursor.current(), Ok(Some((5, H256::zero())))); // the end of table
         tx.commit().expect(ERROR_COMMIT);
 
@@ -507,14 +507,14 @@ mod tests {
                 transition_id,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(4294936878))
+            Err(Error::Write(-30418))
         );
         assert_eq!(
             cursor.append(
                 transition_id - 1,
                 AccountBeforeTx { address: Address::from_low_u64_be(subkey_to_append), info: None }
             ),
-            Err(Error::Write(4294936878))
+            Err(Error::Write(-30418))
         );
         assert_eq!(
             cursor.append(
