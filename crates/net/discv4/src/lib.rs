@@ -1256,6 +1256,8 @@ impl Discv4Service {
             true
         });
 
+        debug!(target: "discv4", num=%failed_neighbours.len(), "processing failed neighbours");
+
         for node_id in failed_neighbours {
             let key = kad_key(node_id);
             let failures = match self.kbuckets.entry(&key) {
@@ -1358,11 +1360,6 @@ impl Discv4Service {
             {
                 let target = self.lookup_rotator.next(&self.local_node_record.id);
                 self.lookup_with(target, None);
-            }
-
-            // evict expired nodes
-            if self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
-                self.evict_expired_requests(Instant::now())
             }
 
             // re-ping some peers
@@ -1476,6 +1473,11 @@ impl Discv4Service {
 
             // try resending buffered pings
             self.ping_buffered();
+
+            // evict expired nodes
+            if self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
+                self.evict_expired_requests(Instant::now())
+            }
 
             if self.queued_events.is_empty() {
                 return Poll::Pending
