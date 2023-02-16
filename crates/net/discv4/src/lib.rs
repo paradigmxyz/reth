@@ -1255,7 +1255,16 @@ impl Discv4Service {
                 _ => continue,
             };
 
+            // if the node failed to respond anything useful multiple times, remove the node from
+            // the table, but only if there are enough other nodes in the bucket (bucket must be at
+            // least half full)
             if failures > (self.config.max_find_node_failures as usize) {
+                if let Some(bucket) = self.kbuckets.get_bucket(&key) {
+                    if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
+                        // skip half empty bucket
+                        continue
+                    }
+                }
                 self.remove_node(node_id);
             }
         }
