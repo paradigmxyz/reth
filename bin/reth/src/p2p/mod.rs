@@ -1,5 +1,8 @@
 //! P2P Debugging tool
-use crate::dirs::{ConfigPath, PlatformPath};
+use crate::{
+    args::DiscoveryArgs,
+    dirs::{ConfigPath, PlatformPath},
+};
 use backon::{ConstantBackoff, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
@@ -42,8 +45,8 @@ pub struct Command {
     chain: ChainSpec,
 
     /// Disable the discovery service.
-    #[arg(short, long)]
-    disable_discovery: bool,
+    #[command(flatten)]
+    pub discovery: DiscoveryArgs,
 
     /// Target trusted peer
     #[arg(long)]
@@ -98,10 +101,12 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
-        let network = config
-            .network_config(self.nat, None)
-            .set_discovery(self.disable_discovery)
-            .chain_spec(self.chain.clone())
+        let mut network_config_builder =
+            config.network_config(self.nat, None).chain_spec(self.chain.clone());
+
+        network_config_builder = self.discovery.apply_to_builder(network_config_builder);
+
+        let network = network_config_builder
             .build(Arc::new(ShareableDatabase::new(noop_db)))
             .start_network()
             .await?;
