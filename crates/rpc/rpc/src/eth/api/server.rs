@@ -189,10 +189,12 @@ where
     // range of consecutive blocks from the database.
     async fn fee_history(
         &self,
-        block_count: u64,
+        block_count: U64,
         newest_block: BlockId,
         _reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
+        let block_count = block_count.as_u64();
+
         if block_count == 0 {
             return Ok(FeeHistory::default())
         }
@@ -205,7 +207,7 @@ where
 
         let start_block = end_block - block_count;
 
-        let mut fee_history_cache = self.fee_history_cache.0.lock();
+        let mut fee_history_cache = self.fee_history_cache.0.lock().await;
 
         // Sorted map that's populated in two rounds:
         // 1. Cache entries until first non-cached block
@@ -355,7 +357,7 @@ mod tests {
     async fn test_fee_history() {
         let eth_api = EthApi::new(NoopProvider::default(), testing_pool(), NoopNetwork::default());
 
-        let response = eth_api.fee_history(1, BlockNumber::Latest.into(), None).await;
+        let response = eth_api.fee_history(1.into(), BlockNumber::Latest.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
@@ -395,13 +397,14 @@ mod tests {
 
         let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
 
-        let response = eth_api.fee_history(newest_block + 1, newest_block.into(), None).await;
+        let response =
+            eth_api.fee_history((newest_block + 1).into(), newest_block.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
         let fee_history =
-            eth_api.fee_history(block_count, newest_block.into(), None).await.unwrap();
+            eth_api.fee_history(block_count.into(), newest_block.into(), None).await.unwrap();
 
         assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
         assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);

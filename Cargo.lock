@@ -4682,13 +4682,13 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "lru 0.9.0",
- "parking_lot 0.12.1",
  "reth-network-api",
  "reth-primitives",
  "reth-rlp",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

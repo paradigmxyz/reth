@@ -1,8 +1,8 @@
 use lru::LruCache;
-use parking_lot::Mutex;
 use reth_primitives::{BlockNumber, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroUsize, sync::Arc};
+use tokio::sync::Mutex;
 
 /// Response type for `eth_feeHistory`
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
