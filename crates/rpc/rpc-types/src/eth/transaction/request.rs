@@ -2,7 +2,7 @@ use crate::eth::transaction::typed::{
     EIP1559TransactionRequest, EIP2930TransactionRequest, LegacyTransactionRequest,
     TransactionKind, TypedTransactionRequest,
 };
-use reth_primitives::{AccessList, Address, Bytes, U128, U256};
+use reth_primitives::{AccessList, Address, HexBytes, U128, U256};
 use serde::{Deserialize, Serialize};
 
 /// Represents _all_ transaction requests received from RPC
@@ -28,7 +28,7 @@ pub struct TransactionRequest {
     /// value of th tx in wei
     pub value: Option<U256>,
     /// Any additional data sent
-    pub data: Option<Bytes>,
+    pub data: Option<HexBytes>,
     /// Transaction nonce
     pub nonce: Option<U256>,
     /// warm storage access pre-payment

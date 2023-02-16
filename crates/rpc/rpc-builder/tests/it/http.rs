@@ -11,7 +11,7 @@ use jsonrpsee::{
 use reth_primitives::{
     hex_literal::hex,
     rpc::{BlockId, BlockNumber},
-    Address, Bytes, NodeRecord, H256, H64, U256,
+    Address, HexBytes, NodeRecord, H256, H64, U256,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -55,8 +55,8 @@ where
     let block_number = BlockNumber::default();
     let call_request = CallRequest::default();
     let transaction_request = TransactionRequest::default();
-    let bytes = Bytes::default();
-    let tx = Bytes::from(hex!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"));
+    let bytes = HexBytes::default();
+    let tx = HexBytes::from(hex!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"));
 
     // Implemented
     EthApiClient::protocol_version(client).await.unwrap();
@@ -210,7 +210,7 @@ where
     ));
     assert!(is_unimplemented(TraceApiClient::call_many(client, vec![], None).await.err().unwrap()));
     assert!(is_unimplemented(
-        TraceApiClient::raw_transaction(client, Bytes::default(), HashSet::default(), None)
+        TraceApiClient::raw_transaction(client, HexBytes::default(), HashSet::default(), None)
             .await
             .err()
             .unwrap()
@@ -242,7 +242,7 @@ where
     C: ClientT + SubscriptionClientT + Sync,
 {
     Web3ApiClient::client_version(client).await.unwrap();
-    Web3ApiClient::sha3(client, Bytes::default()).await.unwrap();
+    Web3ApiClient::sha3(client, HexBytes::default()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

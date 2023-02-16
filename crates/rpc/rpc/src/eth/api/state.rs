@@ -5,14 +5,18 @@ use crate::{
     EthApi,
 };
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Address, Bytes, H256, U256};
+use reth_primitives::{rpc::BlockId, Address, HexBytes, H256, U256};
 use reth_provider::{BlockProvider, StateProvider, StateProviderFactory};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
 {
-    pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
+    pub(crate) fn get_code(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> EthResult<HexBytes> {
         let state =
             self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
         let code = state.account_code(address)?.unwrap_or_default();

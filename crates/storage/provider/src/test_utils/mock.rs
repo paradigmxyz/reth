@@ -4,8 +4,8 @@ use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
-    U256,
+    Account, Address, Block, BlockHash, ChainInfo, Header, HexBytes, StorageKey, StorageValue,
+    H256, U256,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -24,7 +24,7 @@ pub struct MockEthProvider {
 #[derive(Debug, Clone)]
 pub struct ExtendedAccount {
     account: Account,
-    bytecode: Option<Bytes>,
+    bytecode: Option<HexBytes>,
     storage: HashMap<StorageKey, StorageValue>,
 }
 
@@ -39,7 +39,7 @@ impl ExtendedAccount {
     }
 
     /// Set bytecode and bytecode hash on the extended account
-    pub fn with_bytecode(mut self, bytecode: Bytes) -> Self {
+    pub fn with_bytecode(mut self, bytecode: HexBytes) -> Self {
         let hash = keccak256(&bytecode);
         self.account.bytecode_hash = Some(hash);
         self.bytecode = Some(bytecode);
@@ -168,7 +168,7 @@ impl AccountProvider for MockEthProvider {
 }
 
 impl StateProvider for MockEthProvider {
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<HexBytes>> {
         let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
             match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {

@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::{rpc::BlockId, Bytes, H256};
+use reth_primitives::{rpc::BlockId, HexBytes, H256};
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     CallRequest, Index,
@@ -35,7 +35,7 @@ pub trait TraceApi {
     #[method(name = "trace_rawTransaction")]
     async fn raw_transaction(
         &self,
-        data: Bytes,
+        data: HexBytes,
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults>;

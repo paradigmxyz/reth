@@ -1,7 +1,7 @@
 use crate::{result::internal_rpc_err, EthApiSpec};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{rpc::BlockId, Bytes, H256};
+use reth_primitives::{rpc::BlockId, HexBytes, H256};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::RichBlock;
 
@@ -28,20 +28,20 @@ impl<Eth> DebugApiServer for DebugApi<Eth>
 where
     Eth: EthApiSpec + 'static,
 {
-    async fn raw_header(&self, _block_id: BlockId) -> Result<Bytes> {
+    async fn raw_header(&self, _block_id: BlockId) -> Result<HexBytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn raw_block(&self, _block_id: BlockId) -> Result<Bytes> {
+    async fn raw_block(&self, _block_id: BlockId) -> Result<HexBytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, _hash: H256) -> Result<Bytes> {
+    async fn raw_transaction(&self, _hash: H256) -> Result<HexBytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn raw_receipts(&self, _block_id: BlockId) -> Result<Vec<Bytes>> {
+    async fn raw_receipts(&self, _block_id: BlockId) -> Result<Vec<HexBytes>> {
         Err(internal_rpc_err("unimplemented"))
     }
 

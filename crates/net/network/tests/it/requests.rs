@@ -9,7 +9,7 @@ use reth_interfaces::p2p::{
 use reth_network::test_utils::{NetworkEventStream, Testnet};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::{
-    Block, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionKind,
+    Block, Header, HeadersDirection, HexBytes, Signature, Transaction, TransactionKind,
     TransactionSigned, TxEip2930, H256, U256,
 };
 use reth_provider::test_utils::MockEthProvider;
@@ -24,7 +24,7 @@ pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
         gas_limit: rng.gen(),
         to: TransactionKind::Create,
         value: rng.gen(),
-        input: Bytes::from(vec![1, 2]),
+        input: HexBytes::from(vec![1, 2]),
         access_list: Default::default(),
     });
     let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };

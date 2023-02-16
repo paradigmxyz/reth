@@ -3,7 +3,7 @@
 //!
 //! See <https://openethereum.github.io/JSONRPC-trace-module>
 
-use reth_primitives::{Address, Bytes, H256, U256, U64};
+use reth_primitives::{Address, HexBytes, H256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -18,7 +18,7 @@ pub enum TraceType {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceResults {
-    pub output: Bytes,
+    pub output: HexBytes,
     pub trace: Option<Vec<TransactionTrace>>,
     pub vm_trace: Option<VmTrace>,
     pub state_diff: Option<StateDiff>,
@@ -57,7 +57,7 @@ pub enum Delta<T> {
 pub struct AccountDiff {
     pub balance: Delta<U256>,
     pub nonce: Delta<U64>,
-    pub code: Delta<Bytes>,
+    pub code: Delta<HexBytes>,
     pub storage: BTreeMap<H256, Delta<H256>>,
 }
 
@@ -98,7 +98,7 @@ pub struct CallAction {
     pub to: Address,
     pub value: U256,
     pub gas: U64,
-    pub input: Bytes,
+    pub input: HexBytes,
     pub call_type: CallType,
 }
 
@@ -108,7 +108,7 @@ pub struct CreateAction {
     pub from: Address,
     pub value: U256,
     pub gas: U64,
-    pub init: Bytes,
+    pub init: HexBytes,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -138,14 +138,14 @@ pub struct SelfdestructAction {
 #[serde(rename_all = "camelCase")]
 pub struct CallOutput {
     pub gas_used: U64,
-    pub output: Bytes,
+    pub output: HexBytes,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateOutput {
     pub gas_used: U64,
-    pub code: Bytes,
+    pub code: HexBytes,
     pub address: Address,
 }
 
@@ -188,7 +188,7 @@ pub struct LocalizedTransactionTrace {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VmTrace {
-    pub code: Bytes,
+    pub code: HexBytes,
     pub ops: Vec<VmInstruction>,
 }
 
@@ -214,7 +214,7 @@ pub struct VmExecutedOperation {
 #[serde(rename_all = "camelCase")]
 pub struct MemoryDelta {
     pub off: usize,
-    pub data: Bytes,
+    pub data: HexBytes,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

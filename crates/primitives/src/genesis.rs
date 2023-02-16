@@ -4,7 +4,7 @@ use crate::{
     keccak256,
     proofs::{KeccakHasher, EMPTY_ROOT},
     utils::serde_helpers::deserialize_stringified_u64,
-    Address, Bytes, H256, KECCAK_EMPTY, U256,
+    Address, HexBytes, H256, KECCAK_EMPTY, U256,
 };
 use bytes::BytesMut;
 use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
@@ -23,7 +23,7 @@ pub struct Genesis {
     #[serde(deserialize_with = "deserialize_stringified_u64")]
     pub timestamp: u64,
     /// The genesis header extra data.
-    pub extra_data: Bytes,
+    pub extra_data: HexBytes,
     /// The genesis header gas limit.
     #[serde(deserialize_with = "deserialize_stringified_u64")]
     pub gas_limit: u64,
@@ -47,7 +47,7 @@ pub struct GenesisAccount {
     pub balance: U256,
     /// The account's bytecode at genesis.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<Bytes>,
+    pub code: Option<HexBytes>,
     /// The account's storage at genesis.
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub storage: Option<HashMap<H256, H256>>,

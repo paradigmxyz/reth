@@ -8,7 +8,7 @@ use crate::{
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId, BlockNumber},
-    Address, Bytes, H256, H64, U256, U64,
+    Address, HexBytes, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -150,11 +150,15 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
+    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<HexBytes> {
         Ok(EthApi::get_code(self, address, block_number)?)
     }
 
-    async fn call(&self, _request: CallRequest, _block_number: Option<BlockId>) -> Result<Bytes> {
+    async fn call(
+        &self,
+        _request: CallRequest,
+        _block_number: Option<BlockId>,
+    ) -> Result<HexBytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -215,19 +219,19 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
+    async fn send_raw_transaction(&self, tx: HexBytes) -> Result<H256> {
         Ok(EthApi::send_raw_transaction(self, tx).await?)
     }
 
-    async fn sign(&self, _address: Address, _message: Bytes) -> Result<Bytes> {
+    async fn sign(&self, _address: Address, _message: HexBytes) -> Result<HexBytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn sign_transaction(&self, _transaction: CallRequest) -> Result<Bytes> {
+    async fn sign_transaction(&self, _transaction: CallRequest) -> Result<HexBytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn sign_typed_data(&self, _address: Address, _data: Value) -> Result<Bytes> {
+    async fn sign_typed_data(&self, _address: Address, _data: Value) -> Result<HexBytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 

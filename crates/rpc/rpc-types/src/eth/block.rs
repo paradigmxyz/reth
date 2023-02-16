@@ -1,7 +1,7 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as RethHeader, H256, H64, U256,
+    Address, Block as PrimitiveBlock, Bloom, Header as RethHeader, HexBytes, H256, H64, U256,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -147,7 +147,7 @@ pub struct Header {
     /// Gas Limit
     pub gas_limit: U256,
     /// Extra data
-    pub extra_data: Bytes,
+    pub extra_data: HexBytes,
     /// Logs bloom
     pub logs_bloom: Bloom,
     /// Timestamp

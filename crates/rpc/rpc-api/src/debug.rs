@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::{rpc::BlockId, Bytes, H256};
+use reth_primitives::{rpc::BlockId, HexBytes, H256};
 use reth_rpc_types::RichBlock;
 
 /// Debug rpc interface.
@@ -8,19 +8,19 @@ use reth_rpc_types::RichBlock;
 pub trait DebugApi {
     /// Returns an RLP-encoded header.
     #[method(name = "debug_getRawHeader")]
-    async fn raw_header(&self, block_id: BlockId) -> Result<Bytes>;
+    async fn raw_header(&self, block_id: BlockId) -> Result<HexBytes>;
 
     /// Returns an RLP-encoded block.
     #[method(name = "debug_getRawBlock")]
-    async fn raw_block(&self, block_id: BlockId) -> Result<Bytes>;
+    async fn raw_block(&self, block_id: BlockId) -> Result<HexBytes>;
 
     /// Returns a EIP-2718 binary-encoded transaction.
     #[method(name = "debug_getRawTransaction")]
-    async fn raw_transaction(&self, hash: H256) -> Result<Bytes>;
+    async fn raw_transaction(&self, hash: H256) -> Result<HexBytes>;
 
     /// Returns an array of EIP-2718 binary-encoded receipts.
     #[method(name = "debug_getRawReceipts")]
-    async fn raw_receipts(&self, block_id: BlockId) -> Result<Vec<Bytes>>;
+    async fn raw_receipts(&self, block_id: BlockId) -> Result<Vec<HexBytes>>;
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "debug_getBadBlocks")]

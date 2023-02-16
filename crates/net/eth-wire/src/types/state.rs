@@ -1,6 +1,6 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Bytes, H256};
+use reth_primitives::{HexBytes, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
@@ -22,7 +22,7 @@ pub struct GetNodeData(pub Vec<H256>);
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NodeData(pub Vec<Bytes>);
+pub struct NodeData(pub Vec<HexBytes>);
 
 #[cfg(test)]
 mod test {

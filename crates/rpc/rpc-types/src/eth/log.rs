@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bytes, H256, U256};
+use reth_primitives::{Address, HexBytes, H256, U256};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum Log emitted by a transaction
@@ -10,7 +10,7 @@ pub struct Log {
     /// All topics of the log
     pub topics: Vec<H256>,
     /// Additional data fields of the log
-    pub data: Bytes,
+    pub data: HexBytes,
     /// Hash of the block the transaction that emitted this log was mined in
     pub block_hash: Option<H256>,
     /// Number of the block the transaction that emitted this log was mined in

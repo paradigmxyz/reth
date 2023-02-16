@@ -1,6 +1,6 @@
 use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
+    proofs, Account, Address, Header, HexBytes, SealedBlock, SealedHeader, Signature, Transaction,
     TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
@@ -53,7 +53,7 @@ pub fn random_tx() -> Transaction {
         gas_limit: rand::random::<u16>().into(),
         to: TransactionKind::Call(Address::random()),
         value: rand::random::<u16>().into(),
-        input: Bytes::default(),
+        input: HexBytes::default(),
     })
 }
 
@@ -248,7 +248,7 @@ mod test {
             gas_limit: 21000,
             to: TransactionKind::Call(hex!("3535353535353535353535353535353535353535").into()),
             value: 10_u128.pow(18),
-            input: Bytes::default(),
+            input: HexBytes::default(),
         });
 
         // TODO resolve dependency issue

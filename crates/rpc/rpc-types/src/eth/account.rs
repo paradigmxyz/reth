@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-use reth_primitives::{Address, Bytes, H256, H512, U256, U64};
+use reth_primitives::{Address, HexBytes, H256, H512, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Account information.
@@ -18,7 +18,7 @@ pub struct StorageProof {
     /// Value that the key holds
     pub value: U256,
     /// proof for the pair
-    pub proof: Vec<Bytes>,
+    pub proof: Vec<HexBytes>,
 }
 
 /// Response for EIP-1186 account proof `eth_getProof`
@@ -30,7 +30,7 @@ pub struct EIP1186AccountProofResponse {
     pub code_hash: H256,
     pub nonce: U64,
     pub storage_hash: H256,
-    pub account_proof: Vec<Bytes>,
+    pub account_proof: Vec<HexBytes>,
     pub storage_proof: Vec<StorageProof>,
 }
 

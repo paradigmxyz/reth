@@ -13,41 +13,41 @@ use thiserror::Error;
 
 /// Wrapper type around Bytes to deserialize/serialize "0x" prefixed ethereum hex strings
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-pub struct Bytes(
+pub struct HexBytes(
     #[serde(serialize_with = "serialize_bytes", deserialize_with = "deserialize_bytes")]
     pub  bytes::Bytes,
 );
 
-fn bytes_to_hex(b: &Bytes) -> String {
+fn bytes_to_hex(b: &HexBytes) -> String {
     hex::encode(b.0.as_ref())
 }
 
-impl Debug for Bytes {
+impl Debug for HexBytes {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "Bytes(0x{})", bytes_to_hex(self))
     }
 }
 
-impl Display for Bytes {
+impl Display for HexBytes {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "0x{}", bytes_to_hex(self))
     }
 }
 
-impl LowerHex for Bytes {
+impl LowerHex for HexBytes {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "0x{}", bytes_to_hex(self))
     }
 }
 
-impl Bytes {
+impl HexBytes {
     /// Return bytes as [`Vec::<u8>`]
     pub fn to_vec(&self) -> Vec<u8> {
         self.as_ref().to_vec()
     }
 }
 
-impl Deref for Bytes {
+impl Deref for HexBytes {
     type Target = [u8];
 
     #[inline]
@@ -56,19 +56,19 @@ impl Deref for Bytes {
     }
 }
 
-impl AsRef<[u8]> for Bytes {
+impl AsRef<[u8]> for HexBytes {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl Borrow<[u8]> for Bytes {
+impl Borrow<[u8]> for HexBytes {
     fn borrow(&self) -> &[u8] {
         self.as_ref()
     }
 }
 
-impl IntoIterator for Bytes {
+impl IntoIterator for HexBytes {
     type Item = u8;
     type IntoIter = bytes::buf::IntoIter<bytes::Bytes>;
 
@@ -77,7 +77,7 @@ impl IntoIterator for Bytes {
     }
 }
 
-impl<'a> IntoIterator for &'a Bytes {
+impl<'a> IntoIterator for &'a HexBytes {
     type Item = &'a u8;
     type IntoIter = core::slice::Iter<'a, u8>;
 
@@ -86,67 +86,67 @@ impl<'a> IntoIterator for &'a Bytes {
     }
 }
 
-impl From<&[u8]> for Bytes {
+impl From<&[u8]> for HexBytes {
     fn from(src: &[u8]) -> Self {
         Self(bytes::Bytes::copy_from_slice(src))
     }
 }
 
-impl From<bytes::Bytes> for Bytes {
+impl From<bytes::Bytes> for HexBytes {
     fn from(src: bytes::Bytes) -> Self {
         Self(src)
     }
 }
 
-impl From<Vec<u8>> for Bytes {
+impl From<Vec<u8>> for HexBytes {
     fn from(src: Vec<u8>) -> Self {
         Self(src.into())
     }
 }
 
-impl<const N: usize> From<[u8; N]> for Bytes {
+impl<const N: usize> From<[u8; N]> for HexBytes {
     fn from(src: [u8; N]) -> Self {
         src.to_vec().into()
     }
 }
 
-impl<'a, const N: usize> From<&'a [u8; N]> for Bytes {
+impl<'a, const N: usize> From<&'a [u8; N]> for HexBytes {
     fn from(src: &'a [u8; N]) -> Self {
         src.to_vec().into()
     }
 }
 
-impl PartialEq<[u8]> for Bytes {
+impl PartialEq<[u8]> for HexBytes {
     fn eq(&self, other: &[u8]) -> bool {
         self.as_ref() == other
     }
 }
 
-impl PartialEq<Bytes> for [u8] {
-    fn eq(&self, other: &Bytes) -> bool {
+impl PartialEq<HexBytes> for [u8] {
+    fn eq(&self, other: &HexBytes) -> bool {
         *other == *self
     }
 }
 
-impl PartialEq<Vec<u8>> for Bytes {
+impl PartialEq<Vec<u8>> for HexBytes {
     fn eq(&self, other: &Vec<u8>) -> bool {
         self.as_ref() == &other[..]
     }
 }
 
-impl PartialEq<Bytes> for Vec<u8> {
-    fn eq(&self, other: &Bytes) -> bool {
+impl PartialEq<HexBytes> for Vec<u8> {
+    fn eq(&self, other: &HexBytes) -> bool {
         *other == *self
     }
 }
 
-impl PartialEq<bytes::Bytes> for Bytes {
+impl PartialEq<bytes::Bytes> for HexBytes {
     fn eq(&self, other: &bytes::Bytes) -> bool {
         other == self.as_ref()
     }
 }
 
-impl Encodable for Bytes {
+impl Encodable for HexBytes {
     fn length(&self) -> usize {
         self.0.length()
     }
@@ -155,7 +155,7 @@ impl Encodable for Bytes {
     }
 }
 
-impl Decodable for Bytes {
+impl Decodable for HexBytes {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
         Ok(Self(bytes::Bytes::decode(buf)?))
     }
@@ -165,7 +165,7 @@ impl Decodable for Bytes {
 #[error("Failed to parse bytes: {0}")]
 pub struct ParseBytesError(String);
 
-impl FromStr for Bytes {
+impl FromStr for HexBytes {
     type Err = ParseBytesError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -201,7 +201,7 @@ where
     .map_err(|e| serde::de::Error::custom(e.to_string()))
 }
 
-impl Compact for Bytes {
+impl Compact for HexBytes {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
         let len = self.len();
         buf.put(self.0);
@@ -215,9 +215,9 @@ impl Compact for Bytes {
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
 #[cfg(any(test, feature = "arbitrary"))]
-impl proptest::prelude::Arbitrary for Bytes {
+impl proptest::prelude::Arbitrary for HexBytes {
     type Parameters = proptest::arbitrary::ParamsFor<u8>;
-    type Strategy = proptest::prelude::BoxedStrategy<Bytes>;
+    type Strategy = proptest::prelude::BoxedStrategy<HexBytes>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
         proptest::collection::vec(proptest::arbitrary::any_with::<u8>(args), 0..80)
@@ -227,7 +227,7 @@ impl proptest::prelude::Arbitrary for Bytes {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for Bytes {
+impl<'a> arbitrary::Arbitrary<'a> for HexBytes {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let size = u.int_in_range(0..=80)?;
         Ok(Self(bytes::Bytes::copy_from_slice(u.bytes(size)?)))
@@ -241,8 +241,8 @@ mod tests {
     #[test]
     fn test_from_bytes() {
         let b = bytes::Bytes::from("0123456789abcdef");
-        let wrapped_b = Bytes::from(b.clone());
-        let expected = Bytes(b);
+        let wrapped_b = HexBytes::from(b.clone());
+        let expected = HexBytes(b);
 
         assert_eq!(wrapped_b, expected);
     }
@@ -250,15 +250,15 @@ mod tests {
     #[test]
     fn test_from_slice() {
         let arr = [1, 35, 69, 103, 137, 171, 205, 239];
-        let b = Bytes::from(&arr);
-        let expected = Bytes(bytes::Bytes::from(arr.to_vec()));
+        let b = HexBytes::from(&arr);
+        let expected = HexBytes(bytes::Bytes::from(arr.to_vec()));
 
         assert_eq!(b, expected);
     }
 
     #[test]
     fn hex_formatting() {
-        let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        let b = HexBytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         let expected = String::from("0x0123456789abcdef");
         assert_eq!(format!("{b:x}"), expected);
         assert_eq!(format!("{b}"), expected);
@@ -266,19 +266,19 @@ mod tests {
 
     #[test]
     fn test_from_str() {
-        let b = Bytes::from_str("0x1213");
+        let b = HexBytes::from_str("0x1213");
         assert!(b.is_ok());
         let b = b.unwrap();
         assert_eq!(b.as_ref(), hex::decode("1213").unwrap());
 
-        let b = Bytes::from_str("1213");
+        let b = HexBytes::from_str("1213");
         let b = b.unwrap();
         assert_eq!(b.as_ref(), hex::decode("1213").unwrap());
     }
 
     #[test]
     fn test_debug_formatting() {
-        let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        let b = HexBytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         assert_eq!(format!("{b:?}"), "Bytes(0x0123456789abcdef)");
         assert_eq!(format!("{b:#?}"), "Bytes(0x0123456789abcdef)");
     }
@@ -286,14 +286,14 @@ mod tests {
     #[test]
     fn test_to_vec() {
         let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
-        let b = Bytes::from(vec.clone());
+        let b = HexBytes::from(vec.clone());
 
         assert_eq!(b.to_vec(), vec);
     }
 
     #[test]
     fn test_encodable_length_lt_56() {
-        let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        let b = HexBytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         // since the payload length is less than 56, this should give the length
         // of the array + 1 = 9
         assert_eq!(b.length(), 9);
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_encodable_length_gt_56() {
-        let b = Bytes::from(vec![255; 57]);
+        let b = HexBytes::from(vec![255; 57]);
         // since the payload length is greater than 56, this should give the length
         // of the array + (1 + 8 - payload_length.leading_zeros() as usize / 8) = 59
         assert_eq!(b.length(), 59);
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_encodable_encode() {
-        let b = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        let b = HexBytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         let mut buf = Vec::new();
         b.encode(&mut buf);
         let expected: Vec<u8> = vec![136, 1, 35, 69, 103, 137, 171, 205, 239];
@@ -319,15 +319,15 @@ mod tests {
     #[test]
     fn test_decodable_decode() {
         let buf: Vec<u8> = vec![136, 1, 35, 69, 103, 137, 171, 205, 239];
-        let b = Bytes::decode(&mut &buf[..]).unwrap();
-        let expected = Bytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
+        let b = HexBytes::decode(&mut &buf[..]).unwrap();
+        let expected = HexBytes::from(vec![1, 35, 69, 103, 137, 171, 205, 239]);
         assert_eq!(b, expected);
     }
 
     #[test]
     fn test_vec_partialeq() {
         let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
-        let b = Bytes::from(vec.clone());
+        let b = HexBytes::from(vec.clone());
         assert_eq!(b, vec);
         assert_eq!(vec, b);
 
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn test_slice_partialeq() {
         let vec = vec![1, 35, 69, 103, 137, 171, 205, 239];
-        let b = Bytes::from(vec.clone());
+        let b = HexBytes::from(vec.clone());
         assert_eq!(b, vec[..]);
         assert_eq!(vec[..], b);
 
@@ -351,7 +351,7 @@ mod tests {
     #[test]
     fn test_bytes_partialeq() {
         let b = bytes::Bytes::from("0123456789abcdef");
-        let wrapped_b = Bytes::from(b.clone());
+        let wrapped_b = HexBytes::from(b.clone());
         assert_eq!(wrapped_b, b);
 
         let wrong_b = bytes::Bytes::from("0123absd");
@@ -360,11 +360,11 @@ mod tests {
 
     #[test]
     fn arbitrary() {
-        proptest::proptest!(|(bytes: Bytes)| {
+        proptest::proptest!(|(bytes: HexBytes)| {
             let mut buf = vec![];
             bytes.clone().to_compact(&mut buf);
 
-            let (decoded, remaining_buf) = Bytes::from_compact(&buf, buf.len());
+            let (decoded, remaining_buf) = HexBytes::from_compact(&buf, buf.len());
 
             assert!(bytes == decoded);
             assert!(remaining_buf.is_empty());

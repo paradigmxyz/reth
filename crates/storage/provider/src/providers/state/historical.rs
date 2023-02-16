@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Account, Address, Bytes, StorageKey, StorageValue, TransitionId, H256, U256,
+    Account, Address, HexBytes, StorageKey, StorageValue, TransitionId, H256, U256,
 };
 use std::marker::PhantomData;
 
@@ -113,8 +113,11 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
-        self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<HexBytes>> {
+        self.tx
+            .get::<tables::Bytecodes>(code_hash)
+            .map_err(Into::into)
+            .map(|r| r.map(HexBytes::from))
     }
 }
 

@@ -1,7 +1,7 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{
     rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId, BlockNumber},
-    Address, Bytes, H256, H64, U256, U64,
+    Address, HexBytes, H256, H64, U256, U64,
 };
 use reth_rpc_types::{
     CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
@@ -124,11 +124,11 @@ pub trait EthApi {
 
     /// Returns code at a given address at given block number.
     #[method(name = "eth_getCode")]
-    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes>;
+    async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<HexBytes>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "eth_call")]
-    async fn call(&self, request: CallRequest, block_number: Option<BlockId>) -> Result<Bytes>;
+    async fn call(&self, request: CallRequest, block_number: Option<BlockId>) -> Result<HexBytes>;
 
     /// Generates an access list for a transaction.
     ///
@@ -211,21 +211,21 @@ pub trait EthApi {
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "eth_sendRawTransaction")]
-    async fn send_raw_transaction(&self, bytes: Bytes) -> Result<H256>;
+    async fn send_raw_transaction(&self, bytes: HexBytes) -> Result<H256>;
 
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).
     #[method(name = "eth_sign")]
-    async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes>;
+    async fn sign(&self, address: Address, message: HexBytes) -> Result<HexBytes>;
 
     /// Signs a transaction that can be submitted to the network at a later time using with
     /// `eth_sendRawTransaction.`
     #[method(name = "eth_signTransaction")]
-    async fn sign_transaction(&self, transaction: CallRequest) -> Result<Bytes>;
+    async fn sign_transaction(&self, transaction: CallRequest) -> Result<HexBytes>;
 
     /// Signs data via [EIP-712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md).
     #[method(name = "eth_signTypedData")]
-    async fn sign_typed_data(&self, address: Address, data: serde_json::Value) -> Result<Bytes>;
+    async fn sign_typed_data(&self, address: Address, data: serde_json::Value) -> Result<HexBytes>;
 
     /// Returns the account and storage values of the specified account including the Merkle-proof.
     /// This call can be used to verify that the data you are pulling from is not tampered with.

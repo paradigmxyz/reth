@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::{Bytes, H256};
+use reth_primitives::{HexBytes, H256};
 
 /// Web3 rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server))]
@@ -12,5 +12,5 @@ pub trait Web3Api {
 
     /// Returns sha3 of the given data.
     #[method(name = "web3_sha3")]
-    fn sha3(&self, input: Bytes) -> Result<H256>;
+    fn sha3(&self, input: HexBytes) -> Result<H256>;
 }

@@ -1,4 +1,4 @@
-use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
+use crate::{keccak256, Address, ChainId, HexBytes, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
@@ -53,7 +53,7 @@ pub struct TxLegacy {
     /// EVM-code for the account initialisation procedure CREATE,
     /// data: An unlimited size byte array specifying the
     /// input data of the message call, formally Td.
-    pub input: Bytes,
+    pub input: HexBytes,
 }
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
@@ -101,7 +101,7 @@ pub struct TxEip2930 {
     /// EVM-code for the account initialisation procedure CREATE,
     /// data: An unlimited size byte array specifying the
     /// input data of the message call, formally Td.
-    pub input: Bytes,
+    pub input: HexBytes,
 }
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
@@ -157,7 +157,7 @@ pub struct TxEip1559 {
     /// EVM-code for the account initialisation procedure CREATE,
     /// data: An unlimited size byte array specifying the
     /// input data of the message call, formally Td.
-    pub input: Bytes,
+    pub input: HexBytes,
 }
 
 /// A raw transaction.
@@ -269,7 +269,7 @@ impl Transaction {
     }
 
     /// Get the transaction's input field.
-    pub fn input(&self) -> &Bytes {
+    pub fn input(&self) -> &HexBytes {
         match self {
             Transaction::Legacy(TxLegacy { input, .. }) => input,
             Transaction::Eip2930(TxEip2930 { input, .. }) => input,
@@ -669,7 +669,7 @@ impl TransactionSigned {
             gas_limit: Decodable::decode(data)?,
             to: Decodable::decode(data)?,
             value: Decodable::decode(data)?,
-            input: Bytes(Decodable::decode(data)?),
+            input: HexBytes(Decodable::decode(data)?),
             chain_id: None,
         });
         let (signature, extracted_id) = Signature::decode_with_eip155_chain_id(data)?;
@@ -712,7 +712,7 @@ impl TransactionSigned {
                 gas_limit: Decodable::decode(data)?,
                 to: Decodable::decode(data)?,
                 value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
+                input: HexBytes(Decodable::decode(data)?),
                 access_list: Decodable::decode(data)?,
             }),
             2 => Transaction::Eip1559(TxEip1559 {
@@ -723,7 +723,7 @@ impl TransactionSigned {
                 gas_limit: Decodable::decode(data)?,
                 to: Decodable::decode(data)?,
                 value: Decodable::decode(data)?,
-                input: Bytes(Decodable::decode(data)?),
+                input: HexBytes(Decodable::decode(data)?),
                 access_list: Decodable::decode(data)?,
             }),
             _ => return Err(DecodeError::Custom("unsupported typed transaction type")),
@@ -742,7 +742,7 @@ impl TransactionSigned {
     /// For legacy transactions, the format is encoded as: `rlp(tx)`
     /// For EIP-2718 typed transaction, the format is encoded as the type of the transaction
     /// followed by the rlp of the transaction: `type` + `rlp(tx)`
-    pub fn decode_enveloped(tx: Bytes) -> Result<Self, DecodeError> {
+    pub fn decode_enveloped(tx: HexBytes) -> Result<Self, DecodeError> {
         let mut data = tx.as_ref();
 
         if data.is_empty() {
@@ -919,7 +919,7 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 mod tests {
     use crate::{
         transaction::{signature::Signature, TransactionKind, TxEip1559, TxEip2930, TxLegacy},
-        AccessList, Address, Bytes, Transaction, TransactionSigned, H256, U256,
+        AccessList, Address, HexBytes, Transaction, TransactionSigned, H256, U256,
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
@@ -943,7 +943,7 @@ mod tests {
             gas_limit: 2,
             to: TransactionKind::Create,
             value: 3,
-            input: Bytes::from(vec![1, 2]),
+            input: HexBytes::from(vec![1, 2]),
             access_list: Default::default(),
         });
         let signature = Signature { odd_y_parity: true, r: U256::default(), s: U256::default() };
@@ -982,7 +982,7 @@ mod tests {
             gas_limit: 2,
             to: TransactionKind::Call(Address::default()),
             value: 3,
-            input: Bytes::from(vec![1, 2]),
+            input: HexBytes::from(vec![1, 2]),
             access_list: Default::default(),
         });
 
@@ -1022,7 +1022,7 @@ mod tests {
                 Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap(),
             ),
             value: 1000000000000000,
-            input: Bytes::default(),
+            input: HexBytes::default(),
         });
         let signature = Signature {
             odd_y_parity: false,
@@ -1067,7 +1067,7 @@ mod tests {
                 &hex::decode("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap()[..],
             )),
             value: 1000000000000000u64.into(),
-            input: Bytes::default(),
+            input: HexBytes::default(),
         });
         let signature = Signature {
             odd_y_parity: false,
@@ -1111,7 +1111,7 @@ mod tests {
                 &hex::decode("cf7f9e66af820a19257a2108375b180b0ec49167").unwrap()[..],
             )),
             value: 1234u64.into(),
-            input: Bytes::default(),
+            input: HexBytes::default(),
         });
         let signature = Signature {
             odd_y_parity: true,

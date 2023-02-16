@@ -350,8 +350,8 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
 mod tests {
     use reth_interfaces::Result;
     use reth_primitives::{
-        hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
-        TransactionSigned, MAINNET, U256,
+        hex_literal::hex, Account, Address, BlockHash, Header, HexBytes, Signature,
+        TransactionKind, TransactionSigned, MAINNET, U256,
     };
 
     use super::*;
@@ -432,7 +432,7 @@ mod tests {
             gas_limit: 10,
             to: TransactionKind::Call(Address::default()),
             value: 3,
-            input: Bytes::from(vec![1, 2]),
+            input: HexBytes::from(vec![1, 2]),
             access_list: Default::default(),
         });
 

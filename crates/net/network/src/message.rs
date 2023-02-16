@@ -11,7 +11,7 @@ use reth_eth_wire::{
     SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
-use reth_primitives::{Bytes, Header, PeerId, Receipt, TransactionSigned, H256};
+use reth_primitives::{Header, HexBytes, PeerId, Receipt, TransactionSigned, H256};
 use std::{
     fmt,
     sync::Arc,
@@ -198,7 +198,7 @@ pub enum PeerResponseResult {
     BlockHeaders(RequestResult<Vec<Header>>),
     BlockBodies(RequestResult<Vec<BlockBody>>),
     PooledTransactions(RequestResult<Vec<TransactionSigned>>),
-    NodeData(RequestResult<Vec<Bytes>>),
+    NodeData(RequestResult<Vec<HexBytes>>),
     Receipts(RequestResult<Vec<Vec<Receipt>>>),
 }
 

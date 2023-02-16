@@ -48,7 +48,7 @@ pub use forkid::{ForkFilter, ForkHash, ForkId, ForkTransition, ValidationError};
 pub use genesis::{Genesis, GenesisAccount};
 pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
-pub use hex_bytes::Bytes;
+pub use hex_bytes::HexBytes;
 pub use integer_list::IntegerList;
 pub use jsonu256::JsonU256;
 pub use log::Log;

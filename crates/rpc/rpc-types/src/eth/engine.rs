@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use bytes::BytesMut;
-use reth_primitives::{Address, Bloom, Bytes, SealedBlock, H256, H64, U256, U64};
+use reth_primitives::{Address, Bloom, HexBytes, SealedBlock, H256, H64, U256, U64};
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
@@ -23,10 +23,10 @@ pub struct ExecutionPayload {
     pub gas_limit: U64,
     pub gas_used: U64,
     pub timestamp: U64,
-    pub extra_data: Bytes,
+    pub extra_data: HexBytes,
     pub base_fee_per_gas: U256,
     pub block_hash: H256,
-    pub transactions: Vec<Bytes>,
+    pub transactions: Vec<HexBytes>,
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]

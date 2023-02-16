@@ -1,4 +1,4 @@
-use reth_primitives::{Bytes, H256, U256};
+use reth_primitives::{HexBytes, H256, U256};
 use thiserror::Error;
 
 /// The Engine API result type
@@ -9,7 +9,7 @@ pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 pub enum EngineApiError {
     /// Invalid payload extra data.
     #[error("Invalid payload extra data: {0}")]
-    PayloadExtraData(Bytes),
+    PayloadExtraData(HexBytes),
     /// Invalid payload base fee.
     #[error("Invalid payload base fee: {0}")]
     PayloadBaseFee(U256),

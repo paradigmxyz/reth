@@ -1,5 +1,5 @@
 use reth_primitives::{
-    Address, BigEndianHash, Bloom, Bytes, ChainSpec, ChainSpecBuilder, Header as RethHeader,
+    Address, BigEndianHash, Bloom, ChainSpec, ChainSpecBuilder, Header as RethHeader, HexBytes,
     JsonU256, SealedHeader, H160, H256, H64, U256, U64,
 };
 use serde::{self, Deserialize};
@@ -17,7 +17,7 @@ pub struct BlockchainTestData {
     pub genesis_block_header: Header,
     /// RLP encoded genesis block.
     #[serde(rename = "genesisRLP")]
-    pub genesis_rlp: Option<Bytes>,
+    pub genesis_rlp: Option<HexBytes>,
     /// Block data.
     pub blocks: Vec<Block>,
     /// The expected post state.
@@ -44,7 +44,7 @@ pub struct Header {
     /// Difficulty.
     pub difficulty: JsonU256,
     /// Extra data.
-    pub extra_data: Bytes,
+    pub extra_data: HexBytes,
     /// Gas limit.
     pub gas_limit: JsonU256,
     /// Gas used.
@@ -107,7 +107,7 @@ pub struct Block {
     /// Block header.
     pub block_header: Option<Header>,
     /// RLP encoded block bytes
-    pub rlp: Bytes,
+    pub rlp: HexBytes,
     /// Transactions
     pub transactions: Option<Vec<Transaction>>,
     /// Uncle/ommer headers
@@ -124,7 +124,7 @@ pub struct Block {
 #[serde(rename_all = "camelCase")]
 pub struct TransactionSequence {
     exception: String,
-    raw_bytes: Bytes,
+    raw_bytes: HexBytes,
     valid: String,
 }
 
@@ -159,7 +159,7 @@ pub struct Account {
     /// Balance.
     pub balance: JsonU256,
     /// Code.
-    pub code: Bytes,
+    pub code: HexBytes,
     /// Nonce.
     pub nonce: JsonU256,
     /// Storage.
@@ -276,7 +276,7 @@ pub struct Transaction {
     #[serde(rename = "type")]
     pub transaction_type: Option<JsonU256>,
     /// Data.
-    pub data: Bytes,
+    pub data: HexBytes,
     /// Gas limit.
     pub gas_limit: JsonU256,
     /// Gas price.

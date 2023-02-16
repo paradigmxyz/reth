@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    keccak256, Address, Bytes, GenesisAccount, Header, Log, Receipt, TransactionSigned, H256,
+    keccak256, Address, GenesisAccount, Header, HexBytes, Log, Receipt, TransactionSigned, H256,
 };
 use bytes::BytesMut;
 use hash_db::Hasher;
@@ -78,7 +78,7 @@ pub fn genesis_state_root(genesis_alloc: &HashMap<Address, GenesisAccount>) -> H
     let encoded_accounts = genesis_alloc.iter().map(|(address, account)| {
         let mut acc_rlp = BytesMut::new();
         account.encode(&mut acc_rlp);
-        (address, Bytes::from(acc_rlp.freeze()))
+        (address, HexBytes::from(acc_rlp.freeze()))
     });
 
     H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0)

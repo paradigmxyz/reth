@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, Bytes, ChainInfo, Header,
+    rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, ChainInfo, Header, HexBytes,
     StorageKey, StorageValue, H256, U256,
 };
 
@@ -64,7 +64,7 @@ impl StateProvider for NoopProvider {
         Ok(None)
     }
 
-    fn bytecode_by_hash(&self, _code_hash: H256) -> Result<Option<Bytes>> {
+    fn bytecode_by_hash(&self, _code_hash: H256) -> Result<Option<HexBytes>> {
         Ok(None)
     }
 }

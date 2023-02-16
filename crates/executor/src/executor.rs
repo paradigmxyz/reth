@@ -501,7 +501,7 @@ mod tests {
 
     use crate::revm_wrap::State;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
+        hex_literal::hex, keccak256, Account, Address, ChainSpecBuilder, ForkCondition, HexBytes,
         SealedBlock, StorageKey, H160, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
@@ -512,7 +512,7 @@ mod tests {
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-        contracts: HashMap<H256, Bytes>,
+        contracts: HashMap<H256, HexBytes>,
         block_hash: HashMap<U256, H256>,
     }
 
@@ -522,7 +522,7 @@ mod tests {
             &mut self,
             address: Address,
             mut account: Account,
-            bytecode: Option<Bytes>,
+            bytecode: Option<HexBytes>,
             storage: HashMap<StorageKey, U256>,
         ) {
             if let Some(bytecode) = bytecode {
@@ -559,7 +559,7 @@ mod tests {
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytes>> {
+        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<HexBytes>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
     }

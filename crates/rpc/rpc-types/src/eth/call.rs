@@ -1,4 +1,4 @@
-use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U128, U256};
+use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, HexBytes, U128, U256};
 use serde::{Deserialize, Serialize};
 
 /// Call request
@@ -20,7 +20,7 @@ pub struct CallRequest {
     /// Value
     pub value: Option<U256>,
     /// Data
-    pub data: Option<Bytes>,
+    pub data: Option<HexBytes>,
     /// Nonce
     pub nonce: Option<U256>,
     /// AccessList

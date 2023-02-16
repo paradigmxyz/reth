@@ -1,7 +1,7 @@
 use crate::{
     keccak256,
     proofs::{EMPTY_LIST_HASH, EMPTY_ROOT},
-    BlockHash, BlockNumber, Bloom, Bytes, H160, H256, U256,
+    BlockHash, BlockNumber, Bloom, HexBytes, H160, H256, U256,
 };
 use bytes::{BufMut, BytesMut};
 use ethers_core::types::{Block, H256 as EthersH256, H64};
@@ -88,7 +88,7 @@ pub struct Header {
     pub base_fee_per_gas: Option<u64>,
     /// An arbitrary byte array containing data relevant to this block. This must be 32 bytes or
     /// fewer; formally Hx.
-    pub extra_data: Bytes,
+    pub extra_data: HexBytes,
 }
 
 impl Default for Header {
@@ -442,7 +442,7 @@ impl From<HeadersDirection> for bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bytes, Decodable, Encodable, Header, H256};
+    use super::{Decodable, Encodable, Header, HexBytes, H256};
     use crate::{Address, HeadersDirection, U256};
     use ethers_core::utils::hex::{self, FromHex};
     use std::str::FromStr;
@@ -457,7 +457,7 @@ mod tests {
             gas_limit: 0x115c_u64,
             gas_used: 0x15b3_u64,
             timestamp: 0x1a0a_u64,
-            extra_data: Bytes::from_str("7788").unwrap(),
+            extra_data: HexBytes::from_str("7788").unwrap(),
             ommers_hash: H256::zero(),
             state_root: H256::zero(),
             transactions_root: H256::zero(),
@@ -489,7 +489,7 @@ mod tests {
             gas_limit: 0x016345785d8a0000_u64,
             gas_used: 0x015534_u64,
             timestamp: 0x079e,
-            extra_data: Bytes::from_str("42").unwrap(),
+            extra_data: HexBytes::from_str("42").unwrap(),
             mix_hash: H256::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             nonce: 0,
             base_fee_per_gas: Some(0x036b_u64),
@@ -507,7 +507,7 @@ mod tests {
             gas_limit: 0x115cu64,
             gas_used: 0x15b3u64,
             timestamp: 0x1a0au64,
-            extra_data: Bytes::from_str("7788").unwrap(),
+            extra_data: HexBytes::from_str("7788").unwrap(),
             ommers_hash: H256::zero(),
             state_root: H256::zero(),
             transactions_root: H256::zero(),
