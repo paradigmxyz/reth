@@ -102,6 +102,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         let start = match range.start_bound().cloned() {
             Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
             Bound::Excluded(key) => {
+                // unreachable!("Rust doesn't allow for Bound::Excluded in starting bounds");
                 self.inner
                     .set_range(key.encode().as_ref())
                     .map_err(|e| Error::Read(e.into()))?

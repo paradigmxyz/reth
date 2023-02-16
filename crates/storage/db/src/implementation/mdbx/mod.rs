@@ -269,6 +269,15 @@ mod tests {
         assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
         // next() returns None after walker is done
         assert_eq!(walker.next(), None);
+
+        // (∞, ∞)
+        let mut walker = cursor.walk_range(..).unwrap();
+        assert_eq!(walker.next(), Some(Ok((0, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((2, H256::zero()))));
+        assert_eq!(walker.next(), Some(Ok((3, H256::zero()))));
+        // next() returns None after walker is done
+        assert_eq!(walker.next(), None);
     }
 
     #[test]
