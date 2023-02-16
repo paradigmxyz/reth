@@ -282,7 +282,7 @@ where
                 let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
                 let old = to_reth_acc(&db_account.info);
                 // drain balance
-                drained_balance += std::mem::take(&mut db_account.info.balance);
+                drained_balance += core::mem::take(&mut db_account.info.balance);
                 let new = to_reth_acc(&db_account.info);
                 // assume it is changeset as it is irregular state change
                 Ok((address, AccountInfoChangeSet::Changed { new, old }))
