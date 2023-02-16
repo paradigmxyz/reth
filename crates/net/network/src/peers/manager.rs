@@ -163,6 +163,12 @@ impl PeersManager {
         PeersHandle { manager_tx: self.manager_tx.clone() }
     }
 
+    /// Returns the number of peers in the peer set
+    #[inline]
+    pub(crate) fn num_known_peers(&self) -> usize {
+        self.peers.len()
+    }
+
     /// Returns an iterator over all peers
     pub(crate) fn iter_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
         self.peers.iter().map(|(peer_id, v)| NodeRecord::new(v.addr, *peer_id))
@@ -199,11 +205,13 @@ impl PeersManager {
     }
 
     /// Returns the number of currently active inbound connections.
+    #[inline]
     pub(crate) fn num_inbound_connections(&self) -> usize {
         self.connection_info.num_inbound
     }
 
     /// Returns the number of currently active outbound connections.
+    #[inline]
     pub(crate) fn num_outbound_connections(&self) -> usize {
         self.connection_info.num_outbound
     }
