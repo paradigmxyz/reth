@@ -125,13 +125,11 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Self: Sized,
     {
         let start = if let Some(start_key) = start_key {
-            self.inner
-                .set_range(start_key.encode().as_ref())
-                .map_err(|e| Error::Read(e.into()))?
-                .map(decoder::<T>)
+            decode!(self.inner.set_range(start_key.encode().as_ref()))
         } else {
-            self.last().transpose()
-        };
+            self.last()
+        }
+        .transpose();
 
         Ok(ReverseWalker::new(self, start))
     }
