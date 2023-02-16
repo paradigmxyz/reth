@@ -26,6 +26,17 @@ where
         Ok(balance)
     }
 
+    pub(crate) fn get_transaction_count(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> EthResult<U256> {
+        let state =
+            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let nonce = U256::from(state.account_nonce(address)?.unwrap_or_default());
+        Ok(nonce)
+    }
+
     async fn storage_at(
         &self,
         _address: Address,

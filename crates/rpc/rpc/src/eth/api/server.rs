@@ -145,10 +145,10 @@ where
 
     async fn transaction_count(
         &self,
-        _address: Address,
-        _block_number: Option<BlockId>,
+        address: Address,
+        block_number: Option<BlockId>,
     ) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::get_transaction_count(self, address, block_number)?)
     }
 
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {

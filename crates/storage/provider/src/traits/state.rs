@@ -49,6 +49,18 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
             None => return Ok(None),
         }
     }
+
+    /// Get account nonce by its address.
+    ///
+    /// Returns `None` if the account doesn't exist
+    fn account_nonce(&self, addr: Address) -> Result<Option<u64>> {
+        // Get basic account information
+        // Returns None if acc doesn't exist
+        match self.basic_account(addr)? {
+            Some(acc) => Ok(Some(acc.nonce)),
+            None => return Ok(None),
+        }
+    }
 }
 
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
