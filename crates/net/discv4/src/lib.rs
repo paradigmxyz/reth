@@ -768,7 +768,7 @@ impl Discv4Service {
                 entry.value_mut().update_with_enr(last_enr_seq);
                 if !old_status.is_connected() {
                     let _ = entry.update(ConnectionState::Connected, Some(old_status.direction));
-                    trace!(target : "discv4",  ?record, "added after successful endpoint proof");
+                    debug!(target : "discv4",  ?record, "added after successful endpoint proof");
                     self.notify(DiscoveryUpdate::Added(record));
 
                     if has_enr_seq {
@@ -782,7 +782,7 @@ impl Discv4Service {
                 if !status.is_connected() {
                     status.state = ConnectionState::Connected;
                     let _ = entry.update(status);
-                    trace!(target : "discv4",  ?record, "added after successful endpoint proof");
+                    debug!(target : "discv4",  ?record, "added after successful endpoint proof");
                     self.notify(DiscoveryUpdate::Added(record));
 
                     if has_enr_seq {
@@ -899,6 +899,7 @@ impl Discv4Service {
                         is_new_insert = true;
                     }
                     BucketInsertResult::Full => {
+                        debug!(target: "discv4", peer=?record.id, "bucket full");
                         // we have received a ping, but the corresponding bucket for the peer is already full, we cannot add more peers to this bucket.
                         // Following the spec
                         // > If the bucket already contains k entries, the least recently seen node in the bucket, N₂, needs to be revalidated by sending a Ping packet. If no reply is received from N₂ it is considered dead, removed and N₁ added to the front of the bucket.
@@ -915,6 +916,7 @@ impl Discv4Service {
                                 }
                             }
 
+                            debug!(target: "discv4", oldest=?oldest.value.record.id, peer=?record.id, "try to replace oldest");
                             // then ping oldest
                             self.try_ping(oldest.value.record, PingReason::ReplaceWithNodeOnNoPong(record));
                         }
@@ -1295,6 +1297,8 @@ impl Discv4Service {
             }
             true
         });
+
+        debug!(target: "discv4", num=%failed_neighbours.len(), "processing failed neighbours");
 
         for node_id in failed_neighbours {
             let key = kad_key(node_id);
