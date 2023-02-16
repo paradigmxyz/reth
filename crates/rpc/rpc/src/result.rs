@@ -3,7 +3,7 @@
 use jsonrpsee::core::{Error as RpcError, RpcResult};
 use reth_interfaces::Result as RethResult;
 use reth_primitives::Block;
-use std::{error::Error, fmt::Display};
+use std::fmt::Display;
 
 use crate::eth::error::EthApiError;
 
