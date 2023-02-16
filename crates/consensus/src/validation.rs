@@ -353,6 +353,7 @@ mod tests {
         hex_literal::hex, Account, Address, BlockHash, Bytes, Header, Signature, TransactionKind,
         TransactionSigned, MAINNET, U256,
     };
+    use std::ops::RangeBounds;
 
     use super::*;
 
@@ -421,6 +422,10 @@ mod tests {
 
         fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
             Ok(None)
+        }
+
+        fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+            Ok(vec![])
         }
     }
 

@@ -4691,12 +4691,14 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "jsonrpsee-types",
+ "lru 0.9.0",
  "reth-network-api",
  "reth-primitives",
  "reth-rlp",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
