@@ -16,6 +16,7 @@ use reth_interfaces::{
     },
 };
 use reth_primitives::{BlockNumber, SealedHeader};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
@@ -206,6 +207,9 @@ where
         self.in_progress_queue.clear();
         self.buffered_responses.clear();
         self.queued_bodies.clear();
+
+        self.metrics.in_flight_requests.set(0.);
+        self.metrics.buffered_responses.set(0.);
     }
 
     /// Queues bodies and sets the latest queued block number
@@ -222,6 +226,7 @@ where
 
             if next_block_rng.contains(&expected) {
                 return self.buffered_responses.pop().map(|buffered| {
+                    self.metrics.buffered_responses.decrement(1.);
                     buffered
                         .0
                         .into_iter()
@@ -233,6 +238,7 @@ where
 
             // Drop buffered response since we passed that range
             if *next_block_rng.end() < expected {
+                self.metrics.buffered_responses.decrement(1.);
                 self.buffered_responses.pop();
             }
         }
@@ -246,10 +252,18 @@ where
     DB: Database,
     Self: BodyDownloader + 'static,
 {
+    /// Spawns the downloader task via [tokio::task::spawn]
+    pub fn into_task(self) -> TaskDownloader {
+        self.into_task_with(&TokioTaskExecutor::default())
+    }
+
     /// Convert the downloader into a [`TaskDownloader`](super::task::TaskDownloader) by spawning
-    /// it.
-    pub fn as_task(self) -> TaskDownloader {
-        TaskDownloader::spawn(self)
+    /// it via the given spawner.
+    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
+    where
+        S: TaskSpawner,
+    {
+        TaskDownloader::spawn_with(self, spawner)
     }
 }
 
@@ -309,8 +323,19 @@ where
         loop {
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
-                let response = OrderedBodiesResponse(response);
-                this.buffered_responses.push(response);
+                this.metrics.in_flight_requests.decrement(1.);
+                match response {
+                    Ok(response) => {
+                        let response = OrderedBodiesResponse(response);
+                        this.buffered_responses.push(response);
+                        this.metrics.buffered_responses.increment(1.);
+                    }
+                    Err(error) => {
+                        tracing::error!(target: "downloaders::bodies", ?error, "Request failed");
+                        this.clear();
+                        return Poll::Ready(Some(Err(error)))
+                    }
+                };
             }
 
             // Loop exit condition
@@ -322,6 +347,7 @@ where
             {
                 match this.next_headers_request() {
                     Ok(Some(request)) => {
+                        this.metrics.in_flight_requests.increment(1.);
                         this.in_progress_queue.push_new_request(
                             Arc::clone(&this.client),
                             Arc::clone(&this.consensus),

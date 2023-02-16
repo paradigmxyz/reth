@@ -15,7 +15,6 @@ async fn test_session_established_with_highest_version() {
     reth_tracing::init_test_tracing();
 
     let net = Testnet::create(2).await;
-
     net.for_each(|peer| assert_eq!(0, peer.num_peers()));
 
     let mut handles = net.handles();
@@ -37,12 +36,11 @@ async fn test_session_established_with_highest_version() {
                 assert_eq!(handle1.peer_id(), &peer_id);
                 assert_eq!(status.version, EthVersion::Eth67 as u8);
             }
-            _ => {
-                panic!("unexpected event")
+            ev => {
+                panic!("unexpected event {ev:?}")
             }
         }
     }
-
     handle.terminate().await;
 }
 

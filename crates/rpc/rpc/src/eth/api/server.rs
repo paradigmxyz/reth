@@ -7,8 +7,8 @@ use crate::{
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
-    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
-    Address, BlockNumber, Bytes, Header, H256, H64, U256, U64,
+    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId, BlockNumber},
+    Address, Bytes, Header, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -212,7 +212,8 @@ where
         // Sorted map that's populated in two rounds:
         // 1. Cache entries until first non-cached block
         // 2. Database query from the first non-cached block
-        let mut fee_history_cache_items = BTreeMap::<BlockNumber, FeeHistoryCacheItem>::new();
+        let mut fee_history_cache_items =
+            BTreeMap::<reth_primitives::BlockNumber, FeeHistoryCacheItem>::new();
 
         let mut first_non_cached_block = None;
         let mut last_non_cached_block = None;

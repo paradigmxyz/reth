@@ -1,7 +1,7 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{
-    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId},
-    Address, BlockNumber, Bytes, H256, H64, U256, U64,
+    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId, BlockNumber},
+    Address, Bytes, H256, H64, U256, U64,
 };
 use reth_rpc_types::{
     CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,

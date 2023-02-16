@@ -6,6 +6,7 @@ use reth_interfaces::{
     consensus::Consensus,
     p2p::{
         bodies::{client::BodiesClient, response::BlockResponse},
+        error::DownloadResult,
         priority::Priority,
     },
 };
@@ -83,7 +84,7 @@ impl<B> Stream for BodiesRequestQueue<B>
 where
     B: BodiesClient + 'static,
 {
-    type Item = Vec<BlockResponse>;
+    type Item = DownloadResult<Vec<BlockResponse>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().inner.poll_next_unpin(cx)

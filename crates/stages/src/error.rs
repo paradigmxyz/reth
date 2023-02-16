@@ -33,6 +33,12 @@ pub enum StageError {
         #[source]
         error: executor::Error,
     },
+    /// Invalid checkpoint passed to the stage
+    #[error("Invalid stage progress: {0}")]
+    StageProgress(u64),
+    /// Download channel closed
+    #[error("Download channel closed")]
+    ChannelClosed,
     /// The stage encountered a database integrity error.
     #[error("A database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] ProviderError),
@@ -43,9 +49,6 @@ pub enum StageError {
     /// rely on external downloaders
     #[error("Invalid download response: {0}")]
     Download(#[from] DownloadError),
-    /// Invalid checkpoint passed to the stage
-    #[error("Invalid stage progress: {0}")]
-    StageProgress(u64),
     /// The stage encountered a recoverable error.
     ///
     /// These types of errors are caught by the [Pipeline][crate::Pipeline] and trigger a restart
@@ -68,6 +71,7 @@ impl StageError {
                 StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageProgress(_) |
+                StageError::ChannelClosed |
                 StageError::Fatal(_)
         )
     }
