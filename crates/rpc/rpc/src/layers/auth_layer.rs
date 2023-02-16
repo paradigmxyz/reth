@@ -1,3 +1,4 @@
+use super::AuthValidator;
 use http::{Request, Response};
 use http_body::Body;
 use pin_project::pin_project;
@@ -7,8 +8,6 @@ use std::{
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
-
-use super::AuthValidator;
 
 /// This is an Http middleware layer that acts as an
 /// interceptor for `Authorization` headers. Incoming requests are dispatched to

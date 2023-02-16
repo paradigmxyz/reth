@@ -1379,6 +1379,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9b0705efd4599c15a38151f4721f7bc388306f61084d3bfd50bd07fbca5cb60"
+
+[[package]]
 name = "ecdsa"
 version = "0.14.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4220,6 +4226,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-rlp",
+ "reth-tasks",
  "reth-tracing",
  "tempfile",
  "thiserror",
@@ -4617,6 +4624,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-rpc-types",
+ "reth-tasks",
  "reth-transaction-pool",
  "secp256k1 0.26.0",
  "serde",
@@ -4681,6 +4689,7 @@ name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "jsonrpsee-types",
  "reth-network-api",
  "reth-primitives",
  "reth-rlp",
@@ -4715,6 +4724,7 @@ dependencies = [
  "reth-provider",
  "reth-staged-sync",
  "reth-stages",
+ "reth-tasks",
  "reth-tracing",
  "secp256k1 0.24.3",
  "serde",
@@ -4772,7 +4782,9 @@ dependencies = [
 name = "reth-tasks"
 version = "0.1.0"
 dependencies = [
+ "dyn-clone",
  "futures-util",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-futures",

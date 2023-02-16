@@ -9,3 +9,4 @@ Documents on planning and process in the repository: what the labels mean, how i
 ### Structure
 
 - [Layout](./layout.md): Describes each of the crates in the repository and their function.
+- [CI](./ci.md): An overview of the CI workflows

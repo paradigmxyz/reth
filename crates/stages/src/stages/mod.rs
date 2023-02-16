@@ -2,6 +2,8 @@
 mod bodies;
 /// The execution stage that generates state diff.
 mod execution;
+/// The finish stage
+mod finish;
 /// Account hashing stage.
 mod hashing_account;
 /// Storage hashing stage.
@@ -25,6 +27,7 @@ mod tx_lookup;
 
 pub use bodies::*;
 pub use execution::*;
+pub use finish::*;
 pub use hashing_account::*;
 pub use hashing_storage::*;
 pub use headers::*;

@@ -45,3 +45,12 @@ pub trait StatusUpdater: Send + Sync {
     /// Updates the status of the p2p node
     fn update_status(&self, head: Head);
 }
+
+/// A [StatusUpdater] implementation that does nothing.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct NoopStatusUpdater;
+
+impl StatusUpdater for NoopStatusUpdater {
+    fn update_status(&self, _: Head) {}
+}

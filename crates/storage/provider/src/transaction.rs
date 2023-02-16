@@ -8,7 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{db::Error as DbError, provider::Error as ProviderError};
-use reth_primitives::{BlockHash, BlockNumber, Header, TransitionId, TxNumber};
+use reth_primitives::{BlockHash, BlockNumber, Header, TransitionId, TxNumber, U256};
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
@@ -88,6 +88,17 @@ where
         Ok(success)
     }
 
+    /// Drops the current inner transaction and open a new one.
+    pub fn drop(&mut self) -> Result<(), DbError> {
+        if let Some(tx) = self.tx.take() {
+            drop(tx);
+        }
+
+        self.tx = Some(self.db.tx_mut()?);
+
+        Ok(())
+    }
+
     /// Open a new inner transaction.
     pub fn open(&mut self) -> Result<(), DbError> {
         self.tx = Some(self.db.tx_mut()?);
@@ -100,10 +111,7 @@ where
     }
 
     /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub(crate) fn get_block_hash(
-        &self,
-        block_number: BlockNumber,
-    ) -> Result<BlockHash, TransactionError> {
+    pub fn get_block_hash(&self, block_number: BlockNumber) -> Result<BlockHash, TransactionError> {
         let hash = self
             .get::<tables::CanonicalHeaders>(block_number)?
             .ok_or(ProviderError::CanonicalHeader { block_number })?;
@@ -148,6 +156,14 @@ where
         let header =
             self.get::<tables::Headers>(number)?.ok_or(ProviderError::Header { number })?;
         Ok(header)
+    }
+
+    /// Get the total difficulty for a block.
+    pub fn get_td(&self, block: BlockNumber) -> Result<U256, TransactionError> {
+        let td = self
+            .get::<tables::HeaderTD>(block)?
+            .ok_or(ProviderError::TotalDifficulty { number: block })?;
+        Ok(td.into())
     }
 
     /// Unwind table by some number key
