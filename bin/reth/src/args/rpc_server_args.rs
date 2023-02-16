@@ -2,8 +2,14 @@
 
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
+use jsonrpsee::core::Error as RpcError;
+use reth_network_api::{NetworkInfo, Peers};
+use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
-use reth_rpc_builder::RpcModuleSelection;
+use reth_rpc_builder::{
+    RethRpcModule, RpcModuleSelection, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
+};
+use reth_transaction_pool::TransactionPool;
 use std::{net::IpAddr, path::Path};
 
 /// Parameters for configuring the rpc more granularity via CLI
@@ -77,6 +83,27 @@ impl RpcServerArgs {
                 JwtSecret::try_create(fpath)
             }
         }
+    }
+
+    pub(crate) async fn server<Client, Pool, Network>(
+        client: Client,
+        pool: Pool,
+        network: Network,
+    ) -> Result<RpcServerHandle, RpcError>
+    where
+        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Pool: TransactionPool + Clone + 'static,
+        Network: NetworkInfo + Peers + Clone + 'static,
+    {
+        reth_rpc_builder::launch(
+            client,
+            pool,
+            network,
+            TransportRpcModuleConfig::default()
+                .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
+            RpcServerConfig::default().with_http(Default::default()),
+        )
+        .await
     }
 }
 

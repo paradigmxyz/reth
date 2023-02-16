@@ -4245,6 +4245,7 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
+ "jsonrpsee",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
