@@ -29,6 +29,7 @@ mod peer;
 mod receipt;
 mod storage;
 mod transaction;
+mod filter;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;

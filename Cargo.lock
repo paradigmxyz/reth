@@ -4515,6 +4515,7 @@ dependencies = [
  "crc",
  "criterion",
  "derive_more",
+ "ethereum-types",
  "ethers-core",
  "fixed-hash",
  "hash-db",
