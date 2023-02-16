@@ -1182,20 +1182,25 @@ impl Discv4Service {
             let key = kad_key(closest.id);
             match self.kbuckets.entry(&key) {
                 BucketEntry::Absent(entry) => {
+                    // the node's endpoint is not proven yet, so we need to ping it first, on
+                    // success, it will initiate a `FindNode` request.
+                    // In order to prevent that this node is selected again on subsequent responses,
+                    // while the ping is still active, we always mark it as queried.
+                    ctx.mark_queried(closest.id);
                     let node = NodeEntry::new(closest);
-                    let _ = entry.insert(
+                    match entry.insert(
                         node,
                         NodeStatus {
                             direction: ConnectionDirection::Outgoing,
                             state: ConnectionState::Disconnected,
                         },
-                    );
-                    // the node's endpoint is not proven yet, so we need to ping it first, on
-                    // success, it will initiate a `FindNode` request.
-                    // In order to prevent that this node is selected again on subsequent responses,
-                    // while the ping is still active, we already mark it as queried.
-                    ctx.mark_queried(closest.id);
-                    self.try_ping(closest, PingReason::Lookup(closest, ctx.clone()))
+                    ) {
+                        BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
+                            // only ping if the node was added to the table
+                            self.try_ping(closest, PingReason::Lookup(closest, ctx.clone()))
+                        }
+                        _ => {}
+                    }
                 }
                 BucketEntry::SelfEntry => {
                     // we received our own node entry
