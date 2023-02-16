@@ -279,12 +279,11 @@ impl From<EthersGenesis> for ChainSpec {
         }
 
         // Time-based hardforks
-        let time_hardfork_opts = vec![(Hardfork::Shanghai, genesis.config.shanghai_time)];
-        let time_hardforks = time_hardfork_opts
-            .iter()
-            .filter_map(|(hardfork, opt)| {
-                opt.map(|time| (*hardfork, ForkCondition::Timestamp(time)))
-            })
+        let time_hardforks = genesis
+            .config
+            .shanghai_time
+            .map(|time| (Hardfork::Shanghai, ForkCondition::Timestamp(time)))
+            .into_iter()
             .collect::<BTreeMap<_, _>>();
 
         hardforks.extend(time_hardforks);
