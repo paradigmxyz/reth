@@ -19,6 +19,13 @@ where
         Ok(code)
     }
 
+    pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {
+        let state =
+            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let balance = state.account_balance(address)?.unwrap_or_default();
+        Ok(balance)
+    }
+
     async fn storage_at(
         &self,
         _address: Address,

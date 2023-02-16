@@ -130,8 +130,8 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn balance(&self, _address: Address, _block_number: Option<BlockId>) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
+        Ok(EthApi::balance(self, address, block_number)?)
     }
 
     async fn storage_at(
