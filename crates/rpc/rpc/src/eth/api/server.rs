@@ -209,6 +209,8 @@ where
 
         let start_block = end_block - block_count;
 
+        // Query canonical block hashes for the whole block range to compare them against cache.
+        // We need it due to the possibility of reorgs when block numbers match but hashes don't.
         let block_hashes =
             self.inner.client.canonical_hashes_range(start_block..=end_block).to_rpc_result()?;
 

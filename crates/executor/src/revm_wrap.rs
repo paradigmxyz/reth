@@ -61,6 +61,8 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
     }
 
     fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
+        // Safety: block numbers are u64 everywhere
+        // TODO: remove conversion after revm changes the function signature
         Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
     }
 }
