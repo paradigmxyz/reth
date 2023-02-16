@@ -278,6 +278,16 @@ impl From<EthersGenesis> for ChainSpec {
             );
         }
 
+        // Time-based hardforks
+        let time_hardforks = genesis
+            .config
+            .shanghai_time
+            .map(|time| (Hardfork::Shanghai, ForkCondition::Timestamp(time)))
+            .into_iter()
+            .collect::<BTreeMap<_, _>>();
+
+        hardforks.extend(time_hardforks);
+
         Self {
             chain: genesis.config.chain_id.into(),
             genesis: genesis_block,
@@ -900,5 +910,122 @@ mod tests {
         assert!(chainspec
             .fork(Hardfork::Paris)
             .active_at_ttd(first_pos_block_ttd, first_pos_difficulty));
+    }
+
+    #[test]
+    fn geth_genesis_with_shanghai() {
+        let geth_genesis = r#"
+        {
+          "config": {
+            "chainId": 1337,
+            "homesteadBlock": 0,
+            "eip150Block": 0,
+            "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "eip155Block": 0,
+            "eip158Block": 0,
+            "byzantiumBlock": 0,
+            "constantinopleBlock": 0,
+            "petersburgBlock": 0,
+            "istanbulBlock": 0,
+            "muirGlacierBlock": 0,
+            "berlinBlock": 0,
+            "londonBlock": 0,
+            "arrowGlacierBlock": 0,
+            "grayGlacierBlock": 0,
+            "shanghaiTime": 0,
+            "terminalTotalDifficulty": 0,
+            "terminalTotalDifficultyPassed": true,
+            "ethash": {}
+          },
+          "nonce": "0x0",
+          "timestamp": "0x0",
+          "extraData": "0x",
+          "gasLimit": "0x4c4b40",
+          "difficulty": "0x1",
+          "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "coinbase": "0x0000000000000000000000000000000000000000",
+          "alloc": {
+            "658bdf435d810c91414ec09147daa6db62406379": {
+              "balance": "0x487a9a304539440000"
+            },
+            "aa00000000000000000000000000000000000000": {
+              "code": "0x6042",
+              "storage": {
+                "0x0000000000000000000000000000000000000000000000000000000000000000": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "0x0100000000000000000000000000000000000000000000000000000000000000": "0x0100000000000000000000000000000000000000000000000000000000000000",
+                "0x0200000000000000000000000000000000000000000000000000000000000000": "0x0200000000000000000000000000000000000000000000000000000000000000",
+                "0x0300000000000000000000000000000000000000000000000000000000000000": "0x0000000000000000000000000000000000000000000000000000000000000303"
+              },
+              "balance": "0x1",
+              "nonce": "0x1"
+            },
+            "bb00000000000000000000000000000000000000": {
+              "code": "0x600154600354",
+              "storage": {
+                "0x0000000000000000000000000000000000000000000000000000000000000000": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "0x0100000000000000000000000000000000000000000000000000000000000000": "0x0100000000000000000000000000000000000000000000000000000000000000",
+                "0x0200000000000000000000000000000000000000000000000000000000000000": "0x0200000000000000000000000000000000000000000000000000000000000000",
+                "0x0300000000000000000000000000000000000000000000000000000000000000": "0x0000000000000000000000000000000000000000000000000000000000000303"
+              },
+              "balance": "0x2",
+              "nonce": "0x1"
+            }
+          },
+          "number": "0x0",
+          "gasUsed": "0x0",
+          "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "baseFeePerGas": "0x3b9aca00"
+        }
+        "#;
+
+        let genesis: ethers_core::utils::Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chainspec = ChainSpec::from(genesis);
+
+        // assert a bunch of hardforks that should be set
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Homestead).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Tangerine).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::SpuriousDragon).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Byzantium).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Constantinople).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Petersburg).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(chainspec.hardforks.get(&Hardfork::Istanbul).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::MuirGlacier).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(chainspec.hardforks.get(&Hardfork::Berlin).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(chainspec.hardforks.get(&Hardfork::London).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::ArrowGlacier).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::GrayGlacier).unwrap(),
+            &ForkCondition::Block(0)
+        );
+
+        // including time based hardforks
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Shanghai).unwrap(),
+            &ForkCondition::Timestamp(0)
+        );
     }
 }
