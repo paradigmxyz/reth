@@ -179,7 +179,7 @@ impl Command {
             )
         }
 
-        let header = response.into_iter().next().unwrap().seal();
+        let header = response.into_iter().next().unwrap().seal_slow();
 
         let valid = match id {
             BlockHashOrNumber::Hash(hash) => header.hash() == hash,

@@ -145,10 +145,17 @@ impl Header {
         self.transactions_root == EMPTY_ROOT
     }
 
-    /// Calculate hash and seal the Header so that it can't be changed.
-    pub fn seal(self) -> SealedHeader {
-        let hash = self.hash_slow();
+    /// Seal the header with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    pub fn seal(self, hash: H256) -> SealedHeader {
         SealedHeader { header: self, hash }
+    }
+
+    /// Calculate hash and seal the Header so that it can't be changed.
+    pub fn seal_slow(self) -> SealedHeader {
+        let hash = self.hash_slow();
+        self.seal(hash)
     }
 
     fn header_payload_length(&self) -> usize {
@@ -290,21 +297,14 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::{any, Strategy};
 
-        any::<(Header, BlockHash)>()
-            .prop_map(move |(header, _)| {
-                let hash = header.hash_slow();
-                SealedHeader { header, hash }
-            })
-            .boxed()
+        any::<(Header, BlockHash)>().prop_map(move |(header, _)| header.seal_slow()).boxed()
     }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header = Header::arbitrary(u)?;
-        let hash = header.hash_slow();
-        Ok(SealedHeader { header, hash })
+        Ok(Header::arbitrary(u)?.seal_slow())
     }
 }
 
@@ -323,19 +323,16 @@ impl From<Block<EthersH256>> for SealedHeader {
             base_fee_per_gas: block.base_fee_per_gas.map(|fee| fee.as_u64()),
             ..Default::default()
         };
-        let hash = match block.hash {
-            Some(hash) => hash.0.into(),
-            None => header.hash_slow(),
-        };
-        SealedHeader::new(header, hash)
+        match block.hash {
+            Some(hash) => header.seal(hash.0.into()),
+            None => header.seal_slow(),
+        }
     }
 }
 
 impl Default for SealedHeader {
     fn default() -> Self {
-        let header = Header::default();
-        let hash = header.hash_slow();
-        Self { header, hash }
+        Header::default().seal_slow()
     }
 }
 
@@ -351,8 +348,7 @@ impl Decodable for SealedHeader {
         // TODO make this more performant, we are not encoding again for a hash.
         // But i dont know how much of buf is the header or if takeing rlp::Header will
         // going to consume those buf bytes.
-        let hash = header.hash_slow();
-        Ok(SealedHeader { header, hash })
+        Ok(header.seal_slow())
     }
 }
 
@@ -371,13 +367,6 @@ impl Deref for SealedHeader {
 }
 
 impl SealedHeader {
-    /// Construct a new sealed header.
-    ///
-    /// Applicable when hash is known from the database provided it's not corrupted.
-    pub fn new(header: Header, hash: H256) -> Self {
-        Self { header, hash }
-    }
-
     /// Extract raw header that can be modified.
     pub fn unseal(self) -> Header {
         self.header

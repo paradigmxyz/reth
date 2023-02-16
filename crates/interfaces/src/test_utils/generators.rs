@@ -36,7 +36,7 @@ pub fn random_header(number: u64, parent: Option<H256>) -> SealedHeader {
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    header.seal()
+    header.seal_slow()
 }
 
 /// Generates a random legacy [Transaction].
@@ -133,9 +133,9 @@ pub fn random_block(
             base_fee_per_gas: Some(rng.gen()),
             ..Default::default()
         }
-        .seal(),
+        .seal_slow(),
         body: transactions,
-        ommers: ommers.into_iter().map(|ommer| ommer.seal()).collect(),
+        ommers: ommers.into_iter().map(Header::seal_slow).collect(),
         withdrawals: None,
     }
 }

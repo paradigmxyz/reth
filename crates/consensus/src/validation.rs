@@ -352,7 +352,7 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
         .ok_or(Error::ParentUnknown { hash: block.parent_hash })?;
 
     // Return parent header.
-    Ok(parent.seal())
+    Ok(parent.seal(block.parent_hash))
 }
 
 /// Full validation of block before execution.
@@ -519,7 +519,7 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal(), body, ommers, withdrawals: None }, parent)
+        (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
     }
 
     #[test]
@@ -610,7 +610,7 @@ mod tests {
                     withdrawals_root: Some(proofs::calculate_withdrawals_root(withdrawals.iter())),
                     ..Default::default()
                 }
-                .seal(),
+                .seal_slow(),
                 withdrawals: Some(withdrawals),
                 ..Default::default()
             }
