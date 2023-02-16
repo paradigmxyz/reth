@@ -1,7 +1,11 @@
 //! Additional helpers for converting errors.
 
 use jsonrpsee::core::{Error as RpcError, RpcResult};
+use reth_interfaces::Result as RethResult;
+use reth_primitives::Block;
 use std::fmt::Display;
+
+use crate::eth::error::EthApiError;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub(crate) trait ToRpcResult<Ok, Err> {
@@ -104,6 +108,30 @@ macro_rules! impl_to_rpc_result {
 impl_to_rpc_result!(reth_interfaces::Error);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
+/// An extension to used to apply error conversions to various result types
+pub(crate) trait ToRpcResultExt {
+    /// The `Ok` variant of the [RpcResult]
+    type Ok;
+
+    /// Maps the `Ok` variant of this type into [Self::Ok] and maps the `Err` variant into rpc
+    /// error.
+    fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok>;
+}
+
+impl ToRpcResultExt for RethResult<Option<Block>> {
+    type Ok = Block;
+
+    fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
+        match self {
+            Ok(block) => match block {
+                Some(value) => Ok(value),
+                None => Err(EthApiError::UnknownBlockNumber.into()),
+            },
+            Err(err) => Err(internal_rpc_err(err.to_string())),
+        }
+    }
+}
+
 /// Constructs an internal JSON-RPC error.
 pub(crate) fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error {
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, None)
@@ -133,12 +161,17 @@ pub(crate) fn rpc_err(code: i32, msg: impl Into<String>, data: Option<&[u8]>) ->
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     fn assert_rpc_result<Ok, Err, T: ToRpcResult<Ok, Err>>() {}
 
     fn to_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Ok> {
         Ok(o)
+    }
+
+    fn to_optional_reth_err<Ok>(o: Ok) -> reth_interfaces::Result<Option<Ok>> {
+        Ok(Some(o))
     }
 
     #[test]
