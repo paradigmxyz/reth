@@ -809,13 +809,18 @@ impl Discv4Service {
         match self.kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
                 let node = NodeEntry::new(record);
-                let _ = entry.insert(
+                match entry.insert(
                     node,
                     NodeStatus {
                         direction: ConnectionDirection::Outgoing,
                         state: ConnectionState::Disconnected,
                     },
-                );
+                ) {
+                    BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
+                        debug!(target : "discv4",  ?record, "inserted new record");
+                    }
+                    _ => return,
+                }
             }
             _ => return,
         }
