@@ -4300,10 +4300,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-crate-template"
-version = "0.1.0"
-
-[[package]]
 name = "reth-db"
 version = "0.1.0"
 dependencies = [
