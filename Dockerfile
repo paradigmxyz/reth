@@ -31,4 +31,4 @@ WORKDIR app
 COPY --from=builder /app/target/release/reth /usr/local/bin
 
 EXPOSE 30303 30303/udp 9000 8545 8546
-CMD ["/usr/local/bin/reth"]
+ENTRYPOINT ["/usr/local/bin/reth", "node"]
