@@ -15,7 +15,6 @@ use std::{
     future::Future,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::{
@@ -35,18 +34,18 @@ pub struct Testnet<C> {
 
 impl<C> Testnet<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockProvider + HeaderProvider + Clone,
 {
     /// Same as [`Self::try_create_with`] but panics on error
-    pub async fn create_with(num_peers: usize, provider: Arc<C>) -> Self {
+    pub async fn create_with(num_peers: usize, provider: C) -> Self {
         Self::try_create_with(num_peers, provider).await.unwrap()
     }
 
     /// Creates a new [`Testnet`] with the given number of peers and the provider.
-    pub async fn try_create_with(num_peers: usize, provider: Arc<C>) -> Result<Self, NetworkError> {
+    pub async fn try_create_with(num_peers: usize, provider: C) -> Result<Self, NetworkError> {
         let mut this = Self { peers: Vec::with_capacity(num_peers) };
         for _ in 0..num_peers {
-            let config = PeerConfig::new(Arc::clone(&provider));
+            let config = PeerConfig::new(provider.clone());
             this.add_peer_with_config(config).await?;
         }
         Ok(this)
@@ -123,7 +122,7 @@ where
 
 impl<C> Testnet<C>
 where
-    C: BlockProvider + HeaderProvider + 'static,
+    C: BlockProvider + HeaderProvider + Unpin + 'static,
 {
     /// Spawns the testnet to a separate task
     pub fn spawn(self) -> TestnetHandle<C> {
@@ -177,7 +176,7 @@ impl<C> fmt::Debug for Testnet<C> {
 
 impl<C> Future for Testnet<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockProvider + HeaderProvider + Unpin,
 {
     type Output = ();
 
@@ -213,7 +212,7 @@ pub struct Peer<C> {
     network: NetworkManager<C>,
     #[pin]
     request_handler: Option<EthRequestHandler<C>>,
-    client: Arc<C>,
+    client: C,
     secret_key: SecretKey,
 }
 
@@ -221,7 +220,7 @@ pub struct Peer<C> {
 
 impl<C> Peer<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockProvider + HeaderProvider + Clone,
 {
     /// Returns the number of connected peers.
     pub fn num_peers(&self) -> usize {
@@ -243,14 +242,14 @@ where
         let (tx, rx) = unbounded_channel();
         self.network.set_eth_request_handler(tx);
         let peers = self.network.peers_handle();
-        let request_handler = EthRequestHandler::new(Arc::clone(&self.client), peers, rx);
+        let request_handler = EthRequestHandler::new(self.client.clone(), peers, rx);
         self.request_handler = Some(request_handler);
     }
 }
 
 impl<C> Future for Peer<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockProvider + HeaderProvider + Unpin,
 {
     type Output = ();
 
@@ -268,7 +267,7 @@ where
 /// A helper config for setting up the reth networking stack.
 pub struct PeerConfig<C = NoopProvider> {
     config: NetworkConfig<C>,
-    client: Arc<C>,
+    client: C,
     secret_key: SecretKey,
 }
 
@@ -276,7 +275,7 @@ pub struct PeerConfig<C = NoopProvider> {
 
 impl<C> PeerConfig<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockProvider + HeaderProvider + Clone,
 {
     /// Launches the network and returns the [Peer] that manages it
     pub async fn launch(self) -> Result<Peer<C>, NetworkError> {
@@ -288,27 +287,27 @@ where
 
     /// Initialize the network with a random secret key, allowing the devp2p and discovery to bind
     /// to any available IP and port.
-    pub fn new(client: Arc<C>) -> Self {
+    pub fn new(client: C) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
-        let config = Self::network_config_builder(secret_key).build(Arc::clone(&client));
+        let config = Self::network_config_builder(secret_key).build(client.clone());
         Self { config, client, secret_key }
     }
 
     /// Initialize the network with a given secret key, allowing devp2p and discovery to bind any
     /// available IP and port.
-    pub fn with_secret_key(client: Arc<C>, secret_key: SecretKey) -> Self {
-        let config = Self::network_config_builder(secret_key).build(Arc::clone(&client));
+    pub fn with_secret_key(client: C, secret_key: SecretKey) -> Self {
+        let config = Self::network_config_builder(secret_key).build(client.clone());
         Self { config, client, secret_key }
     }
 
     /// Initialize the network with a given capabilities.
-    pub fn with_capabilities(client: Arc<C>, capabilities: Vec<Capability>) -> Self {
+    pub fn with_capabilities(client: C, capabilities: Vec<Capability>) -> Self {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let builder = Self::network_config_builder(secret_key);
         let hello_message =
             HelloBuilder::new(builder.get_peer_id()).capabilities(capabilities).build();
-        let config = builder.hello_message(hello_message).build(Arc::clone(&client));
+        let config = builder.hello_message(hello_message).build(client.clone());
 
         Self { config, client, secret_key }
     }
@@ -324,7 +323,7 @@ where
 
 impl Default for PeerConfig {
     fn default() -> Self {
-        Self::new(Arc::new(NoopProvider::default()))
+        Self::new(NoopProvider::default())
     }
 }
 

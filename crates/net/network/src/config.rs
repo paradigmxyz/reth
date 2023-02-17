@@ -15,7 +15,6 @@ use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
 };
 
 /// reexports for convenience
@@ -37,7 +36,7 @@ pub fn rng_secret_key() -> SecretKey {
 /// All network related initialization settings.
 pub struct NetworkConfig<C> {
     /// The client type that can interact with the chain.
-    pub client: Arc<C>,
+    pub client: C,
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
@@ -79,7 +78,7 @@ pub struct NetworkConfig<C> {
 
 impl<C> NetworkConfig<C> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
-    pub fn new(client: Arc<C>, secret_key: SecretKey) -> Self {
+    pub fn new(client: C, secret_key: SecretKey) -> Self {
         Self::builder(secret_key).build(client)
     }
 
@@ -103,7 +102,7 @@ impl<C> NetworkConfig<C> {
 
 impl<C> NetworkConfig<C>
 where
-    C: BlockProvider + HeaderProvider + 'static,
+    C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
 {
     /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
@@ -288,7 +287,7 @@ impl NetworkConfigBuilder {
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
-    pub fn build<C>(self, client: Arc<C>) -> NetworkConfig<C> {
+    pub fn build<C>(self, client: C) -> NetworkConfig<C> {
         let peer_id = self.get_peer_id();
         let Self {
             secret_key,
@@ -402,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_network_dns_defaults() {
-        let config = builder().build(Arc::new(NoopProvider::default()));
+        let config = builder().build(NoopProvider::default());
 
         let dns = config.dns_discovery_config.unwrap();
         let bootstrap_nodes = dns.bootstrap_dns_networks.unwrap();
@@ -423,7 +422,7 @@ mod tests {
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
 
         // enforce that the fork_id set in the status is consistent with the generated fork filter
-        let config = builder().chain_spec(chain_spec).build(Arc::new(NoopProvider::default()));
+        let config = builder().chain_spec(chain_spec).build(NoopProvider::default());
 
         let status = config.status;
         let fork_filter = config.fork_filter;

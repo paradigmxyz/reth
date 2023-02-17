@@ -271,7 +271,7 @@ impl Command {
         _pool: (),
     ) -> Result<NetworkHandle, NetworkError>
     where
-        C: BlockProvider + HeaderProvider + 'static,
+        C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
     {
         let client = config.client.clone();
         let (handle, network, _txpool, eth) =
@@ -317,7 +317,7 @@ impl Command {
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
-    ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
+    ) -> NetworkConfig<Arc<ShareableDatabase<Arc<Env<WriteMap>>>>> {
         let head = self.fetch_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
@@ -378,7 +378,7 @@ async fn run_network_until_shutdown<C>(
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
-    C: BlockProvider + HeaderProvider + 'static,
+    C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
 {
     pin_mut!(network, shutdown);
 
