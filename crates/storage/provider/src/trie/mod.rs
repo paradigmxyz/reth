@@ -18,6 +18,7 @@ use reth_rlp::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    marker::PhantomData,
     ops::Range,
     sync::Arc,
 };
@@ -39,12 +40,12 @@ pub enum TrieError {
     DecodeError(#[from] DecodeError),
 }
 
-/// Database wrapper implementing HashDB trait.
-struct HashDatabase<'tx, 'itx, DB: Database> {
+/// Database wrapper implementing HashDB trait, with a read-write transaction.
+struct HashDatabaseMut<'tx, 'itx, DB: Database> {
     tx: &'tx Transaction<'itx, DB>,
 }
 
-impl<'tx, 'itx, DB> cita_trie::DB for HashDatabase<'tx, 'itx, DB>
+impl<'tx, 'itx, DB> cita_trie::DB for HashDatabaseMut<'tx, 'itx, DB>
 where
     DB: Database,
 {
@@ -74,7 +75,7 @@ where
     }
 }
 
-impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
+impl<'tx, 'itx, DB: Database> HashDatabaseMut<'tx, 'itx, DB> {
     /// Instantiates a new Database for the accounts trie, with an empty root
     fn new(tx: &'tx Transaction<'itx, DB>) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
@@ -94,13 +95,13 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
     }
 }
 
-/// Database wrapper implementing HashDB trait.
-struct DupHashDatabase<'tx, 'itx, DB: Database> {
+/// Database wrapper implementing HashDB trait, with a read-write transaction.
+struct DupHashDatabaseMut<'tx, 'itx, DB: Database> {
     tx: &'tx Transaction<'itx, DB>,
     key: H256,
 }
 
-impl<'tx, 'itx, DB> cita_trie::DB for DupHashDatabase<'tx, 'itx, DB>
+impl<'tx, 'itx, DB> cita_trie::DB for DupHashDatabaseMut<'tx, 'itx, DB>
 where
     DB: Database,
 {
@@ -138,7 +139,7 @@ where
     }
 }
 
-impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
+impl<'tx, 'itx, DB: Database> DupHashDatabaseMut<'tx, 'itx, DB> {
     /// Instantiates a new Database for the storage trie, with an empty root
     fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
@@ -161,6 +162,95 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
             .seek_by_key_subkey(key, root)?
             .ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx, key })
+    }
+}
+
+/// Database wrapper implementing HashDB trait, with a read-only transaction.
+struct HashDatabase<'tx, 'itx, TX: DbTx<'itx>> {
+    tx: &'tx TX,
+    _p: PhantomData<&'itx ()>, // to suppress "unused" lifetime 'itx
+}
+
+impl<'tx, 'itx, TX> cita_trie::DB for HashDatabase<'tx, 'itx, TX>
+where
+    TX: DbTx<'itx>,
+{
+    type Error = TrieError;
+
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+        Ok(self.tx.get::<tables::AccountsTrie>(H256::from_slice(key))?)
+    }
+
+    fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
+        Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
+    }
+
+    fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
+        // this could be avoided if cita_trie::DB was split into two traits
+        // with read and write operations respectively
+        unimplemented!("insert isn't valid for read-only transaction");
+    }
+
+    fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
+        unimplemented!("remove isn't valid for read-only transaction");
+    }
+
+    fn flush(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl<'tx, 'itx, TX: DbTx<'itx>> HashDatabase<'tx, 'itx, TX> {
+    /// Instantiates a new Database for the accounts trie, with an existing root
+    fn from_root(tx: &'tx TX, root: H256) -> Result<Self, TrieError> {
+        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
+        Ok(Self { tx, _p: Default::default() })
+    }
+}
+
+/// Database wrapper implementing HashDB trait, with a read-only transaction.
+struct DupHashDatabase<'tx, 'itx, TX: DbTx<'itx>> {
+    tx: &'tx TX,
+    key: H256,
+    _p: PhantomData<&'itx ()>, // to suppress "unused" lifetime 'itx
+}
+
+impl<'tx, 'itx, TX> cita_trie::DB for DupHashDatabase<'tx, 'itx, TX>
+where
+    TX: DbTx<'itx>,
+{
+    type Error = TrieError;
+
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+        let mut cursor = self.tx.cursor_dup_read::<tables::StoragesTrie>()?;
+        Ok(cursor.seek_by_key_subkey(self.key, H256::from_slice(key))?.map(|entry| entry.node))
+    }
+
+    fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
+        Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
+    }
+
+    fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
+        // Caching and bulk inserting shouldn't be needed, as the data is ordered
+        unimplemented!("insert isn't valid for read-only transaction");
+    }
+
+    fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
+        unimplemented!("remove isn't valid for read-only transaction");
+    }
+
+    fn flush(&self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+impl<'tx, 'itx, TX: DbTx<'itx>> DupHashDatabase<'tx, 'itx, TX> {
+    /// Instantiates a new Database for the storage trie, with an existing root
+    fn from_root(tx: &'tx TX, key: H256, root: H256) -> Result<Self, TrieError> {
+        tx.cursor_dup_read::<tables::StoragesTrie>()?
+            .seek_by_key_subkey(key, root)?
+            .ok_or(TrieError::MissingRoot(root))?;
+        Ok(Self { tx, key, _p: Default::default() })
     }
 }
 
@@ -211,7 +301,7 @@ impl DBTrieLoader {
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(None)?;
 
-        let db = Arc::new(HashDatabase::new(tx)?);
+        let db = Arc::new(HashDatabaseMut::new(tx)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -237,7 +327,7 @@ impl DBTrieLoader {
         tx: &Transaction<'_, DB>,
         address: H256,
     ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::new(tx, address)?);
+        let db = Arc::new(DupHashDatabaseMut::new(tx, address)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -271,7 +361,7 @@ impl DBTrieLoader {
 
         let changed_accounts = self.gather_changes(tx, tid_range)?;
 
-        let db = Arc::new(HashDatabase::from_root(tx, root)?);
+        let db = Arc::new(HashDatabaseMut::from_root(tx, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -307,7 +397,7 @@ impl DBTrieLoader {
         address: H256,
         changed_storages: BTreeSet<H256>,
     ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::from_root(tx, address, root)?);
+        let db = Arc::new(DupHashDatabaseMut::from_root(tx, address, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -365,6 +455,48 @@ impl DBTrieLoader {
             .collect();
 
         Ok(hashed_changes)
+    }
+
+    /// Returns a list of encoded nodes from the root of the trie to the given
+    /// account, and optionally a list of proofs for the given keys.
+    pub fn generate_acount_proof<'tx, 'itx>(
+        &self,
+        tx: &'tx impl DbTx<'itx>,
+        root: H256,
+        address: H256,
+        keys: Vec<H256>,
+    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<Vec<u8>>>), TrieError> {
+        let db = Arc::new(HashDatabase::from_root(tx, root)?);
+        let hasher = Arc::new(HasherKeccak::new());
+
+        let trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
+        let proof = trie.get_proof(keccak256(address).as_bytes())?;
+
+        let Some(account) = trie.get(address.as_slice())? else { return Ok((proof, vec![])) };
+
+        let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
+
+        Ok((proof, self.generate_storage_proofs(tx, storage_root, address, keys)?))
+    }
+
+    fn generate_storage_proofs<'tx, 'itx>(
+        &self,
+        tx: &'tx impl DbTx<'itx>,
+        root: H256,
+        address: H256,
+        keys: Vec<H256>,
+    ) -> Result<Vec<Vec<Vec<u8>>>, TrieError> {
+        let db = Arc::new(DupHashDatabase::from_root(tx, address, root)?);
+        let hasher = Arc::new(HasherKeccak::new());
+
+        let trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
+
+        let proof = keys
+            .into_iter()
+            .map(|key| trie.get_proof(key.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(proof)
     }
 }
 
