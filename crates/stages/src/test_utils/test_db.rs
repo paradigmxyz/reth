@@ -243,7 +243,6 @@ impl TestTransaction {
                     },
                 )?;
                 for body_tx in block.body.clone() {
-                    tx.put::<tables::TxHashNumber>(body_tx.hash, current_tx_id);
                     tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
                     current_tx_id += 1;
                 }
