@@ -61,7 +61,7 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       matrix:
-        sim: [devp2p, issues/go-ethereum-14359, ethereum/consensus, ethereum/engine, ethereum/rpc-compat, ethereum/rpc, ethereum/sync]
+        sim: [devp2p, issues/go-ethereum-14359, ethereum/consensus, ethereum/engine, ethereum/rpc-compat, ethereum/rpc, ethereum/sync, smoke]
         experimental: [true]
       fail-fast: false
     needs: prepare
