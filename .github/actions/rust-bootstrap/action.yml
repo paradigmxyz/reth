@@ -12,6 +12,20 @@ inputs:
     description: version of sccache to install
     default: v0.4.0-pre.7
     required: false
+  sccache_region:
+    description: region of sccache s3 bucket
+    default: auto
+    required: true
+  sccache_bucket:
+    default: reth-sccache
+    required: true
+  sccache_endpoint:
+    default: https://nyc3.digitaloceanspaces.com
+    required: true
+  sccache_key_id:
+    required: true
+  sccache_secret:
+    required: true
 runs:
   using: composite
   steps:
@@ -59,20 +73,18 @@ runs:
       run: |
         # Prevent the sccache server from terminating due to inactivity
         echo "SCCACHE_IDLE_TIMEOUT=0" >> $GITHUB_ENV
-        # Change this to purge the cache
-        echo "SCCACHE_GHA_VERSION=sccache" >> $GITHUB_ENV
+        echo "SCCACHE_S3_USE_SSL=true" >> $GITHUB_ENV
         # Disable incremental builds (they can't be cached)
         echo "CARGO_INCREMENTAL=0" >> $GITHUB_ENV
         echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
-    - name: Configure sccache environment
-      uses: actions/github-script@v6
-      with:
-        script: |
-          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '')
-          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '')
 
     - name: Start sccache
       shell: bash
       run: |
         sccache --start-server
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.sccache_key_id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.sccache_secret }}
+        SCCACHE_BUCKET: ${{ inputs.sccache_bucket }}
+        SCCACHE_ENDPOINT: ${{ inputs.sccache_endpoint }}
+        SCCACHE_REGION: ${{ inputs.sccache_region }}

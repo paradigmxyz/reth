@@ -26,6 +26,8 @@ jobs:
         with:
           rust_toolchain: nightly
           rust_target: x86_64-unknown-linux-musl
+          sccache_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          sccache_secret: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: cargo fmt
         uses: actions-rs/cargo@v1
@@ -49,6 +51,8 @@ jobs:
         with:
           rust_toolchain: stable
           rust_target: x86_64-unknown-linux-musl
+          sccache_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          sccache_secret: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       - name: Check if documentation builds
         run: RUSTDOCFLAGS="-D warnings" cargo doc --all --no-deps --all-features --document-private-items
       - uses: ./.github/actions/sccache-finish

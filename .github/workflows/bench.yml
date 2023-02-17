@@ -24,6 +24,8 @@ jobs:
         with:
           rust_toolchain: stable
           rust_target: x86_64-unknown-linux-musl
+          sccache_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          sccache_secret: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Install valgrind
         uses: taiki-e/install-action@valgrind
