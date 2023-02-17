@@ -2,6 +2,7 @@ use criterion::{
     async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
     BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
 use reth_stages::{
     stages::{SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
@@ -10,13 +11,11 @@ use reth_stages::{
 };
 use std::path::PathBuf;
 
-mod perf;
-
 mod setup;
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100));
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = transaction_lookup, account_hashing, senders, total_difficulty
 }
 criterion_main!(benches);
