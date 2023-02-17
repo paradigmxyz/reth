@@ -55,7 +55,7 @@ where
     Pool: TransactionPool + 'static,
 {
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
-        self.inner.install_filter(FilterKind::Log(filter)).await
+        self.inner.install_filter(FilterKind::Log(Box::new(filter))).await
     }
 
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
@@ -72,7 +72,7 @@ where
 
         let (start_block, kind) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
-            let mut filter = filters.get_mut(&id).ok_or_else(|| FilterError::FilterNotFound(id))?;
+            let mut filter = filters.get_mut(&id).ok_or(FilterError::FilterNotFound(id))?;
 
             // update filter
             // we fetch all changes from [filter.block..best_block], so we advance the filter's
@@ -266,7 +266,7 @@ enum FilterKind {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum FilterError {
     #[error("filter not found")]
-    FilterNotFound(SubscriptionId<'static>),
+    FilterNotFound(FilterId),
 }
 
 // convert the error
