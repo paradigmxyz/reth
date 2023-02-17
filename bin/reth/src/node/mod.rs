@@ -317,14 +317,14 @@ impl Command {
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
-    ) -> NetworkConfig<Arc<ShareableDatabase<Arc<Env<WriteMap>>>>> {
+    ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
         let head = self.fetch_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
             .network_config(config, self.chain.clone())
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .build(Arc::new(ShareableDatabase::new(db, self.chain.clone())))
+            .build(ShareableDatabase::new(db, self.chain.clone()))
     }
 
     async fn build_pipeline<H, B, U>(
