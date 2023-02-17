@@ -10,7 +10,7 @@ description = "Staged syncing primitives used in reth."
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
-    "aquamarine"
+    "aquamarine",
 ]
 
 [dependencies]
@@ -42,17 +42,13 @@ itertools = "0.10.5"
 rayon = "1.6.0"
 num-traits = "0.2.15"
 
-# trie
-cita_trie = "4.0.0"
-hasher = "0.1.4"
-
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 proptest = { version = "1.0", optional = true }
 
 [dev-dependencies]
 # reth
-reth-primitives = { path = "../primitives", features = ["arbitrary"]}
+reth-primitives = { path = "../primitives", features = ["arbitrary"] }
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
@@ -64,15 +60,15 @@ rand = "0.8.5"
 paste = "1.0"
 
 # Stage benchmarks
-pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { version = "0.11", features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 criterion = { version = "0.4.0", features = ["async_futures"] }
 proptest = { version = "1.0" }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 eyre = "0.6.8"
-
-# trie
-reth-staged-sync = { path = "../staged-sync" }
-triehash = "0.8"
 
 [features]
 default = ["serde"]

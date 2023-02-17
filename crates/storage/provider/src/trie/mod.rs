@@ -1,3 +1,4 @@
+use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
@@ -11,7 +12,6 @@ use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
     H256, KECCAK_EMPTY, U256,
 };
-use reth_provider::Transaction;
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
     EMPTY_STRING_CODE,
@@ -21,16 +21,20 @@ use std::{
     ops::Range,
     sync::Arc,
 };
-use tracing::*;
 
+/// Errors returned by [`DBTrieLoader`].
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum TrieError {
+pub enum TrieError {
+    /// Error returned by the underlying implementation.
     #[error("Some error occurred: {0}")]
     InternalError(#[from] cita_trie::TrieError),
+    /// The database doesn't contain the root of the trie.
     #[error("The root node wasn't found in the DB")]
     MissingRoot(H256),
+    /// Error returned by the database.
     #[error("{0:?}")]
     DatabaseError(#[from] reth_db::Error),
+    /// Error when encoding/decoding a value.
     #[error("{0:?}")]
     DecodeError(#[from] DecodeError),
 }
@@ -190,12 +194,14 @@ impl EthAccount {
     }
 }
 
+/// Helper struct that interacts with a Merkle Patricia Tree persisted
+/// in the database.
 #[derive(Debug, Default)]
-pub(crate) struct DBTrieLoader;
+pub struct DBTrieLoader;
 
 impl DBTrieLoader {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
-    pub(crate) fn calculate_root<DB: Database>(
+    pub fn calculate_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
@@ -255,7 +261,7 @@ impl DBTrieLoader {
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
-    pub(crate) fn update_root<DB: Database>(
+    pub fn update_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         root: H256,

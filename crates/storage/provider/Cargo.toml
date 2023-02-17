@@ -14,6 +14,7 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-db = { path = "../db" }
+reth-rlp = { path = "../../rlp" }
 
 # codecs
 postcard = { version = "1.0.2", features = ["alloc"] }
@@ -40,6 +41,10 @@ secp256k1 = { version = "0.24.2", default-features = false, features = [
 ], optional = true }
 parking_lot = { version = "0.12", optional = true }
 
+# trie
+cita_trie = "4.0.0"
+hasher = "0.1.4"
+
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
 test-fuzz = "3.0.4"
@@ -53,6 +58,12 @@ secp256k1 = { version = "0.24.2", default-features = false, features = [
     "rand",
 ] }
 parking_lot = "0.12"
+proptest = { version = "1.0" }
+assert_matches = "1.5.0"
+
+# trie
+reth-staged-sync = { path = "../../staged-sync" }
+triehash = "0.8"
 
 [features]
 bench = []
