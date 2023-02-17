@@ -267,8 +267,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::random_block_range;
-    use reth_primitives::{Account, SealedBlock, H256, U256};
+    use reth_primitives::{Account, SealedBlock, U256};
     use reth_provider::insert_canonical_block;
     use test_utils::*;
 
@@ -306,11 +305,9 @@ mod tests {
         };
         use reth_db::{
             cursor::DbCursorRO,
-            models::AccountBeforeTx,
             tables,
             transaction::{DbTx, DbTxMut},
         };
-        use reth_interfaces::test_utils::generators::random_eoa_account_range;
 
         pub(crate) struct AccountHashingTestRunner {
             pub(crate) tx: TestTransaction,
@@ -326,34 +323,6 @@ mod tests {
             #[allow(dead_code)]
             pub(crate) fn set_commit_threshold(&mut self, threshold: u64) {
                 self.commit_threshold = threshold;
-            }
-
-            pub(crate) fn insert_blocks(
-                &self,
-                blocks: Vec<SealedBlock>,
-            ) -> Result<(), TestRunnerError> {
-                for block in blocks.iter() {
-                    self.tx.commit(|tx| {
-                        insert_canonical_block(tx, block, true).unwrap();
-                        Ok(())
-                    })?;
-                }
-
-                Ok(())
-            }
-
-            pub(crate) fn insert_accounts(
-                &self,
-                accounts: &[(Address, Account)],
-            ) -> Result<(), TestRunnerError> {
-                for (addr, acc) in accounts.iter() {
-                    self.tx.commit(|tx| {
-                        tx.put::<tables::PlainAccountState>(*addr, *acc)?;
-                        Ok(())
-                    })?;
-                }
-
-                Ok(())
             }
 
             /// Iterates over PlainAccount table and checks that the accounts match the ones
