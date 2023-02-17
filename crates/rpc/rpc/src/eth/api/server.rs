@@ -130,25 +130,25 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn balance(&self, _address: Address, _block_number: Option<BlockId>) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
+        Ok(EthApi::balance(self, address, block_number)?)
     }
 
     async fn storage_at(
         &self,
-        _address: Address,
-        _index: U256,
-        _block_number: Option<BlockId>,
+        address: Address,
+        index: U256,
+        block_number: Option<BlockId>,
     ) -> Result<H256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::storage_at(self, address, index, block_number)?)
     }
 
     async fn transaction_count(
         &self,
-        _address: Address,
-        _block_number: Option<BlockId>,
+        address: Address,
+        block_number: Option<BlockId>,
     ) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::get_transaction_count(self, address, block_number)?)
     }
 
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
