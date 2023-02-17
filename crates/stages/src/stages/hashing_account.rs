@@ -267,8 +267,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{Account, SealedBlock, U256};
-    use reth_provider::insert_canonical_block;
+    use reth_primitives::{Account, U256};
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
@@ -303,11 +302,7 @@ mod tests {
             test_utils::{StageTestRunner, TestTransaction},
             ExecInput, ExecOutput, UnwindInput,
         };
-        use reth_db::{
-            cursor::DbCursorRO,
-            tables,
-            transaction::{DbTx, DbTxMut},
-        };
+        use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
 
         pub(crate) struct AccountHashingTestRunner {
             pub(crate) tx: TestTransaction,
