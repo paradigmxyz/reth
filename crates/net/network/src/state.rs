@@ -51,7 +51,7 @@ pub struct NetworkState<C> {
     /// Buffered messages until polled.
     queued_messages: VecDeque<StateAction>,
     /// The client type that can interact with the chain.
-    client: Arc<C>,
+    client: C,
     /// Network discovery.
     discovery: Discovery,
     /// The genesis hash of the network we're on
@@ -69,7 +69,7 @@ where
 {
     /// Create a new state instance with the given params
     pub(crate) fn new(
-        client: Arc<C>,
+        client: C,
         discovery: Discovery,
         peers_manager: PeersManager,
         genesis_hash: H256,
@@ -531,7 +531,7 @@ mod tests {
             active_peers: Default::default(),
             peers_manager: Default::default(),
             queued_messages: Default::default(),
-            client: Arc::new(NoopProvider::default()),
+            client: NoopProvider::default(),
             discovery: Discovery::noop(),
             genesis_hash: Default::default(),
             state_fetcher: StateFetcher::new(handle, Default::default()),
