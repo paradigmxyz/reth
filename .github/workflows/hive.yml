@@ -36,8 +36,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v3
         with:
-          repository: onbjerg/hive
-          ref: onbjerg/reth
+          repository: paradigmxyz/hive
+          ref: master
           path: hivetests
       - uses: actions/setup-go@v3
         with:
