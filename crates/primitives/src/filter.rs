@@ -1,214 +1,18 @@
 #![allow(missing_docs)]
 use crate::{
+    bloom::{Bloom, Input},
     keccak256,
     rpc::BlockNumber,
-    tiny_keccak::{Hasher, Keccak},
     Address, Log, H160, H256, U64,
 };
 use ethers_core::types::U256;
-use fixed_hash::*;
+use std::ops::{Range, RangeFrom, RangeTo};
 
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::ops::{Range, RangeFrom, RangeTo};
-
-use core::{mem, ops};
-
-use crunchy::unroll;
-
-// 3 according to yellowpaper
-const BLOOM_BITS: u32 = 3;
-const BLOOM_SIZE: usize = 256;
-
-construct_fixed_hash! {
-    pub struct Bloom(BLOOM_SIZE);
-}
-
-/// Returns log2.
-fn log2(x: usize) -> u32 {
-    if x <= 1 {
-        return 0
-    }
-
-    let n = x.leading_zeros();
-    mem::size_of::<usize>() as u32 * 8 - n
-}
-
-pub enum Input<'a> {
-    Raw(&'a [u8]),
-    Hash(&'a [u8; 32]),
-}
-
-enum Hash<'a> {
-    Ref(&'a [u8; 32]),
-    Owned([u8; 32]),
-}
-
-impl<'a> From<Input<'a>> for Hash<'a> {
-    fn from(input: Input<'a>) -> Self {
-        match input {
-            Input::Raw(raw) => {
-                let mut out = [0u8; 32];
-                let mut keccak256 = Keccak::v256();
-                keccak256.update(raw);
-                keccak256.finalize(&mut out);
-                Hash::Owned(out)
-            }
-            Input::Hash(hash) => Hash::Ref(hash),
-        }
-    }
-}
-
-impl<'a> ops::Index<usize> for Hash<'a> {
-    type Output = u8;
-
-    fn index(&self, index: usize) -> &u8 {
-        match *self {
-            Hash::Ref(r) => &r[index],
-            Hash::Owned(ref hash) => &hash[index],
-        }
-    }
-}
-
-impl<'a> Hash<'a> {
-    fn len(&self) -> usize {
-        match *self {
-            Hash::Ref(r) => r.len(),
-            Hash::Owned(ref hash) => hash.len(),
-        }
-    }
-}
-
-// impl<'a> PartialEq<BloomRef<'a>> for Bloom {
-//     fn eq(&self, other: &BloomRef<'a>) -> bool {
-//         let s_ref: &[u8] = &self.0;
-//         let o_ref: &[u8] = other.0;
-//         s_ref.eq(o_ref)
-//     }
-// }
-
-impl<'a> From<Input<'a>> for Bloom {
-    fn from(input: Input<'a>) -> Bloom {
-        let mut bloom = Bloom::default();
-        bloom.accrue(input);
-        bloom
-    }
-}
-
-impl Bloom {
-    pub fn contains_bloom<'a, B>(&self, bloom: B) -> bool
-    where
-        BloomRef<'a>: From<B>,
-    {
-        let bloom_ref: BloomRef<'_> = bloom.into();
-        // workaround for https://github.com/rust-lang/rust/issues/43644
-        self.contains_bloom_ref(bloom_ref)
-    }
-
-    fn contains_bloom_ref(&self, bloom: BloomRef<'_>) -> bool {
-        let self_ref: BloomRef<'_> = self.into();
-        self_ref.contains_bloom(bloom)
-    }
-
-    pub fn accrue(&mut self, input: Input<'_>) {
-        let p = BLOOM_BITS;
-
-        let m = self.0.len();
-        let bloom_bits = m * 8;
-        let mask = bloom_bits - 1;
-        let bloom_bytes = (log2(bloom_bits) + 7) / 8;
-
-        let hash: Hash<'_> = input.into();
-
-        // must be a power of 2
-        assert_eq!(m & (m - 1), 0);
-        // out of range
-        assert!(p * bloom_bytes <= hash.len() as u32);
-
-        let mut ptr = 0;
-
-        assert_eq!(BLOOM_BITS, 3);
-        unroll! {
-            for i in 0..3 {
-                let _ = i;
-                let mut index = 0 as usize;
-                for _ in 0..bloom_bytes {
-                    index = (index << 8) | hash[ptr] as usize;
-                    ptr += 1;
-                }
-                index &= mask;
-                self.0[m - 1 - index / 8] |= 1 << (index % 8);
-            }
-        }
-    }
-
-    // pub fn accrue_bloom<'a, B>(&mut self, bloom: B)
-    // where
-    //     BloomRef<'a>: From<B>,
-    // {
-    //     let bloom_ref: BloomRef<'_> = bloom.into();
-    //     assert_eq!(self.0.len(), BLOOM_SIZE);
-    //     assert_eq!(bloom_ref.0.len(), BLOOM_SIZE);
-    //     for i in 0..BLOOM_SIZE {
-    //         self.0[i] |= bloom_ref.0[i];
-    //     }
-    // }
-
-    // pub fn data(&self) -> &[u8; BLOOM_SIZE] {
-    //     &self.0
-    // }
-}
-
-#[derive(Clone, Copy)]
-pub struct BloomRef<'a>(&'a [u8; BLOOM_SIZE]);
-
-impl<'a> BloomRef<'a> {
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    // pub fn is_empty(&self) -> bool {
-    //     self.0.iter().all(|x| *x == 0)
-    // }
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    pub fn contains_bloom<'b, B>(&self, bloom: B) -> bool
-    where
-        BloomRef<'b>: From<B>,
-    {
-        let bloom_ref: BloomRef<'_> = bloom.into();
-        assert_eq!(self.0.len(), BLOOM_SIZE);
-        assert_eq!(bloom_ref.0.len(), BLOOM_SIZE);
-        for i in 0..BLOOM_SIZE {
-            let a = self.0[i];
-            let b = bloom_ref.0[i];
-            if (a & b) != b {
-                return false
-            }
-        }
-        true
-    }
-
-    // #[allow(clippy::trivially_copy_pass_by_ref)]
-    // pub fn data(&self) -> &'a [u8; BLOOM_SIZE] {
-    //     self.0
-    // }
-}
-
-// impl<'a> From<&'a [u8; BLOOM_SIZE]> for BloomRef<'a> {
-//     fn from(data: &'a [u8; BLOOM_SIZE]) -> Self {
-//         BloomRef(data)
-//     }
-// }
-
-impl<'a> From<&'a Bloom> for BloomRef<'a> {
-    fn from(bloom: &'a Bloom) -> Self {
-        BloomRef(&bloom.0)
-    }
-}
-
-// impl_fixed_hash_rlp!(Bloom, BLOOM_SIZE);
-// impl_fixed_hash_serde!(Bloom, BLOOM_SIZE);
-// impl_fixed_hash_codec!(Bloom, BLOOM_SIZE);
 
 pub type BloomFilter = Vec<Option<Bloom>>;
 
@@ -345,7 +149,7 @@ impl Filter {
     /// Match only a specific block
     ///
     /// ```rust
-    /// # use ethers_core::types::Filter;
+    /// # use reth_primitives::filter::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(69u64);
     /// # }
@@ -355,7 +159,7 @@ impl Filter {
     /// Match the latest block only
     ///
     /// ```rust
-    /// # use ethers_core::types::{Filter, BlockNumber};
+    /// # use reth_primitives::{filter::Filter, rpc::BlockNumber};
     /// # fn main() {
     /// let filter = Filter::new().select(BlockNumber::Latest);
     /// # }
@@ -364,7 +168,7 @@ impl Filter {
     /// Match a block by its hash
     ///
     /// ```rust
-    /// # use ethers_core::types::{Filter, H256};
+    /// # use reth_primitives::{filter::Filter, H256};
     /// # fn main() {
     /// let filter = Filter::new().select(H256::zero());
     /// # }
@@ -374,7 +178,7 @@ impl Filter {
     /// Match a range of blocks
     ///
     /// ```rust
-    /// # use ethers_core::types::{Filter, H256};
+    /// # use reth_primitives::filter::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(0u64..100u64);
     /// # }
@@ -383,7 +187,7 @@ impl Filter {
     /// Match all blocks in range `(1337..BlockNumber::Latest)`
     ///
     /// ```rust
-    /// # use ethers_core::types::{Filter, H256};
+    /// # use reth_primitives::filter::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(1337u64..);
     /// # }
@@ -392,7 +196,7 @@ impl Filter {
     /// Match all blocks in range `(BlockNumber::Earliest..1337)`
     ///
     /// ```rust
-    /// # use ethers_core::types::{Filter, H256};
+    /// # use reth_primitives::filter::Filter;
     /// # fn main() {
     /// let filter = Filter::new().select(..1337u64);
     /// # }
@@ -432,7 +236,7 @@ impl Filter {
     /// Match only a specific address `("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF")`
     ///
     /// ```rust
-    /// # use ethers_core::types::{Filter, Address};
+    /// # use reth_primitives::{Address, filter::Filter};
     /// # fn main() {
     /// let filter = Filter::new().address("0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap());
     /// # }
@@ -442,7 +246,7 @@ impl Filter {
     /// "0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8"])`
     ///
     /// ```rust
-    /// # use ethers_core::types::{Filter, Address, ValueOrArray};
+    /// # use reth_primitives::{filter::Filter, Address};
     /// # fn main() {
     /// let addresses = vec!["0xAc4b3DacB91461209Ae9d41EC517c2B9Cb1B7DAF".parse::<Address>().unwrap(),"0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8".parse::<Address>().unwrap()];
     /// let filter = Filter::new().address(addresses);
@@ -643,46 +447,46 @@ impl<'de> Deserialize<'de> for Filter {
                     match key.as_str() {
                         "fromBlock" => {
                             if from_block.is_some() {
-                                return Err(serde::de::Error::duplicate_field("fromBlock"))
+                                return Err(serde::de::Error::duplicate_field("fromBlock"));
                             }
                             if block_hash.is_some() {
                                 return Err(serde::de::Error::custom(
                                     "fromBlock not allowed with blockHash",
-                                ))
+                                ));
                             }
                             from_block = Some(map.next_value()?)
                         }
                         "toBlock" => {
                             if to_block.is_some() {
-                                return Err(serde::de::Error::duplicate_field("toBlock"))
+                                return Err(serde::de::Error::duplicate_field("toBlock"));
                             }
                             if block_hash.is_some() {
                                 return Err(serde::de::Error::custom(
                                     "toBlock not allowed with blockHash",
-                                ))
+                                ));
                             }
                             to_block = Some(map.next_value()?)
                         }
                         "blockHash" => {
                             if block_hash.is_some() {
-                                return Err(serde::de::Error::duplicate_field("blockHash"))
+                                return Err(serde::de::Error::duplicate_field("blockHash"));
                             }
                             if from_block.is_some() || to_block.is_some() {
                                 return Err(serde::de::Error::custom(
                                     "fromBlock,toBlock not allowed with blockHash",
-                                ))
+                                ));
                             }
                             block_hash = Some(map.next_value()?)
                         }
                         "address" => {
                             if address.is_some() {
-                                return Err(serde::de::Error::duplicate_field("address"))
+                                return Err(serde::de::Error::duplicate_field("address"));
                             }
                             address = Some(map.next_value()?)
                         }
                         "topics" => {
                             if topics.is_some() {
-                                return Err(serde::de::Error::duplicate_field("topics"))
+                                return Err(serde::de::Error::duplicate_field("topics"));
                             }
                             topics = Some(map.next_value()?)
                         }
@@ -704,7 +508,7 @@ impl<'de> Deserialize<'de> for Filter {
 
                 // maximum allowed filter len
                 if topics_vec.len() > 4 {
-                    return Err(serde::de::Error::custom("exceeded maximum topics len"))
+                    return Err(serde::de::Error::custom("exceeded maximum topics len"));
                 }
                 let mut topics: [Option<Topic>; 4] = [None, None, None, None];
                 for (idx, topic) in topics_vec.into_iter().enumerate() {
@@ -815,7 +619,7 @@ where
         let value = serde_json::Value::deserialize(deserializer)?;
 
         if value.is_null() {
-            return Ok(ValueOrArray::Array(Vec::new()))
+            return Ok(ValueOrArray::Array(Vec::new()));
         }
 
         #[derive(Deserialize)]
@@ -868,7 +672,7 @@ impl FilteredParams {
     /// Returns `true` if the bloom matches the topics
     pub fn matches_topics(bloom: Bloom, topic_filters: &[BloomFilter]) -> bool {
         if topic_filters.is_empty() {
-            return true
+            return true;
         }
 
         // returns true if a filter matches
@@ -877,11 +681,11 @@ impl FilteredParams {
             for maybe_bloom in filter {
                 is_match = maybe_bloom.as_ref().map(|b| bloom.contains_bloom(b)).unwrap_or(true);
                 if !is_match {
-                    break
+                    break;
                 }
             }
             if is_match {
-                return true
+                return true;
             }
         }
         false
@@ -890,11 +694,11 @@ impl FilteredParams {
     /// Returns `true` if the bloom contains the address
     pub fn matches_address(bloom: Bloom, address_filter: &BloomFilter) -> bool {
         if address_filter.is_empty() {
-            return true
+            return true;
         } else {
             for maybe_bloom in address_filter {
                 if maybe_bloom.as_ref().map(|b| bloom.contains_bloom(b)).unwrap_or(true) {
-                    return true
+                    return true;
                 }
             }
         }
@@ -921,14 +725,14 @@ impl FilteredParams {
             }
         };
         if out.is_empty() {
-            return None
+            return None;
         }
         Some(out)
     }
 
     pub fn filter_block_range(&self, block_number: u64) -> bool {
         if self.filter.is_none() {
-            return true
+            return true;
         }
         let filter = self.filter.as_ref().unwrap();
         let mut res = true;
@@ -958,7 +762,7 @@ impl FilteredParams {
     pub fn filter_block_hash(&self, block_hash: H256) -> bool {
         if let Some(h) = self.filter.as_ref().and_then(|f| f.get_block_hash()) {
             if h != block_hash {
-                return false
+                return false;
             }
         }
         true
@@ -969,15 +773,15 @@ impl FilteredParams {
             match input_address {
                 ValueOrArray::Value(x) => {
                     if log.address != *x {
-                        return false
+                        return false;
                     }
                 }
                 ValueOrArray::Array(x) => {
                     if x.is_empty() {
-                        return true
+                        return true;
                     }
                     if !x.contains(&log.address) {
-                        return false
+                        return false;
                     }
                 }
             }
@@ -999,7 +803,7 @@ impl FilteredParams {
                 ValueOrArray::Array(multi) => {
                     if multi.is_empty() {
                         out = true;
-                        continue
+                        continue;
                     }
                     // Shrink the topics until the last item is Some.
                     let mut new_multi = multi;
@@ -1009,7 +813,7 @@ impl FilteredParams {
                     // We can discard right away any logs with lesser topics than the filter.
                     if new_multi.len() > log.topics.len() {
                         out = false;
-                        break
+                        break;
                     }
                     let replaced: Option<Vec<H256>> =
                         self.replace(log, ValueOrArray::Array(new_multi));
@@ -1017,7 +821,7 @@ impl FilteredParams {
                         out = false;
                         if log.topics.starts_with(&replaced[..]) {
                             out = true;
-                            break
+                            break;
                         }
                     }
                 }
