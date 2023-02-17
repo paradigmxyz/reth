@@ -2992,6 +2992,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "348108ab3fba42ec82ff6e9564fc4ca0247bdccdc68dd8af9764bbc79c3c8ffb"
+
+[[package]]
 name = "lifetimed-bytes"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3385,6 +3391,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -3882,9 +3889,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e0d9cc07f18492d879586c92b485def06bc850da3118075cd45d50e9c95b0e5"
+checksum = "29f1b898011ce9595050a68e60f90bad083ff2987a695a42357134c8381fba70"
 dependencies = [
  "bit-set",
  "bitflags",
@@ -3898,6 +3905,7 @@ dependencies = [
  "regex-syntax",
  "rusty-fork",
  "tempfile",
+ "unarray",
 ]
 
 [[package]]
@@ -4998,8 +5006,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "284747ad0324ed0e805dcf8f412e2beccb7a547fbd84f0607865001b8719c515"
+source = "git+https://github.com/bluealloy/revm#8e6f4f26173a245d9c3c19fd2317cd8bfd1c56a9"
 dependencies = [
  "auto_impl 1.0.1",
  "revm-interpreter",
@@ -5009,8 +5016,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db1b86f1d21d1852b40ec8ac9b6d31ac8a7c000875155809d41ce68f6369dc56"
+source = "git+https://github.com/bluealloy/revm#8e6f4f26173a245d9c3c19fd2317cd8bfd1c56a9"
 dependencies = [
  "derive_more",
  "enumn",
@@ -5021,8 +5027,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66837781605c6dcb7f07ad87604eeab3119dae9149d69d8839073dd6f188673d"
+source = "git+https://github.com/bluealloy/revm#8e6f4f26173a245d9c3c19fd2317cd8bfd1c56a9"
 dependencies = [
  "k256",
  "num",
@@ -5038,8 +5043,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad165d3f69e4d14405d82c6625864ee48c162dcebdf170322e6dd80398226a9e"
+source = "git+https://github.com/bluealloy/revm#8e6f4f26173a245d9c3c19fd2317cd8bfd1c56a9"
 dependencies = [
  "arbitrary",
  "auto_impl 1.0.1",
@@ -5050,6 +5054,7 @@ dependencies = [
  "hashbrown 0.13.2",
  "hex",
  "hex-literal",
+ "primitive-types",
  "proptest",
  "proptest-derive",
  "rlp",
@@ -6590,6 +6595,12 @@ dependencies = [
  "hex",
  "static_assertions",
 ]
+
+[[package]]
+name = "unarray"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
 name = "unicode-bidi"

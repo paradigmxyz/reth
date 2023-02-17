@@ -88,6 +88,13 @@ pub fn should_skip(path: &Path) -> bool {
     {
         return true
     }
+
+    // Ignore outdated EOF tests that haven't been updated for Cancun yet.
+    let eof_path = Path::new("EIPTests").join("stEOF");
+    if path.to_string_lossy().contains(&*eof_path.to_string_lossy()) {
+        return true
+    }
+
     false
 }
 
@@ -112,7 +119,6 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
                 ForkSpec::MergeEOF |
                 ForkSpec::MergeMeterInitCode |
                 ForkSpec::MergePush0 |
-                ForkSpec::Shanghai |
                 ForkSpec::Unknown
         ) {
             continue

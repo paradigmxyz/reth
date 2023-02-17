@@ -236,9 +236,7 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::MergeEOF => spec_builder.paris_activated(),
             ForkSpec::MergeMeterInitCode => spec_builder.paris_activated(),
             ForkSpec::MergePush0 => spec_builder.paris_activated(),
-            ForkSpec::Shanghai => {
-                panic!("Not supported")
-            }
+            ForkSpec::Shanghai => spec_builder.shanghai_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
             }
