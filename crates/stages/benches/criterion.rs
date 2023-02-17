@@ -30,14 +30,7 @@ fn account_hashing(c: &mut Criterion) {
     let num_blocks = 10_000;
     let (path, stage, execution_range) = setup::prepare_account_hashing(num_blocks);
 
-    measure_stage_with_path(
-        &mut group,
-        stage,
-        num_blocks,
-        path,
-        "AccountHashing".to_string(),
-        execution_range,
-    );
+    measure_stage_with_path(&mut group, stage, path, "AccountHashing".to_string(), execution_range);
 }
 
 fn senders(c: &mut Criterion) {
@@ -81,18 +74,12 @@ fn total_difficulty(c: &mut Criterion) {
 fn measure_stage_with_path<S: Clone + Default + Stage<Env<WriteMap>>>(
     group: &mut BenchmarkGroup<WallTime>,
     stage: S,
-    num_blocks: u64,
     path: PathBuf,
     label: String,
-    execution_range: Option<(ExecInput, UnwindInput)>,
+    stage_range: (ExecInput, UnwindInput),
 ) {
     let tx = TestTransaction::new(&path);
-
-    let (input, unwind) = execution_range.unwrap_or_else(|| {
-        let mut input = ExecInput::default();
-        input.previous_stage = Some((StageId("Another"), num_blocks));
-        (input, UnwindInput::default())
-    });
+    let (input, unwind) = stage_range;
 
     group.bench_function(label, move |b| {
         b.to_async(FuturesExecutor).iter_with_setup(
@@ -134,5 +121,18 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
     label: String,
 ) {
     let path = setup::txs_testdata(num_blocks as usize);
-    measure_stage_with_path(group, stage, num_blocks, path, label, None)
+
+    measure_stage_with_path(
+        group,
+        stage,
+        path,
+        label,
+        (
+            ExecInput {
+                previous_stage: Some((StageId("Another"), num_blocks)),
+                ..Default::default()
+            },
+            UnwindInput::default(),
+        ),
+    )
 }

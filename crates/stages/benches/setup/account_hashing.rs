@@ -17,14 +17,12 @@ use std::path::{Path, PathBuf};
 /// Returns the path to the database file, stage and range of stage execution if it exists.
 pub fn prepare_account_hashing(
     num_blocks: u64,
-) -> (PathBuf, AccountHashingStage, Option<(ExecInput, UnwindInput)>) {
-    let mut stage_range = None;
-
-    let path = match std::env::var(constants::ACCOUNT_HASHING_DB) {
+) -> (PathBuf, AccountHashingStage, (ExecInput, UnwindInput)) {
+    let (path, stage_range) = match std::env::var(constants::ACCOUNT_HASHING_DB) {
         Ok(db) => {
             let path = Path::new(&db).to_path_buf();
-            stage_range = find_stage_range(&path);
-            path
+            let range = find_stage_range(&path);
+            (path, range)
         }
         Err(_) => generate_testdata_db(num_blocks),
     };
@@ -32,7 +30,7 @@ pub fn prepare_account_hashing(
     (path, AccountHashingStage::default(), stage_range)
 }
 
-fn find_stage_range(db: &PathBuf) -> Option<(ExecInput, UnwindInput)> {
+fn find_stage_range(db: &PathBuf) -> (ExecInput, UnwindInput) {
     let mut stage_range = None;
     TestTransaction::new(db)
         .tx
@@ -53,10 +51,10 @@ fn find_stage_range(db: &PathBuf) -> Option<(ExecInput, UnwindInput)> {
         .unwrap()
         .unwrap();
 
-    stage_range
+    stage_range.expect("Could not find the stage range from the external DB.")
 }
 
-fn generate_testdata_db(num_blocks: u64) -> PathBuf {
+fn generate_testdata_db(num_blocks: u64) -> (PathBuf, (ExecInput, UnwindInput)) {
     let opts = SeedOpts {
         blocks: 0..num_blocks + 1,
         accounts: 0..10_000,
@@ -74,5 +72,14 @@ fn generate_testdata_db(num_blocks: u64) -> PathBuf {
         let mut tx = tx.inner();
         let _accounts = AccountHashingStage::seed(&mut tx, opts);
     }
-    path
+    (
+        path,
+        (
+            ExecInput {
+                previous_stage: Some((StageId("Another"), num_blocks)),
+                ..Default::default()
+            },
+            UnwindInput::default(),
+        ),
+    )
 }
