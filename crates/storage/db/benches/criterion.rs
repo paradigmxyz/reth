@@ -5,8 +5,13 @@ use criterion::{
 };
 use reth_db::cursor::{DbDupCursorRO, DbDupCursorRW};
 use std::time::Instant;
+use pprof::criterion::{Output, PProfProfiler};
 
-criterion_group!(benches, db, serialization);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = db, serialization
+}
 criterion_main!(benches);
 
 pub fn db(c: &mut Criterion) {

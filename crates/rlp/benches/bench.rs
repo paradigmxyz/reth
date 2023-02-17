@@ -10,6 +10,7 @@
 
 use bytes::BytesMut;
 use criterion::{criterion_group, criterion_main, Criterion};
+use pprof::criterion::{Output, PProfProfiler};
 use ethnum::*;
 use hex_literal::hex;
 use reth_rlp::*;
@@ -65,5 +66,9 @@ fn bench_decode(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_encode, bench_decode);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench_encode, bench_decode
+}
 criterion_main!(benches);
