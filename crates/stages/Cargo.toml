@@ -64,9 +64,11 @@ rand = "0.8.5"
 paste = "1.0"
 
 # Stage benchmarks
+pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = { version = "0.4.0", features = ["async_futures"] }
 proptest = { version = "1.0" }
 arbitrary = { version = "1.1.7", features = ["derive"] }
+eyre = "0.6.8"
 
 # trie
 reth-staged-sync = { path = "../staged-sync" }

@@ -175,7 +175,7 @@ pub fn random_eoa_account() -> (Address, Account) {
 }
 
 /// Generate random Externaly Owned Accounts
-pub fn random_eoa_account_range(acc_range: &mut std::ops::Range<u64>) -> Vec<(Address, Account)> {
+pub fn random_eoa_account_range(acc_range: std::ops::Range<u64>) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         accounts.push(random_eoa_account())
