@@ -16,6 +16,7 @@ pub mod bloom;
 mod chain;
 pub mod constants;
 mod error;
+pub mod filter;
 mod forkid;
 mod genesis;
 mod hardfork;
@@ -29,7 +30,6 @@ mod peer;
 mod receipt;
 mod storage;
 mod transaction;
-mod filter;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
