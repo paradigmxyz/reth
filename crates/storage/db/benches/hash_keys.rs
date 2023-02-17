@@ -3,6 +3,7 @@
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     arbitrary::Arbitrary,
     prelude::{any_with, ProptestConfig},
@@ -15,7 +16,6 @@ use reth_db::{
 };
 use std::{collections::HashSet, time::Instant};
 use test_fuzz::runtime::num_traits::Zero;
-use pprof::criterion::{Output, PProfProfiler};
 
 criterion_group! {
     name = benches;

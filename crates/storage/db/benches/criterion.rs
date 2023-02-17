@@ -3,9 +3,9 @@
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use reth_db::cursor::{DbDupCursorRO, DbDupCursorRW};
 use std::time::Instant;
-use pprof::criterion::{Output, PProfProfiler};
 
 criterion_group! {
     name = benches;

@@ -1,8 +1,8 @@
 mod utils;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use pprof::criterion::{Output, PProfProfiler};
 use ffi::*;
+use pprof::criterion::{Output, PProfProfiler};
 use reth_libmdbx::*;
 use std::ptr;
 use utils::*;

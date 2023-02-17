@@ -10,9 +10,9 @@
 
 use bytes::BytesMut;
 use criterion::{criterion_group, criterion_main, Criterion};
-use pprof::criterion::{Output, PProfProfiler};
 use ethnum::*;
 use hex_literal::hex;
+use pprof::criterion::{Output, PProfProfiler};
 use reth_rlp::*;
 
 fn bench_encode(c: &mut Criterion) {
