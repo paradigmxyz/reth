@@ -353,8 +353,6 @@ pub struct Discv4Service {
     _tasks: JoinSet<()>,
     /// The routing table.
     kbuckets: KBucketsTable<NodeKey, NodeEntry>,
-    /// Whether to respect timestamps
-    check_timestamps: bool,
     /// Receiver for incoming messages
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
@@ -474,7 +472,6 @@ impl Discv4Service {
             pending_pings: Default::default(),
             pending_find_nodes: Default::default(),
             pending_enr_requests: Default::default(),
-            check_timestamps: false,
             commands_rx,
             update_listeners: Vec::with_capacity(1),
             lookup_interval: self_lookup_interval,
@@ -1313,7 +1310,7 @@ impl Discv4Service {
     /// Validate that given timestamp is not expired.
     fn ensure_not_expired(&self, expiration: u64) -> Result<(), ()> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if self.check_timestamps && expiration < now {
+        if self.config.enforce_expiration_timestamps && expiration < now {
             debug!(target: "discv4", "Expired packet");
             return Err(())
         }
@@ -1979,7 +1976,7 @@ mod tests {
         let ping = Ping {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
-            expire: 0,
+            expire: service.ping_expiration(),
             enr_sq: Some(rng.gen()),
         };
 
@@ -1993,6 +1990,34 @@ mod tests {
                 assert!(node_addr.is_ipv4());
                 assert_eq!(node_addr, IpAddr::from(v4));
             }
+            _ => unreachable!(),
+        };
+    }
+
+    #[tokio::test]
+    async fn test_respect_ping_expiration() {
+        reth_tracing::init_test_tracing();
+        let mut rng = thread_rng();
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+        let v6 = v4.to_ipv6_mapped();
+        let addr: SocketAddr = (v6, 30303).into();
+
+        let ping = Ping {
+            from: rng_endpoint(&mut rng),
+            to: rng_endpoint(&mut rng),
+            expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
+            enr_sq: Some(rng.gen()),
+        };
+
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, H256::random());
+
+        let key = kad_key(id);
+        match service.kbuckets.entry(&key) {
+            kbucket::Entry::Absent(_) => {}
             _ => unreachable!(),
         };
     }
