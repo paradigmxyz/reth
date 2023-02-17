@@ -1,61 +1,30 @@
 ## Installation
 
-To use Reth, you must first install Geth. You can find instructions for installing Geth at the following link: [https://geth.ethereum.org/docs/install-and-build/installing-geth](https://geth.ethereum.org/docs/getting-started/installing-geth).
+reth is currently unstable and does not have officially cut releases. To install reth, you must either install it from source or using Docker.
 
-### Ubuntu
-Building the source
+### From Source
 
-* install rustup
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+To build from source, first install [Rust](https://rustup.rs). You also need some basic build tools for our C libraries:
 
-* install Requirements
- - libclang-dev
- - pkg-config
+- For Ubuntu: `apt-get install libclang-dev pkg-config`
+- For Arch: `pacman -S base-devel`
+- For macOS: `brew install llvm pkg-config`
 
-```bash
-apt install libclang-dev pkg-config
-```
-* Build reth
-```bash
+Then clone the repository and build the binary:
+
+```console
 git clone https://github.com/paradigmxyz/reth
 cd reth
-cargo build --all
-./target/debug/reth
+cargo install --release --locked --path . --bin reth
 ```
 
-### MacOS
+The binary will now be in a platform specific folder, and should be accessible as `reth` via the command line.
 
-To install and build reth on macOS using Homebrew, you can use the following steps
+### Using Docker
 
-* Install rustup by running the following command in a terminal:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+Clone the repository and build the image:
 
-* Install the necessary requirements by running the following command:
-```bash
-brew install llvm pkg-config
-```
-
-* Clone the reth repository and navigate to the directory:
-```bash
+```console
 git clone https://github.com/paradigmxyz/reth
-cd reth
-```
-
-* Build reth using cargo:
-```bash
-cargo build --all
-```
-
-* Run reth:
-```bash
-./target/debug/reth
-```
-
-* Alternatively, you can use the following one-liner to install and build reth:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && brew install llvm pkg-config && git clone https://github.com/paradigmxyz/reth && cd reth && cargo build --all && ./target/debug/reth
+docker build -t paradigmxyz/reth .
 ```
