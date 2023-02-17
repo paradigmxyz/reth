@@ -1,5 +1,4 @@
 use super::BlockHashProvider;
-use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{
     rpc::{BlockId, BlockNumber},
@@ -7,7 +6,7 @@ use reth_primitives::{
 };
 
 /// Client trait for transforming [BlockId].
-#[auto_impl(&)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait BlockIdProvider: BlockHashProvider + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;

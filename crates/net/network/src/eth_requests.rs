@@ -14,7 +14,6 @@ use std::{
     future::Future,
     hash::Hash,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
@@ -49,7 +48,7 @@ const APPROX_HEADER_SIZE: usize = 500;
 #[must_use = "Manager does nothing unless polled."]
 pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
-    client: Arc<C>,
+    client: C,
     /// Used for reporting peers.
     #[allow(unused)]
     // TODO use to report spammers
@@ -62,7 +61,7 @@ pub struct EthRequestHandler<C> {
 impl<C> EthRequestHandler<C> {
     /// Create a new instance
     pub fn new(
-        client: Arc<C>,
+        client: C,
         peers: PeersHandle,
         incoming: UnboundedReceiver<IncomingEthRequest>,
     ) -> Self {
@@ -195,7 +194,7 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C> Future for EthRequestHandler<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockProvider + HeaderProvider + Unpin,
 {
     type Output = ();
 
