@@ -1711,7 +1711,7 @@ dependencies = [
 [[package]]
 name = "ethers-contract"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#69edf3b49e98ff70b7e73bf65510a75fc77baace"
+source = "git+https://github.com/gakonst/ethers-rs#228f9447269e61ca7d7f868edd58c08772e38650"
 dependencies = [
  "ethers-core",
  "ethers-providers",
@@ -1727,7 +1727,7 @@ dependencies = [
 [[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#69edf3b49e98ff70b7e73bf65510a75fc77baace"
+source = "git+https://github.com/gakonst/ethers-rs#228f9447269e61ca7d7f868edd58c08772e38650"
 dependencies = [
  "arrayvec",
  "bytes",
@@ -1758,7 +1758,7 @@ dependencies = [
 [[package]]
 name = "ethers-etherscan"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#69edf3b49e98ff70b7e73bf65510a75fc77baace"
+source = "git+https://github.com/gakonst/ethers-rs#228f9447269e61ca7d7f868edd58c08772e38650"
 dependencies = [
  "ethers-core",
  "getrandom 0.2.8",
@@ -1774,7 +1774,7 @@ dependencies = [
 [[package]]
 name = "ethers-middleware"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#69edf3b49e98ff70b7e73bf65510a75fc77baace"
+source = "git+https://github.com/gakonst/ethers-rs#228f9447269e61ca7d7f868edd58c08772e38650"
 dependencies = [
  "async-trait",
  "auto_impl 0.5.0",
@@ -1799,7 +1799,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#69edf3b49e98ff70b7e73bf65510a75fc77baace"
+source = "git+https://github.com/gakonst/ethers-rs#228f9447269e61ca7d7f868edd58c08772e38650"
 dependencies = [
  "async-trait",
  "auto_impl 1.0.1",
@@ -1836,7 +1836,7 @@ dependencies = [
 [[package]]
 name = "ethers-signers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#69edf3b49e98ff70b7e73bf65510a75fc77baace"
+source = "git+https://github.com/gakonst/ethers-rs#228f9447269e61ca7d7f868edd58c08772e38650"
 dependencies = [
  "async-trait",
  "coins-bip32",
