@@ -150,7 +150,7 @@ impl Command {
 
         // TODO(mattsse): cleanup, add cli args
         let _rpc_server = reth_rpc_builder::launch(
-            ShareableDatabase::new(db.clone()),
+            ShareableDatabase::new(db.clone(), self.chain.clone()),
             reth_transaction_pool::test_utils::testing_pool(),
             network.clone(),
             TransportRpcModuleConfig::default()
@@ -324,7 +324,7 @@ impl Command {
             .network_config(config, self.chain.clone())
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .build(Arc::new(ShareableDatabase::new(db)))
+            .build(Arc::new(ShareableDatabase::new(db, self.chain.clone())))
     }
 
     async fn build_pipeline<H, B, U>(
