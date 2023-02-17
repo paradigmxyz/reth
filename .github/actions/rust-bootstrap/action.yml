@@ -8,6 +8,10 @@ inputs:
   rust_target:
     description: rust target triple to install
     required: true
+  mold_version:
+    description: mold version to install (linux)
+    default: 1.10.1
+    required: true
   sccache_version:
     description: version of sccache to install
     default: v0.4.0-pre.7
@@ -17,14 +21,18 @@ inputs:
     default: auto
     required: true
   sccache_bucket:
+    description: sccache s3 bucket name
     default: reth-sccache
     required: true
   sccache_endpoint:
+    description: sccache s3 endpoint
     default: https://nyc3.digitaloceanspaces.com
     required: true
   sccache_key_id:
+    description: sccache s3 key id
     required: true
   sccache_secret:
+    description: sccache s3 key secret
     required: true
 runs:
   using: composite
@@ -45,14 +53,14 @@ runs:
       shell: bash
       run: |
         # Install sccache
-        curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-x86_64-unknown-linux-musl.tar.gz 
+        curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-$(uname -m)-unknown-linux-musl.tar.gz 
         tar -xvzf sccache.tar.gz
-        mv sccache-${{ inputs.sccache_version }}-x86_64-unknown-linux-musl/sccache /home/runner/.cargo/bin/sccache
+        mv sccache-${{ inputs.sccache_version }}-$(uname -m)-unknown-linux-musl/sccache /home/runner/.cargo/bin/sccache
         rm -rf sccache*
         chmod +x /home/runner/.cargo/bin/sccache
 
         # Install and set up mold
-        curl -L --retry 10 --silent --show-error https://github.com/rui314/mold/releases/download/v1.10.1/mold-1.10.1-$(uname -m)-linux.tar.gz | sudo tar -C /usr/local --strip-components=1 -xzf -
+        curl -L --retry 10 --silent --show-error https://github.com/rui314/mold/releases/download/v${{ inputs.mold_version }}/mold-${{ inputs.mold_version }}-$(uname -m)-linux.tar.gz | sudo tar -C /usr/local --strip-components=1 -xzf -
         sudo ln -sf /usr/local/bin/mold "$(realpath /usr/bin/ld)"
 
     - name: Bootstrap Environment (macOS)
