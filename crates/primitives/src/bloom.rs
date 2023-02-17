@@ -125,7 +125,7 @@ impl Bloom {
         unroll! {
             for i in 0..3 {
                 let _ = i;
-                let mut index = 0 as usize;
+                let mut index = 0_usize;
                 for _ in 0..bloom_bytes {
                     index = (index << 8) | hash[ptr] as usize;
                     ptr += 1;
