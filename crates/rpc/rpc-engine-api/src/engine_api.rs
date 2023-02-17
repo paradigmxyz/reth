@@ -6,15 +6,17 @@ use reth_executor::{
 };
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
+    bytes::BytesMut,
     proofs::{self, EMPTY_LIST_HASH},
     rpc::{BlockId, H256 as EthersH256},
-    BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned, H64, U256,
+    Block, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
+    H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
-use reth_rlp::Decodable;
+use reth_rlp::{Decodable, Encodable};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    PayloadStatusEnum, TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadBody, ForkchoiceUpdated,
+    PayloadAttributes, PayloadStatus, PayloadStatusEnum, TransitionConfiguration,
 };
 use std::{
     future::Future,
@@ -28,8 +30,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
-/// The upper limit for
-pub const PAYLOAD_BODIES_LIMIT: u64 = 32;
+/// The upper limit for payload bodies request.
+pub const PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -133,6 +135,19 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
         })
     }
 
+    /// Transform the block to [ExecutionPayloadBody]
+    fn transform_block_to_payload_body(&self, block: Block) -> ExecutionPayloadBody {
+        let transactions = block.body.into_iter().map(|tx| {
+            let mut out = BytesMut::new();
+            tx.encode(&mut out);
+            out.freeze().into()
+        });
+        ExecutionPayloadBody {
+            transactions: transactions.collect(),
+            withdrawals: block.withdrawals.unwrap_or_default(),
+        }
+    }
+
     /// Called to retrieve the latest state of the network, validate new blocks, and maintain
     /// consistency between the Consensus and Execution layers.
     ///
@@ -156,7 +171,15 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             return Err(EngineApiError::PayloadRangeInvalidParams { start, count })
         }
 
-        todo!()
+        // TODO: optimize
+        let mut result = Vec::with_capacity(count as usize);
+        for num in start..start + count {
+            let block = self.client.block(BlockId::Number(num.into()))?;
+            let body = block.map(|b| self.transform_block_to_payload_body(b));
+            result.push(body);
+        }
+
+        Ok(result)
     }
 
     /// Called to retrieve execution payload bodies by hashes.
@@ -169,7 +192,14 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             return Err(EngineApiError::PayloadRequestTooLarge { len })
         }
 
-        todo!()
+        let mut result = Vec::with_capacity(hashes.len());
+        for hash in hashes {
+            let block = self.client.block(BlockId::Hash(hash.0.into()))?;
+            let body = block.map(|b| self.transform_block_to_payload_body(b));
+            result.push(body);
+        }
+
+        Ok(result)
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,

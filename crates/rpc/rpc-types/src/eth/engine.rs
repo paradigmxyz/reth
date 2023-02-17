@@ -70,8 +70,8 @@ impl From<SealedBlock> for ExecutionPayload {
 /// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadBody {
-    transactions: Vec<Bytes>,
-    withdrawals: Vec<Withdrawal>,
+    pub transactions: Vec<Bytes>,
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 /// The execution payload body response that allows for `null` values.
