@@ -8,7 +8,7 @@ use reth_interfaces::Result;
 use reth_primitives::{
     rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, ChainSpec, Hardfork, Header, H256, U256,
 };
-use std::ops::RangeBounds;
+use std::{ops::RangeBounds, sync::Arc};
 
 mod state;
 use reth_db::cursor::DbCursorRO;
@@ -25,19 +25,19 @@ pub struct ShareableDatabase<DB> {
     /// Database
     db: DB,
     /// Chain spec
-    chain_spec: ChainSpec,
+    chain_spec: Arc<ChainSpec>,
 }
 
 impl<DB> ShareableDatabase<DB> {
     /// create new database provider
     pub fn new(db: DB, chain_spec: ChainSpec) -> Self {
-        Self { db, chain_spec }
+        Self { db, chain_spec: Arc::new(chain_spec) }
     }
 }
 
 impl<DB: Clone> Clone for ShareableDatabase<DB> {
     fn clone(&self) -> Self {
-        Self { db: self.db.clone(), chain_spec: self.chain_spec.clone() }
+        Self { db: self.db.clone(), chain_spec: Arc::clone(&self.chain_spec) }
     }
 }
 
