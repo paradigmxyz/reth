@@ -1,3 +1,5 @@
+use crate::HeaderProvider;
+
 use super::BlockHashProvider;
 use reth_interfaces::Result;
 use reth_primitives::{
@@ -6,7 +8,7 @@ use reth_primitives::{
 };
 
 /// Api trait for fetching `Block` related data.
-pub trait BlockProvider: BlockHashProvider + Send + Sync {
+pub trait BlockProvider: BlockHashProvider + HeaderProvider + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
 
