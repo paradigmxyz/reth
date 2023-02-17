@@ -181,26 +181,25 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
-        self.db.view(|tx| {
-            let mut results = Vec::default();
-            let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
-            let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-            for entry in body_cursor.walk_range(range)? {
-                let (_, body) = entry?;
-                let tx_range = body.tx_id_range();
-                if body.tx_id_range().is_empty() {
-                    results.push(Vec::default());
-                } else {
-                    results.push(
-                        tx_cursor
-                            .walk_range(tx_range)?
-                            .map(|result| result.map(|(_, tx)| tx))
-                            .collect::<std::result::Result<Vec<_>, _>>()?,
-                    );
-                }
+        let tx = self.db.tx()?;
+        let mut results = Vec::default();
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+        for entry in body_cursor.walk_range(range)? {
+            let (_, body) = entry?;
+            let tx_range = body.tx_id_range();
+            if body.tx_id_range().is_empty() {
+                results.push(Vec::default());
+            } else {
+                results.push(
+                    tx_cursor
+                        .walk_range(tx_range)?
+                        .map(|result| result.map(|(_, tx)| tx))
+                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                );
             }
-            todo!()
-        })?
+        }
+        Ok(results)
     }
 }
 
