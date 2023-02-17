@@ -1,7 +1,6 @@
  use crate::{keccak256, rpc::BlockNumber, Address, Log, H160, H256, U64};
-
- // Bloom type from crate::Bloom didn't have the needed methods like Bloom::contains_bloom()
- use ethereum_types::{Bloom, BloomInput, U256};
+ use ethbloom::{Bloom, Input};
+ use ethers_core::types::U256;
 
  use serde::{
      de::{DeserializeOwned, MapAccess, Visitor},
@@ -832,7 +831,7 @@
      match topics {
          ValueOrArray::Value(topic) => {
              if let Some(topic) = topic {
-                 let bloom: Bloom = BloomInput::Raw(topic.as_ref()).into();
+                 let bloom: Bloom = Input::Raw(topic.as_ref()).into();
                  blooms.push(Some(bloom));
              } else {
                  blooms.push(None);
@@ -844,7 +843,7 @@
              } else {
                  for topic in topics.iter() {
                      if let Some(topic) = topic {
-                         let bloom: Bloom = BloomInput::Raw(topic.as_ref()).into();
+                         let bloom: Bloom = Input::Raw(topic.as_ref()).into();
                          blooms.push(Some(bloom));
                      } else {
                          blooms.push(None);
@@ -860,7 +859,7 @@
      let mut blooms = BloomFilter::new();
      match address {
          ValueOrArray::Value(address) => {
-             let bloom: Bloom = BloomInput::Raw(address.as_ref()).into();
+             let bloom: Bloom = Input::Raw(address.as_ref()).into();
              blooms.push(Some(bloom))
          }
          ValueOrArray::Array(addresses) => {
@@ -868,7 +867,7 @@
                  blooms.push(None);
              } else {
                  for address in addresses.iter() {
-                     let bloom: Bloom = BloomInput::Raw(address.as_ref()).into();
+                     let bloom: Bloom = Input::Raw(address.as_ref()).into();
                      blooms.push(Some(bloom));
                  }
              }
@@ -877,338 +876,338 @@
      blooms
  }
 
- //  #[cfg(test)]
- //  mod tests {
- //      use super::*;
- //      use impl_serde::serialize;
- //      use serde_json::json;
- // 
- //      #[test]
- //      fn can_serde_value_or_array() {
- //          #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
- //          struct Item {
- //              value: ValueOrArray<U256>,
- //          }
- // 
- //          let item = Item { value: ValueOrArray::Value(U256::one()) };
- //          let json = serde_json::to_value(item.clone()).unwrap();
- //          let deserialized: Item = serde_json::from_value(json).unwrap();
- //          assert_eq!(item, deserialized);
- // 
- //          let item = Item { value: ValueOrArray::Array(vec![U256::one(), U256::zero()]) };
- //          let json = serde_json::to_value(item.clone()).unwrap();
- //          let deserialized: Item = serde_json::from_value(json).unwrap();
- //          assert_eq!(item, deserialized);
- //      }
- //
- //     #[test]
- //     fn filter_serialization_test() {
- //         let t1 = "9729a6fbefefc8f6005933898b13dc45c3a2c8b7".parse::<Address>().unwrap();
- //         let t2 = H256::from([0; 32]);
- //         let t3 = U256::from(123);
- //
- //         let t1_padded = H256::from(t1);
- //         let t3_padded = H256::from({
- //             let mut x = [0; 32];
- //             x[31] = 123;
- //             x
- //         });
- //
- //         let event = "ValueChanged(address,string,string)";
- //         let t0 = H256::from(keccak256(event.as_bytes()));
- //         let addr: Address = "f817796F60D268A36a57b8D2dF1B97B14C0D0E1d".parse().unwrap();
- //         let filter = Filter::new();
- //
- //         let ser = serialize(&filter);
- //         assert_eq!(ser, json!({ "topics": [] }));
- //
- //         let filter = filter.address(ValueOrArray::Value(addr));
- //
- //         let ser = serialize(&filter);
- //         assert_eq!(ser, json!({"address" : addr, "topics": []}));
- //
- //         let filter = filter.event(event);
- //
- //         // 0
- //         let ser = serialize(&filter);
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0]}));
- //
- //         // 1
- //         let ser = serialize(&filter.clone().topic1(t1));
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded]}));
- //
- //         // 2
- //         let ser = serialize(&filter.clone().topic2(t2));
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, null, t2]}));
- //
- //         // 3
- //         let ser = serialize(&filter.clone().topic3(t3));
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, null, null, t3_padded]}));
- //
- //         // 1 & 2
- //         let ser = serialize(&filter.clone().topic1(t1).topic2(t2));
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded, t2]}));
- //
- //         // 1 & 3
- //         let ser = serialize(&filter.clone().topic1(t1).topic3(t3));
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded, null, t3_padded]}));
- //
- //         // 2 & 3
- //         let ser = serialize(&filter.clone().topic2(t2).topic3(t3));
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, null, t2, t3_padded]}));
- //
- //         // 1 & 2 & 3
- //         let ser = serialize(&filter.topic1(t1).topic2(t2).topic3(t3));
- //         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded, t2, t3_padded]}));
- //     }
- //
- //     fn build_bloom(address: Address, topic1: H256, topic2: H256) -> Bloom {
- //         let mut block_bloom = Bloom::default();
- //         block_bloom.accrue(BloomInput::Raw(&address[..]));
- //         block_bloom.accrue(BloomInput::Raw(&topic1[..]));
- //         block_bloom.accrue(BloomInput::Raw(&topic2[..]));
- //         block_bloom
- //     }
- //
- //     fn topic_filter(
- //         topic1: H256,
- //         topic2: H256,
- //         topic3: H256,
- //     ) -> (Filter, Option<Vec<ValueOrArray<Option<H256>>>>) {
- //         let filter = Filter {
- //             block_option: Default::default(),
- //             address: None,
- //             topics: [
- //                 Some(ValueOrArray::Value(Some(topic1))),
- //                 Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])),
- //                 None,
- //                 None,
- //             ],
- //         };
- //         let filtered_params = FilteredParams::new(Some(filter.clone()));
- //
- //         (filter, Some(filtered_params.flat_topics))
- //     }
- //
- //     #[test]
- //     fn can_detect_different_topics() {
- //         let topic1 = H256::random();
- //         let topic2 = H256::random();
- //         let topic3 = H256::random();
- //
- //         let (_, topics) = topic_filter(topic1, topic2, topic3);
- //         let topics_bloom = FilteredParams::topics_filter(&topics);
- //         assert!(!FilteredParams::matches_topics(
- //             build_bloom(Address::random(), H256::random(), H256::random()),
- //             &topics_bloom
- //         ));
- //     }
- //
- //     #[test]
- //     fn can_match_topic() {
- //         let topic1 = H256::random();
- //         let topic2 = H256::random();
- //         let topic3 = H256::random();
- //
- //         let (_, topics) = topic_filter(topic1, topic2, topic3);
- //         let _topics_bloom = FilteredParams::topics_filter(&topics);
- //
- //         let topics_bloom = FilteredParams::topics_filter(&topics);
- //         assert!(FilteredParams::matches_topics(
- //             build_bloom(Address::random(), topic1, topic2),
- //             &topics_bloom
- //         ));
- //     }
- //
- //     #[test]
- //     fn can_match_empty_topics() {
- //         let filter =
- //             Filter { block_option: Default::default(), address: None, topics: Default::default() };
- //
- //         let filtered_params = FilteredParams::new(Some(filter));
- //         let topics = Some(filtered_params.flat_topics);
- //
- //         let topics_bloom = FilteredParams::topics_filter(&topics);
- //         assert!(FilteredParams::matches_topics(
- //             build_bloom(Address::random(), H256::random(), H256::random()),
- //             &topics_bloom
- //         ));
- //     }
- //
- //     #[test]
- //     fn can_match_address_and_topics() {
- //         let rng_address = Address::random();
- //         let topic1 = H256::random();
- //         let topic2 = H256::random();
- //         let topic3 = H256::random();
- //
- //         let filter = Filter {
- //             block_option: Default::default(),
- //             address: Some(ValueOrArray::Value(rng_address)),
- //             topics: [
- //                 Some(ValueOrArray::Value(Some(topic1))),
- //                 Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])),
- //                 None,
- //                 None,
- //             ],
- //         };
- //         let filtered_params = FilteredParams::new(Some(filter.clone()));
- //         let topics = Some(filtered_params.flat_topics);
- //         let address_filter = FilteredParams::address_filter(&filter.address);
- //         let topics_filter = FilteredParams::topics_filter(&topics);
- //         assert!(
- //             FilteredParams::matches_address(
- //                 build_bloom(rng_address, topic1, topic2),
- //                 &address_filter
- //             ) && FilteredParams::matches_topics(
- //                 build_bloom(rng_address, topic1, topic2),
- //                 &topics_filter
- //             )
- //         );
- //     }
- //
- //     #[test]
- //     fn can_match_topics_wildcard() {
- //         let topic1 = H256::random();
- //         let topic2 = H256::random();
- //         let topic3 = H256::random();
- //
- //         let filter = Filter {
- //             block_option: Default::default(),
- //             address: None,
- //             topics: [None, Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])), None, None],
- //         };
- //         let filtered_params = FilteredParams::new(Some(filter));
- //         let topics = Some(filtered_params.flat_topics);
- //         let topics_bloom = FilteredParams::topics_filter(&topics);
- //         assert!(FilteredParams::matches_topics(
- //             build_bloom(Address::random(), topic1, topic2),
- //             &topics_bloom
- //         ));
- //     }
- //
- //     #[test]
- //     fn can_match_topics_wildcard_mismatch() {
- //         let filter = Filter {
- //             block_option: Default::default(),
- //             address: None,
- //             topics: [
- //                 None,
- //                 Some(ValueOrArray::Array(vec![Some(H256::random()), Some(H256::random())])),
- //                 None,
- //                 None,
- //             ],
- //         };
- //         let filtered_params = FilteredParams::new(Some(filter));
- //         let topics_input = Some(filtered_params.flat_topics);
- //         let topics_bloom = FilteredParams::topics_filter(&topics_input);
- //         assert!(!FilteredParams::matches_topics(
- //             build_bloom(Address::random(), H256::random(), H256::random()),
- //             &topics_bloom
- //         ));
- //     }
- //
- //     #[test]
- //     fn can_match_address_filter() {
- //         let rng_address = Address::random();
- //         let filter = Filter {
- //             block_option: Default::default(),
- //             address: Some(ValueOrArray::Value(rng_address)),
- //             topics: Default::default(),
- //         };
- //         let address_bloom = FilteredParams::address_filter(&filter.address);
- //         assert!(FilteredParams::matches_address(
- //             build_bloom(rng_address, H256::random(), H256::random(),),
- //             &address_bloom
- //         ));
- //     }
- //
- //     #[test]
- //     fn can_detect_different_address() {
- //         let bloom_address = Address::random();
- //         let rng_address = Address::random();
- //         let filter = Filter {
- //             block_option: Default::default(),
- //             address: Some(ValueOrArray::Value(rng_address)),
- //             topics: Default::default(),
- //         };
- //         let address_bloom = FilteredParams::address_filter(&filter.address);
- //         assert!(!FilteredParams::matches_address(
- //             build_bloom(bloom_address, H256::random(), H256::random(),),
- //             &address_bloom
- //         ));
- //     }
- //
- //     #[test]
- //     fn can_convert_to_ethers_filter() {
- //         let json = json!(
- //                     {
- //           "fromBlock": "0x429d3b",
- //           "toBlock": "0x429d3b",
- //           "address": "0xb59f67a8bff5d8cd03f6ac17265c550ed8f33907",
- //           "topics": [
- //           "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
- //           "0x00000000000000000000000000b46c2526e227482e2ebb8f4c69e4674d262e75",
- //           "0x00000000000000000000000054a2d42a40f51259dedd1978f6c118a0f0eff078"
- //           ]
- //         }
- //             );
- //
- //         let filter: Filter = serde_json::from_value(json).unwrap();
- //         assert_eq!(
- //             filter,
- //             Filter {
- //                 block_option: FilterBlockOption::Range {
- //                     from_block: Some(4365627u64.into()),
- //                     to_block: Some(4365627u64.into()),
- //                 },
- //                 address: Some(ValueOrArray::Value(
- //                     "0xb59f67a8bff5d8cd03f6ac17265c550ed8f33907".parse().unwrap()
- //                 )),
- //                 topics: [
- //                     Some(ValueOrArray::Value(Some(
- //                         "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
- //                             .parse()
- //                             .unwrap(),
- //                     ))),
- //                     Some(ValueOrArray::Value(Some(
- //                         "0x00000000000000000000000000b46c2526e227482e2ebb8f4c69e4674d262e75"
- //                             .parse()
- //                             .unwrap(),
- //                     ))),
- //                     Some(ValueOrArray::Value(Some(
- //                         "0x00000000000000000000000054a2d42a40f51259dedd1978f6c118a0f0eff078"
- //                             .parse()
- //                             .unwrap(),
- //                     ))),
- //                     None,
- //                 ],
- //             }
- //         );
- //     }
- //
- //     #[test]
- //     fn can_convert_to_ethers_filter_with_null_fields() {
- //         let json = json!(
- //                     {
- //           "fromBlock": "0x429d3b",
- //           "toBlock": "0x429d3b",
- //           "address": null,
- //           "topics": null
- //         }
- //             );
- //
- //         let filter: Filter = serde_json::from_value(json).unwrap();
- //         assert_eq!(
- //             filter,
- //             Filter {
- //                 block_option: FilterBlockOption::Range {
- //                     from_block: Some(4365627u64.into()),
- //                     to_block: Some(4365627u64.into()),
- //                 },
- //                 address: None,
- //                 topics: [None, None, None, None,],
- //             }
- //         );
- //     }
- // }
+  #[cfg(test)]
+  mod tests {
+      use super::*;
+      use serde_json::json;
+     use ethers_core::utils::serialize;
+
+      #[test]
+      fn can_serde_value_or_array() {
+          #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+          struct Item {
+              value: ValueOrArray<U256>,
+          }
+
+          let item = Item { value: ValueOrArray::Value(U256::one()) };
+          let json = serde_json::to_value(item.clone()).unwrap();
+          let deserialized: Item = serde_json::from_value(json).unwrap();
+          assert_eq!(item, deserialized);
+
+          let item = Item { value: ValueOrArray::Array(vec![U256::one(), U256::zero()]) };
+          let json = serde_json::to_value(item.clone()).unwrap();
+          let deserialized: Item = serde_json::from_value(json).unwrap();
+          assert_eq!(item, deserialized);
+      }
+
+     #[test]
+     fn filter_serialization_test() {
+         let t1 = "9729a6fbefefc8f6005933898b13dc45c3a2c8b7".parse::<Address>().unwrap();
+         let t2 = H256::from([0; 32]);
+         let t3 = U256::from(123);
+
+         let t1_padded = H256::from(t1);
+         let t3_padded = H256::from({
+             let mut x = [0; 32];
+             x[31] = 123;
+             x
+         });
+
+         let event = "ValueChanged(address,string,string)";
+         let t0 = H256::from(keccak256(event.as_bytes()));
+         let addr: Address = "f817796F60D268A36a57b8D2dF1B97B14C0D0E1d".parse().unwrap();
+         let filter = Filter::new();
+
+         let ser = serialize(&filter);
+         assert_eq!(ser, json!({ "topics": [] }));
+
+         let filter = filter.address(ValueOrArray::Value(addr));
+
+         let ser = serialize(&filter);
+         assert_eq!(ser, json!({"address" : addr, "topics": []}));
+
+         let filter = filter.event(event);
+
+         // 0
+         let ser = serialize(&filter);
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0]}));
+
+         // 1
+         let ser = serialize(&filter.clone().topic1(t1));
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded]}));
+
+         // 2
+         let ser = serialize(&filter.clone().topic2(t2));
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, null, t2]}));
+
+         // 3
+         let ser = serialize(&filter.clone().topic3(t3));
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, null, null, t3_padded]}));
+
+         // 1 & 2
+         let ser = serialize(&filter.clone().topic1(t1).topic2(t2));
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded, t2]}));
+
+         // 1 & 3
+         let ser = serialize(&filter.clone().topic1(t1).topic3(t3));
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded, null, t3_padded]}));
+
+         // 2 & 3
+         let ser = serialize(&filter.clone().topic2(t2).topic3(t3));
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, null, t2, t3_padded]}));
+
+         // 1 & 2 & 3
+         let ser = serialize(&filter.topic1(t1).topic2(t2).topic3(t3));
+         assert_eq!(ser, json!({ "address" : addr, "topics": [t0, t1_padded, t2, t3_padded]}));
+     }
+
+     fn build_bloom(address: Address, topic1: H256, topic2: H256) -> Bloom {
+         let mut block_bloom = Bloom::default();
+         block_bloom.accrue(Input::Raw(&address[..]));
+         block_bloom.accrue(Input::Raw(&topic1[..]));
+         block_bloom.accrue(Input::Raw(&topic2[..]));
+         block_bloom
+     }
+
+     fn topic_filter(
+         topic1: H256,
+         topic2: H256,
+         topic3: H256,
+     ) -> (Filter, Option<Vec<ValueOrArray<Option<H256>>>>) {
+         let filter = Filter {
+             block_option: Default::default(),
+             address: None,
+             topics: [
+                 Some(ValueOrArray::Value(Some(topic1))),
+                 Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])),
+                 None,
+                 None,
+             ],
+         };
+         let filtered_params = FilteredParams::new(Some(filter.clone()));
+
+         (filter, Some(filtered_params.flat_topics))
+     }
+
+     #[test]
+     fn can_detect_different_topics() {
+         let topic1 = H256::random();
+         let topic2 = H256::random();
+         let topic3 = H256::random();
+
+         let (_, topics) = topic_filter(topic1, topic2, topic3);
+         let topics_bloom = FilteredParams::topics_filter(&topics);
+         assert!(!FilteredParams::matches_topics(
+             build_bloom(Address::random(), H256::random(), H256::random()),
+             &topics_bloom
+         ));
+     }
+
+     #[test]
+     fn can_match_topic() {
+         let topic1 = H256::random();
+         let topic2 = H256::random();
+         let topic3 = H256::random();
+
+         let (_, topics) = topic_filter(topic1, topic2, topic3);
+         let _topics_bloom = FilteredParams::topics_filter(&topics);
+
+         let topics_bloom = FilteredParams::topics_filter(&topics);
+         assert!(FilteredParams::matches_topics(
+             build_bloom(Address::random(), topic1, topic2),
+             &topics_bloom
+         ));
+     }
+
+     #[test]
+     fn can_match_empty_topics() {
+         let filter =
+             Filter { block_option: Default::default(), address: None, topics: Default::default() };
+
+         let filtered_params = FilteredParams::new(Some(filter));
+         let topics = Some(filtered_params.flat_topics);
+
+         let topics_bloom = FilteredParams::topics_filter(&topics);
+         assert!(FilteredParams::matches_topics(
+             build_bloom(Address::random(), H256::random(), H256::random()),
+             &topics_bloom
+         ));
+     }
+
+     #[test]
+     fn can_match_address_and_topics() {
+         let rng_address = Address::random();
+         let topic1 = H256::random();
+         let topic2 = H256::random();
+         let topic3 = H256::random();
+
+         let filter = Filter {
+             block_option: Default::default(),
+             address: Some(ValueOrArray::Value(rng_address)),
+             topics: [
+                 Some(ValueOrArray::Value(Some(topic1))),
+                 Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])),
+                 None,
+                 None,
+             ],
+         };
+         let filtered_params = FilteredParams::new(Some(filter.clone()));
+         let topics = Some(filtered_params.flat_topics);
+         let address_filter = FilteredParams::address_filter(&filter.address);
+         let topics_filter = FilteredParams::topics_filter(&topics);
+         assert!(
+             FilteredParams::matches_address(
+                 build_bloom(rng_address, topic1, topic2),
+                 &address_filter
+             ) && FilteredParams::matches_topics(
+                 build_bloom(rng_address, topic1, topic2),
+                 &topics_filter
+             )
+         );
+     }
+
+     #[test]
+     fn can_match_topics_wildcard() {
+         let topic1 = H256::random();
+         let topic2 = H256::random();
+         let topic3 = H256::random();
+
+         let filter = Filter {
+             block_option: Default::default(),
+             address: None,
+             topics: [None, Some(ValueOrArray::Array(vec![Some(topic2), Some(topic3)])), None, None],
+         };
+         let filtered_params = FilteredParams::new(Some(filter));
+         let topics = Some(filtered_params.flat_topics);
+         let topics_bloom = FilteredParams::topics_filter(&topics);
+         assert!(FilteredParams::matches_topics(
+             build_bloom(Address::random(), topic1, topic2),
+             &topics_bloom
+         ));
+     }
+
+     #[test]
+     fn can_match_topics_wildcard_mismatch() {
+         let filter = Filter {
+             block_option: Default::default(),
+             address: None,
+             topics: [
+                 None,
+                 Some(ValueOrArray::Array(vec![Some(H256::random()), Some(H256::random())])),
+                 None,
+                 None,
+             ],
+         };
+         let filtered_params = FilteredParams::new(Some(filter));
+         let topics_input = Some(filtered_params.flat_topics);
+         let topics_bloom = FilteredParams::topics_filter(&topics_input);
+         assert!(!FilteredParams::matches_topics(
+             build_bloom(Address::random(), H256::random(), H256::random()),
+             &topics_bloom
+         ));
+     }
+
+     #[test]
+     fn can_match_address_filter() {
+         let rng_address = Address::random();
+         let filter = Filter {
+             block_option: Default::default(),
+             address: Some(ValueOrArray::Value(rng_address)),
+             topics: Default::default(),
+         };
+         let address_bloom = FilteredParams::address_filter(&filter.address);
+         assert!(FilteredParams::matches_address(
+             build_bloom(rng_address, H256::random(), H256::random(),),
+             &address_bloom
+         ));
+     }
+
+     #[test]
+     fn can_detect_different_address() {
+         let bloom_address = Address::random();
+         let rng_address = Address::random();
+         let filter = Filter {
+             block_option: Default::default(),
+             address: Some(ValueOrArray::Value(rng_address)),
+             topics: Default::default(),
+         };
+         let address_bloom = FilteredParams::address_filter(&filter.address);
+         assert!(!FilteredParams::matches_address(
+             build_bloom(bloom_address, H256::random(), H256::random(),),
+             &address_bloom
+         ));
+     }
+
+     #[test]
+     fn can_convert_to_ethers_filter() {
+         let json = json!(
+                     {
+           "fromBlock": "0x429d3b",
+           "toBlock": "0x429d3b",
+           "address": "0xb59f67a8bff5d8cd03f6ac17265c550ed8f33907",
+           "topics": [
+           "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+           "0x00000000000000000000000000b46c2526e227482e2ebb8f4c69e4674d262e75",
+           "0x00000000000000000000000054a2d42a40f51259dedd1978f6c118a0f0eff078"
+           ]
+         }
+             );
+
+         let filter: Filter = serde_json::from_value(json).unwrap();
+         assert_eq!(
+             filter,
+             Filter {
+                 block_option: FilterBlockOption::Range {
+                     from_block: Some(4365627u64.into()),
+                     to_block: Some(4365627u64.into()),
+                 },
+                 address: Some(ValueOrArray::Value(
+                     "0xb59f67a8bff5d8cd03f6ac17265c550ed8f33907".parse().unwrap()
+                 )),
+                 topics: [
+                     Some(ValueOrArray::Value(Some(
+                         "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+                             .parse()
+                             .unwrap(),
+                     ))),
+                     Some(ValueOrArray::Value(Some(
+                         "0x00000000000000000000000000b46c2526e227482e2ebb8f4c69e4674d262e75"
+                             .parse()
+                             .unwrap(),
+                     ))),
+                     Some(ValueOrArray::Value(Some(
+                         "0x00000000000000000000000054a2d42a40f51259dedd1978f6c118a0f0eff078"
+                             .parse()
+                             .unwrap(),
+                     ))),
+                     None,
+                 ],
+             }
+         );
+     }
+
+     #[test]
+     fn can_convert_to_ethers_filter_with_null_fields() {
+         let json = json!(
+                     {
+           "fromBlock": "0x429d3b",
+           "toBlock": "0x429d3b",
+           "address": null,
+           "topics": null
+         }
+             );
+
+         let filter: Filter = serde_json::from_value(json).unwrap();
+         assert_eq!(
+             filter,
+             Filter {
+                 block_option: FilterBlockOption::Range {
+                     from_block: Some(4365627u64.into()),
+                     to_block: Some(4365627u64.into()),
+                 },
+                 address: None,
+                 topics: [None, None, None, None,],
+             }
+         );
+     }
+ }
