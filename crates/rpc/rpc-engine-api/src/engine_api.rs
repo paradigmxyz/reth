@@ -8,16 +8,15 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
     rpc::{BlockId, H256 as EthersH256},
-    ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned, H64, U256,
+    BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned, H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
-    TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBody, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum, TransitionConfiguration,
 };
 use std::{
-    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -29,6 +28,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
+/// The upper limit for
+pub const PAYLOAD_BODIES_LIMIT: u64 = 32;
+
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
 #[must_use = "EngineApi does nothing unless polled."]
@@ -38,9 +40,8 @@ pub struct EngineApi<Client> {
     chain_spec: ChainSpec,
     message_rx: UnboundedReceiverStream<EngineApiMessage>,
     forkchoice_state_tx: watch::Sender<ForkchoiceState>,
-    // TODO: Placeholder for storing future blocks. Make cache bounded.
-    // Use [lru](https://crates.io/crates/lru) crate
-    local_store: HashMap<H64, ExecutionPayload>,
+    // TODO: Placeholder for storing future blocks. Make cache bounded. Use lru
+    // local_store: HashMap<H64, ExecutionPayload>,
     // remote_store: HashMap<H64, ExecutionPayload>,
 }
 
@@ -50,6 +51,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             EngineApiMessage::GetPayload(payload_id, tx) => {
                 let _ = tx.send(self.get_payload(payload_id).ok_or(EngineApiError::PayloadUnknown));
             }
+            EngineApiMessage::GetPayloadBodiesByHash(_, _) => {}
+            EngineApiMessage::GetPayloadBodiesByRange(..) => {}
             EngineApiMessage::NewPayload(payload, tx) => {
                 let _ = tx.send(self.new_payload(payload));
             }
@@ -131,8 +134,34 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
     ///
     /// NOTE: Will always result in `PayloadUnknown` since we don't support block
     /// building for now.
-    pub fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload> {
-        self.local_store.get(&payload_id).cloned()
+    pub fn get_payload(&self, _payload_id: H64) -> Option<ExecutionPayload> {
+        None
+    }
+
+    /// TODO:
+    pub fn get_payload_bodies_by_range(
+        &self,
+        _start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<Vec<ExecutionPayloadBody>> {
+        if count > PAYLOAD_BODIES_LIMIT {
+            return Err(EngineApiError::PayloadRequestTooLarge { len: count })
+        }
+
+        todo!()
+    }
+
+    /// TODO:
+    pub fn get_payload_bodies_by_hash(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<Vec<ExecutionPayloadBody>> {
+        let len = hashes.len() as u64;
+        if len > PAYLOAD_BODIES_LIMIT {
+            return Err(EngineApiError::PayloadRequestTooLarge { len })
+        }
+
+        todo!()
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
@@ -356,7 +385,6 @@ mod tests {
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -447,7 +475,6 @@ mod tests {
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -478,7 +505,6 @@ mod tests {
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -506,7 +532,6 @@ mod tests {
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -544,7 +569,6 @@ mod tests {
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -599,7 +623,6 @@ mod tests {
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -629,7 +652,6 @@ mod tests {
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -663,7 +685,6 @@ mod tests {
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -694,7 +715,6 @@ mod tests {
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -732,7 +752,6 @@ mod tests {
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -787,7 +806,6 @@ mod tests {
             let engine = EngineApi {
                 client: Arc::new(MockEthProvider::default()),
                 chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -825,7 +843,6 @@ mod tests {
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };
@@ -889,7 +906,6 @@ mod tests {
             let engine = EngineApi {
                 client: client.clone(),
                 chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
                 message_rx: UnboundedReceiverStream::new(msg_rx),
                 forkchoice_state_tx: tip_tx,
             };

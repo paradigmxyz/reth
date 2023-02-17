@@ -1,8 +1,9 @@
 use crate::EngineApiSender;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::H64;
+use reth_primitives::{BlockHash, BlockNumber, H64};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBody, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    TransitionConfiguration,
 };
 
 /// Message type for communicating with [`EngineApi`][crate::EngineApi].
@@ -12,6 +13,10 @@ pub enum EngineApiMessage {
     NewPayload(ExecutionPayload, EngineApiSender<PayloadStatus>),
     /// Get payload message
     GetPayload(H64, EngineApiSender<ExecutionPayload>),
+    /// Get payload bodies by range message
+    GetPayloadBodiesByRange(BlockNumber, u64, EngineApiSender<Vec<ExecutionPayloadBody>>),
+    /// Get payload bodies by hash message
+    GetPayloadBodiesByHash(Vec<BlockHash>, EngineApiSender<Vec<ExecutionPayloadBody>>),
     /// Forkchoice updated message
     ForkchoiceUpdated(
         ForkchoiceState,

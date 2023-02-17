@@ -41,6 +41,12 @@ pub enum EngineApiError {
     /// Unknown payload requested.
     #[error("Unknown payload")]
     PayloadUnknown,
+    /// The payload body request length is too large.
+    #[error("Payload request too large: {len}")]
+    PayloadRequestTooLarge {
+        /// The length that was requested.
+        len: u64,
+    },
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
         "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
