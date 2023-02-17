@@ -3,6 +3,7 @@
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     arbitrary::Arbitrary,
     prelude::{any_with, ProptestConfig},
@@ -16,7 +17,11 @@ use reth_db::{
 use std::{collections::HashSet, time::Instant};
 use test_fuzz::runtime::num_traits::Zero;
 
-criterion_group!(benches, hash_keys);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = hash_keys
+}
 criterion_main!(benches);
 
 /// It benchmarks the insertion of rows into a table where `Keys` are hashes.
