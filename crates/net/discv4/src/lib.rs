@@ -353,8 +353,6 @@ pub struct Discv4Service {
     _tasks: JoinSet<()>,
     /// The routing table.
     kbuckets: KBucketsTable<NodeKey, NodeEntry>,
-    /// Whether to respect timestamps
-    check_timestamps: bool,
     /// Receiver for incoming messages
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
@@ -474,7 +472,6 @@ impl Discv4Service {
             pending_pings: Default::default(),
             pending_find_nodes: Default::default(),
             pending_enr_requests: Default::default(),
-            check_timestamps: false,
             commands_rx,
             update_listeners: Vec::with_capacity(1),
             lookup_interval: self_lookup_interval,
@@ -1313,7 +1310,7 @@ impl Discv4Service {
     /// Validate that given timestamp is not expired.
     fn ensure_not_expired(&self, expiration: u64) -> Result<(), ()> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if self.check_timestamps && expiration < now {
+        if self.config.enforce_expiration_timestamps && expiration < now {
             debug!(target: "discv4", "Expired packet");
             return Err(())
         }
