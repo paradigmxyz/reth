@@ -20,7 +20,7 @@ use tokio::sync::Mutex;
 use tracing::trace;
 
 /// The default maximum of logs in a single response.
-const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 1_000;
+const DEFAULT_MAX_LOGS_IN_RESPONSE: usize = 2_000;
 
 /// `Eth` filter RPC implementation.
 #[derive(Debug, Clone)]
