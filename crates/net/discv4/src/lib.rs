@@ -1976,7 +1976,7 @@ mod tests {
         let ping = Ping {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
-            expire: 0,
+            expire: service.ping_expiration(),
             enr_sq: Some(rng.gen()),
         };
 
@@ -1990,6 +1990,34 @@ mod tests {
                 assert!(node_addr.is_ipv4());
                 assert_eq!(node_addr, IpAddr::from(v4));
             }
+            _ => unreachable!(),
+        };
+    }
+
+    #[tokio::test]
+    async fn test_respect_ping_expiration() {
+        reth_tracing::init_test_tracing();
+        let mut rng = thread_rng();
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+        let v6 = v4.to_ipv6_mapped();
+        let addr: SocketAddr = (v6, 30303).into();
+
+        let ping = Ping {
+            from: rng_endpoint(&mut rng),
+            to: rng_endpoint(&mut rng),
+            expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
+            enr_sq: Some(rng.gen()),
+        };
+
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, H256::random());
+
+        let key = kad_key(id);
+        match service.kbuckets.entry(&key) {
+            kbucket::Entry::Absent(_) => {}
             _ => unreachable!(),
         };
     }
