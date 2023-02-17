@@ -446,46 +446,46 @@ impl<'de> Deserialize<'de> for Filter {
                     match key.as_str() {
                         "fromBlock" => {
                             if from_block.is_some() {
-                                return Err(serde::de::Error::duplicate_field("fromBlock"));
+                                return Err(serde::de::Error::duplicate_field("fromBlock"))
                             }
                             if block_hash.is_some() {
                                 return Err(serde::de::Error::custom(
                                     "fromBlock not allowed with blockHash",
-                                ));
+                                ))
                             }
                             from_block = Some(map.next_value()?)
                         }
                         "toBlock" => {
                             if to_block.is_some() {
-                                return Err(serde::de::Error::duplicate_field("toBlock"));
+                                return Err(serde::de::Error::duplicate_field("toBlock"))
                             }
                             if block_hash.is_some() {
                                 return Err(serde::de::Error::custom(
                                     "toBlock not allowed with blockHash",
-                                ));
+                                ))
                             }
                             to_block = Some(map.next_value()?)
                         }
                         "blockHash" => {
                             if block_hash.is_some() {
-                                return Err(serde::de::Error::duplicate_field("blockHash"));
+                                return Err(serde::de::Error::duplicate_field("blockHash"))
                             }
                             if from_block.is_some() || to_block.is_some() {
                                 return Err(serde::de::Error::custom(
                                     "fromBlock,toBlock not allowed with blockHash",
-                                ));
+                                ))
                             }
                             block_hash = Some(map.next_value()?)
                         }
                         "address" => {
                             if address.is_some() {
-                                return Err(serde::de::Error::duplicate_field("address"));
+                                return Err(serde::de::Error::duplicate_field("address"))
                             }
                             address = Some(map.next_value()?)
                         }
                         "topics" => {
                             if topics.is_some() {
-                                return Err(serde::de::Error::duplicate_field("topics"));
+                                return Err(serde::de::Error::duplicate_field("topics"))
                             }
                             topics = Some(map.next_value()?)
                         }
@@ -507,7 +507,7 @@ impl<'de> Deserialize<'de> for Filter {
 
                 // maximum allowed filter len
                 if topics_vec.len() > 4 {
-                    return Err(serde::de::Error::custom("exceeded maximum topics len"));
+                    return Err(serde::de::Error::custom("exceeded maximum topics len"))
                 }
                 let mut topics: [Option<Topic>; 4] = [None, None, None, None];
                 for (idx, topic) in topics_vec.into_iter().enumerate() {
@@ -618,7 +618,7 @@ where
         let value = serde_json::Value::deserialize(deserializer)?;
 
         if value.is_null() {
-            return Ok(ValueOrArray::Array(Vec::new()));
+            return Ok(ValueOrArray::Array(Vec::new()))
         }
 
         #[derive(Deserialize)]
@@ -671,7 +671,7 @@ impl FilteredParams {
     /// Returns `true` if the bloom matches the topics
     pub fn matches_topics(bloom: Bloom, topic_filters: &[BloomFilter]) -> bool {
         if topic_filters.is_empty() {
-            return true;
+            return true
         }
 
         // returns true if a filter matches
@@ -680,11 +680,11 @@ impl FilteredParams {
             for maybe_bloom in filter {
                 is_match = maybe_bloom.as_ref().map(|b| bloom.contains_bloom(b)).unwrap_or(true);
                 if !is_match {
-                    break;
+                    break
                 }
             }
             if is_match {
-                return true;
+                return true
             }
         }
         false
@@ -693,11 +693,11 @@ impl FilteredParams {
     /// Returns `true` if the bloom contains the address
     pub fn matches_address(bloom: Bloom, address_filter: &BloomFilter) -> bool {
         if address_filter.is_empty() {
-            return true;
+            return true
         } else {
             for maybe_bloom in address_filter {
                 if maybe_bloom.as_ref().map(|b| bloom.contains_bloom(b)).unwrap_or(true) {
-                    return true;
+                    return true
                 }
             }
         }
@@ -724,14 +724,14 @@ impl FilteredParams {
             }
         };
         if out.is_empty() {
-            return None;
+            return None
         }
         Some(out)
     }
 
     pub fn filter_block_range(&self, block_number: u64) -> bool {
         if self.filter.is_none() {
-            return true;
+            return true
         }
         let filter = self.filter.as_ref().unwrap();
         let mut res = true;
@@ -761,7 +761,7 @@ impl FilteredParams {
     pub fn filter_block_hash(&self, block_hash: H256) -> bool {
         if let Some(h) = self.filter.as_ref().and_then(|f| f.get_block_hash()) {
             if h != block_hash {
-                return false;
+                return false
             }
         }
         true
@@ -772,15 +772,15 @@ impl FilteredParams {
             match input_address {
                 ValueOrArray::Value(x) => {
                     if log.address != *x {
-                        return false;
+                        return false
                     }
                 }
                 ValueOrArray::Array(x) => {
                     if x.is_empty() {
-                        return true;
+                        return true
                     }
                     if !x.contains(&log.address) {
-                        return false;
+                        return false
                     }
                 }
             }
@@ -802,7 +802,7 @@ impl FilteredParams {
                 ValueOrArray::Array(multi) => {
                     if multi.is_empty() {
                         out = true;
-                        continue;
+                        continue
                     }
                     // Shrink the topics until the last item is Some.
                     let mut new_multi = multi;
@@ -812,7 +812,7 @@ impl FilteredParams {
                     // We can discard right away any logs with lesser topics than the filter.
                     if new_multi.len() > log.topics.len() {
                         out = false;
-                        break;
+                        break
                     }
                     let replaced: Option<Vec<H256>> =
                         self.replace(log, ValueOrArray::Array(new_multi));
@@ -820,7 +820,7 @@ impl FilteredParams {
                         out = false;
                         if log.topics.starts_with(&replaced[..]) {
                             out = true;
-                            break;
+                            break
                         }
                     }
                 }

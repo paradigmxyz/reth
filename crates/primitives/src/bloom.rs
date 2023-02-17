@@ -20,7 +20,7 @@ impl_fixed_hash_type!((Bloom, BLOOM_SIZE));
 /// Returns log2.
 fn log2(x: usize) -> u32 {
     if x <= 1 {
-        return 0;
+        return 0
     }
 
     let n = x.leading_zeros();
@@ -173,7 +173,7 @@ impl<'a> BloomRef<'a> {
             let a = self.0[i];
             let b = bloom_ref.0[i];
             if (a & b) != b {
-                return false;
+                return false
             }
         }
         true
