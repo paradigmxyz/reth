@@ -1,7 +1,7 @@
 //! Disconnect
 
-use bytes::Buf;
 use reth_codecs::derive_arbitrary;
+use reth_primitives::bytes::{Buf, BufMut};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use std::fmt::Display;
 use thiserror::Error;
@@ -104,7 +104,7 @@ impl TryFrom<u8> for DisconnectReason {
 /// The [`Encodable`](reth_rlp::Encodable) implementation for [`DisconnectReason`] encodes the
 /// disconnect reason in a single-element RLP list.
 impl Encodable for DisconnectReason {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
+    fn encode(&self, out: &mut dyn BufMut) {
         vec![*self as u8].encode(out);
     }
     fn length(&self) -> usize {
@@ -146,6 +146,7 @@ impl Decodable for DisconnectReason {
 #[cfg(test)]
 mod tests {
     use crate::{p2pstream::P2PMessage, DisconnectReason};
+    use reth_primitives::hex;
     use reth_rlp::{Decodable, Encodable};
 
     fn all_reasons() -> Vec<DisconnectReason> {

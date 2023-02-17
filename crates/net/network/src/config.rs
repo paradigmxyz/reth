@@ -274,19 +274,16 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Sets the discovery service off on true.
-    // TODO(onbjerg): This name does not imply `true` = disable
-    pub fn set_discovery(mut self, disable_discovery: bool) -> Self {
-        if disable_discovery {
-            self.disable_discovery();
-        }
+    /// Disable the DNS discovery.
+    pub fn disable_dns_discovery(mut self) -> Self {
+        self.dns_discovery_config = None;
         self
     }
 
-    /// Disables all discovery services.
-    pub fn disable_discovery(&mut self) {
+    /// Disable the Discv4 discovery.
+    pub fn disable_discv4_discovery(mut self) -> Self {
         self.discovery_v4_builder = None;
-        self.dns_discovery_config = None;
+        self
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]

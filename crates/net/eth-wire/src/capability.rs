@@ -1,8 +1,8 @@
 //! All capability related types
 
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
-use bytes::{BufMut, Bytes};
 use reth_codecs::add_arbitrary_tests;
+use reth_primitives::bytes::{BufMut, Bytes};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use smol_str::SmolStr;
 

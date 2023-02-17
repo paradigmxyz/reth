@@ -156,6 +156,9 @@ impl Discovery {
                     self.on_discv4_update(update);
                 }
             }
+            DiscoveryUpdate::DiscoveredAtCapacity(record) => {
+                self.on_node_record_update(record, None);
+            }
         }
     }
 

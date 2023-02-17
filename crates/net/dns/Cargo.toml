@@ -31,7 +31,6 @@ trust-dns-resolver = "0.22"
 # misc
 data-encoding = "2"
 async-trait = "0.1"
-bytes = "1.2"
 linked_hash_set = "0.1"
 lru = "0.9"
 thiserror = "1.0"

@@ -6,8 +6,10 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
+use std::ops::RangeBounds;
 
 mod state;
+use reth_db::cursor::DbCursorRO;
 pub use state::{
     chain::ChainState,
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
@@ -62,6 +64,18 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
                 Ok(None)
             }
         })?
+    }
+
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+        self.db
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::Headers>()?;
+                cursor
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
     }
 }
 

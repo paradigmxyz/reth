@@ -96,8 +96,8 @@ impl Error {
     }
 
     /// Converts an [Error] to the raw error code.
-    pub fn to_err_code(&self) -> u32 {
-        let err_code = match self {
+    pub fn to_err_code(&self) -> i32 {
+        match self {
             Error::KeyExist => ffi::MDBX_KEYEXIST,
             Error::NotFound => ffi::MDBX_NOTFOUND,
             Error::NoData => ffi::MDBX_ENODATA,
@@ -129,12 +129,11 @@ impl Error {
             Error::BadSignature => ffi::MDBX_EBADSIGN,
             Error::Other(err_code) => *err_code,
             _ => unreachable!(),
-        };
-        err_code as u32
+        }
     }
 }
 
-impl From<Error> for u32 {
+impl From<Error> for i32 {
     fn from(value: Error) -> Self {
         value.to_err_code()
     }
@@ -145,7 +144,7 @@ impl fmt::Display for Error {
         let value = match self {
             Self::DecodeErrorLenDiff => "Mismatched data length",
             _ => unsafe {
-                let err = ffi::mdbx_strerror(self.to_err_code() as i32);
+                let err = ffi::mdbx_strerror(self.to_err_code());
                 str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes())
             },
         };

@@ -3,10 +3,12 @@ use crate::{
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     types::{EthMessage, ProtocolMessage, Status},
 };
-use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_primitives::ForkFilter;
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    ForkFilter,
+};
 use reth_rlp::{Decodable, Encodable};
 use std::{
     pin::Pin,

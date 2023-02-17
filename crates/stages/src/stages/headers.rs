@@ -85,7 +85,7 @@ where
         let (_, head) = header_cursor
             .seek_exact(head_num)?
             .ok_or(ProviderError::Header { number: head_num })?;
-        let local_head = SealedHeader::new(head, head_hash);
+        let local_head = head.seal(head_hash);
 
         // Look up the next header
         let next_header = cursor
@@ -94,7 +94,7 @@ where
                 let (_, next) = header_cursor
                     .seek_exact(next_num)?
                     .ok_or(ProviderError::Header { number: next_num })?;
-                Ok(SealedHeader::new(next, next_hash))
+                Ok(next.seal(next_hash))
             })
             .transpose()?;
 
@@ -372,7 +372,7 @@ mod tests {
                                 // validate the header
                                 let header = tx.get::<tables::Headers>(block_num)?;
                                 assert!(header.is_some());
-                                let header = header.unwrap().seal();
+                                let header = header.unwrap().seal_slow();
                                 assert_eq!(header.hash(), hash);
                             }
                             Ok(())

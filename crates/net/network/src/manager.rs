@@ -664,12 +664,16 @@ where
                         SwarmEvent::PeerAdded(peer_id) => {
                             trace!(target: "net", ?peer_id, "Peer added");
                             this.event_listeners.send(NetworkEvent::PeerAdded(peer_id));
-                            this.metrics.tracked_peers.increment(1f64);
+                            this.metrics
+                                .tracked_peers
+                                .set(this.swarm.state().peers().num_known_peers() as f64);
                         }
                         SwarmEvent::PeerRemoved(peer_id) => {
                             trace!(target: "net", ?peer_id, "Peer dropped");
                             this.event_listeners.send(NetworkEvent::PeerRemoved(peer_id));
-                            this.metrics.tracked_peers.decrement(1f64);
+                            this.metrics
+                                .tracked_peers
+                                .set(this.swarm.state().peers().num_known_peers() as f64);
                         }
                         SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                             let total_active =
