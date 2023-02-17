@@ -6,7 +6,7 @@ use reth_primitives::{BlockHash, BlockNumber, H64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{EngineApiError, EngineApiMessage, EngineApiResult};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBody, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
     TransitionConfiguration,
 };
 use tokio::sync::{
@@ -35,7 +35,9 @@ impl EngineApi {
         let _ = self.engine_tx.send(msg);
         rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(|err| {
             let code = match err {
+                EngineApiError::PayloadRangeInvalidParams { .. } => -32602,
                 EngineApiError::PayloadUnknown => -38001,
+                EngineApiError::PayloadRequestTooLarge { .. } => -38004,
                 // Any other server error
                 _ => jsonrpsee::types::error::INTERNAL_ERROR_CODE,
             };
@@ -103,7 +105,7 @@ impl EngineApiServer for EngineApi {
     async fn get_payload_bodies_by_hash_v1(
         &self,
         _block_hashes: Vec<BlockHash>,
-    ) -> Result<Vec<ExecutionPayloadBody>> {
+    ) -> Result<ExecutionPayloadBodies> {
         // TODO:
         Err(internal_rpc_err("unimplemented"))
     }
@@ -113,7 +115,7 @@ impl EngineApiServer for EngineApi {
         &self,
         _start: BlockNumber,
         _count: u64,
-    ) -> Result<Vec<ExecutionPayloadBody>> {
+    ) -> Result<ExecutionPayloadBodies> {
         // TODO:
         Err(internal_rpc_err("unimplemented"))
     }

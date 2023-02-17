@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBody, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
     PayloadStatusEnum, TransitionConfiguration,
 };
 use std::{
@@ -51,8 +51,12 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             EngineApiMessage::GetPayload(payload_id, tx) => {
                 let _ = tx.send(self.get_payload(payload_id).ok_or(EngineApiError::PayloadUnknown));
             }
-            EngineApiMessage::GetPayloadBodiesByHash(_, _) => {}
-            EngineApiMessage::GetPayloadBodiesByRange(..) => {}
+            EngineApiMessage::GetPayloadBodiesByHash(hashes, tx) => {
+                let _ = tx.send(self.get_payload_bodies_by_hash(hashes));
+            }
+            EngineApiMessage::GetPayloadBodiesByRange(start, count, tx) => {
+                let _ = tx.send(self.get_payload_bodies_by_range(start, count));
+            }
             EngineApiMessage::NewPayload(payload, tx) => {
                 let _ = tx.send(self.new_payload(payload));
             }
@@ -138,24 +142,28 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
         None
     }
 
-    /// TODO:
+    /// Called to retrieve execution payload bodies by range.
     pub fn get_payload_bodies_by_range(
         &self,
-        _start: BlockNumber,
+        start: BlockNumber,
         count: u64,
-    ) -> EngineApiResult<Vec<ExecutionPayloadBody>> {
+    ) -> EngineApiResult<ExecutionPayloadBodies> {
         if count > PAYLOAD_BODIES_LIMIT {
             return Err(EngineApiError::PayloadRequestTooLarge { len: count })
+        }
+
+        if start < 1 || count < 1 {
+            return Err(EngineApiError::PayloadRangeInvalidParams { start, count })
         }
 
         todo!()
     }
 
-    /// TODO:
+    /// Called to retrieve execution payload bodies by hashes.
     pub fn get_payload_bodies_by_hash(
         &self,
         hashes: Vec<BlockHash>,
-    ) -> EngineApiResult<Vec<ExecutionPayloadBody>> {
+    ) -> EngineApiResult<ExecutionPayloadBodies> {
         let len = hashes.len() as u64;
         if len > PAYLOAD_BODIES_LIMIT {
             return Err(EngineApiError::PayloadRequestTooLarge { len })

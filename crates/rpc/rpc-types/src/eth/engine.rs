@@ -74,6 +74,9 @@ pub struct ExecutionPayloadBody {
     withdrawals: Vec<Withdrawal>,
 }
 
+/// The execution payload body response that allows for `null` values.
+pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
+
 /// This structure encapsulates the fork choice state
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

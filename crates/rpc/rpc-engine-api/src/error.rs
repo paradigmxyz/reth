@@ -47,6 +47,14 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
+    /// The payload range params are invalid.
+    #[error("Invalid payload range. Start: {start}. Count: {count}")]
+    PayloadRangeInvalidParams {
+        /// The range start
+        start: u64,
+        /// The range count
+        count: u64,
+    },
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
         "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
