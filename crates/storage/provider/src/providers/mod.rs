@@ -5,7 +5,9 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
+use reth_primitives::{
+    rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, ChainSpec, Hardfork, Header, H256, U256,
+};
 use std::ops::RangeBounds;
 
 mod state;
@@ -22,18 +24,20 @@ pub use state::{
 pub struct ShareableDatabase<DB> {
     /// Database
     db: DB,
+    /// Chain spec
+    chain_spec: ChainSpec,
 }
 
 impl<DB> ShareableDatabase<DB> {
     /// create new database provider
-    pub fn new(db: DB) -> Self {
-        Self { db }
+    pub fn new(db: DB, chain_spec: ChainSpec) -> Self {
+        Self { db, chain_spec }
     }
 }
 
 impl<DB: Clone> Clone for ShareableDatabase<DB> {
     fn clone(&self) -> Self {
-        Self { db: self.db.clone() }
+        Self { db: self.db.clone(), chain_spec: self.chain_spec.clone() }
     }
 }
 
@@ -99,8 +103,42 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
         Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
     }
 
-    fn block(&self, _id: BlockId) -> Result<Option<Block>> {
-        // TODO
+    fn block(&self, id: BlockId) -> Result<Option<Block>> {
+        if let Some(number) = self.block_number_for_id(id)? {
+            if let Some(header) = self.header_by_number(number)? {
+                let tx = self.db.tx()?;
+                let body = tx
+                    .get::<tables::BlockBodies>(header.number)?
+                    .ok_or(Error::BlockBody { number })?;
+
+                let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+                let mut transactions = Vec::with_capacity(body.tx_count as usize);
+                for id in body.tx_id_range() {
+                    let (_, transaction) =
+                        tx_cursor.seek_exact(id)?.ok_or(Error::Transaction { id })?;
+                    transactions.push(transaction);
+                }
+
+                let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
+
+                let header_timestamp = header.timestamp;
+                let mut block = Block {
+                    header,
+                    body: transactions,
+                    ommers: ommers.unwrap_or_default(),
+                    withdrawals: None,
+                };
+
+                if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header_timestamp) {
+                    let withdrawals =
+                        tx.get::<tables::BlockWithdrawals>(number)?.map(|w| w.withdrawals);
+                    block.withdrawals = Some(withdrawals.unwrap_or_default());
+                }
+
+                return Ok(Some(block))
+            }
+        }
+
         Ok(None)
     }
 
@@ -149,19 +187,21 @@ mod tests {
 
     use super::ShareableDatabase;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_primitives::H256;
+    use reth_primitives::{ChainSpecBuilder, H256};
 
     #[test]
     fn common_history_provider() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db);
+        let provider = ShareableDatabase::new(db, chain_spec);
         let _ = provider.latest();
     }
 
     #[test]
     fn default_chain_info() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db);
+        let provider = ShareableDatabase::new(db, chain_spec);
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);

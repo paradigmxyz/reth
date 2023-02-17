@@ -136,7 +136,7 @@ impl Command {
                 let network = self
                     .network
                     .network_config(&config, self.chain.clone())
-                    .build(Arc::new(ShareableDatabase::new(db.clone())))
+                    .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
                     .start_network()
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);
