@@ -44,16 +44,22 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
+        # Install sccache
         curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-x86_64-unknown-linux-musl.tar.gz 
         tar -xvzf sccache.tar.gz
         mv sccache-${{ inputs.sccache_version }}-x86_64-unknown-linux-musl/sccache /home/runner/.cargo/bin/sccache
         rm -rf sccache*
         chmod +x /home/runner/.cargo/bin/sccache
 
+        # Install and set up mold
+        curl -L --retry 10 --silent --show-error https://github.com/rui314/mold/releases/download/v1.10.1/mold-1.10.1-$(uname -m)-linux.tar.gz | sudo tar -C /usr/local --strip-components=1 -xzf -
+        sudo ln -sf /usr/local/bin/mold "$(realpath /usr/bin/ld)"
+
     - name: Bootstrap Environment (macOS)
       if: runner.os == 'macOS'
       shell: bash
       run: |
+        # Install sccache
         curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-x86_64-apple-darwin.tar.gz
         tar -xvzf sccache.tar.gz
         mv sccache-${{ inputs.sccache_version }}-x86_64-apple-darwin/sccache /Users/runner/.cargo/bin/sccache
@@ -64,6 +70,7 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
+        # Install sccache
         curl -L -o sccache.tar.gz https://github.com/mozilla/sccache/releases/download/${{ inputs.sccache_version }}/sccache-${{ inputs.sccache_version }}-x86_64-pc-windows-msvc.tar.gz 
         tar -xvzf sccache.tar.gz
         mv sccache-${{ inputs.sccache_version }}-x86_64-pc-windows-msvc/sccache.exe C:/Users/runneradmin/.cargo/bin/sccache.exe
