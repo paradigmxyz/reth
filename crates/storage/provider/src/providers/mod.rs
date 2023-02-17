@@ -104,12 +104,7 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
     }
 
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
-        let block_number = match id {
-            BlockId::Number(num) => self.convert_block_number(num)?,
-            BlockId::Hash(hash) => self.block_number(H256(hash.0))?,
-        };
-
-        if let Some(number) = block_number {
+        if let Some(number) = self.block_number_for_id(id)? {
             if let Some(header) = self.header_by_number(number)? {
                 let tx = self.db.tx()?;
                 let body = tx
