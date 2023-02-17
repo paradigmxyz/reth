@@ -1308,9 +1308,20 @@ impl Discv4Service {
     }
 
     /// Validate that given timestamp is not expired.
-    fn ensure_not_expired(&self, expiration: u64) -> Result<(), ()> {
+    ///
+    /// Note: this accepts the timestamp as u64 because this is used by the wire protocol, but the
+    /// UNIX timestamp (number of non-leap seconds since January 1, 1970 0:00:00 UTC) is supposed to
+    /// be an i64.
+    ///
+    /// Returns an error if:
+    ///  - invalid UNIX timestamp (larger than i64::MAX)
+    ///  - timestamp is expired (lower than current local UNIX timestamp)
+    fn ensure_not_expired(&self, timestamp: u64) -> Result<(), ()> {
+        // ensure the timestamp is a valid UNIX timestamp
+        let _ = i64::try_from(timestamp).map_err(|_| ())?;
+
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if self.config.enforce_expiration_timestamps && expiration < now {
+        if self.config.enforce_expiration_timestamps && timestamp < now {
             debug!(target: "discv4", "Expired packet");
             return Err(())
         }
