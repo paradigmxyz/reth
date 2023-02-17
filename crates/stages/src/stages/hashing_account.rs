@@ -82,25 +82,32 @@ impl AccountHashingStage {
         for block in blocks {
             insert_canonical_block(&**tx, &block, true).unwrap();
         }
+        let mut accounts = random_eoa_account_range(opts.accounts);
+        {
+            // Account State generator
+            let mut account_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
+            accounts.sort_by(|a, b| a.0.cmp(&b.0));
+            for (addr, acc) in accounts.iter() {
+                account_cursor.append(*addr, *acc)?;
+            }
 
-        // Account State generator
-        let accounts = random_eoa_account_range(opts.accounts);
-        for (addr, acc) in accounts.iter() {
-            tx.put::<tables::PlainAccountState>(*addr, *acc)?;
-        }
+            // seed account changeset
+            let (_, last_transition) =
+                tx.cursor_read::<tables::BlockTransitionIndex>()?.last()?.unwrap();
 
-        // seed account changeset
-        let (_, last_transition) =
-            tx.cursor_read::<tables::BlockTransitionIndex>()?.last()?.unwrap();
+            let first_transition = last_transition.checked_sub(transitions).unwrap_or_default();
 
-        let first_transition = last_transition.checked_sub(transitions).unwrap_or_default();
-
-        for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
-            let Account { nonce, balance, .. } = acc;
-            let prev_acc =
-                Account { nonce: nonce - 1, balance: balance - U256::from(1), bytecode_hash: None };
-            let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
-            tx.put::<tables::AccountChangeSet>(t, acc_before_tx)?;
+            let mut acc_changeset_cursor = tx.cursor_write::<tables::AccountChangeSet>()?;
+            for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
+                let Account { nonce, balance, .. } = acc;
+                let prev_acc = Account {
+                    nonce: nonce - 1,
+                    balance: balance - U256::from(1),
+                    bytecode_hash: None,
+                };
+                let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
+                acc_changeset_cursor.append(t, acc_before_tx)?;
+            }
         }
 
         tx.commit()?;
