@@ -149,14 +149,21 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         .map(|res| res.map(|(address, account)| (keccak256(address), account)))
                         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-                    // next key of iterator
-                    let next_key = accounts.next()?;
-
                     // iterate and put presorted hashed accounts
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| tx.put::<tables::HashedAccount>(k, v))?;
-                    next_key
+                    if first_key.is_none() {
+                        let mut hashed_account_cursor =
+                            tx.cursor_write::<tables::HashedAccount>()?;
+                        hashed_batch
+                            .into_iter()
+                            .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
+                    } else {
+                        hashed_batch
+                            .into_iter()
+                            .try_for_each(|(k, v)| tx.put::<tables::HashedAccount>(k, v))?;
+                    }
+
+                    // next key of iterator
+                    accounts.next()?
                 };
                 tx.commit()?;
                 if let Some((next_key, _)) = next_key {
