@@ -1,14 +1,14 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider,
-    StateProviderFactory,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, HeaderProvider,
+    StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
-    U256,
+    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue,
+    TransactionSigned, TxHash, H256, U256,
 };
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
 
@@ -119,6 +119,34 @@ impl HeaderProvider for MockEthProvider {
     }
 }
 
+impl TransactionsProvider for MockEthProvider {
+    fn transaction_by_id(
+        &self,
+        _id: reth_primitives::TxNumber,
+    ) -> Result<Option<TransactionSigned>> {
+        unimplemented!()
+    }
+
+    fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
+        Ok(self
+            .blocks
+            .lock()
+            .iter()
+            .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash == hash).cloned()))
+    }
+
+    fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+        Ok(self.block(id)?.map(|b| b.body))
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        _range: impl RangeBounds<reth_primitives::BlockNumber>,
+    ) -> Result<Vec<Vec<TransactionSigned>>> {
+        unimplemented!()
+    }
+}
+
 impl BlockHashProvider for MockEthProvider {
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
         let lock = self.blocks.lock();
@@ -137,7 +165,7 @@ impl BlockHashProvider for MockEthProvider {
     }
 }
 
-impl BlockProvider for MockEthProvider {
+impl BlockIdProvider for MockEthProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         let lock = self.headers.lock();
         Ok(lock
@@ -152,6 +180,14 @@ impl BlockProvider for MockEthProvider {
             .expect("provider is empty"))
     }
 
+    fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
+        let lock = self.blocks.lock();
+        let num = lock.iter().find_map(|(h, b)| if *h == hash { Some(b.number) } else { None });
+        Ok(num)
+    }
+}
+
+impl BlockProvider for MockEthProvider {
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
@@ -163,12 +199,6 @@ impl BlockProvider for MockEthProvider {
                 unreachable!("unused in network tests")
             }
         }
-    }
-
-    fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
-        let lock = self.blocks.lock();
-        let num = lock.iter().find_map(|(h, b)| if *h == hash { Some(b.number) } else { None });
-        Ok(num)
     }
 }
 

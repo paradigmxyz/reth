@@ -9,8 +9,17 @@ pub use block::BlockProvider;
 mod block_hash;
 pub use block_hash::BlockHashProvider;
 
+mod block_id;
+pub use block_id::BlockIdProvider;
+
 mod header;
 pub use header::HeaderProvider;
 
 mod state;
 pub use state::{StateProvider, StateProviderFactory};
+
+mod transactions;
+pub use transactions::TransactionsProvider;
+
+mod withdrawals;
+pub use withdrawals::WithdrawalsProvider;
