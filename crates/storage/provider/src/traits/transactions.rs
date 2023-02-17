@@ -3,7 +3,7 @@ use reth_interfaces::Result;
 use reth_primitives::{rpc::BlockId, BlockNumber, TransactionSigned, TxHash, TxNumber};
 use std::ops::RangeBounds;
 
-///  Client trait for fetching [Transaction] related data.
+///  Client trait for fetching [TransactionSigned] related data.
 pub trait TransactionsProvider: BlockIdProvider + Send + Sync {
     /// Get transaction by id.
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>>;
