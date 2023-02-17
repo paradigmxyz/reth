@@ -4924,6 +4924,7 @@ dependencies = [
  "async-trait",
  "cita_trie",
  "criterion",
+ "eyre",
  "futures-util",
  "hasher",
  "itertools 0.10.5",

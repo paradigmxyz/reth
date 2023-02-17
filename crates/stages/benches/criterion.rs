@@ -17,7 +17,7 @@ mod setup;
 criterion_group! {
     name = benches;
     config = Criterion::default().with_profiler(perf::FlamegraphProfiler::new(100));
-    targets = account_hashing //, transaction_lookup, senders, total_difficulty
+    targets = transaction_lookup, account_hashing, senders, total_difficulty
 }
 criterion_main!(benches);
 
@@ -103,7 +103,16 @@ fn measure_stage_with_path<S: Clone + Default + Stage<Env<WriteMap>>>(
                     let mut db_tx = tx.inner();
 
                     // Clear previous run
-                    stage.unwind(&mut db_tx, unwind).await.unwrap();
+                    stage
+                        .unwind(&mut db_tx, unwind)
+                        .await
+                        .map_err(|e| {
+                            eyre::eyre!(format!(
+                                "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
+                                path.display()
+                            ))
+                        })
+                        .unwrap();
 
                     db_tx.commit().unwrap();
                 });
