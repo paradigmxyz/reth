@@ -61,12 +61,14 @@ where
     // Implemented
     EthApiClient::protocol_version(client).await.unwrap();
     EthApiClient::chain_id(client).await.unwrap();
-    EthApiClient::chain_id(client).await.unwrap();
     EthApiClient::accounts(client).await.unwrap();
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
     EthApiClient::fee_history(client, 0.into(), block_number.into(), None).await.unwrap();
+    EthApiClient::balance(client, address, None).await.unwrap();
+    EthApiClient::transaction_count(client, address, None).await.unwrap();
+    EthApiClient::storage_at(client, address, U256::default(), None).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
@@ -109,13 +111,6 @@ where
             .unwrap()
     ));
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
-    assert!(is_unimplemented(EthApiClient::balance(client, address, None).await.err().unwrap()));
-    assert!(is_unimplemented(
-        EthApiClient::storage_at(client, address, U256::default(), None).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::transaction_count(client, address, None).await.err().unwrap()
-    ));
     assert!(is_unimplemented(
         EthApiClient::call(client, call_request.clone(), None).await.err().unwrap()
     ));
