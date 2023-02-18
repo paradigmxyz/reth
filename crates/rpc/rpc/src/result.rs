@@ -145,6 +145,11 @@ pub(crate) fn internal_rpc_err_with_data(
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, Some(data))
 }
 
+/// Constructs an internal JSON-RPC error with code and message
+pub(crate) fn rpc_error_with_code(code: i32, msg: impl Into<String>) -> jsonrpsee::core::Error {
+    rpc_err(code, msg, None)
+}
+
 /// Constructs a JSON-RPC error, consisting of `code`, `message` and optional `data`.
 pub(crate) fn rpc_err(code: i32, msg: impl Into<String>, data: Option<&[u8]>) -> RpcError {
     RpcError::Call(jsonrpsee::types::error::CallError::Custom(

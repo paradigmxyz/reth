@@ -3,7 +3,7 @@ use crate::BlockHashProvider;
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, H256, KECCAK_EMPTY,
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, H256, KECCAK_EMPTY, U256,
 };
 
 /// An abstraction for a type that provides state data.
@@ -36,6 +36,30 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
 
         // Return `None` if no code hash is set
         Ok(None)
+    }
+
+    /// Get account balance by its address.
+    ///
+    /// Returns `None` if the account doesn't exist
+    fn account_balance(&self, addr: Address) -> Result<Option<U256>> {
+        // Get basic account information
+        // Returns None if acc doesn't exist
+        match self.basic_account(addr)? {
+            Some(acc) => Ok(Some(acc.balance)),
+            None => Ok(None),
+        }
+    }
+
+    /// Get account nonce by its address.
+    ///
+    /// Returns `None` if the account doesn't exist
+    fn account_nonce(&self, addr: Address) -> Result<Option<u64>> {
+        // Get basic account information
+        // Returns None if acc doesn't exist
+        match self.basic_account(addr)? {
+            Some(acc) => Ok(Some(acc.nonce)),
+            None => Ok(None),
+        }
     }
 }
 

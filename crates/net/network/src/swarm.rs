@@ -286,7 +286,7 @@ where
 
 impl<C> Stream for Swarm<C>
 where
-    C: BlockProvider,
+    C: BlockProvider + Unpin,
 {
     type Item = SwarmEvent;
 

@@ -353,8 +353,6 @@ pub struct Discv4Service {
     _tasks: JoinSet<()>,
     /// The routing table.
     kbuckets: KBucketsTable<NodeKey, NodeEntry>,
-    /// Whether to respect timestamps
-    check_timestamps: bool,
     /// Receiver for incoming messages
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
@@ -474,7 +472,6 @@ impl Discv4Service {
             pending_pings: Default::default(),
             pending_find_nodes: Default::default(),
             pending_enr_requests: Default::default(),
-            check_timestamps: false,
             commands_rx,
             update_listeners: Vec::with_capacity(1),
             lookup_interval: self_lookup_interval,
@@ -812,13 +809,18 @@ impl Discv4Service {
         match self.kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
                 let node = NodeEntry::new(record);
-                let _ = entry.insert(
+                match entry.insert(
                     node,
                     NodeStatus {
                         direction: ConnectionDirection::Outgoing,
                         state: ConnectionState::Disconnected,
                     },
-                );
+                ) {
+                    BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
+                        debug!(target : "discv4",  ?record, "inserted new record");
+                    }
+                    _ => return,
+                }
             }
             _ => return,
         }
@@ -1311,9 +1313,20 @@ impl Discv4Service {
     }
 
     /// Validate that given timestamp is not expired.
-    fn ensure_not_expired(&self, expiration: u64) -> Result<(), ()> {
+    ///
+    /// Note: this accepts the timestamp as u64 because this is used by the wire protocol, but the
+    /// UNIX timestamp (number of non-leap seconds since January 1, 1970 0:00:00 UTC) is supposed to
+    /// be an i64.
+    ///
+    /// Returns an error if:
+    ///  - invalid UNIX timestamp (larger than i64::MAX)
+    ///  - timestamp is expired (lower than current local UNIX timestamp)
+    fn ensure_not_expired(&self, timestamp: u64) -> Result<(), ()> {
+        // ensure the timestamp is a valid UNIX timestamp
+        let _ = i64::try_from(timestamp).map_err(|_| ())?;
+
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if self.check_timestamps && expiration < now {
+        if self.config.enforce_expiration_timestamps && timestamp < now {
             debug!(target: "discv4", "Expired packet");
             return Err(())
         }
@@ -1979,7 +1992,7 @@ mod tests {
         let ping = Ping {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
-            expire: 0,
+            expire: service.ping_expiration(),
             enr_sq: Some(rng.gen()),
         };
 
@@ -1993,6 +2006,34 @@ mod tests {
                 assert!(node_addr.is_ipv4());
                 assert_eq!(node_addr, IpAddr::from(v4));
             }
+            _ => unreachable!(),
+        };
+    }
+
+    #[tokio::test]
+    async fn test_respect_ping_expiration() {
+        reth_tracing::init_test_tracing();
+        let mut rng = thread_rng();
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+        let v6 = v4.to_ipv6_mapped();
+        let addr: SocketAddr = (v6, 30303).into();
+
+        let ping = Ping {
+            from: rng_endpoint(&mut rng),
+            to: rng_endpoint(&mut rng),
+            expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
+            enr_sq: Some(rng.gen()),
+        };
+
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, H256::random());
+
+        let key = kad_key(id);
+        match service.kbuckets.entry(&key) {
+            kbucket::Entry::Absent(_) => {}
             _ => unreachable!(),
         };
     }

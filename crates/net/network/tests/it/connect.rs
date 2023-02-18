@@ -21,7 +21,7 @@ use reth_primitives::{HeadersDirection, NodeRecord, PeerId};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::task;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -90,12 +90,12 @@ async fn test_already_connected() {
     let mut net = Testnet::default();
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let client = Arc::new(NoopProvider::default());
+    let client = NoopProvider::default();
     let p1 = PeerConfig::default();
 
     // initialize two peers with the same identifier
-    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
-    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
+    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p3 = PeerConfig::with_secret_key(client, secret_key);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
@@ -135,11 +135,11 @@ async fn test_get_peer() {
     let mut net = Testnet::default();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
-    let client = Arc::new(NoopProvider::default());
+    let client = NoopProvider::default();
 
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
-    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
+    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p3 = PeerConfig::with_secret_key(client, secret_key_1);
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
     let mut handles = net.handles();
@@ -169,10 +169,10 @@ async fn test_get_peer_by_id() {
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
-    let client = Arc::new(NoopProvider::default());
+    let client = NoopProvider::default();
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key);
-    let p3 = PeerConfig::with_secret_key(Arc::clone(&client), secret_key_1);
+    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p3 = PeerConfig::with_secret_key(client, secret_key_1);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
@@ -204,9 +204,8 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config = NetworkConfigBuilder::new(secret_key)
-        .discovery(discv4)
-        .build(Arc::new(NoopProvider::default()));
+    let config =
+        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -226,8 +225,8 @@ async fn test_connect_with_builder() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let client = Arc::new(NoopProvider::default());
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(Arc::clone(&client));
+    let client = NoopProvider::default();
+    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -262,8 +261,8 @@ async fn test_connect_to_trusted_peer() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let discv4 = Discv4Config::builder();
 
-    let client = Arc::new(NoopProvider::default());
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(Arc::clone(&client));
+    let client = NoopProvider::default();
+    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -332,7 +331,7 @@ async fn test_incoming_node_id_blacklist() {
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
             .peer_config(peer_config)
-            .build(Arc::new(NoopProvider::default()));
+            .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -380,7 +379,7 @@ async fn test_incoming_connect_with_single_geth() {
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
-            .build(Arc::new(NoopProvider::default()));
+            .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -414,7 +413,7 @@ async fn test_outgoing_connect_with_single_geth() {
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
-            .build(Arc::new(NoopProvider::default()));
+            .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
         let handle = network.handle().clone();
@@ -459,7 +458,7 @@ async fn test_geth_disconnect() {
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_addr(reth_p2p)
             .discovery_addr(reth_disc)
-            .build(Arc::new(NoopProvider::default()));
+            .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
         let handle = network.handle().clone();
@@ -563,7 +562,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
         .listener_addr(reth_p2p)
         .discovery_addr(reth_disc)
         .peer_config(peers_config)
-        .build(Arc::new(NoopProvider::default()));
+        .build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
 
     let other_peer_handle = net.handles().next().unwrap();
