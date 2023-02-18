@@ -1,6 +1,6 @@
 //! Types for broadcasting new data.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Block, TransactionSigned, H256, U128};
+use reth_primitives::{Block, TransactionSigned, TxType, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use std::sync::Arc;
 
@@ -174,9 +174,13 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     }
 }
 
-impl From<(Vec<u8>, Vec<usize>, Vec<H256>)> for NewPooledTransactionHashes {
-    fn from((types, sizes, hashes): (Vec<u8>, Vec<usize>, Vec<H256>)) -> Self {
-        NewPooledTransactionHashes { types: Some(types), sizes: Some(sizes), hashes }
+impl From<(Vec<TxType>, Vec<usize>, Vec<H256>)> for NewPooledTransactionHashes {
+    fn from((types, sizes, hashes): (Vec<TxType>, Vec<usize>, Vec<H256>)) -> Self {
+        NewPooledTransactionHashes {
+            types: Some(types.into_iter().map(|t| t as u8).collect()),
+            sizes: Some(sizes),
+            hashes,
+        }
     }
 }
 
