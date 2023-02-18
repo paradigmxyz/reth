@@ -150,7 +150,7 @@ impl<S> EthStream<S> {
         Self { version, inner }
     }
 
-    /// Returns the stream version.
+    /// Returns the eth version.
     pub fn version(&self) -> EthVersion {
         self.version
     }
