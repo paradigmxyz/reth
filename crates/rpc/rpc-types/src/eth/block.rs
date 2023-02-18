@@ -1,8 +1,8 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as RethHeader, Withdrawal, H256, H64,
-    U256,
+    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, Withdrawal, H256,
+    H64, U256,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -56,51 +56,12 @@ impl Block {
         total_difficulty: U256,
     ) -> Result<Self, BlockError> {
         let block_hash = block.header.hash_slow();
-        let header_length = block.header.length();
         let block_length = block.length();
+        let block_number = block.number;
         let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
+        let base_fee_per_gas = block.header.base_fee_per_gas;
 
-        let RethHeader {
-            parent_hash,
-            ommers_hash,
-            beneficiary,
-            state_root,
-            transactions_root,
-            receipts_root,
-            logs_bloom,
-            difficulty,
-            number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            mix_hash,
-            nonce,
-            base_fee_per_gas,
-            extra_data,
-            withdrawals_root,
-        } = block.header;
-
-        let header = Header {
-            hash: Some(block_hash),
-            parent_hash,
-            uncles_hash: ommers_hash,
-            author: beneficiary,
-            miner: beneficiary,
-            state_root,
-            transactions_root,
-            receipts_root,
-            withdrawals_root,
-            number: Some(U256::from(number)),
-            gas_used: U256::from(gas_used),
-            gas_limit: U256::from(gas_limit),
-            extra_data,
-            logs_bloom,
-            timestamp: U256::from(timestamp),
-            difficulty,
-            mix_hash,
-            nonce: Some(nonce.to_be_bytes().into()),
-            size: Some(U256::from(header_length)),
-        };
+        let header = Header::from_primitive_with_hash(block.header, block_hash);
 
         let mut transactions = Vec::with_capacity(block.body.len());
         for (idx, tx) in block.body.iter().enumerate() {
@@ -108,7 +69,7 @@ impl Block {
             transactions.push(Transaction::from_recovered_with_block_context(
                 signed_tx,
                 block_hash,
-                number,
+                block_number,
                 U256::from(idx),
             ))
         }
@@ -170,11 +131,76 @@ pub struct Header {
     pub size: Option<U256>,
 }
 
+// === impl Header ===
+
+impl Header {
+    /// Converts the primitive header type to this RPC type
+    ///
+    /// CAUTION: this takes the header's hash as is and does _not_ calculate the hash.
+    pub fn from_primitive_with_hash(primitive_header: PrimitiveHeader, block_hash: H256) -> Self {
+        let header_length = primitive_header.length();
+
+        let PrimitiveHeader {
+            parent_hash,
+            ommers_hash,
+            beneficiary,
+            state_root,
+            transactions_root,
+            receipts_root,
+            logs_bloom,
+            difficulty,
+            number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            mix_hash,
+            nonce,
+            base_fee_per_gas: _,
+            extra_data,
+            withdrawals_root,
+        } = primitive_header;
+
+        Header {
+            hash: Some(block_hash),
+            parent_hash,
+            uncles_hash: ommers_hash,
+            author: beneficiary,
+            miner: beneficiary,
+            state_root,
+            transactions_root,
+            receipts_root,
+            withdrawals_root,
+            number: Some(U256::from(number)),
+            gas_used: U256::from(gas_used),
+            gas_limit: U256::from(gas_limit),
+            extra_data,
+            logs_bloom,
+            timestamp: U256::from(timestamp),
+            difficulty,
+            mix_hash,
+            nonce: Some(nonce.to_be_bytes().into()),
+            size: Some(U256::from(header_length)),
+        }
+    }
+}
+
 /// A Block representation that allows to include additional fields
 pub type RichBlock = Rich<Block>;
 
+impl From<Block> for RichBlock {
+    fn from(block: Block) -> Self {
+        Rich { inner: block, extra_info: Default::default() }
+    }
+}
+
 /// Header representation with additional info.
 pub type RichHeader = Rich<Header>;
+
+impl From<Header> for RichHeader {
+    fn from(header: Header) -> Self {
+        Rich { inner: header, extra_info: Default::default() }
+    }
+}
 
 /// Value representation with additional info
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
