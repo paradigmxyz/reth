@@ -648,7 +648,7 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
 
         let header = Header {
-            base_fee_per_gas: Some(1337u64.into()),
+            base_fee_per_gas: Some(1337u64),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()
         }

@@ -4,7 +4,10 @@ use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::cursor::{DbDupCursorRO, DbDupCursorRW};
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    tables::*,
+};
 use std::time::Instant;
 
 criterion_group! {
@@ -64,11 +67,12 @@ where
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                black_box({
+                {
                     for (k, _, _, _) in input {
                         k.encode();
                     }
-                });
+                };
+                black_box(());
             },
         )
     });
@@ -77,11 +81,12 @@ where
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                black_box({
+                {
                     for (_, k, _, _) in input {
                         let _ = <T as Table>::Key::decode(k);
                     }
-                });
+                };
+                black_box(());
             },
         )
     });
@@ -90,11 +95,12 @@ where
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                black_box({
+                {
                     for (_, _, v, _) in input {
                         v.compress();
                     }
-                });
+                };
+                black_box(());
             },
         )
     });
@@ -103,11 +109,12 @@ where
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                black_box({
+                {
                     for (_, _, _, v) in input {
                         let _ = <T as Table>::Value::decompress(v);
                     }
-                });
+                };
+                black_box(());
             },
         )
     });
@@ -177,13 +184,14 @@ where
             // Create TX
             let tx = db.tx().expect("tx");
 
-            black_box({
+            {
                 let mut cursor = tx.cursor_read::<T>().expect("cursor");
                 let walker = cursor.walk(Some(input.first().unwrap().0.clone())).unwrap();
                 for element in walker {
                     element.unwrap();
                 }
-            });
+            };
+            black_box(());
         })
     });
 
@@ -194,12 +202,13 @@ where
             // Create TX
             let tx = db.tx().expect("tx");
 
-            black_box({
+            {
                 for index in RANDOM_INDEXES {
                     let mut cursor = tx.cursor_read::<T>().expect("cursor");
                     cursor.seek_exact(input.get(index).unwrap().0.clone()).unwrap();
                 }
-            });
+            };
+            black_box(());
         })
     });
 }
@@ -267,13 +276,14 @@ where
             // Create TX
             let tx = db.tx().expect("tx");
 
-            black_box({
+            {
                 let mut cursor = tx.cursor_dup_read::<T>().expect("cursor");
                 let walker = cursor.walk_dup(None, Some(T::SubKey::default())).unwrap();
                 for element in walker {
                     element.unwrap();
                 }
-            });
+            };
+            black_box(());
         })
     });
 

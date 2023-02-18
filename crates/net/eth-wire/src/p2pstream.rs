@@ -906,16 +906,15 @@ mod tests {
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
             match unauthed_stream.handshake(server_hello.clone()).await {
-                Ok((_, hello)) => panic!(
-                    "expected handshake to fail, instead got a successful Hello: {:?}",
-                    hello
-                ),
+                Ok((_, hello)) => {
+                    panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
+                }
                 Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
                     assert_eq!(expected, server_hello.protocol_version as u8);
                     assert_ne!(expected, got);
                 }
                 Err(other_err) => {
-                    panic!("expected mismatched protocol version error, got {:?}", other_err)
+                    panic!("expected mismatched protocol version error, got {other_err:?}")
                 }
             }
         });
@@ -931,14 +930,14 @@ mod tests {
         let unauthed_stream = UnauthedP2PStream::new(sink);
         match unauthed_stream.handshake(client_hello.clone()).await {
             Ok((_, hello)) => {
-                panic!("expected handshake to fail, instead got a successful Hello: {:?}", hello)
+                panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
             }
             Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
                 assert_eq!(expected, client_hello.protocol_version as u8);
                 assert_ne!(expected, got);
             }
             Err(other_err) => {
-                panic!("expected mismatched protocol version error, got {:?}", other_err)
+                panic!("expected mismatched protocol version error, got {other_err:?}")
             }
         }
 

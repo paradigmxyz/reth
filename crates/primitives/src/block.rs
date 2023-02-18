@@ -501,7 +501,7 @@ mod test {
     /// Serde tests
     #[test]
     fn serde_blockid_tags() {
-        let block_ids = [Latest, Finalized, Safe, Pending].map(|id| BlockId::from(id));
+        let block_ids = [Latest, Finalized, Safe, Pending].map(BlockId::from);
         for block_id in &block_ids {
             let serialized = serde_json::to_string(&block_id).unwrap();
             let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
@@ -539,7 +539,7 @@ mod test {
         let hash =
             H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
-        assert_eq!(BlockId::from(hash.clone()), block_id);
+        assert_eq!(BlockId::from(hash), block_id);
         let serialized = serde_json::to_string(&BlockId::from(hash)).unwrap();
         assert_eq!("{\"blockHash\":\"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\"}", serialized)
     }
