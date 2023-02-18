@@ -344,11 +344,20 @@ impl Encodable for SealedHeader {
 
 impl Decodable for SealedHeader {
     fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
-        let header = Header::decode(buf)?;
-        // TODO make this more performant, we are not encoding again for a hash.
-        // But i dont know how much of buf is the header or if takeing rlp::Header will
-        // going to consume those buf bytes.
-        Ok(header.seal_slow())
+        let b = &mut &**buf;
+        let started_len = buf.len();
+
+        // decode the header from temp buffer
+        let header = Header::decode(b)?;
+
+        // hash the consumed bytes, the rlp encoded header
+        let consumed = started_len - b.len();
+        let hash = keccak256(&buf[..consumed]);
+
+        // update original buffer
+        *buf = *b;
+
+        Ok(Self { header, hash })
     }
 }
 
