@@ -77,7 +77,6 @@ Small utility crates.
 - [`interfaces`](../../crates/interfaces): Traits containing common abstractions across the components used in the system. For ease of unit testing, each crate importing the interface is recommended to create mock/in-memory implementations of each trait.
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 - [`crate-template`](../../crate-template): Template crate to use when instantiating new crates under `crates/`.
-- [`examples`](../../examples): Example usage of the reth stack as a library.
 
 [fastrlp]: https://crates.io/crates/fastrlp
 [fastrlp-derive]: https://crates.io/crates/fastrlp-derive
