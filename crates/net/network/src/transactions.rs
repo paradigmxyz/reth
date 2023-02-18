@@ -382,7 +382,7 @@ where
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
                 // If we received the transactions as the response to our GetPooledTransactions
-                // requests (based on received `NewPooledTransactionHashe`) then we already
+                // requests (based on received `NewPooledTransactionHashes`) then we already
                 // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]
                 if source.is_broadcast() && !peer.transactions.insert(tx.hash) {
                     num_already_seen += 1;
