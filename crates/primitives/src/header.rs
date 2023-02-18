@@ -325,15 +325,15 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     }
 }
 
-impl From<Block<EthersH256>> for SealedHeader {
-    fn from(block: Block<EthersH256>) -> Self {
-        let header = Header {
+impl From<&Block<EthersH256>> for Header {
+    fn from(block: &Block<EthersH256>) -> Self {
+        Header {
             parent_hash: block.parent_hash.0.into(),
             number: block.number.unwrap().as_u64(),
             gas_limit: block.gas_limit.as_u64(),
             difficulty: block.difficulty.into(),
             nonce: block.nonce.unwrap().to_low_u64_be(),
-            extra_data: block.extra_data.0.into(),
+            extra_data: block.extra_data.0.clone().into(),
             state_root: block.state_root.0.into(),
             transactions_root: block.transactions_root.0.into(),
             receipts_root: block.receipts_root.0.into(),
@@ -345,7 +345,13 @@ impl From<Block<EthersH256>> for SealedHeader {
             gas_used: block.gas_used.as_u64(),
             withdrawals_root: None,
             logs_bloom: block.logs_bloom.unwrap_or_default().0.into(),
-        };
+        }
+    }
+}
+
+impl From<&Block<EthersH256>> for SealedHeader {
+    fn from(block: &Block<EthersH256>) -> Self {
+        let header = Header::from(block);
         match block.hash {
             Some(hash) => header.seal(hash.0.into()),
             None => header.seal_slow(),
