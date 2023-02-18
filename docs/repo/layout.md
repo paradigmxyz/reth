@@ -15,8 +15,8 @@ All binaries are stored in [`bin`](../../bin).
 These crates define primitive types or algorithms such as RLP.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`common/rlp`](../../crates/common/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
-- [`common/rlp-derive`](../../crates/common/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
+- [`rlp`](../../crates/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
+- [`rlp/rlp-derive`](../../crates/rlp/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
 
 ### Storage
 
