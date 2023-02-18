@@ -64,3 +64,50 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_cache_should_insert_into_empty_set() {
+        let limit = NonZeroUsize::new(5).unwrap();
+        let mut cache = LruCache::new(limit);
+        let entry = "entry";
+        assert!(cache.insert(entry));
+        assert!(cache.contains(entry));
+    }
+
+    #[test]
+    fn test_cache_should_not_insert_same_value_twice() {
+        let limit = NonZeroUsize::new(5).unwrap();
+        let mut cache = LruCache::new(limit);
+        let entry = "entry";
+        assert!(cache.insert(entry));
+        assert!(!cache.insert(entry));
+    }
+
+    #[test]
+    fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
+        let limit = NonZeroUsize::new(2).unwrap();
+        let mut cache = LruCache::new(limit);
+        let old_entry = "old_entry";
+        let new_entry = "new_entry";
+        cache.insert(old_entry);
+        cache.insert("entry");
+        cache.insert(new_entry);
+        assert!(cache.contains(new_entry));
+        assert!(!cache.contains(old_entry));
+    }
+
+    #[test]
+    fn test_cache_should_extend_an_array() {
+        let limit = NonZeroUsize::new(5).unwrap();
+        let mut cache = LruCache::new(limit);
+        let entries = ["some_entry", "another_entry"];
+        cache.extend(entries);
+        for e in entries {
+            assert!(cache.contains(e));
+        }
+    }
+}
