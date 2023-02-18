@@ -7,8 +7,8 @@ use futures::FutureExt;
 use reth_eth_wire::{
     capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockBody, BlockHeaders,
     EthMessage, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    NewBlock, NewBlockHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
-    PooledTransactions, Receipts, SharedTransactions, Transactions,
+    NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
+    SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{Bytes, Header, PeerId, Receipt, TransactionSigned, H256};
@@ -49,10 +49,8 @@ pub enum PeerMessage {
     ReceivedTransaction(Transactions),
     /// Broadcast transactions _from_ local _to_ a peer.
     SendTransactions(SharedTransactions),
-    /// Send new pooled transactions (eth/66)
-    PooledTransactions66(NewPooledTransactionHashes66),
-    /// Send new pooled transactions (eth/68)
-    PooledTransactions68(NewPooledTransactionHashes68),
+    /// Send new pooled transactions
+    PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
     EthRequest(PeerRequest),
     /// Other than eth namespace message

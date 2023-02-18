@@ -131,9 +131,52 @@ pub struct NewPooledTransactionHashes68 {
     pub hashes: Vec<H256>,
 }
 
-impl From<(Vec<u8>, Vec<usize>, Vec<H256>)> for NewPooledTransactionHashes68 {
+impl TryFrom<NewPooledTransactionHashes> for NewPooledTransactionHashes68 {
+    type Error = &'static str;
+
+    fn try_from(msg: NewPooledTransactionHashes) -> Result<Self, Self::Error> {
+        if msg.types.is_none() {
+            return Err("`types` is none")
+        }
+        if msg.sizes.is_none() {
+            return Err("`sizes` is none")
+        }
+        Ok(Self { types: msg.types.unwrap(), sizes: msg.sizes.unwrap(), hashes: msg.hashes })
+    }
+}
+
+/// Same as [`NewPooledTransactionHashes68`] but types and sizes are Option. It's used internally
+/// instead of [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`].
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NewPooledTransactionHashes {
+    /// Transaction types for new transactions that have appeared on the network.
+    pub types: Option<Vec<u8>>,
+    /// Transaction sizes for new transactions that have appeared on the network.
+    pub sizes: Option<Vec<usize>>,
+    /// Transaction hashes for new transactions that have appeared on the network.
+    pub hashes: Vec<H256>,
+}
+
+impl From<NewPooledTransactionHashes66> for NewPooledTransactionHashes {
+    fn from(msg: NewPooledTransactionHashes66) -> Self {
+        NewPooledTransactionHashes { types: None, sizes: None, hashes: msg.0 }
+    }
+}
+
+impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
+    fn from(msg: NewPooledTransactionHashes68) -> Self {
+        NewPooledTransactionHashes {
+            types: Some(msg.types),
+            sizes: Some(msg.sizes),
+            hashes: msg.hashes,
+        }
+    }
+}
+
+impl From<(Vec<u8>, Vec<usize>, Vec<H256>)> for NewPooledTransactionHashes {
     fn from((types, sizes, hashes): (Vec<u8>, Vec<usize>, Vec<H256>)) -> Self {
-        NewPooledTransactionHashes68 { types, sizes, hashes }
+        NewPooledTransactionHashes { types: Some(types), sizes: Some(sizes), hashes }
     }
 }
 

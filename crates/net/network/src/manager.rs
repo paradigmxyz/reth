@@ -460,13 +460,7 @@ where
                     this.block_import.on_new_block(peer_id, block);
                 });
             }
-            PeerMessage::PooledTransactions66(msg) => {
-                self.notify_tx_manager(NetworkTransactionEvent::IncomingPooledTransactionHashes {
-                    peer_id,
-                    hashes: msg.0,
-                });
-            }
-            PeerMessage::PooledTransactions68(msg) => {
+            PeerMessage::PooledTransactions(msg) => {
                 self.notify_tx_manager(NetworkTransactionEvent::IncomingPooledTransactionHashes {
                     peer_id,
                     hashes: msg.hashes,
@@ -513,7 +507,7 @@ where
             NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg } => self
                 .swarm
                 .sessions_mut()
-                .send_message(&peer_id, PeerMessage::PooledTransactions68(msg)),
+                .send_message(&peer_id, PeerMessage::PooledTransactions(msg)),
             NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
                 self.swarm.state_mut().add_peer_kind(peer, kind, addr);
             }

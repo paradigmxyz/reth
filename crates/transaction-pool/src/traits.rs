@@ -72,7 +72,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns types, sizes, hashes of all transactions in the pool.
     ///
-    /// Note: This returns a `Vec<TxHash>` but should guarantee that all hashes are unique.
+    /// Note: The returned `Vec<TxHash>` should be guaranteed that all hashes are unique.
     ///
     /// Consumer: P2P
     fn pooled_transactions(&self) -> (Vec<TxType>, Vec<usize>, Vec<TxHash>);

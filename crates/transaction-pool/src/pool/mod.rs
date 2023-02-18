@@ -174,7 +174,8 @@ where
     /// Returns types, sizes, hashes of _all_ transactions in the pool.
     pub(crate) fn pooled_transactions(&self) -> (Vec<TxType>, Vec<usize>, Vec<TxHash>) {
         let pool = self.pool.read();
-        let (types, (sizes, hashes)) = pool.all().hashes_iter().unzip();
+        let (types, (sizes, hashes)) =
+            pool.all().hashes_iter().map(|(t, s, h)| (t, (s, h))).unzip();
         (types, sizes, hashes)
     }
 

@@ -179,7 +179,7 @@ impl ActiveSession {
                 self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
             }
             EthMessage::NewPooledTransactionHashes66(msg) => {
-                self.try_emit_broadcast(PeerMessage::PooledTransactions66(msg)).into()
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
@@ -192,7 +192,7 @@ impl ActiveSession {
                         message: EthMessage::NewPooledTransactionHashes68(msg),
                     }
                 }
-                self.try_emit_broadcast(PeerMessage::PooledTransactions68(msg)).into()
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
@@ -249,17 +249,18 @@ impl ActiveSession {
             PeerMessage::NewBlock(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
-            PeerMessage::PooledTransactions66(_) => {
-                unreachable!("Not emitted by network")
-            }
-            PeerMessage::PooledTransactions68(msg) => {
-                if self.conn.version() < EthVersion::Eth68 {
+            PeerMessage::PooledTransactions(msg) => {
+                if self.conn.version() >= EthVersion::Eth68 {
+                    if let Ok(msg68) = msg.try_into() {
+                        self.queued_outgoing
+                            .push_back(EthMessage::NewPooledTransactionHashes68(msg68).into());
+                    } else {
+                        error!(target : "net::session", "PooledTransactions should have `types` and `sizes` for `eth68`");
+                    }
+                } else {
                     self.queued_outgoing.push_back(
                         EthMessage::NewPooledTransactionHashes66(msg.hashes.into()).into(),
                     );
-                } else {
-                    self.queued_outgoing
-                        .push_back(EthMessage::NewPooledTransactionHashes68(msg).into());
                 }
             }
             PeerMessage::EthRequest(req) => {
