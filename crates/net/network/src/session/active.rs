@@ -249,14 +249,8 @@ impl ActiveSession {
             PeerMessage::NewBlock(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
-            PeerMessage::PooledTransactions66(msg) => {
-                if self.conn.version() < EthVersion::Eth68 {
-                    self.queued_outgoing
-                        .push_back(EthMessage::NewPooledTransactionHashes66(msg).into());
-                } else {
-                    // TODO could convert NewPooledTransactionHashes66 to
-                    // NewPooledTransactionHashes68?
-                }
+            PeerMessage::PooledTransactions66(_) => {
+                unreachable!("Not emitted by network")
             }
             PeerMessage::PooledTransactions68(msg) => {
                 if self.conn.version() < EthVersion::Eth68 {
