@@ -154,8 +154,9 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 /// The `eth/67` is based on `eth/66` but only removes two messages, [`GetNodeData`] and
 /// [``NodeData].
 ///
-/// The `eth/68` changes only [`NewPooledTransactionHashes`] to include `types` and `sized`. For
-/// including it, [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`] are defined.
+/// The `eth/68` changes only NewPooledTransactionHashes to include `types` and `sized`. For
+/// it, NewPooledTransactionHashes is renamed as [`NewPooledTransactionHashes66`] and
+/// [`NewPooledTransactionHashes68`] is defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessage {
