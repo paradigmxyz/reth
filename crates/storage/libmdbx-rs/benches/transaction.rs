@@ -117,7 +117,7 @@ fn bench_put_rand_raw(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default().with_profiler(pprof::criterion::PProfProfiler::new(100, pprof::criterion::Output::Flamegraph(None)));
     targets = bench_get_rand, bench_get_rand_raw, bench_put_rand, bench_put_rand_raw
 }
 criterion_main!(benches);
