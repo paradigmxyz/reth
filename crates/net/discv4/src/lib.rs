@@ -804,7 +804,10 @@ impl Discv4Service {
 
     /// If the node's not in the table yet, this will add it to the table and start the endpoint
     /// proof by sending a ping to the node.
-    pub fn add_node(&mut self, record: NodeRecord) {
+    ///
+    /// Returns `true` if the record was added successfully, and `false` if the node is either
+    /// already in the table or the record's bucket is full.
+    pub fn add_node(&mut self, record: NodeRecord) -> bool {
         let key = kad_key(record.id);
         match self.kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
@@ -819,12 +822,13 @@ impl Discv4Service {
                     BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
                         debug!(target : "discv4",  ?record, "inserted new record");
                     }
-                    _ => return,
+                    _ => return false,
                 }
             }
-            _ => return,
+            _ => return false,
         }
         self.try_ping(record, PingReason::Initial);
+        true
     }
 
     /// Encodes the packet, sends it and returns the hash.
@@ -1934,11 +1938,14 @@ mod tests {
 
         let local_addr = service.local_addr();
 
-        for idx in 0..MAX_NODES_PING {
+        let mut num_inserted = 0;
+        for _ in 0..MAX_NODES_PING {
             let node = NodeRecord::new(local_addr, PeerId::random());
-            service.add_node(node);
-            assert!(service.pending_pings.contains_key(&node.id));
-            assert_eq!(service.pending_pings.len(), idx + 1);
+            if service.add_node(node) {
+                num_inserted += 1;
+                assert!(service.pending_pings.contains_key(&node.id));
+                assert_eq!(service.pending_pings.len(), num_inserted);
+            }
         }
     }
 
