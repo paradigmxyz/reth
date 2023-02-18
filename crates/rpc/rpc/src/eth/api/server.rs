@@ -1,6 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
 //! Handles RPC requests for the `eth_` namespace.
 
+use super::EthApiSpec;
 use crate::{
     eth::{api::EthApi, error::EthApiError},
     result::{internal_rpc_err, ToRpcResult},
@@ -19,8 +20,6 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
 use std::collections::BTreeMap;
-
-use super::EthApiSpec;
 
 #[async_trait::async_trait]
 impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
@@ -341,6 +340,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::EthApi;
     use jsonrpsee::{
         core::{error::Error as RpcError, RpcResult},
         types::error::{CallError, INVALID_PARAMS_CODE},
@@ -351,8 +351,6 @@ mod tests {
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-
-    use crate::EthApi;
 
     #[tokio::test]
     async fn test_fee_history() {
