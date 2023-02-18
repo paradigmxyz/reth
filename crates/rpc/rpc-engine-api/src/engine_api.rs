@@ -219,7 +219,6 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             return Err(EngineApiError::InvalidParams)
         }
 
-        // TODO: optimize
         let mut result = Vec::with_capacity(count as usize);
         for num in start..start + count {
             let block = self.client.block(BlockId::Number(num.into()))?;
