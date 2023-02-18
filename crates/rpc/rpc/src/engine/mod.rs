@@ -4,7 +4,9 @@ use jsonrpsee::core::{Error, RpcResult as Result};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{BlockHash, BlockNumber, H64};
 use reth_rpc_api::EngineApiServer;
-use reth_rpc_engine_api::{EngineApiError, EngineApiMessage, EngineApiResult};
+use reth_rpc_engine_api::{
+    EngineApiError, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
+};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
     TransitionConfiguration,
@@ -35,7 +37,7 @@ impl EngineApi {
         let _ = self.engine_tx.send(msg);
         rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(|err| {
             let code = match err {
-                EngineApiError::PayloadRangeInvalidParams { .. } => -32602,
+                EngineApiError::InvalidParams => -32602,
                 EngineApiError::PayloadUnknown => -38001,
                 EngineApiError::PayloadRequestTooLarge { .. } => -38004,
                 // Any other server error
@@ -52,13 +54,21 @@ impl EngineApiServer for EngineApi {
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
         let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::NewPayload(payload, tx), rx).await
+        self.delegate_request(
+            EngineApiMessage::NewPayload(EngineApiMessageVersion::V1, payload, tx),
+            rx,
+        )
+        .await
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
-    async fn new_payload_v2(&self, _payload: ExecutionPayload) -> Result<PayloadStatus> {
-        // TODO:
-        Err(internal_rpc_err("unimplemented"))
+    async fn new_payload_v2(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
+        let (tx, rx) = oneshot::channel();
+        self.delegate_request(
+            EngineApiMessage::NewPayload(EngineApiMessageVersion::V2, payload, tx),
+            rx,
+        )
+        .await
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
@@ -71,7 +81,12 @@ impl EngineApiServer for EngineApi {
     ) -> Result<ForkchoiceUpdated> {
         let (tx, rx) = oneshot::channel();
         self.delegate_request(
-            EngineApiMessage::ForkchoiceUpdated(fork_choice_state, payload_attributes, tx),
+            EngineApiMessage::ForkchoiceUpdated(
+                EngineApiMessageVersion::V1,
+                fork_choice_state,
+                payload_attributes,
+                tx,
+            ),
             rx,
         )
         .await
@@ -80,11 +95,20 @@ impl EngineApiServer for EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
     async fn fork_choice_updated_v2(
         &self,
-        _fork_choice_state: ForkchoiceState,
-        _payload_attributes: Option<PayloadAttributes>,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
     ) -> Result<ForkchoiceUpdated> {
-        // TODO:
-        Err(internal_rpc_err("unimplemented"))
+        let (tx, rx) = oneshot::channel();
+        self.delegate_request(
+            EngineApiMessage::ForkchoiceUpdated(
+                EngineApiMessageVersion::V2,
+                fork_choice_state,
+                payload_attributes,
+                tx,
+            ),
+            rx,
+        )
+        .await
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>

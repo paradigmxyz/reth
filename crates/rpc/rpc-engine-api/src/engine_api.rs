@@ -1,4 +1,4 @@
-use crate::{EngineApiError, EngineApiMessage, EngineApiResult};
+use crate::{message::EngineApiMessageVersion, EngineApiError, EngineApiMessage, EngineApiResult};
 use futures::StreamExt;
 use reth_executor::{
     executor,
@@ -31,7 +31,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
 /// The upper limit for payload bodies request.
-pub const PAYLOAD_BODIES_LIMIT: u64 = 1024;
+const PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -59,16 +59,64 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             EngineApiMessage::GetPayloadBodiesByRange(start, count, tx) => {
                 let _ = tx.send(self.get_payload_bodies_by_range(start, count));
             }
-            EngineApiMessage::NewPayload(payload, tx) => {
+            EngineApiMessage::NewPayload(version, payload, tx) => {
+                if let Err(err) = self.validate_withdrawals_presence(
+                    version,
+                    payload.timestamp.as_u64(), // TODO: shanghai valid for v1? https://github.com/ethereum/go-ethereum/blob/6428663faf50f8368cedf0297063154483cce72b/eth/catalyst/api.go#L412-L414
+                    payload.withdrawals.is_some(),
+                ) {
+                    let _ = tx.send(Err(err));
+                    return
+                }
                 let _ = tx.send(self.new_payload(payload));
             }
-            EngineApiMessage::ForkchoiceUpdated(state, attrs, tx) => {
+            EngineApiMessage::ForkchoiceUpdated(version, state, attrs, tx) => {
+                if let Some(attributes) = &attrs {
+                    if let Err(err) = self.validate_withdrawals_presence(
+                        version,
+                        attributes.timestamp.as_u64(),
+                        attributes.withdrawals.is_some(),
+                    ) {
+                        let _ = tx.send(Err(err));
+                        return
+                    }
+                }
+
                 let _ = tx.send(self.fork_choice_updated(state, attrs));
             }
             EngineApiMessage::ExchangeTransitionConfiguration(config, tx) => {
                 let _ = tx.send(self.exchange_transition_configuration(config));
             }
         }
+    }
+
+    /// Validates the presence of the `withdrawals` field according to the payload timestamp.
+    /// After Shanghai, withdrawals field must be [Some].
+    /// Before Shanghai, withdrawals field must be [None];
+    fn validate_withdrawals_presence(
+        &self,
+        version: EngineApiMessageVersion,
+        timestamp: u64,
+        has_withdrawals: bool,
+    ) -> EngineApiResult<()> {
+        let is_shanghai = self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp);
+
+        match version {
+            EngineApiMessageVersion::V1 => {
+                if is_shanghai || has_withdrawals {
+                    return Err(EngineApiError::InvalidParams)
+                }
+            }
+            EngineApiMessageVersion::V2 => {
+                let shanghai_with_no_withdrawals = is_shanghai && !has_withdrawals;
+                let not_shanghai_with_withdrawals = !is_shanghai && has_withdrawals;
+                if shanghai_with_no_withdrawals || not_shanghai_with_withdrawals {
+                    return Err(EngineApiError::InvalidParams)
+                }
+            }
+        };
+
+        Ok(())
     }
 
     /// Try to construct a block from given payload. Perform addition validation of `extra_data` and
@@ -167,8 +215,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             return Err(EngineApiError::PayloadRequestTooLarge { len: count })
         }
 
-        if start < 1 || count < 1 {
-            return Err(EngineApiError::PayloadRangeInvalidParams { start, count })
+        if start == 0 || count == 0 {
+            return Err(EngineApiError::InvalidParams)
         }
 
         // TODO: optimize
@@ -527,7 +575,11 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             msg_tx
-                .send(EngineApiMessage::NewPayload(execution_payload, result_tx))
+                .send(EngineApiMessage::NewPayload(
+                    EngineApiMessageVersion::V1,
+                    execution_payload,
+                    result_tx,
+                ))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -552,7 +604,11 @@ mod tests {
             let (result_tx, result_rx) = oneshot::channel();
             let block = random_block(100, Some(H256::random()), None, Some(0)); // payload must have no ommers
             msg_tx
-                .send(EngineApiMessage::NewPayload(block.into(), result_tx))
+                .send(EngineApiMessage::NewPayload(
+                    EngineApiMessageVersion::V1,
+                    block.into(),
+                    result_tx,
+                ))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -587,7 +643,11 @@ mod tests {
             client.add_block(parent.hash(), parent.clone().unseal());
 
             msg_tx
-                .send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
+                .send(EngineApiMessage::NewPayload(
+                    EngineApiMessageVersion::V1,
+                    block.clone().into(),
+                    result_tx,
+                ))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -631,7 +691,11 @@ mod tests {
             client.add_block(parent.hash(), parent.clone().unseal());
 
             msg_tx
-                .send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
+                .send(EngineApiMessage::NewPayload(
+                    EngineApiMessageVersion::V1,
+                    block.clone().into(),
+                    result_tx,
+                ))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -699,6 +763,7 @@ mod tests {
             let (result_tx, result_rx) = oneshot::channel();
             msg_tx
                 .send(EngineApiMessage::ForkchoiceUpdated(
+                    EngineApiMessageVersion::V1,
                     ForkchoiceState::default(),
                     None,
                     result_tx,
@@ -733,7 +798,12 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             msg_tx
-                .send(EngineApiMessage::ForkchoiceUpdated(state, None, result_tx))
+                .send(EngineApiMessage::ForkchoiceUpdated(
+                    EngineApiMessageVersion::V1,
+                    state,
+                    None,
+                    result_tx,
+                ))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -770,7 +840,12 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             msg_tx
-                .send(EngineApiMessage::ForkchoiceUpdated(state, None, result_tx))
+                .send(EngineApiMessage::ForkchoiceUpdated(
+                    EngineApiMessageVersion::V1,
+                    state,
+                    None,
+                    result_tx,
+                ))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;
@@ -811,7 +886,12 @@ mod tests {
 
             let (result_tx, result_rx) = oneshot::channel();
             msg_tx
-                .send(EngineApiMessage::ForkchoiceUpdated(state.clone(), None, result_tx))
+                .send(EngineApiMessage::ForkchoiceUpdated(
+                    EngineApiMessageVersion::V1,
+                    state.clone(),
+                    None,
+                    result_tx,
+                ))
                 .expect("failed to send engine msg");
 
             let result = result_rx.await;

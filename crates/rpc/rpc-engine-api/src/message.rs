@@ -10,7 +10,7 @@ use reth_rpc_types::engine::{
 #[derive(Debug)]
 pub enum EngineApiMessage {
     /// New payload message
-    NewPayload(ExecutionPayload, EngineApiSender<PayloadStatus>),
+    NewPayload(EngineApiMessageVersion, ExecutionPayload, EngineApiSender<PayloadStatus>),
     /// Get payload message
     GetPayload(H64, EngineApiSender<ExecutionPayload>),
     /// Get payload bodies by range message
@@ -19,6 +19,7 @@ pub enum EngineApiMessage {
     GetPayloadBodiesByHash(Vec<BlockHash>, EngineApiSender<ExecutionPayloadBodies>),
     /// Forkchoice updated message
     ForkchoiceUpdated(
+        EngineApiMessageVersion,
         ForkchoiceState,
         Option<PayloadAttributes>,
         EngineApiSender<ForkchoiceUpdated>,
@@ -28,4 +29,13 @@ pub enum EngineApiMessage {
         TransitionConfiguration,
         EngineApiSender<TransitionConfiguration>,
     ),
+}
+
+/// The version of Engine API message.
+#[derive(Debug)]
+pub enum EngineApiMessageVersion {
+    /// Version 1
+    V1,
+    /// Version 2
+    V2,
 }
