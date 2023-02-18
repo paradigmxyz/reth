@@ -20,7 +20,7 @@ impl Serialize for JsonU256 {
     where
         S: Serializer,
     {
-        self.0.to_string().serialize(serializer)
+        self.0.serialize(serializer)
     }
 }
 
