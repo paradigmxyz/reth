@@ -148,13 +148,14 @@ impl Command {
         // Look at `reth_rpc::AuthLayer` for integration hints
         let _secret = self.rpc.jwt_secret();
 
-        // TODO(mattsse): cleanup, add cli args
-        let _rpc_server = RpcServerArgs::server(
-            ShareableDatabase::new(db.clone(), self.chain.clone()),
-            reth_transaction_pool::test_utils::testing_pool(),
-            network.clone(),
-        )
-        .await?;
+        let _rpc_server = self
+            .rpc
+            .start_server(
+                ShareableDatabase::new(db.clone(), self.chain.clone()),
+                reth_transaction_pool::test_utils::testing_pool(),
+                network.clone(),
+            )
+            .await?;
         info!(target: "reth::cli", "Started RPC server");
 
         let (mut pipeline, events) = self
