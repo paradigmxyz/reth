@@ -80,7 +80,7 @@ use crate::{
 use best::BestTransactions;
 pub use events::TransactionEvent;
 use parking_lot::{Mutex, RwLock};
-use reth_primitives::{Address, TxHash, H256};
+use reth_primitives::{Address, TxHash, TxType, H256};
 use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -171,10 +171,11 @@ where
         rx
     }
 
-    /// Returns hashes of _all_ transactions in the pool.
-    pub(crate) fn pooled_transactions(&self) -> Vec<TxHash> {
+    /// Returns types, sizes, hashes of _all_ transactions in the pool.
+    pub(crate) fn pooled_transactions(&self) -> (Vec<TxType>, Vec<usize>, Vec<TxHash>) {
         let pool = self.pool.read();
-        pool.all().hashes_iter().collect()
+        let (types, (sizes, hashes)) = pool.all().hashes_iter().unzip();
+        (types, sizes, hashes)
     }
 
     /// Updates the entire pool after a new block was executed.

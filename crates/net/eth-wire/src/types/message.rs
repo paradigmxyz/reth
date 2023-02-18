@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes,
+    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
 use crate::{EthVersion, SharedTransactions};
@@ -41,7 +41,9 @@ impl ProtocolMessage {
                         buf,
                     )?)
                 } else {
-                    EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes::decode(buf)?)
+                    EthMessage::NewPooledTransactionHashes66(NewPooledTransactionHashes66::decode(
+                        buf,
+                    )?)
                 }
             }
             EthMessageID::GetBlockHeaders => {
@@ -153,7 +155,7 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 /// [``NodeData].
 ///
 /// The `eth/68` changes only [`NewPooledTransactionHashes`] to include `types` and `sized`. For
-/// including it, [`NewPooledTransactionHashes68`] is defined.
+/// including it, [`NewPooledTransactionHashes66`] and [`NewPooledTransactionHashes68`] are defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessage {
@@ -163,7 +165,7 @@ pub enum EthMessage {
     NewBlockHashes(NewBlockHashes),
     NewBlock(Box<NewBlock>),
     Transactions(Transactions),
-    NewPooledTransactionHashes(NewPooledTransactionHashes),
+    NewPooledTransactionHashes66(NewPooledTransactionHashes66),
     NewPooledTransactionHashes68(NewPooledTransactionHashes68),
 
     // The following messages are request-response message pairs
@@ -187,7 +189,7 @@ impl EthMessage {
             EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             EthMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthMessage::Transactions(_) => EthMessageID::Transactions,
-            EthMessage::NewPooledTransactionHashes(_) |
+            EthMessage::NewPooledTransactionHashes66(_) |
             EthMessage::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
             EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
@@ -210,7 +212,7 @@ impl Encodable for EthMessage {
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
             EthMessage::NewBlock(new_block) => new_block.encode(out),
             EthMessage::Transactions(transactions) => transactions.encode(out),
-            EthMessage::NewPooledTransactionHashes(hashes) => hashes.encode(out),
+            EthMessage::NewPooledTransactionHashes66(hashes) => hashes.encode(out),
             EthMessage::NewPooledTransactionHashes68(hashes) => hashes.encode(out),
             EthMessage::GetBlockHeaders(request) => request.encode(out),
             EthMessage::BlockHeaders(headers) => headers.encode(out),
@@ -230,7 +232,7 @@ impl Encodable for EthMessage {
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
             EthMessage::NewBlock(new_block) => new_block.length(),
             EthMessage::Transactions(transactions) => transactions.length(),
-            EthMessage::NewPooledTransactionHashes(hashes) => hashes.length(),
+            EthMessage::NewPooledTransactionHashes66(hashes) => hashes.length(),
             EthMessage::NewPooledTransactionHashes68(hashes) => hashes.length(),
             EthMessage::GetBlockHeaders(request) => request.length(),
             EthMessage::BlockHeaders(headers) => headers.length(),

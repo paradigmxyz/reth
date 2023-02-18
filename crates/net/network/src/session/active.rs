@@ -16,7 +16,7 @@ use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectReason, EthMessage, EthStream, P2PStream,
+    DisconnectReason, EthMessage, EthStream, EthVersion, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics_common::metered_sender::MeteredSender;
@@ -178,8 +178,8 @@ impl ActiveSession {
             EthMessage::Transactions(msg) => {
                 self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
             }
-            EthMessage::NewPooledTransactionHashes(msg) => {
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg)).into()
+            EthMessage::NewPooledTransactionHashes66(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions66(msg)).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
@@ -192,7 +192,7 @@ impl ActiveSession {
                         message: EthMessage::NewPooledTransactionHashes68(msg),
                     }
                 }
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.hashes.into())).into()
+                self.try_emit_broadcast(PeerMessage::PooledTransactions68(msg)).into()
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
@@ -249,8 +249,24 @@ impl ActiveSession {
             PeerMessage::NewBlock(msg) => {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
-            PeerMessage::PooledTransactions(msg) => {
-                self.queued_outgoing.push_back(EthMessage::NewPooledTransactionHashes(msg).into());
+            PeerMessage::PooledTransactions66(msg) => {
+                if self.conn.version() < EthVersion::Eth68 {
+                    self.queued_outgoing
+                        .push_back(EthMessage::NewPooledTransactionHashes66(msg).into());
+                } else {
+                    // TODO could convert NewPooledTransactionHashes66 to
+                    // NewPooledTransactionHashes68?
+                }
+            }
+            PeerMessage::PooledTransactions68(msg) => {
+                if self.conn.version() < EthVersion::Eth68 {
+                    self.queued_outgoing.push_back(
+                        EthMessage::NewPooledTransactionHashes66(msg.hashes.into()).into(),
+                    );
+                } else {
+                    self.queued_outgoing
+                        .push_back(EthMessage::NewPooledTransactionHashes68(msg).into());
+                }
             }
             PeerMessage::EthRequest(req) => {
                 let deadline = self.request_deadline();
@@ -712,7 +728,7 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        EthVersion, GetBlockBodies, HelloMessage, NewPooledTransactionHashes, ProtocolVersion,
+        EthVersion, GetBlockBodies, HelloMessage, NewPooledTransactionHashes66, ProtocolVersion,
         Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
@@ -942,7 +958,7 @@ mod tests {
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             for _ in 0..num_messages {
                 client_stream
-                    .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(
+                    .send(EthMessage::NewPooledTransactionHashes66(NewPooledTransactionHashes66(
                         vec![],
                     )))
                     .await
@@ -1043,7 +1059,9 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             client_stream
-                .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(vec![])))
+                .send(EthMessage::NewPooledTransactionHashes66(NewPooledTransactionHashes66(
+                    vec![],
+                )))
                 .await
                 .unwrap();
             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;

@@ -94,7 +94,7 @@ use crate::{
     traits::{NewTransactionEvent, PoolSize},
     validate::ValidPoolTransaction,
 };
-use reth_primitives::{TxHash, U256};
+use reth_primitives::{TxHash, TxType, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
@@ -225,7 +225,7 @@ where
         self.pool.add_transaction_listener()
     }
 
-    fn pooled_transactions(&self) -> Vec<TxHash> {
+    fn pooled_transactions(&self) -> (Vec<TxType>, Vec<usize>, Vec<TxHash>) {
         self.pool.pooled_transactions()
     }
 

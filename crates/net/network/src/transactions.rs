@@ -9,9 +9,7 @@ use crate::{
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
-use reth_eth_wire::{
-    GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
-};
+use reth_eth_wire::{GetPooledTransactions, PooledTransactions, Transactions};
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
@@ -176,9 +174,9 @@ where
     /// Invoked when a new transaction is pending.
     ///
     /// When new transactions appear in the pool, we propagate them to the network using the
-    /// `Transactions` and `NewPooledTransactionHashes` messages. The Transactions message relays
-    /// complete transaction objects and is typically sent to a small, random fraction of connected
-    /// peers.
+    /// `Transactions`, `NewPooledTransactionHashes66` and `NewPooledTransactionHashes68` messages.
+    /// The Transactions message relays complete transaction objects and is typically sent to a
+    /// small, random fraction of connected peers.
     ///
     /// All other peers receive a notification of the transaction hash and can request the
     /// complete transaction object if it is unknown to them. The dissemination of complete
@@ -226,8 +224,12 @@ where
                     for hash in &hashes {
                         propagated.0.entry(*hash).or_default().push(PropagateKind::Hash(*peer_id));
                     }
+
+                    let (types, sizes) =
+                        full.iter().map(|tx| (tx.tx_type() as u8, tx.input().len())).unzip();
+
                     // send hashes of transactions
-                    self.network.send_transactions_hashes(*peer_id, hashes);
+                    self.network.send_transactions_hashes(*peer_id, types, sizes, hashes);
                 } else {
                     // send full transactions
                     self.network.send_transactions(*peer_id, full);
@@ -246,11 +248,7 @@ where
     }
 
     /// Request handler for an incoming `NewPooledTransactionHashes`
-    fn on_new_pooled_transaction_hashes(
-        &mut self,
-        peer_id: PeerId,
-        msg: NewPooledTransactionHashes,
-    ) {
+    fn on_new_pooled_transaction_hashes(&mut self, peer_id: PeerId, mut hashes: Vec<H256>) {
         // If the node is currently syncing, ignore transactions
         if self.network.is_syncing() {
             return
@@ -259,18 +257,16 @@ where
         let mut num_already_seen = 0;
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            let mut transactions = msg.0;
-
             // keep track of the transactions the peer knows
-            for tx in transactions.iter().copied() {
+            for tx in hashes.iter().copied() {
                 if !peer.transactions.insert(tx) {
                     num_already_seen += 1;
                 }
             }
 
-            self.pool.retain_unknown(&mut transactions);
+            self.pool.retain_unknown(&mut hashes);
 
-            if transactions.is_empty() {
+            if hashes.is_empty() {
                 // nothing to request
                 return
             }
@@ -278,7 +274,7 @@ where
             // request the missing transactions
             let (response, rx) = oneshot::channel();
             let req = PeerRequest::GetPooledTransactions {
-                request: GetPooledTransactions(transactions),
+                request: GetPooledTransactions(hashes),
                 response,
             };
 
@@ -298,8 +294,8 @@ where
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 self.import_transactions(peer_id, msg.0, TransactionSource::Broadcast);
             }
-            NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
-                self.on_new_pooled_transaction_hashes(peer_id, msg)
+            NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, hashes } => {
+                self.on_new_pooled_transaction_hashes(peer_id, hashes)
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
                 self.on_get_pooled_transactions(peer_id, request, response)
@@ -335,13 +331,13 @@ where
                     },
                 );
 
-                // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
+                // Send a `NewPooledTransactionHashes68` to the peer with _all_ transactions in the
                 // pool
                 if !self.network.is_syncing() {
-                    let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
+                    let (types, sizes, hashes) = self.pool.pooled_transactions();
                     self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
                         peer_id,
-                        msg,
+                        msg: (types.into_iter().map(|ty| ty as u8).collect(), sizes, hashes).into(),
                     })
                 }
             }
@@ -378,7 +374,7 @@ where
 
                 // track that the peer knows this transaction, but only if this is a new broadcast.
                 // If we received the transactions as the response to our GetPooledTransactions
-                // requests (based on received `NewPooledTransactionHashes`) then we already
+                // requests (based on received `NewPooledTransactionHashes66`) then we already
                 // recorded the hashes in [`Self::on_new_pooled_transaction_hashes`]
                 if source.is_broadcast() && !peer.transactions.insert(tx.hash) {
                     num_already_seen += 1;
@@ -546,7 +542,7 @@ pub enum NetworkTransactionEvent {
     /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
+    IncomingPooledTransactionHashes { peer_id: PeerId, hashes: Vec<H256> },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
         peer_id: PeerId,

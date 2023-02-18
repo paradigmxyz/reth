@@ -150,6 +150,11 @@ impl<S> EthStream<S> {
         Self { version, inner }
     }
 
+    /// Returns the stream version.
+    pub fn version(&self) -> EthVersion {
+        self.version
+    }
+
     /// Returns the underlying stream.
     pub fn inner(&self) -> &S {
         &self.inner
