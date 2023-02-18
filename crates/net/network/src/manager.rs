@@ -463,7 +463,7 @@ where
             PeerMessage::PooledTransactions(msg) => {
                 self.notify_tx_manager(NetworkTransactionEvent::IncomingPooledTransactionHashes {
                     peer_id,
-                    hashes: msg.hashes,
+                    msg,
                 });
             }
             PeerMessage::EthRequest(req) => {

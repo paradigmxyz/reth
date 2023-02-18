@@ -9,7 +9,9 @@ use crate::{
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
-use reth_eth_wire::{GetPooledTransactions, PooledTransactions, Transactions};
+use reth_eth_wire::{
+    GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
+};
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
@@ -229,7 +231,7 @@ where
                         full.iter().map(|tx| (tx.tx_type() as u8, tx.input().len())).unzip();
 
                     // send hashes of transactions
-                    self.network.send_transactions_hashes(*peer_id, types, sizes, hashes);
+                    self.network.send_transactions_hashes(*peer_id, (types, sizes, hashes).into());
                 } else {
                     // send full transactions
                     self.network.send_transactions(*peer_id, full);
@@ -294,8 +296,8 @@ where
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 self.import_transactions(peer_id, msg.0, TransactionSource::Broadcast);
             }
-            NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, hashes } => {
-                self.on_new_pooled_transaction_hashes(peer_id, hashes)
+            NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                self.on_new_pooled_transaction_hashes(peer_id, msg.hashes)
             }
             NetworkTransactionEvent::GetPooledTransactions { peer_id, request, response } => {
                 self.on_get_pooled_transactions(peer_id, request, response)
@@ -542,7 +544,7 @@ pub enum NetworkTransactionEvent {
     /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, hashes: Vec<H256> },
+    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
         peer_id: PeerId,
