@@ -1,4 +1,4 @@
-use crate::result::{internal_rpc_err, rpc_err};
+use crate::result::rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::{Error, RpcResult as Result};
 use reth_interfaces::consensus::ForkchoiceState;
@@ -120,28 +120,28 @@ impl EngineApiServer for EngineApi {
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
-    async fn get_payload_v2(&self, _payload_id: H64) -> Result<ExecutionPayload> {
-        // TODO:
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_payload_v2(&self, payload_id: H64) -> Result<ExecutionPayload> {
+        let (tx, rx) = oneshot::channel();
+        self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
         &self,
-        _block_hashes: Vec<BlockHash>,
+        block_hashes: Vec<BlockHash>,
     ) -> Result<ExecutionPayloadBodies> {
-        // TODO:
-        Err(internal_rpc_err("unimplemented"))
+        let (tx, rx) = oneshot::channel();
+        self.delegate_request(EngineApiMessage::GetPayloadBodiesByHash(block_hashes, tx), rx).await
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     async fn get_payload_bodies_by_range_v1(
         &self,
-        _start: BlockNumber,
-        _count: u64,
+        start: BlockNumber,
+        count: u64,
     ) -> Result<ExecutionPayloadBodies> {
-        // TODO:
-        Err(internal_rpc_err("unimplemented"))
+        let (tx, rx) = oneshot::channel();
+        self.delegate_request(EngineApiMessage::GetPayloadBodiesByRange(start, count, tx), rx).await
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_exchangeTransitionConfigurationV1>
