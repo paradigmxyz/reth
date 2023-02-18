@@ -144,7 +144,7 @@ where
             }
 
             // Add header to the result collection
-            headers.push(SealedHeader::new(header, hash));
+            headers.push(header.seal(hash));
 
             // Increment current block number
             current_block_num += 1;
@@ -324,9 +324,18 @@ where
             // Poll requests
             while let Poll::Ready(Some(response)) = this.in_progress_queue.poll_next_unpin(cx) {
                 this.metrics.in_flight_requests.decrement(1.);
-                let response = OrderedBodiesResponse(response);
-                this.buffered_responses.push(response);
-                this.metrics.buffered_responses.increment(1.);
+                match response {
+                    Ok(response) => {
+                        let response = OrderedBodiesResponse(response);
+                        this.buffered_responses.push(response);
+                        this.metrics.buffered_responses.increment(1.);
+                    }
+                    Err(error) => {
+                        tracing::error!(target: "downloaders::bodies", ?error, "Request failed");
+                        this.clear();
+                        return Poll::Ready(Some(Err(error)))
+                    }
+                };
             }
 
             // Loop exit condition
@@ -576,6 +585,7 @@ mod tests {
                     BlockBody {
                         transactions: block.body,
                         ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                        withdrawals: None,
                     },
                 )
             })

@@ -5,7 +5,6 @@ use crate::{
     NetworkManager,
 };
 use reth_transaction_pool::TransactionPool;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// A builder that can configure all components of the network.
@@ -47,7 +46,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
     /// Creates a new [`EthRequestHandler`] and wires it to the network.
     pub fn request_handler<Client>(
         self,
-        client: Arc<Client>,
+        client: Client,
     ) -> NetworkBuilder<C, Tx, EthRequestHandler<Client>> {
         let NetworkBuilder { mut network, transactions, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();

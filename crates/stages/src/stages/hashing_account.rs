@@ -10,6 +10,7 @@ use reth_provider::Transaction;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
+    ops::Range,
 };
 use tracing::*;
 
@@ -18,7 +19,7 @@ pub const ACCOUNT_HASHING: StageId = StageId("AccountHashing");
 
 /// Account hashing stage hashes plain account.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AccountHashingStage {
     /// The threshold (in number of state transitions) for switching between incremental
     /// hashing and full storage hashing.
@@ -30,6 +31,88 @@ pub struct AccountHashingStage {
 impl Default for AccountHashingStage {
     fn default() -> Self {
         Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+    }
+}
+
+#[derive(Clone, Debug)]
+/// `SeedOpts` provides configuration parameters for calling `AccountHashingStage::seed`
+/// in unit tests or benchmarks to generate an initial database state for running the
+/// stage.
+///
+/// In order to check the "full hashing" mode of the stage you want to generate more
+/// transitions than `AccountHashingStage.clean_threshold`. This requires:
+/// 1. Creating enough blocks + transactions so there's enough transactions to generate
+/// the required transition keys in the `BlockTransitionIndex` (which depends on the
+/// `TxTransitionIndex` internally)
+/// 2. Setting `transitions > clean_threshold` so that there's enough diffs to actually
+/// take the 2nd codepath
+pub struct SeedOpts {
+    /// The range of blocks to be generated
+    pub blocks: Range<u64>,
+    /// The range of accounts to be generated
+    pub accounts: Range<u64>,
+    /// The range of transactions to be generated per block.
+    pub txs: Range<u8>,
+    /// The number of transitions to go back, capped at the number of total txs
+    pub transitions: u64,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl AccountHashingStage {
+    /// Initializes the `PlainAccountState` table with `num_accounts` having some random state
+    /// at the target block, with `txs_range` transactions in each block.
+    ///
+    /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
+    /// account state in the `AccountChangeSet` table.
+    pub fn seed<DB: Database>(
+        tx: &mut Transaction<'_, DB>,
+        opts: SeedOpts,
+    ) -> Result<Vec<(Address, Account)>, StageError> {
+        use reth_db::models::AccountBeforeTx;
+        use reth_interfaces::test_utils::generators::{
+            random_block_range, random_eoa_account_range,
+        };
+        use reth_primitives::{H256, U256};
+        use reth_provider::insert_canonical_block;
+
+        let blocks = random_block_range(opts.blocks, H256::zero(), opts.txs);
+        let num_transitions = blocks.iter().map(|b| b.body.len() as u64).sum();
+        let transitions = std::cmp::min(opts.transitions, num_transitions);
+
+        for block in blocks {
+            insert_canonical_block(&**tx, &block, true).unwrap();
+        }
+        let mut accounts = random_eoa_account_range(opts.accounts);
+        {
+            // Account State generator
+            let mut account_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
+            accounts.sort_by(|a, b| a.0.cmp(&b.0));
+            for (addr, acc) in accounts.iter() {
+                account_cursor.append(*addr, *acc)?;
+            }
+
+            // seed account changeset
+            let (_, last_transition) =
+                tx.cursor_read::<tables::BlockTransitionIndex>()?.last()?.unwrap();
+
+            let first_transition = last_transition.checked_sub(transitions).unwrap_or_default();
+
+            let mut acc_changeset_cursor = tx.cursor_write::<tables::AccountChangeSet>()?;
+            for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
+                let Account { nonce, balance, .. } = acc;
+                let prev_acc = Account {
+                    nonce: nonce - 1,
+                    balance: balance - U256::from(1),
+                    bytecode_hash: None,
+                };
+                let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
+                acc_changeset_cursor.append(t, acc_before_tx)?;
+            }
+        }
+
+        tx.commit()?;
+
+        Ok(accounts)
     }
 }
 
@@ -73,14 +156,21 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         .map(|res| res.map(|(address, account)| (keccak256(address), account)))
                         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-                    // next key of iterator
-                    let next_key = accounts.next()?;
+                    let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
 
                     // iterate and put presorted hashed accounts
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| tx.put::<tables::HashedAccount>(k, v))?;
-                    next_key
+                    if first_key.is_none() {
+                        hashed_batch
+                            .into_iter()
+                            .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
+                    } else {
+                        hashed_batch
+                            .into_iter()
+                            .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
+                    }
+
+                    // next key of iterator
+                    accounts.next()?
                 };
                 tx.commit()?;
                 if let Some((next_key, _)) = next_key {
@@ -184,9 +274,7 @@ mod tests {
         PREV_STAGE_ID,
     };
     use assert_matches::assert_matches;
-    use reth_interfaces::test_utils::generators::random_block_range;
-    use reth_primitives::{Account, SealedBlock, H256, U256};
-    use reth_provider::insert_canonical_block;
+    use reth_primitives::{Account, U256};
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);
@@ -221,13 +309,7 @@ mod tests {
             test_utils::{StageTestRunner, TestTransaction},
             ExecInput, ExecOutput, UnwindInput,
         };
-        use reth_db::{
-            cursor::DbCursorRO,
-            models::AccountBeforeTx,
-            tables,
-            transaction::{DbTx, DbTxMut},
-        };
-        use reth_interfaces::test_utils::generators::random_eoa_account_range;
+        use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
 
         pub(crate) struct AccountHashingTestRunner {
             pub(crate) tx: TestTransaction,
@@ -243,34 +325,6 @@ mod tests {
             #[allow(dead_code)]
             pub(crate) fn set_commit_threshold(&mut self, threshold: u64) {
                 self.commit_threshold = threshold;
-            }
-
-            pub(crate) fn insert_blocks(
-                &self,
-                blocks: Vec<SealedBlock>,
-            ) -> Result<(), TestRunnerError> {
-                for block in blocks.iter() {
-                    self.tx.commit(|tx| {
-                        insert_canonical_block(tx, block, true).unwrap();
-                        Ok(())
-                    })?;
-                }
-
-                Ok(())
-            }
-
-            pub(crate) fn insert_accounts(
-                &self,
-                accounts: &[(Address, Account)],
-            ) -> Result<(), TestRunnerError> {
-                for (addr, acc) in accounts.iter() {
-                    self.tx.commit(|tx| {
-                        tx.put::<tables::PlainAccountState>(*addr, *acc)?;
-                        Ok(())
-                    })?;
-                }
-
-                Ok(())
             }
 
             /// Iterates over PlainAccount table and checks that the accounts match the ones
@@ -348,41 +402,16 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let end = input.previous_stage_progress() + 1;
-
-                let blocks = random_block_range(0..end, H256::zero(), 0..3);
-                self.insert_blocks(blocks)?;
-
-                let n_accounts = 2;
-                let accounts = random_eoa_account_range(&mut (0..n_accounts));
-                self.insert_accounts(&accounts)?;
-
-                // seed account changeset
-                self.tx
-                    .commit(|tx| {
-                        let (_, last_transition) =
-                            tx.cursor_read::<tables::BlockTransitionIndex>()?.last()?.unwrap();
-
-                        let first_transition =
-                            last_transition.checked_sub(n_accounts).unwrap_or_default();
-
-                        for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
-                            let Account { nonce, balance, .. } = acc;
-                            let prev_acc = Account {
-                                nonce: nonce - 1,
-                                balance: balance - U256::from(1),
-                                bytecode_hash: None,
-                            };
-                            let acc_before_tx =
-                                AccountBeforeTx { address: *addr, info: Some(prev_acc) };
-                            tx.put::<tables::AccountChangeSet>(t, acc_before_tx)?;
-                        }
-
-                        Ok(())
-                    })
-                    .unwrap();
-
-                Ok(accounts)
+                Ok(AccountHashingStage::seed(
+                    &mut self.tx.inner(),
+                    SeedOpts {
+                        blocks: 0..input.previous_stage_progress() + 1,
+                        accounts: 0..2,
+                        txs: 0..3,
+                        transitions: 2,
+                    },
+                )
+                .unwrap())
             }
 
             fn validate_execution(

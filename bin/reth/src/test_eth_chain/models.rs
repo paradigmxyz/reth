@@ -1,6 +1,6 @@
 use reth_primitives::{
     Address, BigEndianHash, Bloom, Bytes, ChainSpec, ChainSpecBuilder, Header as RethHeader,
-    JsonU256, SealedHeader, H160, H256, H64, U256, U64,
+    JsonU256, SealedHeader, Withdrawal, H160, H256, H64,
 };
 use serde::{self, Deserialize};
 use std::collections::BTreeMap;
@@ -71,31 +71,32 @@ pub struct Header {
     pub uncle_hash: H256,
     /// Base fee per gas.
     pub base_fee_per_gas: Option<JsonU256>,
+    /// Withdrawals root.
+    pub withdrawals_root: Option<H256>,
 }
 
 impl From<Header> for SealedHeader {
     fn from(value: Header) -> Self {
-        SealedHeader::new(
-            RethHeader {
-                base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0.to::<u64>()),
-                beneficiary: value.coinbase,
-                difficulty: value.difficulty.0,
-                extra_data: value.extra_data,
-                gas_limit: value.gas_limit.0.to::<u64>(),
-                gas_used: value.gas_used.0.to::<u64>(),
-                mix_hash: value.mix_hash,
-                nonce: value.nonce.into_uint().as_u64(),
-                number: value.number.0.to::<u64>(),
-                timestamp: value.timestamp.0.to::<u64>(),
-                transactions_root: value.transactions_trie,
-                receipts_root: value.receipt_trie,
-                ommers_hash: value.uncle_hash,
-                state_root: value.state_root,
-                parent_hash: value.parent_hash,
-                logs_bloom: Bloom::default(), // TODO: ?
-            },
-            value.hash,
-        )
+        let header = RethHeader {
+            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0.to::<u64>()),
+            beneficiary: value.coinbase,
+            difficulty: value.difficulty.0,
+            extra_data: value.extra_data,
+            gas_limit: value.gas_limit.0.to::<u64>(),
+            gas_used: value.gas_used.0.to::<u64>(),
+            mix_hash: value.mix_hash,
+            nonce: value.nonce.into_uint().as_u64(),
+            number: value.number.0.to::<u64>(),
+            timestamp: value.timestamp.0.to::<u64>(),
+            transactions_root: value.transactions_trie,
+            receipts_root: value.receipt_trie,
+            ommers_hash: value.uncle_hash,
+            state_root: value.state_root,
+            parent_hash: value.parent_hash,
+            logs_bloom: value.bloom,
+            withdrawals_root: value.withdrawals_root,
+        };
+        header.seal(value.hash)
     }
 }
 
@@ -126,16 +127,6 @@ pub struct TransactionSequence {
     exception: String,
     raw_bytes: Bytes,
     valid: String,
-}
-
-/// Withdrawal in block
-#[derive(Default, Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Withdrawal {
-    index: U64,
-    validator_index: U64,
-    address: Address,
-    amount: U256,
 }
 
 /// Ethereum blockchain test data state.
@@ -245,9 +236,7 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::MergeEOF => spec_builder.paris_activated(),
             ForkSpec::MergeMeterInitCode => spec_builder.paris_activated(),
             ForkSpec::MergePush0 => spec_builder.paris_activated(),
-            ForkSpec::Shanghai => {
-                panic!("Not supported")
-            }
+            ForkSpec::Shanghai => spec_builder.shanghai_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
             }

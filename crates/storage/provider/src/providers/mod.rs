@@ -1,11 +1,19 @@
-use crate::{BlockHashProvider, BlockProvider, Error, HeaderProvider, StateProviderFactory};
+use crate::{
+    BlockHashProvider, BlockIdProvider, BlockProvider, Error, HeaderProvider, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
+};
 use reth_db::{
+    cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
     tables,
     transaction::DbTx,
 };
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, Header, H256, U256};
+use reth_primitives::{
+    rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, ChainSpec, Hardfork, Header,
+    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+};
+use std::{ops::RangeBounds, sync::Arc};
 
 mod state;
 pub use state::{
@@ -20,18 +28,20 @@ pub use state::{
 pub struct ShareableDatabase<DB> {
     /// Database
     db: DB,
+    /// Chain spec
+    chain_spec: Arc<ChainSpec>,
 }
 
 impl<DB> ShareableDatabase<DB> {
     /// create new database provider
-    pub fn new(db: DB) -> Self {
-        Self { db }
+    pub fn new(db: DB, chain_spec: ChainSpec) -> Self {
+        Self { db, chain_spec: Arc::new(chain_spec) }
     }
 }
 
 impl<DB: Clone> Clone for ShareableDatabase<DB> {
     fn clone(&self) -> Self {
-        Self { db: self.db.clone() }
+        Self { db: self.db.clone(), chain_spec: Arc::clone(&self.chain_spec) }
     }
 }
 
@@ -63,6 +73,18 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
             }
         })?
     }
+
+    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
+        self.db
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::Headers>()?;
+                cursor
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, header)| header).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
+    }
 }
 
 impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
@@ -74,7 +96,7 @@ impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
     }
 }
 
-impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
+impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         let best_number = self
             .db
@@ -85,13 +107,116 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
         Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
     }
 
-    fn block(&self, _id: BlockId) -> Result<Option<Block>> {
-        // TODO
-        Ok(None)
-    }
-
     fn block_number(&self, hash: H256) -> Result<Option<BlockNumber>> {
         self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))?.map_err(Into::into)
+    }
+}
+
+impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
+    fn block(&self, id: BlockId) -> Result<Option<Block>> {
+        if let Some(number) = self.block_number_for_id(id)? {
+            if let Some(header) = self.header_by_number(number)? {
+                let id = BlockId::Number(number.into());
+                let tx = self.db.tx()?;
+                let transactions =
+                    self.transactions_by_block(id)?.ok_or(Error::BlockBody { number })?;
+
+                let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
+                let withdrawals = self.withdrawals_by_block(id, header.timestamp)?;
+
+                return Ok(Some(Block {
+                    header,
+                    body: transactions,
+                    ommers: ommers.unwrap_or_default(),
+                    withdrawals,
+                }))
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
+    fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
+        self.db.view(|tx| tx.get::<tables::Transactions>(id))?.map_err(Into::into)
+    }
+
+    fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
+        self.db
+            .view(|tx| {
+                if let Some(id) = tx.get::<tables::TxHashNumber>(hash)? {
+                    tx.get::<tables::Transactions>(id)
+                } else {
+                    Ok(None)
+                }
+            })?
+            .map_err(Into::into)
+    }
+
+    fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+        if let Some(number) = self.block_number_for_id(id)? {
+            let tx = self.db.tx()?;
+            if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
+                let tx_range = body.tx_id_range();
+                if tx_range.is_empty() {
+                    Ok(Some(Vec::default()))
+                } else {
+                    let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+                    let transactions = tx_cursor
+                        .walk_range(tx_range)?
+                        .map(|result| result.map(|(_, tx)| tx))
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(Some(transactions))
+                }
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<Vec<TransactionSigned>>> {
+        let tx = self.db.tx()?;
+        let mut results = Vec::default();
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+        for entry in body_cursor.walk_range(range)? {
+            let (_, body) = entry?;
+            let tx_range = body.tx_id_range();
+            if body.tx_id_range().is_empty() {
+                results.push(Vec::default());
+            } else {
+                results.push(
+                    tx_cursor
+                        .walk_range(tx_range)?
+                        .map(|result| result.map(|(_, tx)| tx))
+                        .collect::<std::result::Result<Vec<_>, _>>()?,
+                );
+            }
+        }
+        Ok(results)
+    }
+}
+
+impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
+    fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
+        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
+            if let Some(number) = self.block_number_for_id(id)? {
+                Ok(self
+                    .db
+                    .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
+                    .map(|w| w.withdrawals))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -131,23 +256,24 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{BlockProvider, StateProviderFactory};
-
     use super::ShareableDatabase;
+    use crate::{BlockIdProvider, StateProviderFactory};
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_primitives::H256;
+    use reth_primitives::{ChainSpecBuilder, H256};
 
     #[test]
     fn common_history_provider() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db);
+        let provider = ShareableDatabase::new(db, chain_spec);
         let _ = provider.latest();
     }
 
     #[test]
     fn default_chain_info() {
+        let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db);
+        let provider = ShareableDatabase::new(db, chain_spec);
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);

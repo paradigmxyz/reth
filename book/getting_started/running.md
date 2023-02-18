@@ -4,21 +4,19 @@ This chapter will provide a few runbooks for getting the node up and running.
 
 This goal of this is not to expose all of the options available to you for running Reth (e.g. config file options, CLI flags, etc.) - those will be documented in the other chapters - but rather showcase some examples of different ways in which one could run the node.
 
-## Run on MacOS w/ Prometheus + Grafana for Metrics
+## Run on w/ Prometheus + Grafana for Metrics
 
-This will provide a brief overview for how to run Reth locally on a Mac.
+This will provide a brief overview for how to run Reth locally.
 
-First, ensure that you have Reth installed by following the [instructions to install on Mac][mac-installation].
+First, ensure that you have Reth installed by following the [installation instructions][installation].
 
 ### Basic operation
 
 The most basic way to run it is by using the following command:
 
-```bash
-cargo run --release -- node
+```console
+reth node
 ```
-
-This will build Reth using cargo's [release profile][release-profile], and run it with an error log level by default.
 
 You will likely see a large number of error logs to the tune of:
 
@@ -35,7 +33,7 @@ When playing around with sync, you may want to set a threshold block that you'd 
 To do so, add the `--debug.tip` flag with the block hash that you'd like to sync to:
 
 ```bash
-cargo run --release -- node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e
+reth node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e
 ```
 
 This will sync to block 1M.
@@ -47,7 +45,7 @@ That's great and all, but wouldn't it be nice to get a deeper view into what's g
 Let's try again, now with the following command:
 
 ```bash
-RUST_LOG=info,sync::stages=trace,downloaders=trace cargo run --release -- node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e
+RUST_LOG=info,sync::stages=trace,downloaders=trace reth node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e
 ```
 
 This will dump info-level logs throughout the node's operation, as well as trace-level logs for the pipeline stages and the downloaders (which fetch data over the P2P network). Check out the [docs][docs] for more info on these!
@@ -67,7 +65,7 @@ These warnings are also nothing to worry about, all of this is part of the norma
 You may want to keep these logs around outside of your terminal. To accomplish this, let's run:
 
 ```bash
-RUST_LOG=info,sync::stages=trace,downloaders=trace cargo r --release -- node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e --log.directory ./
+RUST_LOG=info,sync::stages=trace,downloaders=trace reth node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e --log.directory ./
 ```
 
 Here, adding `--log.directory` specifies a location to which the logs will be saved (in a file named `reth.log`) so that you can view them with a tool like `more`, `less`, or `tail`.
@@ -79,7 +77,7 @@ Now, trying to get a sense of sync progress by scanning through the logs is quit
 Reth exposes a number of metrics, which are listed [here][metrics]. We can serve them from an HTTP endpoint by adding the `--metrics` flag:
 
 ```bash
-RUST_LOG=info,sync::stages=trace,downloaders=trace nohup cargo r --release -- node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e --metrics '127.0.0.1:9000' > reth-out.txt &
+RUST_LOG=info,sync::stages=trace,downloaders=trace nohup reth node --debug.tip 0x8e38b4dbf6b11fcc3b9dee84fb7986e29ca0a02cecd8977c161ff7333329681e --metrics '127.0.0.1:9000' > reth-out.txt &
 ```
 
 Now, as the node is running, you can `curl` the endpoint you provided to the `--metrics` flag to get a text dump of the metrics at that time:
@@ -141,7 +139,7 @@ In this runbook, we took you through starting the node, exposing different log l
 
 This will all be very useful to you, whether you're simply running a home node and want to keep an eye on its performance, or if you're a contributor and want to see the effect that your (or others') changes have on Reth's operations.
 
-[mac-installation]: ./installation.md#macos
+[installation]: ./installation.md
 [release-profile]: https://doc.rust-lang.org/cargo/reference/profiles.html#release
 [docs]: https://github.com/paradigmxyz/reth/tree/main/docs
 [metrics]: https://github.com/paradigmxyz/reth/blob/main/docs/design/metrics.md#current-metrics

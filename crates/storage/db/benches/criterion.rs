@@ -3,10 +3,15 @@
 use criterion::{
     black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use reth_db::cursor::{DbDupCursorRO, DbDupCursorRW};
 use std::time::Instant;
 
-criterion_group!(benches, db, serialization);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = db, serialization
+}
 criterion_main!(benches);
 
 pub fn db(c: &mut Criterion) {

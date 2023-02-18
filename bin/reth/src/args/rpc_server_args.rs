@@ -3,7 +3,7 @@
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use reth_rpc::{JwtError, JwtSecret};
-use reth_rpc_builder::RpcModuleConfig;
+use reth_rpc_builder::RpcModuleSelection;
 use std::{net::IpAddr, path::Path};
 
 /// Parameters for configuring the rpc more granularity via CLI
@@ -24,7 +24,7 @@ pub struct RpcServerArgs {
 
     /// Rpc Modules to be configured for http server
     #[arg(long = "http.api")]
-    pub http_api: Option<RpcModuleConfig>,
+    pub http_api: Option<RpcModuleSelection>,
 
     /// Enable the WS-RPC server
     #[arg(long)]
@@ -40,7 +40,7 @@ pub struct RpcServerArgs {
 
     /// Rpc Modules to be configured for Ws server
     #[arg(long = "ws.api")]
-    pub ws_api: Option<RpcModuleConfig>,
+    pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC  server
     #[arg(long)]
@@ -99,7 +99,7 @@ mod tests {
                 .args;
 
         let apis = args.http_api.unwrap();
-        let expected = RpcModuleConfig::try_from_selection(["eth", "admin", "debug"]).unwrap();
+        let expected = RpcModuleSelection::try_from_selection(["eth", "admin", "debug"]).unwrap();
 
         assert_eq!(apis, expected);
     }

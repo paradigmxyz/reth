@@ -4,10 +4,12 @@ use crate::{
     types::{EthMessage, ProtocolMessage, Status},
     EthVersion,
 };
-use bytes::{Bytes, BytesMut};
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_primitives::ForkFilter;
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    ForkFilter,
+};
 use reth_rlp::Encodable;
 use std::{
     pin::Pin,

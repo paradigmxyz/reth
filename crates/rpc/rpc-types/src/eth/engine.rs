@@ -2,8 +2,9 @@
 
 #![allow(missing_docs)]
 
-use bytes::BytesMut;
-use reth_primitives::{Address, Bloom, Bytes, SealedBlock, H256, H64, U256, U64};
+use reth_primitives::{
+    bytes::BytesMut, Address, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64,
+};
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +31,7 @@ pub struct ExecutionPayload {
     /// Array of [`Withdrawal`] enabled with V2
     /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawal: Option<Withdrawal>,
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl From<SealedBlock> for ExecutionPayload {
@@ -59,24 +60,18 @@ impl From<SealedBlock> for ExecutionPayload {
             base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
             block_hash: value.hash(),
             transactions,
-            withdrawal: None,
+            withdrawals: value.withdrawals,
         }
     }
 }
 
-/// This structure maps onto the validator withdrawal object from the beacon chain spec.
+/// This structure contains a body of an execution payload.
 ///
-/// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#withdrawalv1>
-#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Withdrawal {
-    pub index: U64,
-    pub validator_index: U64,
-    pub address: Address,
-    /// Note: the amount value is represented on the beacon chain as a little-endian value in units
-    /// of Gwei, whereas the amount in this structure MUST be converted to a big-endian value in
-    /// units of Wei.
-    pub amount: U256,
+/// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPayloadBody {
+    transactions: Vec<Bytes>,
+    withdrawals: Vec<Withdrawal>,
 }
 
 /// This structure encapsulates the fork choice state
@@ -97,9 +92,9 @@ pub struct PayloadAttributes {
     pub prev_randao: H256,
     pub suggested_fee_recipient: Address,
     /// Array of [`Withdrawal`] enabled with V2
-    /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
+    /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub withdrawal: Option<Withdrawal>, // TODO: should be a vec
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 /// This structure contains the result of processing a payload

@@ -3,10 +3,12 @@
 //! This basis of this file has been taken from the discv5 codebase:
 //! <https://github.com/sigp/discv5>
 
-use bytes::{Bytes, BytesMut};
 use reth_net_common::ban_list::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
-use reth_primitives::NodeRecord;
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    NodeRecord,
+};
 use reth_rlp::Encodable;
 use std::{
     collections::{HashMap, HashSet},
@@ -26,7 +28,7 @@ pub struct Discv4Config {
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
     pub udp_ingress_message_buffer: usize,
-    /// The number of allowed failures for `FindNode` requests. Default: 1.
+    /// The number of allowed failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
     /// 300sec, 5min.
@@ -56,8 +58,10 @@ pub struct Discv4Config {
     pub enable_dht_random_walk: bool,
     /// Whether to automatically lookup peers.
     pub enable_lookup: bool,
-    /// Whether to enable EIP-868 extension
+    /// Whether to enforce EIP-868 extension
     pub enable_eip868: bool,
+    /// Whether to respect expiration timestamps in messages
+    pub enforce_expiration_timestamps: bool,
     /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
     pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,
     /// If configured, try to resolve public ip
@@ -116,7 +120,7 @@ impl Default for Discv4Config {
             udp_egress_message_buffer: 1024,
             /// Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
-            max_find_node_failures: 2,
+            max_find_node_failures: 5,
             ping_interval: Duration::from_secs(300),
             /// unified expiration and timeout durations, mirrors geth's `expiration` duration
             ping_expiration: Duration::from_secs(20),
@@ -131,6 +135,7 @@ impl Default for Discv4Config {
             enable_dht_random_walk: true,
             enable_lookup: true,
             enable_eip868: true,
+            enforce_expiration_timestamps: true,
             additional_eip868_rlp_pairs: Default::default(),
             external_ip_resolver: Some(Default::default()),
             /// By default retry public IP using a 5min interval
@@ -207,9 +212,18 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Whether to enable EIP-868
+    /// Whether to enforce expiration timestamps in messages.
     pub fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
+        self
+    }
+
+    /// Whether to enable EIP-868
+    pub fn enforce_expiration_timestamps(
+        &mut self,
+        enforce_expiration_timestamps: bool,
+    ) -> &mut Self {
+        self.config.enforce_expiration_timestamps = enforce_expiration_timestamps;
         self
     }
 

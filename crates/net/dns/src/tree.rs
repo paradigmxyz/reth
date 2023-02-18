@@ -23,10 +23,9 @@ use crate::error::{
     ParseDnsEntryError::{FieldNotFound, UnknownEntry},
     ParseEntryResult,
 };
-use bytes::Bytes;
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
-use reth_primitives::hex;
+use reth_primitives::{bytes::Bytes, hex};
 use secp256k1::SecretKey;
 use std::{fmt, str::FromStr};
 

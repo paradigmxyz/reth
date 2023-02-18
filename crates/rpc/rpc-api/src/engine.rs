@@ -1,8 +1,8 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::H64;
+use reth_primitives::{BlockHash, BlockNumber, H64};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBody, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
+    PayloadStatus, TransitionConfiguration,
 };
 
 #[cfg_attr(not(feature = "client"), rpc(server))]
@@ -44,6 +44,21 @@ pub trait EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_getpayloadv2>
     #[method(name = "engine_getPayloadV2")]
     async fn get_payload_v2(&self, payload_id: H64) -> Result<ExecutionPayload>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
+    #[method(name = "engine_getPayloadBodiesByHashV1")]
+    async fn get_payload_bodies_by_hash_v1(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> Result<Vec<ExecutionPayloadBody>>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
+    #[method(name = "engine_getPayloadBodiesByRangeV1")]
+    async fn get_payload_bodies_by_range_v1(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> Result<Vec<ExecutionPayloadBody>>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
     #[method(name = "engine_exchangeTransitionConfigurationV1")]

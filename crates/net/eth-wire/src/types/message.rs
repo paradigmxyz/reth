@@ -5,7 +5,7 @@ use super::{
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
 use crate::{EthVersion, SharedTransactions};
-use bytes::{Buf, BufMut};
+use reth_primitives::bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
 

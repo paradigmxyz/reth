@@ -150,7 +150,7 @@ impl Command {
 
         // TODO(mattsse): cleanup, add cli args
         let _rpc_server = reth_rpc_builder::launch(
-            ShareableDatabase::new(db.clone()),
+            ShareableDatabase::new(db.clone(), self.chain.clone()),
             reth_transaction_pool::test_utils::testing_pool(),
             network.clone(),
             TransportRpcModuleConfig::default()
@@ -175,7 +175,7 @@ impl Command {
         // Run pipeline
         let (rx, tx) = tokio::sync::oneshot::channel();
         info!(target: "reth::cli", "Starting sync pipeline");
-        ctx.task_executor.spawn_critical("pipeline task", async move {
+        ctx.task_executor.spawn_critical_blocking("pipeline task", async move {
             let res = pipeline.run(db.clone()).await;
             let _ = rx.send(res);
         });
@@ -271,7 +271,7 @@ impl Command {
         _pool: (),
     ) -> Result<NetworkHandle, NetworkError>
     where
-        C: BlockProvider + HeaderProvider + 'static,
+        C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
     {
         let client = config.client.clone();
         let (handle, network, _txpool, eth) =
@@ -324,7 +324,7 @@ impl Command {
             .network_config(config, self.chain.clone())
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .build(Arc::new(ShareableDatabase::new(db)))
+            .build(ShareableDatabase::new(db, self.chain.clone()))
     }
 
     async fn build_pipeline<H, B, U>(
@@ -378,7 +378,7 @@ async fn run_network_until_shutdown<C>(
     network: NetworkManager<C>,
     persistent_peers_file: Option<PathBuf>,
 ) where
-    C: BlockProvider + HeaderProvider + 'static,
+    C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
 {
     pin_mut!(network, shutdown);
 

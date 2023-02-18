@@ -2,6 +2,9 @@
 mod hashing_storage;
 use hashing_storage::dump_hashing_storage_stage;
 
+mod hashing_account;
+use hashing_account::dump_hashing_account_stage;
+
 mod execution;
 use execution::dump_execution_stage;
 
@@ -40,6 +43,8 @@ pub enum Stages {
     Execution(StageCommand),
     /// StorageHashing stage.
     StorageHashing(StageCommand),
+    /// AccountHashing stage.
+    AccountHashing(StageCommand),
 }
 
 /// Stage command that takes a range
@@ -85,6 +90,9 @@ impl Command {
             }
             Stages::StorageHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
                 dump_hashing_storage_stage(&mut tool, *from, *to, output_db, *dry_run).await?
+            }
+            Stages::AccountHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
+                dump_hashing_account_stage(&mut tool, *from, *to, output_db, *dry_run).await?
             }
         }
 

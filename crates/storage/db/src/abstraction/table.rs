@@ -3,7 +3,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     Error,
 };
-use bytes::Bytes;
+use reth_primitives::bytes::Bytes;
 use serde::Serialize;
 use std::{
     fmt::Debug,
@@ -101,19 +101,20 @@ pub trait TableImporter<'tx>: for<'a> DbTxMut<'a> {
         source_tx: &R,
         from: Option<<T as Table>::Key>,
         to: <T as Table>::Key,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error>
+    where
+        T::Key: Default,
+    {
         let mut destination_cursor = self.cursor_write::<T>()?;
         let mut source_cursor = source_tx.cursor_read::<T>()?;
 
-        for row in source_cursor.walk(from)? {
+        let source_range = match from {
+            Some(from) => source_cursor.walk_range(from..=to),
+            None => source_cursor.walk_range(..=to),
+        };
+        for row in source_range? {
             let (key, value) = row?;
-            let finished = key == to;
-
             destination_cursor.append(key, value)?;
-
-            if finished {
-                break
-            }
         }
 
         Ok(())

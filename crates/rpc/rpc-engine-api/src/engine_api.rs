@@ -85,12 +85,17 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             .map(|tx| TransactionSigned::decode(&mut tx.as_ref()))
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let transactions_root = proofs::calculate_transaction_root(transactions.iter());
+
+        let withdrawals_root =
+            payload.withdrawals.as_ref().map(|w| proofs::calculate_withdrawals_root(w.iter()));
+
         let header = Header {
             parent_hash: payload.parent_hash,
             beneficiary: payload.fee_recipient,
             state_root: payload.state_root,
             transactions_root,
             receipts_root: payload.receipts_root,
+            withdrawals_root,
             logs_bloom: payload.logs_bloom,
             number: payload.block_number.as_u64(),
             gas_limit: payload.gas_limit.as_u64(),
@@ -103,8 +108,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             ommers_hash: EMPTY_LIST_HASH,
             difficulty: Default::default(),
             nonce: Default::default(),
-        };
-        let header = header.seal();
+        }
+        .seal_slow();
 
         if payload.block_hash != header.hash() {
             return Err(EngineApiError::PayloadBlockHash {
@@ -113,7 +118,12 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             })
         }
 
-        Ok(SealedBlock { header, body: transactions, ommers: Default::default() })
+        Ok(SealedBlock {
+            header,
+            body: transactions,
+            withdrawals: payload.withdrawals,
+            ommers: Default::default(),
+        })
     }
 
     /// Called to retrieve the latest state of the network, validate new blocks, and maintain
@@ -316,9 +326,11 @@ mod tests {
 
     mod new_payload {
         use super::*;
-        use bytes::{Bytes, BytesMut};
         use reth_interfaces::test_utils::generators::random_header;
-        use reth_primitives::Block;
+        use reth_primitives::{
+            bytes::{Bytes, BytesMut},
+            Block,
+        };
         use reth_rlp::DecodeError;
 
         fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> SealedBlock {
@@ -330,9 +342,10 @@ mod tests {
             transformed.header.ommers_hash =
                 proofs::calculate_ommers_root(transformed.ommers.iter());
             SealedBlock {
-                header: transformed.header.seal(),
+                header: transformed.header.seal_slow(),
                 body: transformed.body,
-                ommers: transformed.ommers.into_iter().map(Header::seal).collect(),
+                ommers: transformed.ommers.into_iter().map(Header::seal_slow).collect(),
+                withdrawals: transformed.withdrawals,
             }
         }
 

@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::{StoredBlockBody, StoredBlockOmmers},
+    models::{StoredBlockBody, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -28,6 +28,7 @@ pub const BODIES: StageId = StageId("Bodies");
 /// The body stage downloads block bodies for all block headers stored locally in the database.
 ///
 /// # Empty blocks
+
 ///
 /// Blocks with an ommers hash corresponding to no ommers *and* a transaction root corresponding to
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
@@ -88,8 +89,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
-        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
         // Cursors used to write state transition mapping
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
@@ -101,13 +103,10 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut highest_block = input.stage_progress.unwrap_or_default();
         debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
 
-        let downloaded_bodies = match self.downloader.try_next().await? {
-            Some(downloaded_bodies) => downloaded_bodies,
-            None => {
-                info!(target: "sync::stages::bodies", stage_progress = highest_block, "Download stream exhausted");
-                return Ok(ExecOutput { stage_progress: highest_block, done: true })
-            }
-        };
+        // Task downloader can return `None` only if the response relaying channel was closed. This
+        // is a fatal error to prevent the pipeline from running forever.
+        let downloaded_bodies =
+            self.downloader.try_next().await?.ok_or(StageError::ChannelClosed)?;
 
         trace!(target: "sync::stages::bodies", bodies_len = downloaded_bodies.len(), "Writing blocks");
         for response in downloaded_bodies {
@@ -115,6 +114,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             let block_number = response.block_number();
             let difficulty = response.difficulty();
 
+            let mut has_withdrawals = false;
             match response {
                 BlockResponse::Full(block) => {
                     body_cursor.append(
@@ -136,6 +136,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                         transition_id += 1;
                     }
 
+                    // Write ommers if any
                     if !block.ommers.is_empty() {
                         ommers_cursor.append(
                             block_number,
@@ -147,6 +148,15 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                                     .collect(),
                             },
                         )?;
+                    }
+
+                    // Write withdrawals if any
+                    if let Some(withdrawals) = block.withdrawals {
+                        if !withdrawals.is_empty() {
+                            has_withdrawals = true;
+                            withdrawals_cursor
+                                .append(block_number, StoredBlockWithdrawals { withdrawals })?;
+                        }
                     }
                 }
                 BlockResponse::Empty(_) => {
@@ -166,7 +176,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .ok_or(ProviderError::TotalDifficulty { number: block_number })?
                 .1;
             let has_reward = self.consensus.has_block_reward(td.into(), difficulty);
-            if has_reward {
+            let has_post_block_transition = has_reward || has_withdrawals;
+            if has_post_block_transition {
                 transition_id += 1;
             }
             block_transition_cursor.append(block_number, transition_id)?;
@@ -191,8 +202,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind bodies, ommers
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
-        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
+        let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
         // Cursors to unwind transitions
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
@@ -203,9 +215,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 break
             }
 
-            // Delete the ommers value if any
+            // Delete the ommers entry if any
             if ommers_cursor.seek_exact(number)?.is_some() {
                 ommers_cursor.delete_current()?;
+            }
+
+            // Delete the withdrawals entry if any
+            if withdrawals_cursor.seek_exact(number)?.is_some() {
+                withdrawals_cursor.delete_current()?;
             }
 
             // Delete the block transition if any
@@ -456,6 +473,7 @@ mod tests {
                 BlockBody {
                     transactions: block.body.clone(),
                     ommers: block.ommers.iter().cloned().map(|ommer| ommer.unseal()).collect(),
+                    withdrawals: block.withdrawals.clone(),
                 },
             )
         }
@@ -747,7 +765,7 @@ mod tests {
                             let (num, hash) = entry?;
                             let (_, header) =
                                 header_cursor.seek_exact(num)?.expect("missing header");
-                            headers.push(SealedHeader::new(header, hash));
+                            headers.push(header.seal(hash));
                         }
                         Ok(headers)
                     })??);
@@ -774,7 +792,8 @@ mod tests {
                         response.push(BlockResponse::Full(SealedBlock {
                             header,
                             body: body.transactions,
-                            ommers: body.ommers.into_iter().map(|h| h.seal()).collect(),
+                            ommers: body.ommers.into_iter().map(|h| h.seal_slow()).collect(),
+                            withdrawals: body.withdrawals,
                         }));
                     }
 

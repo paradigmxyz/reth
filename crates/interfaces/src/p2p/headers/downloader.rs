@@ -11,7 +11,7 @@ use reth_primitives::{SealedHeader, H256};
 /// while a [HeadersClient][crate::p2p::headers::client::HeadersClient] represents a client capable
 /// of fulfilling these requests.
 ///
-/// A [HeaderDownloader] is a [Stream] that returns batches for headers.
+/// A [HeaderDownloader] is a [Stream] that returns batches of headers.
 pub trait HeaderDownloader: Send + Sync + Stream<Item = Vec<SealedHeader>> + Unpin {
     /// Updates the gap to sync which ranges from local head to the sync target
     ///

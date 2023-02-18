@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Error, Result};
 
-use crate::utils::{attributes_include, field_ident, is_optional, parse_struct};
+use crate::utils::{attributes_include, field_ident, is_optional, parse_struct, EMPTY_STRING_CODE};
 
 pub(crate) fn impl_decodable(ast: &syn::DeriveInput) -> Result<TokenStream> {
     let body = parse_struct(ast, "RlpDecodable")?;
@@ -107,7 +107,12 @@ fn decodable_field(index: usize, field: &syn::Field, is_opt: bool) -> TokenStrea
     } else if is_opt {
         quote! {
             #ident: if started_len - b.len() < rlp_head.payload_length {
-                Some(reth_rlp::Decodable::decode(b)?)
+                if b.first().map(|b| *b == #EMPTY_STRING_CODE).unwrap_or_default() {
+                    bytes::Buf::advance(b, 1);
+                    None
+                } else {
+                    Some(reth_rlp::Decodable::decode(b)?)
+                }
             } else {
                 None
             },

@@ -1,7 +1,5 @@
 //! Standalone http tests
 
-use std::collections::HashSet;
-
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use jsonrpsee::{
     core::{
@@ -12,8 +10,8 @@ use jsonrpsee::{
 };
 use reth_primitives::{
     hex_literal::hex,
-    rpc::{BlockId, BlockNumber as RpcBlockNumber},
-    Address, BlockNumber, Bytes, NodeRecord, H256, H64, U256,
+    rpc::{BlockId, BlockNumber},
+    Address, Bytes, NodeRecord, H256, H64, U256,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -21,6 +19,7 @@ use reth_rpc_api::{
 };
 use reth_rpc_builder::RethRpcModule;
 use reth_rpc_types::{trace::filter::TraceFilter, CallRequest, Index, TransactionRequest};
+use std::collections::HashSet;
 
 fn is_unimplemented(err: Error) -> bool {
     match err {
@@ -28,7 +27,7 @@ fn is_unimplemented(err: Error) -> bool {
             error_obj.code() == ErrorCode::InternalError.code() &&
                 error_obj.message() == "unimplemented"
         }
-        _ => return false,
+        _ => false,
     }
 }
 
@@ -62,11 +61,14 @@ where
     // Implemented
     EthApiClient::protocol_version(client).await.unwrap();
     EthApiClient::chain_id(client).await.unwrap();
-    EthApiClient::chain_id(client).await.unwrap();
     EthApiClient::accounts(client).await.unwrap();
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
     EthApiClient::send_raw_transaction(client, tx).await.unwrap();
+    EthApiClient::fee_history(client, 0.into(), block_number.into(), None).await.unwrap();
+    EthApiClient::balance(client, address, None).await.unwrap();
+    EthApiClient::transaction_count(client, address, None).await.unwrap();
+    EthApiClient::storage_at(client, address, U256::default(), None).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
@@ -109,13 +111,6 @@ where
             .unwrap()
     ));
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
-    assert!(is_unimplemented(EthApiClient::balance(client, address, None).await.err().unwrap()));
-    assert!(is_unimplemented(
-        EthApiClient::storage_at(client, address, U256::default(), None).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::transaction_count(client, address, None).await.err().unwrap()
-    ));
     assert!(is_unimplemented(
         EthApiClient::call(client, call_request.clone(), None).await.err().unwrap()
     ));
@@ -126,9 +121,6 @@ where
         EthApiClient::estimate_gas(client, call_request.clone(), None).await.err().unwrap()
     ));
     assert!(is_unimplemented(EthApiClient::gas_price(client).await.err().unwrap()));
-    assert!(is_unimplemented(
-        EthApiClient::fee_history(client, U256::default(), block_number, None).await.err().unwrap()
-    ));
     assert!(is_unimplemented(EthApiClient::max_priority_fee_per_gas(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::is_mining(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::hashrate(client).await.err().unwrap()));
@@ -169,7 +161,7 @@ async fn test_basic_debug_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    let block_id = BlockId::Number(RpcBlockNumber::default());
+    let block_id = BlockId::Number(BlockNumber::default());
 
     assert!(is_unimplemented(DebugApiClient::raw_header(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::raw_block(client, block_id).await.err().unwrap()));
@@ -193,7 +185,7 @@ async fn test_basic_trace_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    let block_id = BlockId::Number(RpcBlockNumber::default());
+    let block_id = BlockId::Number(BlockNumber::default());
     let trace_filter = TraceFilter {
         from_block: None,
         to_block: None,

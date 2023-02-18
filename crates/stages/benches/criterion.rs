@@ -2,17 +2,35 @@ use criterion::{
     async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
     BenchmarkGroup, Criterion,
 };
+use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
-use reth_primitives::H256;
 use reth_stages::{
     stages::{SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-criterion_group!(benches, tx_lookup, senders, total_difficulty);
+mod setup;
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = transaction_lookup, account_hashing, senders, total_difficulty
+}
 criterion_main!(benches);
+
+fn account_hashing(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Stages");
+
+    // don't need to run each stage for that many times
+    group.sample_size(10);
+
+    let num_blocks = 10_000;
+    let (path, stage, execution_range) = setup::prepare_account_hashing(num_blocks);
+
+    measure_stage_with_path(&mut group, stage, path, "AccountHashing".to_string(), execution_range);
+}
 
 fn senders(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
@@ -29,7 +47,7 @@ fn senders(c: &mut Criterion) {
     }
 }
 
-fn tx_lookup(c: &mut Criterion) {
+fn transaction_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
 
     // don't need to run each stage for that many times
@@ -52,17 +70,15 @@ fn total_difficulty(c: &mut Criterion) {
     measure_stage(&mut group, stage, num_blocks, "TotalDifficulty".to_string());
 }
 
-fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
+fn measure_stage_with_path<S: Clone + Default + Stage<Env<WriteMap>>>(
     group: &mut BenchmarkGroup<WallTime>,
     stage: S,
-    num_blocks: u64,
+    path: PathBuf,
     label: String,
+    stage_range: (ExecInput, UnwindInput),
 ) {
-    let path = txs_testdata(num_blocks as usize);
     let tx = TestTransaction::new(&path);
-
-    let mut input = ExecInput::default();
-    input.previous_stage = Some((StageId("Another"), num_blocks));
+    let (input, unwind) = stage_range;
 
     group.bench_function(label, move |b| {
         b.to_async(FuturesExecutor).iter_with_setup(
@@ -73,7 +89,16 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
                     let mut db_tx = tx.inner();
 
                     // Clear previous run
-                    stage.unwind(&mut db_tx, UnwindInput::default()).await.unwrap();
+                    stage
+                        .unwind(&mut db_tx, unwind)
+                        .await
+                        .map_err(|e| {
+                            eyre::eyre!(format!(
+                                "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
+                                path.display()
+                            ))
+                        })
+                        .unwrap();
 
                     db_tx.commit().unwrap();
                 });
@@ -88,38 +113,25 @@ fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
     });
 }
 
-use reth_interfaces::test_utils::generators::random_block_range;
+fn measure_stage<S: Clone + Default + Stage<Env<WriteMap>>>(
+    group: &mut BenchmarkGroup<WallTime>,
+    stage: S,
+    num_blocks: u64,
+    label: String,
+) {
+    let path = setup::txs_testdata(num_blocks as usize);
 
-// Helper for generating testdata for the sender recovery stage and tx lookup stages (512MB).
-// Returns the path to the database file and the number of blocks written.
-fn txs_testdata(num_blocks: usize) -> PathBuf {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
-    let txs_range = 100..150;
-
-    if !path.exists() {
-        // create the dirs
-        std::fs::create_dir_all(&path).unwrap();
-        println!("Transactions testdata not found, generating to {:?}", path.display());
-        let tx = TestTransaction::new(&path);
-
-        // This takes a while because it does sig recovery internally
-        let blocks = random_block_range(0..num_blocks as u64 + 1, H256::zero(), txs_range);
-
-        // insert all blocks
-        tx.insert_blocks(blocks.iter(), None).unwrap();
-
-        // // initialize TD
-        use reth_db::{
-            cursor::DbCursorRO,
-            tables,
-            transaction::{DbTx, DbTxMut},
-        };
-        tx.commit(|tx| {
-            let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
-            tx.put::<tables::HeaderTD>(head, reth_primitives::U256::from(0).into())
-        })
-        .unwrap();
-    }
-
-    path
+    measure_stage_with_path(
+        group,
+        stage,
+        path,
+        label,
+        (
+            ExecInput {
+                previous_stage: Some((StageId("Another"), num_blocks)),
+                ..Default::default()
+            },
+            UnwindInput::default(),
+        ),
+    )
 }

@@ -1,7 +1,8 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as RethHeader, H256, H64, U256,
+    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as RethHeader, Withdrawal, H256, H64,
+    U256,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -43,6 +44,8 @@ pub struct Block {
     /// Base Fee for post-EIP1559 blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
+    /// Withdrawals
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl Block {
@@ -74,6 +77,7 @@ impl Block {
             nonce,
             base_fee_per_gas,
             extra_data,
+            withdrawals_root,
         } = block.header;
 
         let header = Header {
@@ -85,6 +89,7 @@ impl Block {
             state_root,
             transactions_root,
             receipts_root,
+            withdrawals_root,
             number: Some(U256::from(number)),
             gas_used: U256::from(gas_used),
             gas_limit: U256::from(gas_limit),
@@ -115,6 +120,7 @@ impl Block {
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
             total_difficulty,
             size: Some(U256::from(block_length)),
+            withdrawals: block.withdrawals,
         })
     }
 }
@@ -140,6 +146,8 @@ pub struct Header {
     pub transactions_root: H256,
     /// Transactions receipts root hash
     pub receipts_root: H256,
+    /// Withdrawals root hash
+    pub withdrawals_root: Option<H256>,
     /// Block number
     pub number: Option<U256>,
     /// Gas Used
