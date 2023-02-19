@@ -13,11 +13,11 @@ use crate::{
         AddedPendingTransaction, AddedTransaction, OnNewBlockOutcome,
     },
     traits::{PoolSize, StateDiff},
-    OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, TransactionOrdering,
-    ValidPoolTransaction, U256,
+    OnNewBlockEvent, PoolConfig, PoolResult, PoolTransaction, PooledTransactionHash,
+    TransactionOrdering, ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
-use reth_primitives::{TxHash, TxType, H256};
+use reth_primitives::{TxHash, H256};
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
@@ -508,8 +508,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
-    pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = (TxType, usize, TxHash)> + '_ {
-        self.by_hash.values().map(|tx| (tx.tx_type(), tx.size(), *tx.hash()))
+    pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = PooledTransactionHash> + '_ {
+        self.by_hash.values().map(|tx| (*tx.hash(), tx.tx_type(), tx.size()).into())
     }
 
     /// Returns if the transaction for the given hash is already included in this pool

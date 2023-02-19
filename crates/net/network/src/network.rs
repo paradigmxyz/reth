@@ -1,10 +1,14 @@
 use crate::{
-    config::NetworkMode, manager::NetworkEvent, message::PeerRequest, peers::PeersHandle,
-    session::PeerInfo, FetchClient,
+    config::NetworkMode,
+    manager::NetworkEvent,
+    message::{NewPooledTransactionHashes, PeerRequest},
+    peers::PeersHandle,
+    session::PeerInfo,
+    FetchClient,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_eth_wire::{DisconnectReason, NewBlock, SharedTransactions};
 use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},

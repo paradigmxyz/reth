@@ -3,15 +3,13 @@
 use crate::{
     cache::LruCache,
     manager::NetworkEvent,
-    message::{PeerRequest, PeerRequestSender},
+    message::{NewPooledTransactionHashes, PeerRequest, PeerRequestSender},
     metrics::TransactionsManagerMetrics,
     network::NetworkHandleMessage,
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
-use reth_eth_wire::{
-    GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
-};
+use reth_eth_wire::{GetPooledTransactions, PooledTransactions, Transactions};
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
@@ -231,7 +229,7 @@ where
                     let (types, sizes) = full.iter().map(|tx| (tx.tx_type(), tx.length())).unzip();
 
                     // send hashes of transactions
-                    self.network.send_transactions_hashes(*peer_id, (types, sizes, hashes).into());
+                    self.network.send_transactions_hashes(*peer_id, (hashes, types, sizes).into());
                 } else {
                     // send full transactions
                     self.network.send_transactions(*peer_id, full);
@@ -342,7 +340,7 @@ where
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
                 if !self.network.is_syncing() {
-                    let msg = self.pool.pooled_transactions().into();
+                    let msg = self.pool.pooled_transaction_hashes().into();
                     self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
                         peer_id,
                         msg,

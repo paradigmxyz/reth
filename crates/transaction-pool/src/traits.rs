@@ -1,4 +1,6 @@
-use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
+use crate::{
+    error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction, PooledTransactionHash,
+};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, TxType, H256, U256,
@@ -75,7 +77,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Note: The returned `Vec<TxHash>` should be guaranteed that all hashes are unique.
     ///
     /// Consumer: P2P
-    fn pooled_transactions(&self) -> (Vec<TxType>, Vec<usize>, Vec<TxHash>);
+    fn pooled_transaction_hashes(&self) -> Vec<PooledTransactionHash>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///

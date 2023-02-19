@@ -7,11 +7,12 @@ use futures::FutureExt;
 use reth_eth_wire::{
     capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockBody, BlockHeaders,
     EthMessage, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    SharedTransactions, Transactions,
+    NewBlock, NewBlockHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
+    PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
-use reth_primitives::{Bytes, Header, PeerId, Receipt, TransactionSigned, H256};
+use reth_primitives::{Bytes, Header, PeerId, Receipt, TransactionSigned, TxHash, TxType, H256};
+use reth_transaction_pool::PooledTransactionHash;
 use std::{
     fmt,
     sync::Arc,
@@ -34,6 +35,52 @@ impl NewBlockMessage {
     /// Returns the block number of the block
     pub fn number(&self) -> u64 {
         self.block.block.header.number
+    }
+}
+
+/// Internal form of a `PooledTransactions` message
+/// Same as [`NewPooledTransactionHashes68`] but types and sizes are Option.
+#[derive(Debug, Clone)]
+pub struct NewPooledTransactionHashes {
+    /// Transaction types for new transactions that have appeared on the network.
+    pub types: Option<Vec<u8>>,
+    /// Transaction sizes for new transactions that have appeared on the network.
+    pub sizes: Option<Vec<usize>>,
+    /// Transaction hashes for new transactions that have appeared on the network.
+    pub hashes: Vec<H256>,
+}
+
+impl From<NewPooledTransactionHashes66> for NewPooledTransactionHashes {
+    fn from(msg: NewPooledTransactionHashes66) -> Self {
+        NewPooledTransactionHashes { types: None, sizes: None, hashes: msg.0 }
+    }
+}
+
+impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
+    fn from(msg: NewPooledTransactionHashes68) -> Self {
+        NewPooledTransactionHashes {
+            types: Some(msg.types),
+            sizes: Some(msg.sizes),
+            hashes: msg.hashes,
+        }
+    }
+}
+
+impl From<(Vec<TxHash>, Vec<TxType>, Vec<usize>)> for NewPooledTransactionHashes {
+    fn from((hashes, types, sizes): (Vec<TxHash>, Vec<TxType>, Vec<usize>)) -> Self {
+        NewPooledTransactionHashes {
+            types: Some(types.into_iter().map(|t| t as u8).collect()),
+            sizes: Some(sizes),
+            hashes,
+        }
+    }
+}
+
+impl From<Vec<PooledTransactionHash>> for NewPooledTransactionHashes {
+    fn from(value: Vec<PooledTransactionHash>) -> Self {
+        let (hashes, (types, sizes)) =
+            value.into_iter().map(|v| (v.hash, (v.tx_type, v.size))).unzip();
+        (hashes, types, sizes).into()
     }
 }
 

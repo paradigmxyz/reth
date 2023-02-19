@@ -251,7 +251,7 @@ impl ActiveSession {
             }
             PeerMessage::PooledTransactions(msg) => {
                 if self.conn.version() >= EthVersion::Eth68 {
-                    match msg.try_into() {
+                    match (msg.types, msg.sizes, msg.hashes).try_into() {
                         Ok(msg68) => {
                             self.queued_outgoing
                                 .push_back(EthMessage::NewPooledTransactionHashes68(msg68).into());

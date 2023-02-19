@@ -225,8 +225,8 @@ where
         self.pool.add_transaction_listener()
     }
 
-    fn pooled_transactions(&self) -> (Vec<TxType>, Vec<usize>, Vec<TxHash>) {
-        self.pool.pooled_transactions()
+    fn pooled_transaction_hashes(&self) -> Vec<PooledTransactionHash> {
+        self.pool.pooled_transaction_hashes()
     }
 
     fn best_transactions(
@@ -265,5 +265,22 @@ where
 impl<V: TransactionValidator, O: TransactionOrdering> Clone for Pool<V, O> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
+    }
+}
+
+/// Internal form of a `PooledTransaction`
+#[derive(Debug, Clone)]
+pub struct PooledTransactionHash {
+    /// Transaction hash
+    pub hash: TxHash,
+    /// Transaction type
+    pub tx_type: TxType,
+    /// Transaction size
+    pub size: usize,
+}
+
+impl From<(TxHash, TxType, usize)> for PooledTransactionHash {
+    fn from((hash, tx_type, size): (TxHash, TxType, usize)) -> Self {
+        Self { hash, tx_type, size }
     }
 }
