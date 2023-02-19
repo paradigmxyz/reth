@@ -1,10 +1,8 @@
 use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    exec_or_return, stages::stream::SequentialPairStream, ExecAction, ExecInput, ExecOutput, Stage,
+    StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
-
-use crate::stages::stream::SequentialPairStream;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -90,7 +88,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             let (tx_id, transaction) = entry?;
             let tx = tx.clone();
             rayon::spawn_fifo(move || {
-                trace!(target: "sync::stages::sender_recovery", tx_id, hash = ?transaction.hash(), "Recovering sender");
                 let res = if let Some(signer) = transaction.recover_signer() {
                     Ok((tx_id, signer))
                 } else {
