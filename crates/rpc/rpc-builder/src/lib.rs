@@ -700,18 +700,18 @@ impl TransportRpcModuleConfig {
     }
 
     /// Returns the [RpcModuleSelection] for the http transport
-    pub fn http(&self) -> Option<RpcModuleSelection> {
-        self.http.clone()
+    pub fn http(&self) -> Option<&RpcModuleSelection> {
+        self.http.as_ref()
     }
 
     /// Returns the [RpcModuleSelection] for the ws transport
-    pub fn ws(&self) -> Option<RpcModuleSelection> {
-        self.ws.clone()
+    pub fn ws(&self) -> Option<&RpcModuleSelection> {
+        self.ws.as_ref()
     }
 
     /// Returns the [RpcModuleSelection] for the ipc transport
-    pub fn ipc(&self) -> Option<RpcModuleSelection> {
-        self.ipc.clone()
+    pub fn ipc(&self) -> Option<&RpcModuleSelection> {
+        self.ipc.as_ref()
     }
 }
 
