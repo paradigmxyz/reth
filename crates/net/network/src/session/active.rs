@@ -251,11 +251,14 @@ impl ActiveSession {
             }
             PeerMessage::PooledTransactions(msg) => {
                 if self.conn.version() >= EthVersion::Eth68 {
-                    if let Ok(msg68) = msg.try_into() {
-                        self.queued_outgoing
-                            .push_back(EthMessage::NewPooledTransactionHashes68(msg68).into());
-                    } else {
-                        error!(target : "net::session", "PooledTransactions should have `types` and `sizes` for `eth68`");
+                    match msg.try_into() {
+                        Ok(msg68) => {
+                            self.queued_outgoing
+                                .push_back(EthMessage::NewPooledTransactionHashes68(msg68).into());
+                        }
+                        Err(err) => {
+                            error!(target : "net::session", err);
+                        }
                     }
                 } else {
                     self.queued_outgoing.push_back(
