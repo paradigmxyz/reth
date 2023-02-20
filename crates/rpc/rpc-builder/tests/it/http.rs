@@ -69,16 +69,12 @@ where
     EthApiClient::storage_at(client, address, U256::default(), None).await.unwrap();
     EthApiClient::block_by_hash(client, hash, false).await.unwrap();
     EthApiClient::block_by_number(client, block_number, false).await.unwrap();
+    EthApiClient::block_transaction_count_by_number(client, block_number).await.unwrap();
+    EthApiClient::block_transaction_count_by_hash(client, hash).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
-    assert!(is_unimplemented(
-        EthApiClient::block_transaction_count_by_hash(client, hash).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::block_transaction_count_by_number(client, block_number).await.err().unwrap()
-    ));
     assert!(is_unimplemented(
         EthApiClient::block_uncles_count_by_hash(client, hash).await.err().unwrap()
     ));
