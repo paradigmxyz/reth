@@ -2,7 +2,7 @@ pub mod execution_result;
 
 use itertools::Itertools;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::{Database, DatabaseGAT},
     models::{
         sharded_key,
@@ -16,12 +16,12 @@ use reth_db::{
 };
 use reth_interfaces::{db::Error as DbError, provider::Error as ProviderError, Error};
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, StorageEntry, TransitionId,
-    TxNumber, H256, U256,
+    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, StorageEntry,
+    TransitionId, TxNumber, H256, U256,
 };
 use reth_tracing::tracing::{info, trace};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
@@ -271,6 +271,150 @@ impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
+    /// Iterate over account changesets and return all account address that were changed.
+    pub fn get_addresses_and_keys_of_changed_storages(
+        &self,
+        from: TransitionId,
+        to: TransitionId,
+    ) -> Result<BTreeMap<Address, BTreeSet<H256>>, TransactionError> {
+        Ok(self
+            .cursor_read::<tables::StorageChangeSet>()?
+            .walk_range(
+                TransitionIdAddress((from, Address::zero()))..
+                    TransitionIdAddress((to, Address::zero())),
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            // fold all storages and save its old state so we can remove it from HashedStorage
+            // it is needed as it is dup table.
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, BTreeSet<H256>>,
+                 (TransitionIdAddress((_, address)), storage_entry)| {
+                    accounts.entry(address).or_default().insert(storage_entry.key);
+                    accounts
+                },
+            ))
+    }
+
+    ///  Get plainstate storages
+    pub fn get_plainstate_storages(
+        &self,
+        iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
+    ) -> Result<Vec<(Address, Vec<(H256, U256)>)>, TransactionError> {
+        let mut plain_storage = self.cursor_dup_read::<tables::PlainStorageState>()?;
+
+        Ok(iter
+            .into_iter()
+            .map(|(address, storage)| {
+                storage
+                    .into_iter()
+                    .map(|key| {
+                        plain_storage
+                            .seek_by_key_subkey(address, key)
+                            .map(|ret| (key, ret.map(|e| e.value).unwrap_or_default()))
+                    })
+                    .collect::<Result<Vec<(_, _)>, _>>()
+                    .map(|storage| (address, storage))
+            })
+            .collect::<Result<Vec<(_, _)>, _>>()?)
+    }
+
+    /// iterate over storages and insert them to hashing table
+    pub fn insert_storage_for_hashing(
+        &self,
+        iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = (H256, U256)>)>,
+    ) -> Result<(), TransactionError> {
+        // hash values
+        let hashed = iter.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
+            let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, (key, value)| {
+                map.insert(keccak256(key), value);
+                map
+            });
+            map.insert(keccak256(address), storage);
+            map
+        });
+
+        let mut hashed_storage = self.cursor_dup_write::<tables::HashedStorage>()?;
+        // Hash the address and key and apply them to HashedStorage (if Storage is None
+        // just remove it);
+        hashed.into_iter().try_for_each(|(address, storage)| {
+            storage.into_iter().try_for_each(|(key, value)| -> Result<(), TransactionError> {
+                if hashed_storage
+                    .seek_by_key_subkey(address, key)?
+                    .filter(|entry| entry.key == key)
+                    .is_some()
+                {
+                    hashed_storage.delete_current()?;
+                }
+
+                if value != U256::ZERO {
+                    hashed_storage.upsert(address, StorageEntry { key, value })?;
+                }
+                Ok(())
+            })
+        })?;
+        Ok(())
+    }
+
+    /// Iterate over account changesets and return all account address that were changed.
+    pub fn get_addresses_of_changed_accounts(
+        &self,
+        from: TransitionId,
+        to: TransitionId,
+    ) -> Result<BTreeSet<Address>, TransactionError> {
+        Ok(self
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(from..to)?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            // fold all account to one set of changed accounts
+            .fold(BTreeSet::new(), |mut accounts: BTreeSet<Address>, (_, account_before)| {
+                accounts.insert(account_before.address);
+                accounts
+            }))
+    }
+
+    /// Get plainstate account from iterator
+    pub fn get_plainstate_accounts(
+        &self,
+        iter: impl IntoIterator<Item = Address>,
+    ) -> Result<Vec<(Address, Option<Account>)>, TransactionError> {
+        let mut plain_accounts = self.cursor_read::<tables::PlainAccountState>()?;
+        Ok(iter
+            .into_iter()
+            .map(|address| plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v))))
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// iterate over accounts and insert them to hashing table
+    pub fn insert_account_for_hashing(
+        &self,
+        accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
+    ) -> Result<(), TransactionError> {
+        let mut hashed_accounts = self.cursor_write::<tables::HashedAccount>()?;
+
+        let hashes_accounts = accounts.into_iter().fold(
+            BTreeMap::new(),
+            |mut map: BTreeMap<H256, Option<Account>>, (address, account)| {
+                map.insert(keccak256(address), account);
+                map
+            },
+        );
+
+        hashes_accounts.into_iter().try_for_each(
+            |(hashed_address, account)| -> Result<(), TransactionError> {
+                if let Some(account) = account {
+                    hashed_accounts.upsert(hashed_address, account)?
+                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                    hashed_accounts.delete_current()?;
+                }
+                Ok(())
+            },
+        )?;
+        Ok(())
+    }
+
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage
     pub fn insert_storage_history_index(
         &self,

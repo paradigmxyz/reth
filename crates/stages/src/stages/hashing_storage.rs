@@ -9,10 +9,7 @@ use reth_db::{
 };
 use reth_primitives::{keccak256, Address, StorageEntry, H256, U256};
 use reth_provider::Transaction;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Debug,
-};
+use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
 
 /// The [`StageId`] of the storage hashing stage.
@@ -133,63 +130,15 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 }
             }
         } else {
-            let mut plain_storage = tx.cursor_dup_read::<tables::PlainStorageState>()?;
-            let mut hashed_storage = tx.cursor_dup_write::<tables::HashedStorage>()?;
-
             // Aggregate all transition changesets and and make list of storages that have been
             // changed.
-            tx.cursor_read::<tables::StorageChangeSet>()?
-                .walk_range(
-                    TransitionIdAddress((from_transition, Address::zero()))..
-                        TransitionIdAddress((to_transition, Address::zero())),
-                )?
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                // fold all storages and save its old state so we can remove it from HashedStorage
-                // it is needed as it is dup table.
-                .fold(
-                    BTreeMap::new(),
-                    |mut accounts: BTreeMap<Address, BTreeSet<H256>>,
-                     (TransitionIdAddress((_, address)), storage_entry)| {
-                        accounts.entry(address).or_default().insert(storage_entry.key);
-                        accounts
-                    },
-                )
-                .into_iter()
-                // iterate over plain state and get newest storage value.
-                // Assumption we are okay with is that plain state represent
-                // `previous_stage_progress` state.
-                .map(|(address, storage)| {
-                    storage
-                        .into_iter()
-                        .map(|key| {
-                            plain_storage
-                                .seek_by_key_subkey(address, key)
-                                .map(|ret| (keccak256(key), ret.map(|e| e.value)))
-                        })
-                        .collect::<Result<BTreeMap<_, _>, _>>()
-                        .map(|storage| (keccak256(address), storage))
-                })
-                .collect::<Result<BTreeMap<_, _>, _>>()?
-                .into_iter()
-                // Hash the address and key and apply them to HashedStorage (if Storage is None
-                // just remove it);
-                .try_for_each(|(address, storage)| {
-                    storage.into_iter().try_for_each(|(key, val)| -> Result<(), StageError> {
-                        if hashed_storage
-                            .seek_by_key_subkey(address, key)?
-                            .filter(|entry| entry.key == key)
-                            .is_some()
-                        {
-                            hashed_storage.delete_current()?;
-                        }
-
-                        if let Some(value) = val {
-                            hashed_storage.upsert(address, StorageEntry { key, value })?;
-                        }
-                        Ok(())
-                    })
-                })?;
+            let changes =
+                tx.get_addresses_and_keys_of_changed_storages(from_transition, to_transition)?;
+            // iterate over plain state and get newest storage value.
+            // Assumption we are okay with is that plain state represent
+            // `previous_stage_progress` state.
+            let changes = tx.get_plainstate_storages(changes.into_iter())?;
+            tx.insert_storage_for_hashing(changes.into_iter())?;
         }
 
         info!(target: "sync::stages::hashing_storage", "Stage finished");

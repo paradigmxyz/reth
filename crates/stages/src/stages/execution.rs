@@ -122,7 +122,7 @@ impl ExecutionStage {
                     tx_walker.next().ok_or(ProviderError::EndOfTransactionTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(ProviderError::TransactionsGap { missing: tx_index }.into());
+                    return Err(ProviderError::TransactionsGap { missing: tx_index }.into())
                 }
                 transactions.push(tx);
             }
@@ -135,7 +135,7 @@ impl ExecutionStage {
                     tx_sender_walker.next().ok_or(ProviderError::EndOfTransactionSenderTable)??;
                 if tx_index != index {
                     error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Signer gap");
-                    return Err(ProviderError::TransactionsSignerGap { missing: tx_index }.into());
+                    return Err(ProviderError::TransactionsSignerGap { missing: tx_index }.into())
                 }
                 signers.push(tx);
             }
@@ -222,7 +222,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // if there is no transaction ids, this means blocks were empty and block reward change set
         // is not present.
         if num_of_tx == 0 {
-            return Ok(UnwindOutput { stage_progress: input.unwind_to });
+            return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
@@ -243,8 +243,8 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
             .walk_range(
-                TransitionIdAddress((from_transition_rev, Address::zero()))
-                    ..TransitionIdAddress((to_transition_rev, Address::zero())),
+                TransitionIdAddress((from_transition_rev, Address::zero()))..
+                    TransitionIdAddress((to_transition_rev, Address::zero())),
             )?
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -267,7 +267,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
         while let Some((transition_id, _)) = rev_acc_changeset_walker.next().transpose()? {
             if transition_id < from_transition_rev {
-                break;
+                break
             }
             // delete all changesets
             tx.delete::<tables::AccountChangeSet>(transition_id, None)?;
@@ -276,7 +276,7 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
             if key.transition_id() < from_transition_rev {
-                break;
+                break
             }
             // delete all changesets
             tx.delete::<tables::StorageChangeSet>(key, None)?;
@@ -298,7 +298,8 @@ mod tests {
         models::AccountBeforeTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, U256,
+        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, StorageEntry, H160,
+        H256, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
