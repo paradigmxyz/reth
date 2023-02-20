@@ -58,8 +58,10 @@ pub struct Discv4Config {
     pub enable_dht_random_walk: bool,
     /// Whether to automatically lookup peers.
     pub enable_lookup: bool,
-    /// Whether to enable EIP-868 extension
+    /// Whether to enforce EIP-868 extension
     pub enable_eip868: bool,
+    /// Whether to respect expiration timestamps in messages
+    pub enforce_expiration_timestamps: bool,
     /// Additional pairs to include in The [`Enr`](enr::Enr) if EIP-868 extension is enabled <https://eips.ethereum.org/EIPS/eip-868>
     pub additional_eip868_rlp_pairs: HashMap<Vec<u8>, Bytes>,
     /// If configured, try to resolve public ip
@@ -133,6 +135,7 @@ impl Default for Discv4Config {
             enable_dht_random_walk: true,
             enable_lookup: true,
             enable_eip868: true,
+            enforce_expiration_timestamps: true,
             additional_eip868_rlp_pairs: Default::default(),
             external_ip_resolver: Some(Default::default()),
             /// By default retry public IP using a 5min interval
@@ -209,9 +212,18 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Whether to enable EIP-868
+    /// Whether to enforce expiration timestamps in messages.
     pub fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
+        self
+    }
+
+    /// Whether to enable EIP-868
+    pub fn enforce_expiration_timestamps(
+        &mut self,
+        enforce_expiration_timestamps: bool,
+    ) -> &mut Self {
+        self.config.enforce_expiration_timestamps = enforce_expiration_timestamps;
         self
     }
 

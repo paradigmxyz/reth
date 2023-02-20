@@ -570,9 +570,9 @@ mod tests {
 
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let client = Arc::new(NoopProvider::default());
+        let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key).build(Arc::clone(&client));
+        let config = NetworkConfigBuilder::new(secret_key).build(client);
         let (handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()

@@ -15,7 +15,7 @@ pub fn test_address() -> SocketAddr {
 /// Launches a new server with http only with the given modules
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server = builder.build(TransportRpcModuleConfig::http(modules));
+    let server = builder.build(TransportRpcModuleConfig::set_http(modules));
     server
         .start_server(RpcServerConfig::http(Default::default()).with_http_address(test_address()))
         .await
@@ -25,7 +25,7 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 /// Launches a new server with ws only with the given modules
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server = builder.build(TransportRpcModuleConfig::ws(modules));
+    let server = builder.build(TransportRpcModuleConfig::set_ws(modules));
     server
         .start_server(RpcServerConfig::ws(Default::default()).with_ws_address(test_address()))
         .await
@@ -36,7 +36,8 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
 pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let modules = modules.into();
-    let server = builder.build(TransportRpcModuleConfig::ws(modules.clone()).with_http(modules));
+    let server =
+        builder.build(TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules));
     server
         .start_server(
             RpcServerConfig::ws(Default::default())

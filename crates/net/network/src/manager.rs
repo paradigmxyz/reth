@@ -240,19 +240,18 @@ where
     /// ```
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
-    /// use std::sync::Arc;
     /// use reth_discv4::bootnodes::mainnet_nodes;
     /// use reth_network::config::rng_secret_key;
     /// use reth_network::{NetworkConfig, NetworkManager};
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
     ///     // This block provider implementation is used for testing purposes.
-    ///     let client = Arc::new(NoopProvider::default());
+    ///     let client = NoopProvider::default();
     ///
     ///     // The key that's used for encrypting sessions and to identify our node.
     ///     let local_key = rng_secret_key();
     ///
     ///     let config =
-    ///         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(Arc::clone(&client));
+    ///         NetworkConfig::<NoopProvider>::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
     ///
     ///     // create the network instance
     ///     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
@@ -555,7 +554,7 @@ where
 
 impl<C> Future for NetworkManager<C>
 where
-    C: BlockProvider,
+    C: BlockProvider + Unpin,
 {
     type Output = ();
 
@@ -664,12 +663,16 @@ where
                         SwarmEvent::PeerAdded(peer_id) => {
                             trace!(target: "net", ?peer_id, "Peer added");
                             this.event_listeners.send(NetworkEvent::PeerAdded(peer_id));
-                            this.metrics.tracked_peers.increment(1f64);
+                            this.metrics
+                                .tracked_peers
+                                .set(this.swarm.state().peers().num_known_peers() as f64);
                         }
                         SwarmEvent::PeerRemoved(peer_id) => {
                             trace!(target: "net", ?peer_id, "Peer dropped");
                             this.event_listeners.send(NetworkEvent::PeerRemoved(peer_id));
-                            this.metrics.tracked_peers.decrement(1f64);
+                            this.metrics
+                                .tracked_peers
+                                .set(this.swarm.state().peers().num_known_peers() as f64);
                         }
                         SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
                             let total_active =

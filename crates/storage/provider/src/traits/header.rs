@@ -4,7 +4,7 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Header, U256};
 use std::ops::RangeBounds;
 
 /// Client trait for fetching `Header` related data.
-#[auto_impl(&)]
+#[auto_impl(&, Arc)]
 pub trait HeaderProvider: Send + Sync {
     /// Check if block is known
     fn is_known(&self, block_hash: &BlockHash) -> Result<bool> {

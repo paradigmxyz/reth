@@ -15,7 +15,12 @@ use reth_primitives::{
     keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
 };
 use reth_provider::Transaction;
-use std::{borrow::Borrow, collections::BTreeMap, path::Path, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
@@ -28,18 +33,22 @@ use std::{borrow::Borrow, collections::BTreeMap, path::Path, sync::Arc};
 pub struct TestTransaction {
     /// WriteMap DB
     pub tx: Arc<Env<WriteMap>>,
+    pub path: Option<PathBuf>,
 }
 
 impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        Self { tx: create_test_db::<WriteMap>(EnvKind::RW) }
+        Self { tx: create_test_db::<WriteMap>(EnvKind::RW), path: None }
     }
 }
 
 impl TestTransaction {
     pub fn new(path: &Path) -> Self {
-        Self { tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)) }
+        Self {
+            tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)),
+            path: Some(path.to_path_buf()),
+        }
     }
 
     /// Return a database wrapped in [Transaction].

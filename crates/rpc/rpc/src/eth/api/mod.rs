@@ -191,8 +191,8 @@ where
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
     }
 
-    async fn transaction_by_hash(&self, _hash: H256) -> Result<Option<TransactionSigned>> {
-        todo!()
+    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<TransactionSigned>> {
+        self.client().transaction_by_hash(hash)
     }
 }
 

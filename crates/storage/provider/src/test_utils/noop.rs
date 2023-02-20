@@ -1,11 +1,11 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider,
-    StateProviderFactory,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, HeaderProvider,
+    StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
     rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, Bytes, ChainInfo, Header,
-    StorageKey, StorageValue, H256, U256,
+    StorageKey, StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use std::ops::RangeBounds;
 
@@ -21,22 +21,40 @@ impl BlockHashProvider for NoopProvider {
     }
 }
 
-impl BlockProvider for NoopProvider {
+impl BlockIdProvider for NoopProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
-        Ok(ChainInfo {
-            best_hash: Default::default(),
-            best_number: 0,
-            last_finalized: None,
-            safe_finalized: None,
-        })
-    }
-
-    fn block(&self, _id: BlockId) -> Result<Option<Block>> {
-        Ok(None)
+        Ok(ChainInfo::default())
     }
 
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
         Ok(None)
+    }
+}
+
+impl BlockProvider for NoopProvider {
+    fn block(&self, _id: BlockId) -> Result<Option<Block>> {
+        Ok(None)
+    }
+}
+
+impl TransactionsProvider for NoopProvider {
+    fn transaction_by_hash(&self, _hash: TxHash) -> Result<Option<TransactionSigned>> {
+        Ok(None)
+    }
+
+    fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
+        Ok(None)
+    }
+
+    fn transactions_by_block(&self, _block_id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+        Ok(None)
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<Vec<TransactionSigned>>> {
+        Ok(Vec::default())
     }
 }
 

@@ -118,7 +118,7 @@ mod test {
         bytes[..8].copy_from_slice(&num.to_be_bytes());
         bytes[8..].copy_from_slice(&hash.0);
 
-        let encoded = Encode::encode(key.clone());
+        let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
         let decoded: TransitionIdAddress = Decode::decode(encoded.to_vec()).unwrap();

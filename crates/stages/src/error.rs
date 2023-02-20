@@ -71,6 +71,7 @@ impl StageError {
                 StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageProgress(_) |
+                StageError::ExecutionError { .. } |
                 StageError::ChannelClosed |
                 StageError::Fatal(_)
         )

@@ -2,9 +2,19 @@
 
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
+use jsonrpsee::core::Error as RpcError;
+use reth_network_api::{NetworkInfo, Peers};
+use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
-use reth_rpc_builder::RpcModuleSelection;
-use std::{net::IpAddr, path::Path};
+use reth_rpc_builder::{
+    IpcServerBuilder, RethRpcModule, RpcModuleSelection, RpcServerConfig, RpcServerHandle,
+    ServerBuilder, TransportRpcModuleConfig, DEFAULT_HTTP_RPC_PORT, DEFAULT_IPC_ENDPOINT,
+};
+use reth_transaction_pool::TransactionPool;
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::Path,
+};
 
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Args, PartialEq, Default)]
@@ -78,10 +88,80 @@ impl RpcServerArgs {
             }
         }
     }
+
+    /// Convenience function for starting a rpc server with configs which extracted from cli args.
+    pub(crate) async fn start_server<Client, Pool, Network>(
+        &self,
+        client: Client,
+        pool: Pool,
+        network: Network,
+    ) -> Result<RpcServerHandle, RpcError>
+    where
+        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Pool: TransactionPool + Clone + 'static,
+        Network: NetworkInfo + Peers + Clone + 'static,
+    {
+        reth_rpc_builder::launch(
+            client,
+            pool,
+            network,
+            self.transport_rpc_module_config(),
+            self.rpc_server_config(),
+        )
+        .await
+    }
+
+    /// Creates the [TransportRpcModuleConfig] from cli args.
+    fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
+        let mut config = TransportRpcModuleConfig::default();
+        let rpc_modules =
+            RpcModuleSelection::Selection(vec![RethRpcModule::Admin, RethRpcModule::Eth]);
+        if self.http {
+            config = config.with_http(self.http_api.as_ref().unwrap_or(&rpc_modules).clone());
+        }
+
+        if self.ws {
+            config = config.with_ws(self.ws_api.as_ref().unwrap_or(&rpc_modules).clone());
+        }
+
+        config
+    }
+
+    /// Creates the [RpcServerConfig] from cli args.
+    fn rpc_server_config(&self) -> RpcServerConfig {
+        let mut config = RpcServerConfig::default();
+
+        if self.http {
+            let socket_address = SocketAddr::new(
+                self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                self.http_port.unwrap_or(DEFAULT_HTTP_RPC_PORT),
+            );
+            config = config.with_http_address(socket_address).with_http(ServerBuilder::new());
+        }
+
+        if self.ws {
+            let socket_address = SocketAddr::new(
+                self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                self.ws_port.unwrap_or(DEFAULT_HTTP_RPC_PORT),
+            );
+            config = config.with_ws_address(socket_address).with_http(ServerBuilder::new());
+        }
+
+        if !self.ipcdisable {
+            let ipc_builder = IpcServerBuilder::default();
+            config = config.with_ipc(ipc_builder).with_ipc_endpoint(
+                self.ipcpath.as_ref().unwrap_or(&DEFAULT_IPC_ENDPOINT.to_string()),
+            );
+        }
+
+        config
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddrV4;
+
     use super::*;
     use clap::Parser;
 
@@ -102,5 +182,50 @@ mod tests {
         let expected = RpcModuleSelection::try_from_selection(["eth", "admin", "debug"]).unwrap();
 
         assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn test_transport_rpc_module_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,admin,debug",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        assert_eq!(
+            config.ws().unwrap().cloned().into_selection(),
+            vec![RethRpcModule::Admin, RethRpcModule::Eth]
+        );
+    }
+
+    #[test]
+    fn test_rpc_server_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,admin,debug",
+            "--http",
+            "--ws",
+            "--ws.addr",
+            "127.0.0.1",
+            "--ws.port",
+            "8888",
+        ])
+        .args;
+        let config = args.rpc_server_config();
+        assert_eq!(
+            config.http_address().unwrap(),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_HTTP_RPC_PORT))
+        );
+        assert_eq!(
+            config.ws_address().unwrap(),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
+        );
+        assert_eq!(config.ipc_endpoint().unwrap().path(), DEFAULT_IPC_ENDPOINT);
     }
 }
