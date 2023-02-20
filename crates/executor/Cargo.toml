@@ -37,3 +37,6 @@ sha3 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
+
+[features]
+test-utils = []

@@ -37,7 +37,7 @@ impl<'a, DB> Executor<'a, DB>
 where
     DB: StateProvider,
 {
-    fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
+    pub fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
         let mut evm = EVM::new();
         evm.database(db);
         Executor { chain_spec, evm, use_printer_tracer: false }
@@ -504,28 +504,22 @@ pub fn execute<DB: StateProvider>(
     executor.execute(block, total_difficulty, senders)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::revm_wrap::State;
-    use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
-        StorageKey, H256, MAINNET, U256,
-    };
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils {
+    use reth_primitives::{keccak256, Account, Address, Bytes, StorageKey, H256, U256};
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
-    use reth_rlp::Decodable;
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
-    struct StateProviderTest {
+    pub struct InMemoryStateProvider {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
         contracts: HashMap<H256, Bytes>,
         block_hash: HashMap<U256, H256>,
     }
 
-    impl StateProviderTest {
+    impl InMemoryStateProvider {
         /// Insert account.
-        fn insert_account(
+        pub fn insert_account(
             &mut self,
             address: Address,
             mut account: Account,
@@ -541,20 +535,20 @@ mod tests {
         }
     }
 
-    impl AccountProvider for StateProviderTest {
+    impl AccountProvider for InMemoryStateProvider {
         fn basic_account(&self, address: Address) -> reth_interfaces::Result<Option<Account>> {
             let ret = Ok(self.accounts.get(&address).map(|(_, acc)| *acc));
             ret
         }
     }
 
-    impl BlockHashProvider for StateProviderTest {
+    impl BlockHashProvider for InMemoryStateProvider {
         fn block_hash(&self, number: U256) -> reth_interfaces::Result<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
         }
     }
 
-    impl StateProvider for StateProviderTest {
+    impl StateProvider for InMemoryStateProvider {
         fn storage(
             &self,
             account: Address,
@@ -570,6 +564,18 @@ mod tests {
             Ok(self.contracts.get(&code_hash).cloned())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::revm_wrap::State;
+    use reth_primitives::{
+        hex_literal::hex, Account, Address, ChainSpecBuilder, ForkCondition, H256, MAINNET, U256,
+    };
+    use reth_rlp::Decodable;
+    use std::{collections::HashMap, str::FromStr};
+    use test_utils::InMemoryStateProvider;
 
     #[test]
     fn sanity_execution() {
@@ -585,7 +591,7 @@ mod tests {
         ommer.number = block.number;
         block.ommers = vec![ommer];
 
-        let mut db = StateProviderTest::default();
+        let mut db = InMemoryStateProvider::default();
 
         let account1 = Address::from_str("1000000000000000000000000000000000000000").unwrap();
         let account2 = Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap();
@@ -729,7 +735,7 @@ mod tests {
     fn dao_hardfork_irregular_state_change() {
         let header = Header { number: 1, ..Header::default() };
 
-        let mut db = StateProviderTest::default();
+        let mut db = InMemoryStateProvider::default();
 
         let mut beneficiary_balance = 0;
         for (i, dao_address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
@@ -800,7 +806,7 @@ mod tests {
 
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = Block::decode(&mut block_rlp).unwrap();
-        let mut db = StateProviderTest::default();
+        let mut db = InMemoryStateProvider::default();
 
         let address_caller = Address::from_str("a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
         let address_selfdestruct =
@@ -886,7 +892,7 @@ mod tests {
         // spec at shanghai fork
         let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
 
-        let mut db = SubState::new(State::new(StateProviderTest::default()));
+        let mut db = SubState::new(State::new(InMemoryStateProvider::default()));
 
         // execute chain and verify receipts
         let out =
