@@ -1,4 +1,4 @@
-use crate::{Header, SealedHeader, TransactionSigned, H256};
+use crate::{Header, SealedHeader, TransactionSigned, Withdrawal, H256};
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -9,17 +9,22 @@ use serde::{
 use std::{fmt, fmt::Formatter, ops::Deref, str::FromStr};
 
 /// Ethereum full block.
+///
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[derive_arbitrary(rlp, 25)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
+#[rlp(trailing)]
 pub struct Block {
     /// Block header.
     pub header: Header,
     /// Transactions in this block.
     pub body: Vec<TransactionSigned>,
-    /// Ommers/uncles header
+    /// Ommers/uncles header.
     pub ommers: Vec<Header>,
+    /// Block withdrawals.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl Deref for Block {
@@ -30,10 +35,13 @@ impl Deref for Block {
 }
 
 /// Sealed Ethereum full block.
+///
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[derive_arbitrary(rlp, 10)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
+#[rlp(trailing)]
 pub struct SealedBlock {
     /// Locked block header.
     pub header: SealedHeader,
@@ -41,6 +49,8 @@ pub struct SealedBlock {
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
     pub ommers: Vec<SealedHeader>,
+    /// Block withdrawals.
+    pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
 impl SealedBlock {
@@ -60,6 +70,7 @@ impl SealedBlock {
             header: self.header.unseal(),
             body: self.body,
             ommers: self.ommers.into_iter().map(|o| o.unseal()).collect(),
+            withdrawals: self.withdrawals,
         }
     }
 }
@@ -181,6 +192,15 @@ impl From<(H256, Option<bool>)> for BlockId {
 impl From<BlockHash> for BlockId {
     fn from(hash_can: BlockHash) -> Self {
         BlockId::Hash(hash_can)
+    }
+}
+
+impl From<BlockHashOrNumber> for BlockId {
+    fn from(value: BlockHashOrNumber) -> Self {
+        match value {
+            BlockHashOrNumber::Hash(hash) => H256::from(hash.0).into(),
+            BlockHashOrNumber::Number(number) => number.into(),
+        }
     }
 }
 
@@ -481,7 +501,7 @@ mod test {
     /// Serde tests
     #[test]
     fn serde_blockid_tags() {
-        let block_ids = [Latest, Finalized, Safe, Pending].map(|id| BlockId::from(id));
+        let block_ids = [Latest, Finalized, Safe, Pending].map(BlockId::from);
         for block_id in &block_ids {
             let serialized = serde_json::to_string(&block_id).unwrap();
             let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
@@ -519,7 +539,7 @@ mod test {
         let hash =
             H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
-        assert_eq!(BlockId::from(hash.clone()), block_id);
+        assert_eq!(BlockId::from(hash), block_id);
         let serialized = serde_json::to_string(&BlockId::from(hash)).unwrap();
         assert_eq!("{\"blockHash\":\"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\"}", serialized)
     }

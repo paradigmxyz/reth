@@ -26,12 +26,12 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockProvider, StateProviderFactory};
+//! use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Client, Pool, Network>(client: Client, pool: Pool, network: Network)
 //! where
-//!     Client: BlockProvider + StateProviderFactory + Clone + 'static,
+//!     Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //! {
@@ -61,7 +61,7 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{AdminApi, DebugApi, EthApi, NetApi, TraceApi, Web3Api};
 use reth_rpc_api::servers::*;
 use reth_transaction_pool::TransactionPool;
@@ -99,7 +99,7 @@ pub async fn launch<Client, Pool, Network>(
     server_config: impl Into<RpcServerConfig>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Client: BlockProvider + StateProviderFactory + Clone + 'static,
+    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -162,7 +162,7 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
 
 impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + Clone + 'static,
+    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -263,7 +263,7 @@ impl RpcModuleSelection {
         network: Network,
     ) -> RpcModule<()>
     where
-        Client: BlockProvider + StateProviderFactory + Clone + 'static,
+        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
     {
@@ -402,7 +402,7 @@ where
 
 impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + Clone + 'static,
+    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -581,6 +581,21 @@ impl RpcServerConfig {
         self
     }
 
+    /// Returns the [SocketAddr] of the http server
+    pub fn http_address(&self) -> Option<SocketAddr> {
+        self.http_addr
+    }
+
+    /// Returns the [SocketAddr] of the ws server
+    pub fn ws_address(&self) -> Option<SocketAddr> {
+        self.ws_addr
+    }
+
+    /// Returns the [Endpoint] of the ipc server
+    pub fn ipc_endpoint(&self) -> Option<&Endpoint> {
+        self.ipc_endpoint.as_ref()
+    }
+
     /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
     pub async fn start(
         self,
@@ -692,17 +707,17 @@ pub struct TransportRpcModuleConfig {
 
 impl TransportRpcModuleConfig {
     /// Creates a new config with only http set
-    pub fn http(http: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_http(http: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_http(http)
     }
 
     /// Creates a new config with only ws set
-    pub fn ws(ws: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_ws(ws: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ws(ws)
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(ipc: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_ipc(ipc: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ipc(ipc)
     }
 
@@ -727,6 +742,21 @@ impl TransportRpcModuleConfig {
     /// Returns true if no transports are configured
     pub fn is_empty(&self) -> bool {
         self.http.is_none() && self.ws.is_none() && self.ipc.is_none()
+    }
+
+    /// Returns the [RpcModuleSelection] for the http transport
+    pub fn http(&self) -> Option<&RpcModuleSelection> {
+        self.http.as_ref()
+    }
+
+    /// Returns the [RpcModuleSelection] for the ws transport
+    pub fn ws(&self) -> Option<&RpcModuleSelection> {
+        self.ws.as_ref()
+    }
+
+    /// Returns the [RpcModuleSelection] for the ipc transport
+    pub fn ipc(&self) -> Option<&RpcModuleSelection> {
+        self.ipc.as_ref()
     }
 }
 

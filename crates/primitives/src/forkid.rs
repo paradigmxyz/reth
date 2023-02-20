@@ -561,8 +561,8 @@ mod tests {
         let b1 = 1_150_000;
         let b2 = 1_920_000;
 
-        let h0 = ForkId { hash: ForkHash(hex!("fc64ec04")), next: b1.into() };
-        let h1 = ForkId { hash: ForkHash(hex!("97c2c34c")), next: b2.into() };
+        let h0 = ForkId { hash: ForkHash(hex!("fc64ec04")), next: b1 };
+        let h1 = ForkId { hash: ForkHash(hex!("97c2c34c")), next: b2 };
         let h2 = ForkId { hash: ForkHash(hex!("91d1f948")), next: 0 };
 
         let mut fork_filter = ForkFilter::new(

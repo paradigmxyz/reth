@@ -1,13 +1,16 @@
-use crate::{AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider};
+use crate::{
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, HeaderProvider,
+    StateProvider, StateProviderFactory, TransactionsProvider,
+};
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256,
     rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue, H256,
-    U256,
+    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue,
+    TransactionSigned, TxHash, H256, U256,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]
@@ -106,6 +109,42 @@ impl HeaderProvider for MockEthProvider {
                 .fold(target.difficulty, |td, h| td + h.difficulty)
         }))
     }
+
+    fn headers_range(
+        &self,
+        range: impl RangeBounds<reth_primitives::BlockNumber>,
+    ) -> Result<Vec<Header>> {
+        let lock = self.headers.lock();
+        Ok(lock.values().filter(|header| range.contains(&header.number)).cloned().collect())
+    }
+}
+
+impl TransactionsProvider for MockEthProvider {
+    fn transaction_by_id(
+        &self,
+        _id: reth_primitives::TxNumber,
+    ) -> Result<Option<TransactionSigned>> {
+        unimplemented!()
+    }
+
+    fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
+        Ok(self
+            .blocks
+            .lock()
+            .iter()
+            .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash == hash).cloned()))
+    }
+
+    fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+        Ok(self.block(id)?.map(|b| b.body))
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        _range: impl RangeBounds<reth_primitives::BlockNumber>,
+    ) -> Result<Vec<Vec<TransactionSigned>>> {
+        unimplemented!()
+    }
 }
 
 impl BlockHashProvider for MockEthProvider {
@@ -126,7 +165,7 @@ impl BlockHashProvider for MockEthProvider {
     }
 }
 
-impl BlockProvider for MockEthProvider {
+impl BlockIdProvider for MockEthProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
         let lock = self.headers.lock();
         Ok(lock
@@ -141,6 +180,14 @@ impl BlockProvider for MockEthProvider {
             .expect("provider is empty"))
     }
 
+    fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
+        let lock = self.blocks.lock();
+        let num = lock.iter().find_map(|(h, b)| if *h == hash { Some(b.number) } else { None });
+        Ok(num)
+    }
+}
+
+impl BlockProvider for MockEthProvider {
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
@@ -152,12 +199,6 @@ impl BlockProvider for MockEthProvider {
                 unreachable!("unused in network tests")
             }
         }
-    }
-
-    fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
-        let lock = self.blocks.lock();
-        let num = lock.iter().find_map(|(h, b)| if *h == hash { Some(b.number) } else { None });
-        Ok(num)
     }
 }
 
@@ -183,5 +224,25 @@ impl StateProvider for MockEthProvider {
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
+    }
+}
+
+impl StateProviderFactory for MockEthProvider {
+    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
+    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
+
+    fn latest(&self) -> Result<Self::LatestSP<'_>> {
+        Ok(self)
+    }
+
+    fn history_by_block_number(
+        &self,
+        _block: reth_primitives::BlockNumber,
+    ) -> Result<Self::HistorySP<'_>> {
+        todo!()
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+        todo!()
     }
 }

@@ -54,14 +54,16 @@ pub trait Consensus: Debug + Send + Sync {
 pub enum Error {
     #[error("Block used gas ({gas_used:?}) is greater than gas limit ({gas_limit:?}).")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
-    #[error("Block ommer hash ({got:?}) is different then expected: ({expected:?})")]
+    #[error("Block ommer hash ({got:?}) is different from expected: ({expected:?})")]
     BodyOmmersHashDiff { got: H256, expected: H256 },
-    #[error("Block state root ({got:?}) is different then expected: ({expected:?})")]
+    #[error("Block state root ({got:?}) is different from expected: ({expected:?})")]
     BodyStateRootDiff { got: H256, expected: H256 },
-    #[error("Block transaction root ({got:?}) is different then expected: ({expected:?})")]
+    #[error("Block transaction root ({got:?}) is different from expected ({expected:?})")]
     BodyTransactionRootDiff { got: H256, expected: H256 },
-    #[error("Block receipts root ({got:?}) is different then expected: ({expected:?}).")]
+    #[error("Block receipts root ({got:?}) is different from expected ({expected:?})")]
     BodyReceiptsRootDiff { got: H256, expected: H256 },
+    #[error("Block withdrawals root ({got:?}) is different from expected ({expected:?})")]
+    BodyWithdrawalsRootDiff { got: H256, expected: H256 },
     #[error("Block with [hash:{hash:?},number: {number:}] is already known.")]
     BlockKnown { hash: BlockHash, number: BlockNumber },
     #[error("Block parent [hash:{hash:?}] is not known.")]
@@ -120,4 +122,12 @@ pub enum Error {
     TheMergeOmmerRootIsNotEmpty,
     #[error("Mix hash after merge is not zero")]
     TheMergeMixHashIsNotZero,
+    #[error("Missing withdrawals root")]
+    WithdrawalsRootMissing,
+    #[error("Unexpected withdrawals root")]
+    WithdrawalsRootUnexpected,
+    #[error("Withdrawal index #{got} is invalid. Expected: #{expected}.")]
+    WithdrawalIndexInvalid { got: u64, expected: u64 },
+    #[error("Missing withdrawals")]
+    BodyWithdrawalsMissing,
 }

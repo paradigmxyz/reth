@@ -182,10 +182,10 @@ mod tests {
         let mut buf = [0u8; 4];
 
         client.write_all(b"ping").await.unwrap();
-        server.read(&mut buf).await.unwrap();
+        server.read_exact(&mut buf).await.unwrap();
 
         server.write_all(b"pong").await.unwrap();
-        client.read(&mut buf).await.unwrap();
+        client.read_exact(&mut buf).await.unwrap();
     }
 
     fn assert_bandwidth_counts(
@@ -236,7 +236,7 @@ mod tests {
 
             let mut buf = [0u8; 4];
 
-            metered_server_stream.read(&mut buf).await.unwrap();
+            metered_server_stream.read_exact(&mut buf).await.unwrap();
 
             assert_eq!(metered_server_stream.meter.total_inbound(), client_meter.total_outbound());
         });

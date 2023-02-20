@@ -12,7 +12,7 @@ pub const WEI_5ETH: u128 = 5000000000000000000u128;
 /// return revm_spec from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm::primitives::SpecId {
     if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
-        revm::primitives::MERGE_EOF
+        revm::primitives::SHANGHAI
     } else if chain_spec.fork(Hardfork::Paris).active_at_head(&block) {
         revm::primitives::MERGE
     } else if chain_spec.fork(Hardfork::London).active_at_head(&block) {

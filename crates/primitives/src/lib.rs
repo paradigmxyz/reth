@@ -29,6 +29,7 @@ mod peer;
 mod receipt;
 mod storage;
 mod transaction;
+mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
@@ -61,6 +62,7 @@ pub use transaction::{
     Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
     TxEip2930, TxLegacy, TxType,
 };
+pub use withdrawal::Withdrawal;
 
 /// A block hash.
 pub type BlockHash = H256;
@@ -90,6 +92,7 @@ pub use revm_primitives::{ruint::aliases::U128, B160 as H160, B256 as H256, U256
 
 #[doc(hidden)]
 mod __reexport {
+    pub use bytes;
     pub use hex;
     pub use hex_literal;
     pub use tiny_keccak;

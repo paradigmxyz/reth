@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "bin/reth",
-    "crate-template",
     "crates/consensus",
     "crates/executor",
     "crates/interfaces",
@@ -36,4 +35,9 @@ members = [
     "crates/tasks",
     "crates/transaction-pool",
 ]
+exclude = ["crate-template"]
 default-members = ["bin/reth"]
+
+[patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm" }
+revm-primitives = { git = "https://github.com/bluealloy/revm" }

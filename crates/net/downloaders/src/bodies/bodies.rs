@@ -144,7 +144,7 @@ where
             }
 
             // Add header to the result collection
-            headers.push(SealedHeader::new(header, hash));
+            headers.push(header.seal(hash));
 
             // Increment current block number
             current_block_num += 1;
@@ -585,6 +585,7 @@ mod tests {
                     BlockBody {
                         transactions: block.body,
                         ommers: block.ommers.into_iter().map(|header| header.unseal()).collect(),
+                        withdrawals: None,
                     },
                 )
             })

@@ -100,13 +100,14 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Self: Sized,
     {
         let start = match range.start_bound().cloned() {
-            Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
-            Bound::Excluded(key) => {
-                self.inner
-                    .set_range(key.encode().as_ref())
-                    .map_err(|e| Error::Read(e.into()))?
-                    .map(decoder::<T>);
-                self.inner.next()
+            Bound::Included(key) => {
+                if matches!(range.end_bound().cloned(), Bound::Included(end_key) | Bound::Excluded(end_key) if end_key < key) {
+                    return Err(Error::Read(2))
+                }
+                self.inner.set_range(key.encode().as_ref())
+            }
+            Bound::Excluded(_key) => {
+                unreachable!("Rust doesn't allow for Bound::Excluded in starting bounds");
             }
             Bound::Unbounded => self.inner.first(),
         }
@@ -124,13 +125,11 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Self: Sized,
     {
         let start = if let Some(start_key) = start_key {
-            self.inner
-                .set_range(start_key.encode().as_ref())
-                .map_err(|e| Error::Read(e.into()))?
-                .map(decoder::<T>)
+            decode!(self.inner.set_range(start_key.encode().as_ref()))
         } else {
-            self.last().transpose()
-        };
+            self.last()
+        }
+        .transpose();
 
         Ok(ReverseWalker::new(self, start))
     }

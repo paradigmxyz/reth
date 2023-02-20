@@ -1,5 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
+use pprof::criterion::{Output, PProfProfiler};
 use reth_primitives::TransactionSigned;
 use reth_rlp::Decodable;
 
@@ -16,5 +17,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = criterion_benchmark
+}
 criterion_main!(benches);

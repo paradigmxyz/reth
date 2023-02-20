@@ -7,6 +7,5 @@ pub(crate) fn child_header(parent: &SealedHeader) -> SealedHeader {
     let mut child = parent.as_ref().clone();
     child.number += 1;
     child.parent_hash = parent.hash_slow();
-    let hash = child.hash_slow();
-    SealedHeader::new(child, hash)
+    child.seal_slow()
 }

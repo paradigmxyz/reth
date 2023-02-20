@@ -2,6 +2,7 @@ mod utils;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use ffi::*;
+use pprof::criterion::{Output, PProfProfiler};
 use reth_libmdbx::*;
 use std::ptr;
 use utils::*;
@@ -101,5 +102,9 @@ fn bench_get_seq_raw(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_get_seq_iter, bench_get_seq_cursor, bench_get_seq_raw);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench_get_seq_iter, bench_get_seq_cursor, bench_get_seq_raw
+}
 criterion_main!(benches);

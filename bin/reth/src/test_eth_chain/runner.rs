@@ -88,6 +88,13 @@ pub fn should_skip(path: &Path) -> bool {
     {
         return true
     }
+
+    // Ignore outdated EOF tests that haven't been updated for Cancun yet.
+    let eof_path = Path::new("EIPTests").join("stEOF");
+    if path.to_string_lossy().contains(&*eof_path.to_string_lossy()) {
+        return true
+    }
+
     false
 }
 
@@ -112,13 +119,10 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
                 ForkSpec::MergeEOF |
                 ForkSpec::MergeMeterInitCode |
                 ForkSpec::MergePush0 |
-                ForkSpec::Shanghai |
                 ForkSpec::Unknown
         ) {
             continue
         }
-
-        // if matches!(suite.pre, State(RootOrState::Root(_))) {}
 
         let pre_state = suite.pre.0;
 
@@ -134,14 +138,14 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         // insert genesis
         let header: SealedHeader = suite.genesis_block_header.into();
-        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![] };
+        let genesis_block = SealedBlock { header, body: vec![], ommers: vec![], withdrawals: None };
         reth_provider::insert_canonical_block(&tx, &genesis_block, has_block_reward)?;
 
         let mut last_block = None;
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
             let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-            last_block = Some(decoded.number);
             reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
+            last_block = Some(decoded.number);
             Ok(())
         })?;
 

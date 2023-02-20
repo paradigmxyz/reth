@@ -2,7 +2,7 @@
 
 /// NetworkArg struct
 mod network_args;
-pub use network_args::NetworkArgs;
+pub use network_args::{DiscoveryArgs, NetworkArgs};
 
 /// RpcServerArg struct
 mod rpc_server_args;

@@ -8,10 +8,10 @@ use std::collections::BTreeMap;
 #[derive(Debug)]
 pub struct ExecutionResult {
     /// Transaction changeset containing [Receipt], changed [Accounts][Account] and Storages.
-    pub changesets: Vec<TransactionChangeSet>,
-    /// Block reward if present. It represent changeset for block reward slot in
-    /// [tables::AccountChangeSet] .
-    pub block_reward: Option<BTreeMap<Address, AccountInfoChangeSet>>,
+    pub tx_changesets: Vec<TransactionChangeSet>,
+    /// Post block account changesets. This might include block reward, uncle rewards, withdrawals
+    /// or irregular state changes (DAO fork).
+    pub block_changesets: BTreeMap<Address, AccountInfoChangeSet>,
 }
 
 /// After transaction is executed this structure contain
