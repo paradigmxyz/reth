@@ -54,15 +54,22 @@ impl Signature {
         let v = u64::decode(buf)?;
         let r = Decodable::decode(buf)?;
         let s = Decodable::decode(buf)?;
+        let (odd_y_parity, chain_id) = Self::decode_v_eip155(v);
+        Ok((Signature { r, s, odd_y_parity }, chain_id))
+    }
+
+    /// Proceeds to decode whether the `odd_y_parity` value should be true or false
+    /// as well as any encoded EIP155 chain id.
+    pub fn decode_v_eip155(v: u64) -> (bool, Option<u64>) {
         if v >= 35 {
             // EIP-155: v = {0, 1} + CHAIN_ID * 2 + 35
             let odd_y_parity = ((v - 35) % 2) != 0;
             let chain_id = (v - 35) >> 1;
-            Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
+            (odd_y_parity, Some(chain_id))
         } else {
             // non-EIP-155 legacy scheme
             let odd_y_parity = (v - 27) != 0;
-            Ok((Signature { r, s, odd_y_parity }, None))
+            (odd_y_parity, None)
         }
     }
 

@@ -12,6 +12,7 @@ use reth_executor::{
 };
 use reth_interfaces::executor::BlockExecutor;
 use reth_primitives::{Block, ChainSpecBuilder, Hardfork, Header, U256};
+use reth_rpc_types as rpc;
 
 use clap::Parser;
 
@@ -43,8 +44,7 @@ impl Command {
         let env: PrestateEnv = serde_json::from_reader(env)?;
 
         let txs = File::open(&self.txs)?;
-        // todo: ethers-core transaction?
-        let _txs: Vec<reth_primitives::Transaction> = serde_json::from_reader(txs)?;
+        let txs: Vec<rpc::Transaction> = serde_json::from_reader(txs)?;
 
         let mut db = InMemoryStateProvider::default();
         for (address, account) in prestate {
@@ -69,6 +69,7 @@ impl Command {
                 gas_limit: env.current_gas_limit.to::<u64>(),
                 ..Default::default()
             },
+            body: txs.into_iter().map(|x| x.into_transaction()).collect(),
             ..Default::default()
         };
         let mut executor = Executor::new(&spec, &mut db);

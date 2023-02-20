@@ -10,8 +10,8 @@ pub use typed::*;
 
 use reth_primitives::{
     rpc::transaction::eip2930::AccessListItem, Address, BlockNumber, Bytes,
-    Transaction as PrimitiveTransaction, TransactionKind, TransactionSignedEcRecovered, TxType,
-    H256, U128, U256, U64,
+    Transaction as PrimitiveTransaction, TransactionKind, TransactionSigned,
+    TransactionSignedEcRecovered, TxLegacy, TxType, H256, U128, U256, U64,
 };
 use serde::{Deserialize, Serialize};
 
@@ -150,6 +150,39 @@ impl Transaction {
             chain_id,
             access_list,
             transaction_type: Some(U64::from(signed_tx.tx_type() as u8)),
+        }
+    }
+
+    /// Create a new rpc transaction result for a pending signed transaction, setting block
+    /// environment related fields to `None`.
+    pub fn into_transaction(self) -> TransactionSigned {
+        let to = match self.to {
+            None => TransactionKind::Create,
+            Some(to) => TransactionKind::Call(to),
+        };
+
+        let transaction = match self.transaction_type.map(|x| x.as_u64()) {
+            None => PrimitiveTransaction::Legacy(TxLegacy {
+                chain_id: self.chain_id.map(|x| x.as_u64()),
+                nonce: self.nonce.to::<u64>(),
+                gas_price: self.gas_price.unwrap_or_default().to::<u128>(),
+                gas_limit: self.gas.to::<u64>(),
+                value: self.value.to::<u128>(),
+                input: self.input,
+                to,
+            }),
+            Some(1) => unimplemented!(),
+            Some(2) => unimplemented!(),
+            _ => unreachable!("unknown transaction type"),
+        };
+
+        TransactionSigned {
+            signature: self
+                .signature
+                .expect("tried to convert transaction without signature")
+                .into_primitive_signature(),
+            hash: self.hash,
+            transaction,
         }
     }
 }

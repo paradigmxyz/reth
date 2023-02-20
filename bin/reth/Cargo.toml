@@ -21,6 +21,7 @@ reth-executor = { path = "../../crates/executor", features = ["test-utils"] }
 reth-eth-wire = { path = "../../crates/net/eth-wire" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
+reth-rpc-types = { path = "../../crates/rpc/rpc-types" }
 reth-rlp = { path = "../../crates/rlp" }
 reth-network = {path = "../../crates/net/network", features = ["serde"] }
 reth-network-api = {path = "../../crates/net/network-api" }

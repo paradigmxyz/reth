@@ -22,4 +22,10 @@ impl Signature {
     pub fn from_primitive_signature(signature: PrimitiveSignature, chain_id: Option<u64>) -> Self {
         Self { r: signature.r, s: signature.s, v: U256::from(signature.v(chain_id)) }
     }
+
+    /// Converts this signature in a signature suited for internal use inside the Executor.
+    pub fn into_primitive_signature(self) -> PrimitiveSignature {
+        let (odd_y_parity, _) = PrimitiveSignature::decode_v_eip155(self.v.to::<u64>());
+        PrimitiveSignature { r: self.r, s: self.s, odd_y_parity }
+    }
 }

@@ -4266,6 +4266,7 @@ dependencies = [
  "reth-rlp",
  "reth-rpc",
  "reth-rpc-builder",
+ "reth-rpc-types",
  "reth-staged-sync",
  "reth-stages",
  "reth-tasks",
