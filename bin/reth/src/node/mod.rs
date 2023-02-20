@@ -156,7 +156,7 @@ impl Command {
             TransportRpcModuleConfig::default()
                 .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
             RpcServerConfig::default()
-                .with_http(Default::default(), self.rpc.http_corsdomain.as_ref()),
+                .with_http(Default::default()).with_cors(self.rpc.http_corsdomain.clone()),
         )
         .await?;
         info!(target: "reth::cli", "Started RPC server");
