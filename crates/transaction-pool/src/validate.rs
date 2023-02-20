@@ -5,7 +5,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
 };
-use reth_primitives::{Address, TransactionKind, TxHash, TxType, U256};
+use reth_primitives::{Address, TransactionKind, TxHash, U256};
 use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
@@ -142,11 +142,6 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Whether the transaction originated locally.
     pub fn is_local(&self) -> bool {
         self.origin.is_local()
-    }
-
-    // Returns the transaction's [`TxType`].
-    pub fn tx_type(&self) -> TxType {
-        self.transaction.tx_type()
     }
 
     /// The heap allocated size of this transaction.

@@ -94,7 +94,7 @@ use crate::{
     traits::{NewTransactionEvent, PoolSize},
     validate::ValidPoolTransaction,
 };
-use reth_primitives::{TxHash, TxType, U256};
+use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
@@ -225,8 +225,8 @@ where
         self.pool.add_transaction_listener()
     }
 
-    fn pooled_transaction_hashes(&self) -> Vec<PooledTransactionHash> {
-        self.pool.pooled_transaction_hashes()
+    fn pooled_transactions(&self) -> Vec<TxHash> {
+        self.pool.pooled_transactions()
     }
 
     fn best_transactions(
@@ -265,22 +265,5 @@ where
 impl<V: TransactionValidator, O: TransactionOrdering> Clone for Pool<V, O> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
-    }
-}
-
-/// Internal form of a `PooledTransaction`
-#[derive(Debug, Clone)]
-pub struct PooledTransactionHash {
-    /// Transaction hash
-    pub hash: TxHash,
-    /// Transaction type
-    pub tx_type: TxType,
-    /// Transaction size
-    pub size: usize,
-}
-
-impl From<(TxHash, TxType, usize)> for PooledTransactionHash {
-    fn from((hash, tx_type, size): (TxHash, TxType, usize)) -> Self {
-        Self { hash, tx_type, size }
     }
 }

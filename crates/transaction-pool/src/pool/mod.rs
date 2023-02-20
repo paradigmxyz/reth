@@ -75,7 +75,7 @@ use crate::{
         NewTransactionEvent, PoolSize, PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
-    OnNewBlockEvent, PoolConfig, PooledTransactionHash, TransactionOrdering, TransactionValidator,
+    OnNewBlockEvent, PoolConfig, TransactionOrdering, TransactionValidator,
 };
 use best::BestTransactions;
 pub use events::TransactionEvent;
@@ -171,8 +171,8 @@ where
         rx
     }
 
-    /// Returns hashes, types, sizes of _all_ transactions in the pool.
-    pub(crate) fn pooled_transaction_hashes(&self) -> Vec<PooledTransactionHash> {
+    /// Returns hashes of _all_ transactions in the pool.
+    pub(crate) fn pooled_transactions(&self) -> Vec<TxHash> {
         let pool = self.pool.read();
         pool.all().hashes_iter().collect()
     }

@@ -179,7 +179,7 @@ impl ActiveSession {
                 self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
             }
             EthMessage::NewPooledTransactionHashes66(msg) => {
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg)).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
@@ -192,7 +192,8 @@ impl ActiveSession {
                         message: EthMessage::NewPooledTransactionHashes68(msg),
                     }
                 }
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+                // TODO revise `PeerMessage::PooledTransactions` to have `types` and `sizes`
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.hashes.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
@@ -251,19 +252,11 @@ impl ActiveSession {
             }
             PeerMessage::PooledTransactions(msg) => {
                 if self.conn.version() >= EthVersion::Eth68 {
-                    match (msg.types, msg.sizes, msg.hashes).try_into() {
-                        Ok(msg68) => {
-                            self.queued_outgoing
-                                .push_back(EthMessage::NewPooledTransactionHashes68(msg68).into());
-                        }
-                        Err(err) => {
-                            error!(target : "net::session", err);
-                        }
-                    }
+                    // TODO
+                    // we don't know types and sizes yet
                 } else {
-                    self.queued_outgoing.push_back(
-                        EthMessage::NewPooledTransactionHashes66(msg.hashes.into()).into(),
-                    );
+                    self.queued_outgoing
+                        .push_back(EthMessage::NewPooledTransactionHashes66(msg).into());
                 }
             }
             PeerMessage::EthRequest(req) => {
@@ -956,9 +949,7 @@ mod tests {
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             for _ in 0..num_messages {
                 client_stream
-                    .send(EthMessage::NewPooledTransactionHashes66(NewPooledTransactionHashes66(
-                        vec![],
-                    )))
+                    .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
                     .await
                     .unwrap();
             }

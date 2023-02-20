@@ -1,9 +1,7 @@
-use crate::{
-    error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction, PooledTransactionHash,
-};
+use crate::{error::PoolResult, pool::state::SubPool, validate::ValidPoolTransaction};
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
-    TransactionKind, TransactionSignedEcRecovered, TxHash, TxType, H256, U256,
+    TransactionKind, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -72,12 +70,12 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
-    /// Returns types, sizes, hashes of all transactions in the pool.
+    /// Returns hashes of all transactions in the pool.
     ///
-    /// Note: The returned `Vec<TxHash>` should be guaranteed that all hashes are unique.
+    /// Note: This returns a `Vec` but should guarantee that all hashes are unique.
     ///
     /// Consumer: P2P
-    fn pooled_transaction_hashes(&self) -> Vec<PooledTransactionHash>;
+    fn pooled_transactions(&self) -> Vec<TxHash>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -280,9 +278,6 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind;
 
-    /// Returns the transaction's [`TxType`].
-    fn tx_type(&self) -> TxType;
-
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
 }
@@ -364,11 +359,6 @@ impl PoolTransaction for PooledTransaction {
     /// [`TransactionKind::Create`] if the transaction is a contract creation.
     fn kind(&self) -> &TransactionKind {
         self.transaction.kind()
-    }
-
-    /// Returns the transaction's [`TxType`].
-    fn tx_type(&self) -> TxType {
-        self.transaction.tx_type()
     }
 
     /// Returns a measurement of the heap usage of this type and all its internals.
