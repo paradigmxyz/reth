@@ -37,6 +37,7 @@ impl<'a, DB> Executor<'a, DB>
 where
     DB: StateProvider,
 {
+    /// Instantiates a new executor with the given database and chainspec.
     pub fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
         let mut evm = EVM::new();
         evm.database(db);
@@ -532,12 +533,15 @@ pub fn execute<DB: StateProvider>(
 }
 
 #[cfg(any(test, feature = "test-utils"))]
+/// Various utilities for non-production usage.
 pub mod test_utils {
     use reth_primitives::{keccak256, Account, Address, Bytes, StorageKey, H256, U256};
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use std::collections::HashMap;
 
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
+    /// A helper for running the EVM Executor with loaded in-memory state from
+    /// any source.
     pub struct InMemoryStateProvider {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
         contracts: HashMap<H256, Bytes>,

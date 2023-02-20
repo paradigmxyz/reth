@@ -10,7 +10,6 @@ use reth_executor::{
     executor::{test_utils::InMemoryStateProvider, Executor},
     revm_wrap::{State, SubState},
 };
-use reth_interfaces::executor::BlockExecutor;
 use reth_primitives::{Block, ChainSpecBuilder, Hardfork, Header, U256};
 use reth_rpc_types as rpc;
 
