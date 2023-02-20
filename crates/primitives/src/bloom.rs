@@ -1,4 +1,6 @@
 //! Bloom type.
+//!
+//! Adapted from <https://github.com/paritytech/parity-common/blob/2fb72eea96b6de4a085144ce239feb49da0cd39e/ethbloom/src/lib.rs>
 #![allow(missing_docs)]
 use crate::{impl_fixed_hash_type, keccak256, Log};
 use bytes::Buf;
@@ -9,7 +11,6 @@ use fixed_hash::*;
 use impl_serde::impl_fixed_hash_serde;
 use reth_codecs::{impl_hash_compact, Compact};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
-use tiny_keccak::{Hasher, Keccak};
 
 /// Length of bloom filter used for Ethereum.
 pub const BLOOM_BITS: u32 = 3;
@@ -41,13 +42,7 @@ enum Hash<'a> {
 impl<'a> From<Input<'a>> for Hash<'a> {
     fn from(input: Input<'a>) -> Self {
         match input {
-            Input::Raw(raw) => {
-                let mut out = [0u8; 32];
-                let mut keccak256 = Keccak::v256();
-                keccak256.update(raw);
-                keccak256.finalize(&mut out);
-                Hash::Owned(out)
-            }
+            Input::Raw(raw) => Hash::Owned(keccak256(raw).0),
             Input::Hash(hash) => Hash::Ref(hash),
         }
     }
@@ -73,13 +68,13 @@ impl<'a> Hash<'a> {
     }
 }
 
-// impl<'a> PartialEq<BloomRef<'a>> for Bloom {
-//     fn eq(&self, other: &BloomRef<'a>) -> bool {
-//         let s_ref: &[u8] = &self.0;
-//         let o_ref: &[u8] = other.0;
-//         s_ref.eq(o_ref)
-//     }
-// }
+impl<'a> PartialEq<BloomRef<'a>> for Bloom {
+    fn eq(&self, other: &BloomRef<'a>) -> bool {
+        let s_ref: &[u8] = &self.0;
+        let o_ref: &[u8] = other.0;
+        s_ref.eq(o_ref)
+    }
+}
 
 impl<'a> From<Input<'a>> for Bloom {
     fn from(input: Input<'a>) -> Bloom {
@@ -95,7 +90,6 @@ impl Bloom {
         BloomRef<'a>: From<B>,
     {
         let bloom_ref: BloomRef<'_> = bloom.into();
-        // workaround for https://github.com/rust-lang/rust/issues/43644
         self.contains_bloom_ref(bloom_ref)
     }
 
@@ -136,32 +130,32 @@ impl Bloom {
         }
     }
 
-    // pub fn accrue_bloom<'a, B>(&mut self, bloom: B)
-    // where
-    //     BloomRef<'a>: From<B>,
-    // {
-    //     let bloom_ref: BloomRef<'_> = bloom.into();
-    //     assert_eq!(self.0.len(), BLOOM_SIZE);
-    //     assert_eq!(bloom_ref.0.len(), BLOOM_SIZE);
-    //     for i in 0..BLOOM_SIZE {
-    //         self.0[i] |= bloom_ref.0[i];
-    //     }
-    // }
+    pub fn accrue_bloom<'a, B>(&mut self, bloom: B)
+    where
+        BloomRef<'a>: From<B>,
+    {
+        let bloom_ref: BloomRef<'_> = bloom.into();
+        assert_eq!(self.0.len(), BLOOM_SIZE);
+        assert_eq!(bloom_ref.0.len(), BLOOM_SIZE);
+        for i in 0..BLOOM_SIZE {
+            self.0[i] |= bloom_ref.0[i];
+        }
+    }
 
-    // pub fn data(&self) -> &[u8; BLOOM_SIZE] {
-    //     &self.0
-    // }
+    pub fn data(&self) -> &[u8; BLOOM_SIZE] {
+        &self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct BloomRef<'a>(&'a [u8; BLOOM_SIZE]);
 
 impl<'a> BloomRef<'a> {
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    // pub fn is_empty(&self) -> bool {
-    //     self.0.iter().all(|x| *x == 0)
-    // }
-    #[allow(clippy::trivially_copy_pass_by_ref)]
+    /// Returns `true` if bloom only consists of `0`
+    pub fn is_empty(&self) -> bool {
+        self.0.iter().all(|x| *x == 0)
+    }
+
     pub fn contains_bloom<'b, B>(&self, bloom: B) -> bool
     where
         BloomRef<'b>: From<B>,
@@ -179,17 +173,16 @@ impl<'a> BloomRef<'a> {
         true
     }
 
-    // #[allow(clippy::trivially_copy_pass_by_ref)]
-    // pub fn data(&self) -> &'a [u8; BLOOM_SIZE] {
-    //     self.0
-    // }
+    pub fn data(&self) -> &'a [u8; BLOOM_SIZE] {
+        self.0
+    }
 }
 
-// impl<'a> From<&'a [u8; BLOOM_SIZE]> for BloomRef<'a> {
-//     fn from(data: &'a [u8; BLOOM_SIZE]) -> Self {
-//         BloomRef(data)
-//     }
-// }
+impl<'a> From<&'a [u8; BLOOM_SIZE]> for BloomRef<'a> {
+    fn from(data: &'a [u8; BLOOM_SIZE]) -> Self {
+        BloomRef(data)
+    }
+}
 
 impl<'a> From<&'a Bloom> for BloomRef<'a> {
     fn from(bloom: &'a Bloom) -> Self {
