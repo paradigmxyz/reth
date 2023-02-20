@@ -162,7 +162,7 @@ impl Transaction {
         };
 
         let transaction = match self.transaction_type.map(|x| x.as_u64()) {
-            None => PrimitiveTransaction::Legacy(TxLegacy {
+            None | Some(0) => PrimitiveTransaction::Legacy(TxLegacy {
                 chain_id: self.chain_id.map(|x| x.as_u64()),
                 nonce: self.nonce.to::<u64>(),
                 gas_price: self.gas_price.unwrap_or_default().to::<u128>(),
@@ -171,6 +171,7 @@ impl Transaction {
                 input: self.input,
                 to,
             }),
+            // TODO: Expand as we need to debug more transactions.
             Some(1) => unimplemented!(),
             Some(2) => unimplemented!(),
             _ => unreachable!("unknown transaction type"),

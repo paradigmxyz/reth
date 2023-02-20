@@ -7,8 +7,11 @@ use reth_primitives::{Address, Bytes, H256, U256, U64};
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PrestateAccount {
+    #[serde(default)]
     pub balance: U256,
+    #[serde(default)]
     pub nonce: U64,
+    #[serde(default)]
     pub storage: HashMap<H256, U256>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<Bytes>,

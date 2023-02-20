@@ -73,9 +73,10 @@ impl Command {
             ..Default::default()
         };
         let mut executor = Executor::new(&spec, &mut db);
-        let result = executor.execute(&block, U256::ZERO, None);
+        let result = executor.execute_transactions(&block, U256::ZERO, None);
 
-        // TODO: Construct the header etc.
+        // State is committed, so we can try calculating stateroot, txs root etc.
+        dbg!(&result);
 
         Ok(())
     }
