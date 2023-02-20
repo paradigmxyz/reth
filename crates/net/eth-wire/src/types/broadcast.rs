@@ -131,22 +131,6 @@ pub struct NewPooledTransactionHashes68 {
     pub hashes: Vec<H256>,
 }
 
-impl TryFrom<(Option<Vec<u8>>, Option<Vec<usize>>, Vec<H256>)> for NewPooledTransactionHashes68 {
-    type Error = &'static str;
-
-    fn try_from(
-        (types, sizes, hashes): (Option<Vec<u8>>, Option<Vec<usize>>, Vec<H256>),
-    ) -> Result<Self, Self::Error> {
-        if types.is_none() {
-            return Err("`types` is none")
-        }
-        if sizes.is_none() {
-            return Err("`sizes` is none")
-        }
-        Ok(Self { types: types.unwrap(), sizes: sizes.unwrap(), hashes })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

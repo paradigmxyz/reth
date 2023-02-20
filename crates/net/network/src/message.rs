@@ -38,53 +38,6 @@ impl NewBlockMessage {
     }
 }
 
-/// Internal form of a `PooledTransactions` message
-/// Same as [`NewPooledTransactionHashes68`] but types and sizes are Option.
-#[derive(Debug, Clone)]
-pub struct NewPooledTransactionHashes {
-    /// Transaction types for new transactions that have appeared on the network.
-    pub types: Option<Vec<u8>>,
-    /// Transaction sizes for new transactions that have appeared on the network.
-    pub sizes: Option<Vec<usize>>,
-    /// Transaction hashes for new transactions that have appeared on the network.
-    pub hashes: Vec<H256>,
-}
-
-impl NewPooledTransactionHashes {
-    pub fn new(hashes: Vec<TxHash>, types: Vec<TxType>, sizes: Vec<usize>) -> Self {
-        NewPooledTransactionHashes {
-            types: Some(types.into_iter().map(|t| t as u8).collect()),
-            sizes: Some(sizes),
-            hashes,
-        }
-    }
-}
-
-impl From<NewPooledTransactionHashes66> for NewPooledTransactionHashes {
-    fn from(msg: NewPooledTransactionHashes66) -> Self {
-        NewPooledTransactionHashes { types: None, sizes: None, hashes: msg.0 }
-    }
-}
-
-impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
-    fn from(msg: NewPooledTransactionHashes68) -> Self {
-        NewPooledTransactionHashes {
-            types: Some(msg.types),
-            sizes: Some(msg.sizes),
-            hashes: msg.hashes,
-        }
-    }
-}
-
-impl From<Vec<PooledTransactionHash>> for NewPooledTransactionHashes {
-    fn from(value: Vec<PooledTransactionHash>) -> Self {
-        let (hashes, (types, sizes)) =
-            value.into_iter().map(|v| (v.hash, (v.tx_type, v.size))).unzip();
-
-        NewPooledTransactionHashes::new(hashes, types, sizes)
-    }
-}
-
 /// All Bi-directional eth-message variants that can be sent to a session or received from a
 /// session.
 #[derive(Debug)]
@@ -98,7 +51,7 @@ pub enum PeerMessage {
     /// Broadcast transactions _from_ local _to_ a peer.
     SendTransactions(SharedTransactions),
     /// Send new pooled transactions
-    PooledTransactions(NewPooledTransactionHashes),
+    PooledTransactions(NewPooledTransactionHashes66),
     /// All `eth` request variants.
     EthRequest(PeerRequest),
     /// Other than eth namespace message
