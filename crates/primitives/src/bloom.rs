@@ -1,16 +1,201 @@
 //! Bloom type.
+#![allow(missing_docs)]
 use crate::{impl_fixed_hash_type, keccak256, Log};
 use bytes::Buf;
+use core::{mem, ops};
+use crunchy::unroll;
 use derive_more::{AsRef, Deref};
-use fixed_hash::construct_fixed_hash;
+use fixed_hash::*;
 use impl_serde::impl_fixed_hash_serde;
 use reth_codecs::{impl_hash_compact, Compact};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper, RlpMaxEncodedLen};
+use tiny_keccak::{Hasher, Keccak};
 
 /// Length of bloom filter used for Ethereum.
-pub const BLOOM_BYTE_LENGTH: usize = 256;
+pub const BLOOM_BITS: u32 = 3;
+pub const BLOOM_SIZE: usize = 256;
 
-impl_fixed_hash_type!((Bloom, BLOOM_BYTE_LENGTH));
+impl_fixed_hash_type!((Bloom, BLOOM_SIZE));
+
+/// Returns log2.
+fn log2(x: usize) -> u32 {
+    if x <= 1 {
+        return 0
+    }
+
+    let n = x.leading_zeros();
+    mem::size_of::<usize>() as u32 * 8 - n
+}
+
+#[derive(Debug)]
+pub enum Input<'a> {
+    Raw(&'a [u8]),
+    Hash(&'a [u8; 32]),
+}
+
+enum Hash<'a> {
+    Ref(&'a [u8; 32]),
+    Owned([u8; 32]),
+}
+
+impl<'a> From<Input<'a>> for Hash<'a> {
+    fn from(input: Input<'a>) -> Self {
+        match input {
+            Input::Raw(raw) => {
+                let mut out = [0u8; 32];
+                let mut keccak256 = Keccak::v256();
+                keccak256.update(raw);
+                keccak256.finalize(&mut out);
+                Hash::Owned(out)
+            }
+            Input::Hash(hash) => Hash::Ref(hash),
+        }
+    }
+}
+
+impl<'a> ops::Index<usize> for Hash<'a> {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &u8 {
+        match *self {
+            Hash::Ref(r) => &r[index],
+            Hash::Owned(ref hash) => &hash[index],
+        }
+    }
+}
+
+impl<'a> Hash<'a> {
+    fn len(&self) -> usize {
+        match *self {
+            Hash::Ref(r) => r.len(),
+            Hash::Owned(ref hash) => hash.len(),
+        }
+    }
+}
+
+// impl<'a> PartialEq<BloomRef<'a>> for Bloom {
+//     fn eq(&self, other: &BloomRef<'a>) -> bool {
+//         let s_ref: &[u8] = &self.0;
+//         let o_ref: &[u8] = other.0;
+//         s_ref.eq(o_ref)
+//     }
+// }
+
+impl<'a> From<Input<'a>> for Bloom {
+    fn from(input: Input<'a>) -> Bloom {
+        let mut bloom = Bloom::default();
+        bloom.accrue(input);
+        bloom
+    }
+}
+
+impl Bloom {
+    pub fn contains_bloom<'a, B>(&self, bloom: B) -> bool
+    where
+        BloomRef<'a>: From<B>,
+    {
+        let bloom_ref: BloomRef<'_> = bloom.into();
+        // workaround for https://github.com/rust-lang/rust/issues/43644
+        self.contains_bloom_ref(bloom_ref)
+    }
+
+    fn contains_bloom_ref(&self, bloom: BloomRef<'_>) -> bool {
+        let self_ref: BloomRef<'_> = self.into();
+        self_ref.contains_bloom(bloom)
+    }
+
+    pub fn accrue(&mut self, input: Input<'_>) {
+        let p = BLOOM_BITS;
+
+        let m = self.0.len();
+        let bloom_bits = m * 8;
+        let mask = bloom_bits - 1;
+        let bloom_bytes = (log2(bloom_bits) + 7) / 8;
+
+        let hash: Hash<'_> = input.into();
+
+        // must be a power of 2
+        assert_eq!(m & (m - 1), 0);
+        // out of range
+        assert!(p * bloom_bytes <= hash.len() as u32);
+
+        let mut ptr = 0;
+
+        assert_eq!(BLOOM_BITS, 3);
+        unroll! {
+            for i in 0..3 {
+                let _ = i;
+                let mut index = 0_usize;
+                for _ in 0..bloom_bytes {
+                    index = (index << 8) | hash[ptr] as usize;
+                    ptr += 1;
+                }
+                index &= mask;
+                self.0[m - 1 - index / 8] |= 1 << (index % 8);
+            }
+        }
+    }
+
+    // pub fn accrue_bloom<'a, B>(&mut self, bloom: B)
+    // where
+    //     BloomRef<'a>: From<B>,
+    // {
+    //     let bloom_ref: BloomRef<'_> = bloom.into();
+    //     assert_eq!(self.0.len(), BLOOM_SIZE);
+    //     assert_eq!(bloom_ref.0.len(), BLOOM_SIZE);
+    //     for i in 0..BLOOM_SIZE {
+    //         self.0[i] |= bloom_ref.0[i];
+    //     }
+    // }
+
+    // pub fn data(&self) -> &[u8; BLOOM_SIZE] {
+    //     &self.0
+    // }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BloomRef<'a>(&'a [u8; BLOOM_SIZE]);
+
+impl<'a> BloomRef<'a> {
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    // pub fn is_empty(&self) -> bool {
+    //     self.0.iter().all(|x| *x == 0)
+    // }
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn contains_bloom<'b, B>(&self, bloom: B) -> bool
+    where
+        BloomRef<'b>: From<B>,
+    {
+        let bloom_ref: BloomRef<'_> = bloom.into();
+        assert_eq!(self.0.len(), BLOOM_SIZE);
+        assert_eq!(bloom_ref.0.len(), BLOOM_SIZE);
+        for i in 0..BLOOM_SIZE {
+            let a = self.0[i];
+            let b = bloom_ref.0[i];
+            if (a & b) != b {
+                return false
+            }
+        }
+        true
+    }
+
+    // #[allow(clippy::trivially_copy_pass_by_ref)]
+    // pub fn data(&self) -> &'a [u8; BLOOM_SIZE] {
+    //     self.0
+    // }
+}
+
+// impl<'a> From<&'a [u8; BLOOM_SIZE]> for BloomRef<'a> {
+//     fn from(data: &'a [u8; BLOOM_SIZE]) -> Self {
+//         BloomRef(data)
+//     }
+// }
+
+impl<'a> From<&'a Bloom> for BloomRef<'a> {
+    fn from(bloom: &'a Bloom) -> Self {
+        BloomRef(&bloom.0)
+    }
+}
 
 // See Section 4.3.1 "Transaction Receipt" of the Yellow Paper
 fn m3_2048(bloom: &mut Bloom, x: &[u8]) {
@@ -18,7 +203,7 @@ fn m3_2048(bloom: &mut Bloom, x: &[u8]) {
     let h: &[u8; 32] = hash.as_ref();
     for i in [0, 2, 4] {
         let bit = (h[i + 1] as usize + ((h[i] as usize) << 8)) & 0x7FF;
-        bloom.0[BLOOM_BYTE_LENGTH - 1 - bit / 8] |= 1 << (bit % 8);
+        bloom.0[BLOOM_SIZE - 1 - bit / 8] |= 1 << (bit % 8);
     }
 }
 
