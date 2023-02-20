@@ -20,7 +20,7 @@ impl Serialize for JsonU256 {
     where
         S: Serializer,
     {
-        self.0.to_string().serialize(serializer)
+        self.0.serialize(serializer)
     }
 }
 
@@ -111,6 +111,9 @@ mod test {
         let data = JsonU256(U256::from(16));
         let serialized = serde_json::to_string(&data).unwrap();
 
-        assert_eq!(serialized, r#""16""#);
+        assert_eq!(
+            serialized,
+            r#""0x0000000000000000000000000000000000000000000000000000000000000010""#
+        );
     }
 }
