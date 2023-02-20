@@ -619,19 +619,16 @@ impl RpcServerConfig {
 
         if let Some(builder) = self.http_server_config {
             let cors = Self::create_cors_layer(self.http_cors_domains).unwrap();
-            match cors {
-                Some(cors) => {
-                    let middleware = tower::ServiceBuilder::new().layer(cors);
-                    let http_server =
-                        builder.set_middleware(middleware).build(http_socket_addr).await?;
-                    server.http_local_addr = http_server.local_addr().ok();
-                    server.http = Some(HttpServer::WithCors(http_server));
-                }
-                None => {
-                    let http_server = builder.build(http_socket_addr).await?;
-                    server.http_local_addr = http_server.local_addr().ok();
-                    server.http = Some(HttpServer::Plain(http_server));
-                }
+            if let Some(cors) = cors {
+                let middleware = tower::ServiceBuilder::new().layer(cors);
+                let http_server =
+                    builder.set_middleware(middleware).build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::WithCors(http_server));
+            } else {
+                let http_server = builder.build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::Plain(http_server));
             }
         }
 
@@ -664,27 +661,27 @@ impl RpcServerConfig {
                 "*" => {
                     cors = Some(
                         CorsLayer::new()
-                        .allow_methods([Method::GET, Method::POST])
-                        .allow_origin(Any)
+                            .allow_methods([Method::GET, Method::POST])
+                            .allow_origin(Any)
                             .allow_headers(Any),
                     );
-                } 
+                }
                 "" => {}
                 _ => {
                     let origins = domains
                         .split(",")
-                    .map(|domain| domain.parse::<HeaderValue>())
-                    .collect::<Result<Vec<HeaderValue>, _>>();
+                        .map(|domain| domain.parse::<HeaderValue>())
+                        .collect::<Result<Vec<HeaderValue>, _>>();
                     if let Ok(origins) = origins {
                         cors = Some(
                             CorsLayer::new()
-                        .allow_methods([Method::GET, Method::POST])
-                        .allow_origin(origins)
+                                .allow_methods([Method::GET, Method::POST])
+                                .allow_origin(origins)
                                 .allow_headers(Any),
                         );
                     }
                 }
-            }   
+            }
         }
         Ok(cors)
     }
@@ -854,7 +851,7 @@ impl RpcServer {
                 HttpServer::WithCors(server) => {
                     handle.http = Some(server.start(module)?);
                 }
-            } 
+            }
         }
 
         if let Some((server, module)) = self.ws.and_then(|server| ws.map(|module| (server, module)))
