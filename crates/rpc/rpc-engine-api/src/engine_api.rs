@@ -6,17 +6,15 @@ use reth_executor::{
 };
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
-    bytes::BytesMut,
     proofs::{self, EMPTY_LIST_HASH},
     rpc::{BlockId, H256 as EthersH256},
-    Block, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
-    H64, U256,
+    BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned, H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
-use reth_rlp::{Decodable, Encodable};
+use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ExecutionPayloadBody, ForkchoiceUpdated,
-    PayloadAttributes, PayloadStatus, PayloadStatusEnum, TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum, TransitionConfiguration,
 };
 use std::{
     future::Future,
@@ -31,7 +29,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
 /// The upper limit for payload bodies request.
-const PAYLOAD_BODIES_LIMIT: u64 = 1024;
+const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -183,19 +181,6 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
         })
     }
 
-    /// Transform the block to [ExecutionPayloadBody]
-    fn transform_block_to_payload_body(&self, block: Block) -> ExecutionPayloadBody {
-        let transactions = block.body.into_iter().map(|tx| {
-            let mut out = BytesMut::new();
-            tx.encode(&mut out);
-            out.freeze().into()
-        });
-        ExecutionPayloadBody {
-            transactions: transactions.collect(),
-            withdrawals: block.withdrawals.unwrap_or_default(),
-        }
-    }
-
     /// Called to retrieve the latest state of the network, validate new blocks, and maintain
     /// consistency between the Consensus and Execution layers.
     ///
@@ -211,7 +196,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodies> {
-        if count > PAYLOAD_BODIES_LIMIT {
+        if count > MAX_PAYLOAD_BODIES_LIMIT {
             return Err(EngineApiError::PayloadRequestTooLarge { len: count })
         }
 
@@ -222,8 +207,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
         let mut result = Vec::with_capacity(count as usize);
         for num in start..start + count {
             let block = self.client.block(BlockId::Number(num.into()))?;
-            let body = block.map(|b| self.transform_block_to_payload_body(b));
-            result.push(body);
+            result.push(block.map(Into::into));
         }
 
         Ok(result)
@@ -235,15 +219,14 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodies> {
         let len = hashes.len() as u64;
-        if len > PAYLOAD_BODIES_LIMIT {
+        if len > MAX_PAYLOAD_BODIES_LIMIT {
             return Err(EngineApiError::PayloadRequestTooLarge { len })
         }
 
         let mut result = Vec::with_capacity(hashes.len());
         for hash in hashes {
             let block = self.client.block(BlockId::Hash(hash.0.into()))?;
-            let body = block.map(|b| self.transform_block_to_payload_body(b));
-            result.push(body);
+            result.push(block.map(Into::into));
         }
 
         Ok(result)
@@ -709,14 +692,134 @@ mod tests {
         }
     }
 
+    // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
-        // TODO:
+        use super::*;
+        use reth_interfaces::test_utils::generators::random_block_range;
+
+        #[tokio::test]
+        async fn invalid_params() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let by_range_tests = [
+                // (start, count)
+                (0, 0),
+                (0, 1),
+                (1, 0),
+            ];
+
+            // test [EngineApiMessage::GetPayloadBodiesByRange]
+            for (start, count) in by_range_tests {
+                let (result_tx, result_rx) = oneshot::channel();
+                handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(
+                    start, count, result_tx,
+                ));
+                assert_matches!(result_rx.await, Ok(Err(EngineApiError::InvalidParams)));
+            }
+
+            // test [EngineApiMessage::GetPayloadBodiesByHash]
+            let (result_tx, result_rx) = oneshot::channel();
+            handle
+                .send_message(EngineApiMessage::GetPayloadBodiesByHash(Vec::default(), result_tx));
+            assert_matches!(result_rx.await, Ok(Err(EngineApiError::InvalidParams)));
+        }
+
+        #[tokio::test]
+        async fn request_too_large() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let request_count = MAX_PAYLOAD_BODIES_LIMIT + 1;
+
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(
+                0,
+                request_count,
+                result_tx,
+            ));
+            assert_matches!(
+                result_rx.await,
+                Ok(Err(EngineApiError::PayloadRequestTooLarge { .. }))
+            );
+
+            let (result_tx, result_rx) = oneshot::channel();
+            let hashes = std::iter::repeat(H256::default()).take(request_count as usize).collect();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByHash(hashes, result_tx));
+            assert_matches!(result_rx.await, Ok(Err(EngineApiError::PayloadRequestTooLarge { .. })))
+        }
+
+        #[tokio::test]
+        async fn returns_payload_bodies() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let (start, count) = (1, 10);
+            let blocks = random_block_range(start..start + count, H256::default(), 0..2);
+            handle.client.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
+
+            let expected =
+                blocks.iter().cloned().map(|b| Some(b.unseal().into())).collect::<Vec<_>>();
+
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(start, count, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+
+            let (result_tx, result_rx) = oneshot::channel();
+            let hashes = blocks.iter().map(|b| b.hash()).collect();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByHash(hashes, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+        }
+
+        #[tokio::test]
+        async fn returns_payload_bodies_with_gaps() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let (start, count) = (1, 100);
+            let blocks = random_block_range(start..start + count, H256::default(), 0..2);
+
+            // Insert only blocks in ranges 1-25 and 50-75
+            let first_missing_range = 26..=50;
+            let second_missing_range = 76..=100;
+            handle.client.extend_blocks(
+                blocks
+                    .iter()
+                    .filter(|b| {
+                        !first_missing_range.contains(&b.number) &&
+                            !second_missing_range.contains(&b.number)
+                    })
+                    .map(|b| (b.hash(), b.clone().unseal())),
+            );
+
+            let expected = blocks
+                .iter()
+                .cloned()
+                .map(|b| {
+                    if first_missing_range.contains(&b.number) ||
+                        second_missing_range.contains(&b.number)
+                    {
+                        None
+                    } else {
+                        Some(b.unseal().into())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(start, count, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+
+            let (result_tx, result_rx) = oneshot::channel();
+            let hashes = blocks.iter().map(|b| b.hash()).collect();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByHash(hashes, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+        }
     }
 
     mod fork_choice_updated {
-        use reth_interfaces::test_utils::generators::random_header;
-
         use super::*;
+        use reth_interfaces::test_utils::generators::random_header;
 
         #[tokio::test]
         async fn empty_head() {

@@ -4868,6 +4868,7 @@ version = "0.1.0"
 dependencies = [
  "jsonrpsee-types",
  "lru 0.9.0",
+ "reth-interfaces",
  "reth-network-api",
  "reth-primitives",
  "reth-rlp",
