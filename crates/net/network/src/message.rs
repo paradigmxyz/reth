@@ -50,6 +50,16 @@ pub struct NewPooledTransactionHashes {
     pub hashes: Vec<H256>,
 }
 
+impl NewPooledTransactionHashes {
+    pub fn new(hashes: Vec<TxHash>, types: Vec<TxType>, sizes: Vec<usize>) -> Self {
+        NewPooledTransactionHashes {
+            types: Some(types.into_iter().map(|t| t as u8).collect()),
+            sizes: Some(sizes),
+            hashes,
+        }
+    }
+}
+
 impl From<NewPooledTransactionHashes66> for NewPooledTransactionHashes {
     fn from(msg: NewPooledTransactionHashes66) -> Self {
         NewPooledTransactionHashes { types: None, sizes: None, hashes: msg.0 }
@@ -66,21 +76,12 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
     }
 }
 
-impl From<(Vec<TxHash>, Vec<TxType>, Vec<usize>)> for NewPooledTransactionHashes {
-    fn from((hashes, types, sizes): (Vec<TxHash>, Vec<TxType>, Vec<usize>)) -> Self {
-        NewPooledTransactionHashes {
-            types: Some(types.into_iter().map(|t| t as u8).collect()),
-            sizes: Some(sizes),
-            hashes,
-        }
-    }
-}
-
 impl From<Vec<PooledTransactionHash>> for NewPooledTransactionHashes {
     fn from(value: Vec<PooledTransactionHash>) -> Self {
-        let (hashes, (types, sizes)) =
+        let (hashes, (types, sizes)): (Vec<TxHash>, (Vec<TxType>, Vec<usize>)) =
             value.into_iter().map(|v| (v.hash, (v.tx_type, v.size))).unzip();
-        (hashes, types, sizes).into()
+
+        NewPooledTransactionHashes::new(hashes, types, sizes)
     }
 }
 

@@ -229,7 +229,10 @@ where
                     let (types, sizes) = full.iter().map(|tx| (tx.tx_type(), tx.length())).unzip();
 
                     // send hashes of transactions
-                    self.network.send_transactions_hashes(*peer_id, (hashes, types, sizes).into());
+                    self.network.send_transactions_hashes(
+                        *peer_id,
+                        NewPooledTransactionHashes::new(hashes, types, sizes),
+                    );
                 } else {
                     // send full transactions
                     self.network.send_transactions(*peer_id, full);
