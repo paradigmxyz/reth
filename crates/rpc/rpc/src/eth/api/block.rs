@@ -12,6 +12,20 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
 {
+    pub(crate) async fn block_transaction_count(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> EthResult<Option<usize>> {
+        let block_id = block_id.into();
+        // TODO support pending block
+
+        if let Some(txs) = self.client().transactions_by_block(block_id)? {
+            Ok(Some(txs.len()))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub(crate) async fn block(
         &self,
         block_id: impl Into<BlockId>,
