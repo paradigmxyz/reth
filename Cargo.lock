@@ -4692,6 +4692,7 @@ dependencies = [
  "bytes",
  "crc",
  "criterion",
+ "crunchy",
  "derive_more",
  "ethers-core",
  "fixed-hash",
