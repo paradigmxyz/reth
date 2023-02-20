@@ -342,18 +342,44 @@ where
             }
         }
     }
-}
 
-impl<'a, DB> BlockExecutor<ExecutionResult> for Executor<'a, DB>
-where
-    DB: StateProvider,
-{
-    fn execute(
+    /// Runs a single transaction in the configured environment and proceeds
+    /// to return the result and state diff (without applying it).
+    ///
+    /// Assumes the rest of the block environment has been filled via `init_block_env`.
+    pub fn execute_transaction(
+        &mut self,
+        transaction: &TransactionSigned,
+        sender: Address,
+    ) -> Result<ResultAndState, Error> {
+        // Fill revm structure.
+        revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, sender);
+
+        // Execute transaction.
+        let out = if self.use_printer_tracer {
+            // execution with inspector.
+            let output = self.evm.inspect(revm::inspectors::CustomPrintTracer::default());
+            tracing::trace!(
+                target: "evm",
+                hash = ?transaction.hash(), ?output, ?transaction, env = ?self.evm.env,
+                "Executed transaction"
+            );
+            output
+        } else {
+            // main execution.
+            self.evm.transact()
+        };
+
+        // cast the error and extract returnables.
+        out.map_err(|e| Error::EVM(format!("{e:?}")))
+    }
+
+    pub fn execute_transactions(
         &mut self,
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<ExecutionResult, Error> {
+    ) -> Result<(Vec<TransactionChangeSet>, u64), Error> {
         let senders = self.recover_senders(&block.body, senders)?;
 
         self.init_block_env(&block.header, total_difficulty);
@@ -373,26 +399,7 @@ where
                 })
             }
 
-            // Fill revm structure.
-            revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, sender);
-
-            // Execute transaction.
-            let out = if self.use_printer_tracer {
-                // execution with inspector.
-                let output = self.evm.inspect(revm::inspectors::CustomPrintTracer::default());
-                tracing::trace!(
-                    target: "evm",
-                    hash = ?transaction.hash(), ?output, ?transaction, env = ?self.evm.env,
-                    "Executed transaction"
-                );
-                output
-            } else {
-                // main execution.
-                self.evm.transact()
-            };
-
-            // cast the error and extract returnables.
-            let ResultAndState { result, state } = out.map_err(|e| Error::EVM(format!("{e:?}")))?;
+            let ResultAndState { result, state } = self.execute_transaction(transaction, sender)?;
 
             // commit changes
             let (changeset, new_bytecodes) = self.commit_changes(state);
@@ -418,6 +425,23 @@ where
                 new_bytecodes,
             });
         }
+
+        Ok((tx_changesets, cumulative_gas_used))
+    }
+}
+
+impl<'a, DB> BlockExecutor<ExecutionResult> for Executor<'a, DB>
+where
+    DB: StateProvider,
+{
+    fn execute(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<ExecutionResult, Error> {
+        let (tx_changesets, cumulative_gas_used) =
+            self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
