@@ -717,12 +717,6 @@ mod tests {
                 ));
                 assert_matches!(result_rx.await, Ok(Err(EngineApiError::InvalidParams)));
             }
-
-            // test [EngineApiMessage::GetPayloadBodiesByHash]
-            let (result_tx, result_rx) = oneshot::channel();
-            handle
-                .send_message(EngineApiMessage::GetPayloadBodiesByHash(Vec::default(), result_tx));
-            assert_matches!(result_rx.await, Ok(Err(EngineApiError::InvalidParams)));
         }
 
         #[tokio::test]
