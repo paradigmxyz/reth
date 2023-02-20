@@ -78,7 +78,7 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
 
 impl From<Vec<PooledTransactionHash>> for NewPooledTransactionHashes {
     fn from(value: Vec<PooledTransactionHash>) -> Self {
-        let (hashes, (types, sizes)): (Vec<TxHash>, (Vec<TxType>, Vec<usize>)) =
+        let (hashes, (types, sizes)) =
             value.into_iter().map(|v| (v.hash, (v.tx_type, v.size))).unzip();
 
         NewPooledTransactionHashes::new(hashes, types, sizes)
