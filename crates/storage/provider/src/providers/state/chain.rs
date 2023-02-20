@@ -44,6 +44,7 @@ mod tests {
 
     fn assert_state_provider<T: StateProvider>() {}
     #[allow(unused)]
+    #[allow(clippy::extra_unused_lifetimes)]
     fn assert_chain_state_provider<'txn>() {
         assert_state_provider::<ChainState<'txn>>();
     }

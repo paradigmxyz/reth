@@ -40,8 +40,7 @@ fn senders(c: &mut Criterion) {
 
     for batch in [1000usize, 10_000, 100_000, 250_000] {
         let num_blocks = 10_000;
-        let mut stage = SenderRecoveryStage::default();
-        stage.commit_threshold = num_blocks;
+        let stage = SenderRecoveryStage { commit_threshold: num_blocks, ..Default::default() };
         let label = format!("SendersRecovery-batch-{batch}");
         measure_stage(&mut group, stage, num_blocks, label);
     }

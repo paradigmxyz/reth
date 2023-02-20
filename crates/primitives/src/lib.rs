@@ -16,6 +16,7 @@ pub mod bloom;
 mod chain;
 pub mod constants;
 mod error;
+pub mod filter;
 mod forkid;
 mod genesis;
 mod hardfork;

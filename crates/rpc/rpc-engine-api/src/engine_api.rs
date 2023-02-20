@@ -7,8 +7,8 @@ use reth_executor::{
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
-    rpc::{BlockId, H256 as EthersH256},
-    BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned, H64, U256,
+    BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
+    H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
 use reth_rlp::Decodable;
@@ -225,7 +225,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
 
         let mut result = Vec::with_capacity(hashes.len());
         for hash in hashes {
-            let block = self.client.block(BlockId::Hash(hash.0.into()))?;
+            let block = self.client.block(BlockId::Hash(hash.into()))?;
             result.push(block.map(Into::into));
         }
 
@@ -255,7 +255,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash))
         }
 
-        let Some(parent) = self.client.block(BlockId::Hash(EthersH256(parent_hash.0)))? else {
+        let Some(parent) = self.client.block_by_hash(parent_hash)? else {
              // TODO: cache block for storing later
              return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
         };

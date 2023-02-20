@@ -11,8 +11,9 @@ use proptest::{
     test_runner::TestRunner,
 };
 use reth_db::{
-    cursor::{DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     mdbx::Env,
+    TxHashNumber,
 };
 use std::{collections::HashSet, time::Instant};
 use test_fuzz::runtime::num_traits::Zero;

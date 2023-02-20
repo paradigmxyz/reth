@@ -9,9 +9,7 @@ use jsonrpsee::{
     types::error::{CallError, ErrorCode},
 };
 use reth_primitives::{
-    hex_literal::hex,
-    rpc::{BlockId, BlockNumber},
-    Address, Bytes, NodeRecord, H256, H64, U256,
+    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, H256, H64, U256,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
@@ -52,7 +50,7 @@ where
     let address = Address::default();
     let index = Index::default();
     let hash = H256::default();
-    let block_number = BlockNumber::default();
+    let block_number = BlockNumberOrTag::default();
     let call_request = CallRequest::default();
     let transaction_request = TransactionRequest::default();
     let bytes = Bytes::default();
@@ -69,13 +67,11 @@ where
     EthApiClient::balance(client, address, None).await.unwrap();
     EthApiClient::transaction_count(client, address, None).await.unwrap();
     EthApiClient::storage_at(client, address, U256::default(), None).await.unwrap();
+    EthApiClient::block_by_hash(client, hash, false).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
-    assert!(is_unimplemented(
-        EthApiClient::block_by_hash(client, hash, false).await.err().unwrap()
-    ));
     assert!(is_unimplemented(
         EthApiClient::block_by_number(client, block_number, false).await.err().unwrap()
     ));
@@ -161,7 +157,7 @@ async fn test_basic_debug_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    let block_id = BlockId::Number(BlockNumber::default());
+    let block_id = BlockId::Number(BlockNumberOrTag::default());
 
     assert!(is_unimplemented(DebugApiClient::raw_header(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::raw_block(client, block_id).await.err().unwrap()));
@@ -185,7 +181,7 @@ async fn test_basic_trace_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync,
 {
-    let block_id = BlockId::Number(BlockNumber::default());
+    let block_id = BlockId::Number(BlockNumberOrTag::default());
     let trace_filter = TraceFilter {
         from_block: None,
         to_block: None,

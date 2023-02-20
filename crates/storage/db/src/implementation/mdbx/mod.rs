@@ -210,7 +210,7 @@ mod tests {
         assert!(first.is_some(), "First should be our put");
 
         // Walk
-        let walk = cursor.walk(Some(key.into())).unwrap();
+        let walk = cursor.walk(Some(key)).unwrap();
         let first = walk.into_iter().next().unwrap().unwrap();
         assert_eq!(first.1, value, "First next should be put value");
     }
@@ -636,18 +636,15 @@ mod tests {
 
         // PUT (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key, value00.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT (2,2)
         let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value22.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
 
         // PUT (1,1)
         let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key, value11.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
 
         // Iterate with cursor
         {
@@ -656,7 +653,7 @@ mod tests {
 
             // Notice that value11 and value22 have been ordered in the DB.
             assert!(Some(value00) == cursor.next_dup_val().unwrap());
-            assert!(Some(value11.clone()) == cursor.next_dup_val().unwrap());
+            assert!(Some(value11) == cursor.next_dup_val().unwrap());
             assert!(Some(value22) == cursor.next_dup_val().unwrap());
         }
 
@@ -685,18 +682,15 @@ mod tests {
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value00.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (1,1)
         let value11 = StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value11.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value11).expect(ERROR_PUT)).unwrap();
 
         // PUT key2 (2,2)
         let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
-        env.update(|tx| tx.put::<PlainStorageState>(key2, value22.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
 
         // Iterate with walk_dup
         {
@@ -705,8 +699,8 @@ mod tests {
             let mut walker = cursor.walk_dup(None, None).unwrap();
 
             // Notice that value11 and value22 have been ordered in the DB.
-            assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
-            assert_eq!(Some(Ok((key1, value11.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value00))), walker.next());
+            assert_eq!(Some(Ok((key1, value11))), walker.next());
             // NOTE: Dup cursor does NOT iterates on all values but only on duplicated values of the
             // same key. assert_eq!(Ok(Some(value22.clone())), walker.next());
             assert_eq!(None, walker.next());
@@ -732,13 +726,11 @@ mod tests {
 
         // PUT key1 (0,1)
         let value01 = StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) };
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value01.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value01).expect(ERROR_PUT)).unwrap();
 
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
-        env.update(|tx| tx.put::<PlainStorageState>(key1, value00.clone()).expect(ERROR_PUT))
-            .unwrap();
+        env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
 
         // Iterate with walk
         {
@@ -748,7 +740,7 @@ mod tests {
             let mut walker = cursor.walk(Some(first.0)).unwrap();
 
             // NOTE: Both values are present
-            assert_eq!(Some(Ok((key1, value00.clone()))), walker.next());
+            assert_eq!(Some(Ok((key1, value00))), walker.next());
             assert_eq!(Some(Ok((key1, value01))), walker.next());
             assert_eq!(None, walker.next());
         }
@@ -759,7 +751,7 @@ mod tests {
             let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
 
             // NOTE: There are two values with same SubKey but only first one is shown
-            assert_eq!(Ok(Some(value00.clone())), cursor.seek_by_key_subkey(key1, value00.key));
+            assert_eq!(Ok(Some(value00)), cursor.seek_by_key_subkey(key1, value00.key));
         }
     }
 
