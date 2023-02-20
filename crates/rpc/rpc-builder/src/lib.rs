@@ -540,8 +540,8 @@ impl RpcServerConfig {
         self
     }
     /// Configure the corsdomains
-    pub fn with_cors(mut self, cors_domain : Option<String>) -> Self {
-        self.http_cors_domains = cors_domain;
+    pub fn with_cors(mut self, cors_domain : String) -> Self {
+        self.http_cors_domains = Some(cors_domain);
         self
     }
 
@@ -618,32 +618,7 @@ impl RpcServerConfig {
         )));
 
         if let Some(builder) = self.http_server_config {
-            let mut cors= None;
-            if let Some(domains) = self.http_cors_domains.as_ref() {
-                match domains.as_str() {
-                    "*" => {
-                        cors = Some(CorsLayer::new()
-                            .allow_methods([Method::GET, Method::POST])
-                            .allow_origin(Any)
-                            .allow_headers(Any));
-                    } 
-                    "" => {}
-                    _ => {
-                        let domains_vec = domains.split(",").collect::<Vec<&str>>();
-
-                        let origins = domains_vec
-                            .into_iter()
-                            .map(|domain| domain.parse().unwrap())
-                            .collect::<Vec<HeaderValue>>();
-
-                        cors = Some(CorsLayer::new()
-                            .allow_methods([Method::GET, Method::POST])
-                            .allow_origin(origins)
-                            .allow_headers(Any));
-                    }
-                }   
-            }
-
+            let cors = Self::create_cors_layer(self.http_cors_domains).unwrap();
             match cors {
                 Some(cors) => {
                     let middleware = tower::ServiceBuilder::new().layer(cors);
@@ -679,6 +654,33 @@ impl RpcServerConfig {
         }
 
         Ok(server)
+    }
+
+    fn create_cors_layer(http_cors_domains : Option<String>) -> Result<Option<CorsLayer>,RpcError> {
+        let mut cors= None;
+        if let Some(domains) = http_cors_domains {
+            match domains.as_str() {
+                "*" => {
+                    cors = Some(CorsLayer::new()
+                        .allow_methods([Method::GET, Method::POST])
+                        .allow_origin(Any)
+                        .allow_headers(Any));
+                } 
+                "" => {}
+                _ => {
+                    let origins = domains.split(",")
+                    .map(|domain| domain.parse::<HeaderValue>())
+                    .collect::<Result<Vec<HeaderValue>, _>>();
+                    if let Ok(origins) = origins {
+                        cors = Some(CorsLayer::new()
+                        .allow_methods([Method::GET, Method::POST])
+                        .allow_origin(origins)
+                        .allow_headers(Any));
+                    }
+                }
+            }   
+        }
+        Ok(cors)
     }
 }
 
