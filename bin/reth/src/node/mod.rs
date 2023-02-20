@@ -36,7 +36,7 @@ use reth_network::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
-use reth_rpc_builder::{RethRpcModule, RpcServerConfig, TransportRpcModuleConfig};
+
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -148,16 +148,14 @@ impl Command {
         // Look at `reth_rpc::AuthLayer` for integration hints
         let _secret = self.rpc.jwt_secret();
 
-        // TODO(mattsse): cleanup, add cli args
-        let _rpc_server = reth_rpc_builder::launch(
-            ShareableDatabase::new(db.clone(), self.chain.clone()),
-            reth_transaction_pool::test_utils::testing_pool(),
-            network.clone(),
-            TransportRpcModuleConfig::default()
-                .with_http(vec![RethRpcModule::Admin, RethRpcModule::Eth]),
-            RpcServerConfig::default().with_http(Default::default()),
-        )
-        .await?;
+        let _rpc_server = self
+            .rpc
+            .start_server(
+                ShareableDatabase::new(db.clone(), self.chain.clone()),
+                reth_transaction_pool::test_utils::testing_pool(),
+                network.clone(),
+            )
+            .await?;
         info!(target: "reth::cli", "Started RPC server");
 
         let (mut pipeline, events) = self
