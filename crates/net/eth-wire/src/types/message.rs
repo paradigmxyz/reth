@@ -4,7 +4,7 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{EthVersion, SharedTransactions};
+use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
 use reth_primitives::bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
@@ -22,10 +22,7 @@ pub struct ProtocolMessage {
 
 impl ProtocolMessage {
     /// Create a new ProtocolMessage from a message type and message rlp bytes.
-    pub fn decode_message(
-        version: EthVersion,
-        buf: &mut &[u8],
-    ) -> Result<Self, reth_rlp::DecodeError> {
+    pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, EthStreamError> {
         let message_type = EthMessageID::decode(buf)?;
 
         let message = match message_type {
@@ -72,14 +69,20 @@ impl ProtocolMessage {
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(reth_rlp::DecodeError::Custom("invalid message id"))
+                    return Err(EthStreamError::EthInvalidMessageError(
+                        version,
+                        EthMessageID::GetNodeData,
+                    ))
                 }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
                 if version >= EthVersion::Eth67 {
-                    return Err(reth_rlp::DecodeError::Custom("invalid message id"))
+                    return Err(EthStreamError::EthInvalidMessageError(
+                        version,
+                        EthMessageID::GetNodeData,
+                    ))
                 }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)

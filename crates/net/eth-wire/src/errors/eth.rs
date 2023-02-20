@@ -1,5 +1,7 @@
 //! Error handling for (`EthStream`)[crate::EthStream]
-use crate::{errors::P2PStreamError, version::ParseVersionError, DisconnectReason};
+use crate::{
+    errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
+};
 use reth_primitives::{Chain, ValidationError, H256};
 use std::io;
 
@@ -13,6 +15,8 @@ pub enum EthStreamError {
     ParseVersionError(#[from] ParseVersionError),
     #[error(transparent)]
     EthHandshakeError(#[from] EthHandshakeError),
+    #[error("For {0:?} version, message id({1:?}) is invalid")]
+    EthInvalidMessageError(EthVersion, EthMessageID),
     #[error("message size ({0}) exceeds max length (10MB)")]
     MessageTooBig(usize),
     #[error("TransactionHashes invalid len of fields: hashes_len={hashes_len} types_len={types_len} sizes_len={sizes_len}")]

@@ -81,8 +81,8 @@ where
         let msg = match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::debug!("rlp decode error in eth handshake: msg={their_msg:x}");
-                return Err(err.into())
+                tracing::debug!("error in eth handshake: msg={their_msg:x}");
+                return Err(err)
             }
         };
 
@@ -214,8 +214,8 @@ where
         let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::debug!("rlp decode error: msg={bytes:x}");
-                return Poll::Ready(Some(Err(err.into())))
+                tracing::debug!("decode error: msg={bytes:x}");
+                return Poll::Ready(Some(Err(err)))
             }
         };
 
