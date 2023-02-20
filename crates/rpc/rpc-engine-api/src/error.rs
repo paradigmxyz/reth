@@ -4,6 +4,11 @@ use thiserror::Error;
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
+/// Payload unknown error code.
+pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
+/// Request too large error code.
+pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
+
 /// Error returned by [`EngineApi`][crate::EngineApi]
 #[derive(Error, PartialEq, Debug)]
 pub enum EngineApiError {

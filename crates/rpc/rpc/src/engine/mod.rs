@@ -1,11 +1,15 @@
 use crate::result::rpc_err;
 use async_trait::async_trait;
-use jsonrpsee::core::{Error, RpcResult as Result};
+use jsonrpsee::{
+    core::{Error, RpcResult as Result},
+    types::error::INVALID_PARAMS_CODE,
+};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{BlockHash, BlockNumber, H64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{
     EngineApiError, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
+    REQUEST_TOO_LARGE_CODE, UNKNOWN_PAYLOAD_CODE,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
@@ -37,9 +41,9 @@ impl EngineApi {
         let _ = self.engine_tx.send(msg);
         rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(|err| {
             let code = match err {
-                EngineApiError::InvalidParams => -32602,
-                EngineApiError::PayloadUnknown => -38001,
-                EngineApiError::PayloadRequestTooLarge { .. } => -38004,
+                EngineApiError::InvalidParams => INVALID_PARAMS_CODE,
+                EngineApiError::PayloadUnknown => UNKNOWN_PAYLOAD_CODE,
+                EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
                 // Any other server error
                 _ => jsonrpsee::types::error::INTERNAL_ERROR_CODE,
             };

@@ -18,5 +18,5 @@ mod message;
 mod error;
 
 pub use engine_api::{EngineApi, EngineApiSender};
-pub use error::{EngineApiError, EngineApiResult};
+pub use error::*;
 pub use message::{EngineApiMessage, EngineApiMessageVersion};
