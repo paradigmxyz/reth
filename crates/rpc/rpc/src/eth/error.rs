@@ -33,9 +33,11 @@ pub(crate) enum EthApiError {
 impl From<EthApiError> for RpcError {
     fn from(value: EthApiError) -> Self {
         match value {
-            EthApiError::UnknownBlockNumber | EthApiError::InvalidBlockRange => {
-                rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
-            }
+            EthApiError::FailedToDecodeSignedTransaction |
+            EthApiError::InvalidTransactionSignature |
+            EthApiError::EmptyRawTransactionData |
+            EthApiError::UnknownBlockNumber |
+            EthApiError::InvalidBlockRange => rpc_err(INVALID_PARAMS_CODE, value.to_string(), None),
             err => internal_rpc_err(err.to_string()),
         }
     }
