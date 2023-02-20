@@ -6,7 +6,7 @@ use crate::{
     dirs::{LogsDir, PlatformPath},
     dump_stage, node, p2p,
     runner::CliRunner,
-    stage, test_eth_chain, test_vectors,
+    stage, t8n, test_eth_chain, test_vectors,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
 use reth_tracing::{
@@ -32,6 +32,7 @@ pub fn run() -> eyre::Result<()> {
         Commands::Stage(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::DumpStage(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::T8n(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
     }
@@ -66,7 +67,12 @@ pub enum Commands {
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),
-    /// Run Ethereum blockchain tests
+    /// Runs an EVM state transition using the provided JSON pre-state files.
+    ///
+    /// Equivalent of Geth's `./evm t8n` utility, and should be used to confirm
+    /// equivalence of behavior between Geth and Reth executors.
+    #[command(name = "t8n")]
+    T8n(t8n::Command),
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
     /// Generate Test Vectors

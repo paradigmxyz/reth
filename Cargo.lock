@@ -4242,6 +4242,7 @@ dependencies = [
  "confy",
  "crossterm",
  "dirs-next",
+ "ethers-core",
  "eyre",
  "fdlimit",
  "futures",
