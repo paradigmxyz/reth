@@ -4,7 +4,7 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{rpc::BlockId, H256};
+use reth_primitives::{BlockId, H256};
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::{Block, RichBlock};
 
