@@ -73,6 +73,7 @@ pub enum Commands {
     /// equivalence of behavior between Geth and Reth executors.
     #[command(name = "t8n")]
     T8n(t8n::Command),
+    /// Run Ethereum blockchain tests
     #[command(name = "test-chain")]
     TestEthChain(test_eth_chain::Command),
     /// Generate Test Vectors
