@@ -123,7 +123,7 @@ where
         }
     }
 
-    /// Returns the state at the given [BlockNumber] enum
+    /// Returns the state at the given [BlockNumberOrTag] enum
     ///
     /// Returns `None` if no state available.
     pub(crate) fn state_at_block_number(
