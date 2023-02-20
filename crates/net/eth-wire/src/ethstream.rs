@@ -81,7 +81,7 @@ where
         let msg = match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::debug!("error in eth handshake: msg={their_msg:x}");
+                tracing::debug!("decode error in eth handshake: msg={their_msg:x}");
                 return Err(err)
             }
         };
