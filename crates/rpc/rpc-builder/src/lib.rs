@@ -572,6 +572,21 @@ impl RpcServerConfig {
         self
     }
 
+    /// Returns the [SocketAddr] of the http server
+    pub fn http_address(&self) -> Option<SocketAddr> {
+        self.http_addr
+    }
+
+    /// Returns the [SocketAddr] of the ws server
+    pub fn ws_address(&self) -> Option<SocketAddr> {
+        self.ws_addr
+    }
+
+    /// Returns the [Endpoint] of the ipc server
+    pub fn ipc_endpoint(&self) -> Option<&Endpoint> {
+        self.ipc_endpoint.as_ref()
+    }
+
     /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
     pub async fn start(
         self,
@@ -647,17 +662,17 @@ pub struct TransportRpcModuleConfig {
 
 impl TransportRpcModuleConfig {
     /// Creates a new config with only http set
-    pub fn http(http: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_http(http: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_http(http)
     }
 
     /// Creates a new config with only ws set
-    pub fn ws(ws: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_ws(ws: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ws(ws)
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(ipc: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_ipc(ipc: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ipc(ipc)
     }
 
@@ -682,6 +697,21 @@ impl TransportRpcModuleConfig {
     /// Returns true if no transports are configured
     pub fn is_empty(&self) -> bool {
         self.http.is_none() && self.ws.is_none() && self.ipc.is_none()
+    }
+
+    /// Returns the [RpcModuleSelection] for the http transport
+    pub fn http(&self) -> Option<&RpcModuleSelection> {
+        self.http.as_ref()
+    }
+
+    /// Returns the [RpcModuleSelection] for the ws transport
+    pub fn ws(&self) -> Option<&RpcModuleSelection> {
+        self.ws.as_ref()
+    }
+
+    /// Returns the [RpcModuleSelection] for the ipc transport
+    pub fn ipc(&self) -> Option<&RpcModuleSelection> {
+        self.ipc.as_ref()
     }
 }
 
