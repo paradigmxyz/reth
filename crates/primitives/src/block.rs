@@ -1,4 +1,5 @@
 use crate::{Header, SealedHeader, TransactionSigned, Withdrawal, H256};
+use ethers_core::types::BlockNumber;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -361,9 +362,22 @@ impl BlockNumberOrTag {
     }
 }
 
-impl<T: Into<u64>> From<T> for BlockNumberOrTag {
-    fn from(num: T) -> Self {
-        BlockNumberOrTag::Number(num.into())
+impl From<u64> for BlockNumberOrTag {
+    fn from(num: u64) -> Self {
+        BlockNumberOrTag::Number(num)
+    }
+}
+
+impl From<ethers_core::types::BlockNumber> for BlockNumberOrTag {
+    fn from(value: BlockNumber) -> Self {
+        match value {
+            BlockNumber::Latest => BlockNumberOrTag::Latest,
+            BlockNumber::Finalized => BlockNumberOrTag::Finalized,
+            BlockNumber::Safe => BlockNumberOrTag::Safe,
+            BlockNumber::Earliest => BlockNumberOrTag::Earliest,
+            BlockNumber::Pending => BlockNumberOrTag::Pending,
+            BlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
+        }
     }
 }
 
@@ -439,11 +453,31 @@ pub struct BlockHash {
     /// Whether the block must be a canonical block
     pub require_canonical: Option<bool>,
 }
+
 impl BlockHash {
     pub fn from_hash(block_hash: H256, require_canonical: Option<bool>) -> Self {
         BlockHash { block_hash, require_canonical }
     }
 }
+
+impl From<H256> for BlockHash {
+    fn from(value: H256) -> Self {
+        Self::from_hash(value, None)
+    }
+}
+
+impl From<BlockHash> for H256 {
+    fn from(value: BlockHash) -> Self {
+        value.block_hash
+    }
+}
+
+impl AsRef<H256> for BlockHash {
+    fn as_ref(&self) -> &H256 {
+        &self.block_hash
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{BlockId, BlockNumberOrTag::*, *};

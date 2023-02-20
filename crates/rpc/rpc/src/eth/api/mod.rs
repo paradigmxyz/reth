@@ -8,8 +8,7 @@ use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    rpc::{BlockId, BlockNumber},
-    Address, ChainInfo, TransactionSigned, H256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, TransactionSigned, H256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
@@ -97,7 +96,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
 {
-    fn convert_block_number(&self, num: BlockNumber) -> Result<Option<u64>> {
+    fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
     }
 
@@ -119,17 +118,17 @@ where
         block_id: BlockId,
     ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
         match block_id {
-            BlockId::Hash(hash) => self.state_at_hash(H256(hash.0)).map(Some),
+            BlockId::Hash(hash) => self.state_at_hash(hash.into()).map(Some),
             BlockId::Number(num) => self.state_at_block_number(num),
         }
     }
 
-    /// Returns the state at the given [BlockNumber] enum
+    /// Returns the state at the given [BlockNumberOrTag] enum
     ///
     /// Returns `None` if no state available.
     pub(crate) fn state_at_block_number(
         &self,
-        num: BlockNumber,
+        num: BlockNumberOrTag,
     ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
         if let Some(number) = self.convert_block_number(num)? {
             self.state_at_number(number).map(Some)
@@ -158,7 +157,7 @@ where
     pub(crate) fn latest_state(
         &self,
     ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
-        self.state_at_block_number(BlockNumber::Latest)
+        self.state_at_block_number(BlockNumberOrTag::Latest)
     }
 }
 

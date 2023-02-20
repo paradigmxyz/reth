@@ -1,9 +1,6 @@
 use crate::{BlockIdProvider, HeaderProvider, TransactionsProvider};
 use reth_interfaces::Result;
-use reth_primitives::{
-    rpc::{BlockId, BlockNumber},
-    Block, H256,
-};
+use reth_primitives::{Block, BlockId, BlockNumberOrTag, H256};
 
 /// Api trait for fetching `Block` related data.
 #[auto_impl::auto_impl(&, Arc)]
@@ -15,17 +12,16 @@ pub trait BlockProvider:
 
     /// Returns the block. Returns `None` if block is not found.
     fn block_by_hash(&self, hash: H256) -> Result<Option<Block>> {
-        // TODO: replace with ruint
-        self.block(BlockId::Hash(reth_primitives::rpc::H256::from(hash.0)))
+        self.block(hash.into())
     }
 
     /// Returns the block. Returns `None` if block is not found.
-    fn block_by_number_or_tag(&self, num: BlockNumber) -> Result<Option<Block>> {
-        self.block(BlockId::Number(num))
+    fn block_by_number_or_tag(&self, num: BlockNumberOrTag) -> Result<Option<Block>> {
+        self.block(num.into())
     }
 
     /// Returns the block. Returns `None` if block is not found.
     fn block_by_number(&self, num: u64) -> Result<Option<Block>> {
-        self.block(BlockId::Number(BlockNumber::Number(num.into())))
+        self.block(num.into())
     }
 }

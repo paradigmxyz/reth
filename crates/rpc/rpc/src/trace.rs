@@ -1,7 +1,7 @@
 use crate::result::internal_rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{rpc::BlockId, Bytes, H256};
+use reth_primitives::{BlockId, Bytes, H256};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},

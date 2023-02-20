@@ -1,14 +1,15 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
 //! Handles RPC requests for the `eth_` namespace.
 
+use super::EthApiSpec;
 use crate::{
     eth::{api::EthApi, error::EthApiError},
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
-    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId, BlockNumber},
-    Address, Bytes, Header, H256, H64, U256, U64,
+    rpc::transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
+    Header, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -19,8 +20,6 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
 use std::collections::BTreeMap;
-
-use super::EthApiSpec;
 
 #[async_trait::async_trait]
 impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
@@ -62,7 +61,7 @@ where
 
     async fn block_by_number(
         &self,
-        _number: BlockNumber,
+        _number: BlockNumberOrTag,
         _full: bool,
     ) -> Result<Option<RichBlock>> {
         Err(internal_rpc_err("unimplemented"))
@@ -74,7 +73,7 @@ where
 
     async fn block_transaction_count_by_number(
         &self,
-        _number: BlockNumber,
+        _number: BlockNumberOrTag,
     ) -> Result<Option<U256>> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -83,7 +82,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn block_uncles_count_by_number(&self, _number: BlockNumber) -> Result<U256> {
+    async fn block_uncles_count_by_number(&self, _number: BlockNumberOrTag) -> Result<U256> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -97,7 +96,7 @@ where
 
     async fn uncle_by_block_number_and_index(
         &self,
-        _number: BlockNumber,
+        _number: BlockNumberOrTag,
         _index: Index,
     ) -> Result<Option<RichBlock>> {
         Err(internal_rpc_err("unimplemented"))
@@ -120,7 +119,7 @@ where
 
     async fn transaction_by_block_number_and_index(
         &self,
-        _number: BlockNumber,
+        _number: BlockNumberOrTag,
         _index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
         Err(internal_rpc_err("unimplemented"))
@@ -212,8 +211,7 @@ where
         // Sorted map that's populated in two rounds:
         // 1. Cache entries until first non-cached block
         // 2. Database query from the first non-cached block
-        let mut fee_history_cache_items =
-            BTreeMap::<reth_primitives::BlockNumber, FeeHistoryCacheItem>::new();
+        let mut fee_history_cache_items = BTreeMap::new();
 
         let mut first_non_cached_block = None;
         let mut last_non_cached_block = None;
@@ -347,7 +345,7 @@ mod tests {
     };
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
-    use reth_primitives::{rpc::BlockNumber, Block, Header, H256, U256};
+    use reth_primitives::{Block, BlockNumberOrTag, Header, H256, U256};
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
@@ -358,7 +356,7 @@ mod tests {
     async fn test_fee_history() {
         let eth_api = EthApi::new(NoopProvider::default(), testing_pool(), NoopNetwork::default());
 
-        let response = eth_api.fee_history(1.into(), BlockNumber::Latest.into(), None).await;
+        let response = eth_api.fee_history(1.into(), BlockNumberOrTag::Latest.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
