@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+
 use crate::{
     bloom::{Bloom, Input},
     keccak256,
@@ -6,13 +7,12 @@ use crate::{
     Address, Log, H160, H256, U64,
 };
 use ethers_core::types::U256;
-use std::ops::{Range, RangeFrom, RangeTo};
-
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::ops::{Range, RangeFrom, RangeTo};
 
 pub type BloomFilter = Vec<Option<Bloom>>;
 
@@ -125,13 +125,9 @@ pub struct Filter {
     /// match.
     // https://eips.ethereum.org/EIPS/eip-234
     pub block_option: FilterBlockOption,
-
     /// Address
     pub address: Option<ValueOrArray<Address>>,
-
-    /// Topics
-    // TODO: We could improve the low level API here by using ethabi's RawTopicFilter
-    // and/or TopicFilter
+    /// Topics (maxmimum of 4)
     pub topics: [Option<Topic>; 4],
 }
 
@@ -918,7 +914,7 @@ mod tests {
         });
 
         let event = "ValueChanged(address,string,string)";
-        let t0 = H256::from(keccak256(event.as_bytes()));
+        let t0 = keccak256(event.as_bytes());
         let addr: Address = "f817796F60D268A36a57b8D2dF1B97B14C0D0E1d".parse().unwrap();
         let filter = Filter::new();
 
