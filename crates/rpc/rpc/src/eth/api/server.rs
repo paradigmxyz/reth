@@ -56,8 +56,8 @@ where
         Ok(Some(EthApiSpec::chain_id(self)))
     }
 
-    async fn block_by_hash(&self, _hash: H256, _full: bool) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
+        Ok(EthApi::block_by_hash(self, hash, full).await?)
     }
 
     async fn block_by_number(
