@@ -719,8 +719,8 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        EthVersion, GetBlockBodies, HelloMessage, NewPooledTransactionHashes66, ProtocolVersion,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        EthVersion, GetBlockBodies, HelloMessage, ProtocolVersion, Status, StatusBuilder,
+        UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
