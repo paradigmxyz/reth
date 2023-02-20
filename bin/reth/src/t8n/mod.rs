@@ -6,10 +6,11 @@
 mod provider;
 use provider::*;
 
-use reth_executor::executor::Executor;
-use reth_primitives::Hardfork;
-
-use ethers_core::types::{Address, Bytes, Transaction, U256, U64};
+use reth_executor::{
+    executor::{test_utils::InMemoryStateProvider, Executor},
+    revm_wrap::{State, SubState},
+};
+use reth_primitives::{Account, ChainSpec, ChainSpecBuilder, Hardfork};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -35,18 +36,32 @@ impl Command {
     /// Execute `stage` command
     pub async fn execute(&self) -> eyre::Result<()> {
         let prestate = File::open(&self.alloc)?;
-        let _prestate: BTreeMap<Address, PrestateAccount> = serde_json::from_reader(prestate)?;
+        let prestate: BTreeMap<reth_primitives::Address, PrestateAccount> =
+            serde_json::from_reader(prestate)?;
 
         let env = File::open(&self.env)?;
         let _env: PrestateEnv = serde_json::from_reader(env)?;
 
         let txs = File::open(&self.txs)?;
-        let _txs: BTreeMap<Address, PrestateAccount> = serde_json::from_reader(txs)?;
+        // todo: ethers-core transaction?
+        let _txs: Vec<reth_primitives::Transaction> = serde_json::from_reader(txs)?;
 
-        // 1. Instantiate the DB with the pre-state
-        // 2. Instantiate the executor
-        // 3. Run it
-        // 4. Diff against the actual one
+        let mut db = InMemoryStateProvider::default();
+        for (address, account) in prestate {
+            let reth_account = reth_primitives::Account {
+                nonce: account.nonce.as_u64(),
+                balance: account.balance,
+                bytecode_hash: None, // this gets set inside the `insert_account` method
+            };
+            db.insert_account(address, reth_account, account.code, account.storage);
+        }
+
+        let spec = ChainSpecBuilder::mainnet().build();
+        let db = State::new(db);
+        let mut db = SubState::new(db);
+        let _executor = Executor::new(&spec, &mut db);
+
+        // TODO: Construct the header etc.
 
         Ok(())
     }
