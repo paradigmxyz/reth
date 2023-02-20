@@ -36,3 +36,5 @@ pub mod test_utils;
 
 /// Re-export provider error.
 pub use reth_interfaces::provider::Error;
+
+pub use transaction::execution_result;

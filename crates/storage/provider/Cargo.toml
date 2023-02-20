@@ -14,6 +14,8 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-db = { path = "../db" }
+reth-tracing = {path = "../../tracing"}
+revm-primitives = "1.0.0"
 
 # codecs
 postcard = { version = "1.0.2", features = ["alloc"] }
@@ -30,6 +32,7 @@ tokio-stream = "0.1.11"
 rand = "0.8.5"
 modular-bitfield = "0.11.2"
 heapless = "0.7.16"
+itertools = "0.10"
 
 # feature test-utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
