@@ -1,6 +1,7 @@
 //! Error variants for the `eth_` namespace.
 
 use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
+use reth_rpc_types::BlockError;
 use reth_transaction_pool::error::PoolError;
 
 use crate::result::{internal_rpc_err, rpc_err};
@@ -25,6 +26,9 @@ pub(crate) enum EthApiError {
     UnknownBlockNumber,
     #[error("Invalid block range")]
     InvalidBlockRange,
+    /// Thrown when constructing an RPC block from a primitive block data failed.
+    #[error(transparent)]
+    InvalidBlockData(#[from] BlockError),
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
@@ -33,9 +37,11 @@ pub(crate) enum EthApiError {
 impl From<EthApiError> for RpcError {
     fn from(value: EthApiError) -> Self {
         match value {
-            EthApiError::UnknownBlockNumber | EthApiError::InvalidBlockRange => {
-                rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
-            }
+            EthApiError::FailedToDecodeSignedTransaction |
+            EthApiError::InvalidTransactionSignature |
+            EthApiError::EmptyRawTransactionData |
+            EthApiError::UnknownBlockNumber |
+            EthApiError::InvalidBlockRange => rpc_err(INVALID_PARAMS_CODE, value.to_string(), None),
             err => internal_rpc_err(err.to_string()),
         }
     }
