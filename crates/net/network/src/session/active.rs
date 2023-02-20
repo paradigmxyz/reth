@@ -184,11 +184,11 @@ impl ActiveSession {
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
                     return OnIncomingMessageOutcome::BadMessage {
-                        error: EthStreamError::TransactionHashesInvalidLenOfFields(
-                            msg.hashes.len(),
-                            msg.types.len(),
-                            msg.sizes.len(),
-                        ),
+                        error: EthStreamError::TransactionHashesInvalidLenOfFields {
+                            hashes_len: msg.hashes.len(),
+                            types_len: msg.types.len(),
+                            sizes_len: msg.sizes.len(),
+                        },
                         message: EthMessage::NewPooledTransactionHashes68(msg),
                     }
                 }
