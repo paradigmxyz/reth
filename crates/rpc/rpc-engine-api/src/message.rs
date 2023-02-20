@@ -32,7 +32,7 @@ pub enum EngineApiMessage {
 }
 
 /// The version of Engine API message.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineApiMessageVersion {
     /// Version 1
     V1,

@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use reth_primitives::{
-    bytes::BytesMut, Address, Block, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64,
+    Address, Block, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64,
 };
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
@@ -40,9 +40,9 @@ impl From<SealedBlock> for ExecutionPayload {
             .body
             .iter()
             .map(|tx| {
-                let mut encoded = BytesMut::new();
+                let mut encoded = Vec::default();
                 tx.encode(&mut encoded);
-                encoded.freeze().into()
+                encoded.into()
             })
             .collect();
         ExecutionPayload {
@@ -77,9 +77,9 @@ pub struct ExecutionPayloadBody {
 impl From<Block> for ExecutionPayloadBody {
     fn from(value: Block) -> Self {
         let transactions = value.body.into_iter().map(|tx| {
-            let mut out = BytesMut::new();
+            let mut out = Vec::default();
             tx.encode(&mut out);
-            out.freeze().into()
+            out.into()
         });
         ExecutionPayloadBody {
             transactions: transactions.collect(),
