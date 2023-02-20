@@ -196,9 +196,9 @@ mod tests {
         .args;
         let config = args.transport_rpc_module_config();
         let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().unwrap().into_selection(), expected);
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
         assert_eq!(
-            config.ws().unwrap().into_selection(),
+            config.ws().unwrap().cloned().into_selection(),
             vec![RethRpcModule::Admin, RethRpcModule::Eth]
         );
     }
