@@ -30,7 +30,7 @@ pub trait EthApi {
     async fn accounts(&self) -> Result<Vec<Address>>;
 
     /// Returns the number of most recent block.
-    #[method(name = "eth_BlockNumberOrTag")]
+    #[method(name = "eth_blockNumber")]
     fn block_number(&self) -> Result<U256>;
 
     /// Returns the chain ID of the current network.
@@ -65,7 +65,7 @@ pub trait EthApi {
     async fn block_uncles_count_by_hash(&self, hash: H256) -> Result<U256>;
 
     /// Returns the number of uncles in a block with given block number.
-    #[method(name = "eth_getUncleCountByBlockNumberOrTag")]
+    #[method(name = "eth_getUncleCountByBlockNumber")]
     async fn block_uncles_count_by_number(&self, number: BlockNumberOrTag) -> Result<U256>;
 
     /// Returns an uncle block of the given block and index.
@@ -77,7 +77,7 @@ pub trait EthApi {
     ) -> Result<Option<RichBlock>>;
 
     /// Returns an uncle block of the given block and index.
-    #[method(name = "eth_getUncleByBlockNumberOrTagAndIndex")]
+    #[method(name = "eth_getUncleByBlockNumberAndIndex")]
     async fn uncle_by_block_number_and_index(
         &self,
         number: BlockNumberOrTag,
@@ -97,7 +97,7 @@ pub trait EthApi {
     ) -> Result<Option<Transaction>>;
 
     /// Returns information about a transaction by block number and transaction index position.
-    #[method(name = "eth_getTransactionByBlockNumberOrTagAndIndex")]
+    #[method(name = "eth_getTransactionByBlockNumberAndIndex")]
     async fn transaction_by_block_number_and_index(
         &self,
         number: BlockNumberOrTag,
