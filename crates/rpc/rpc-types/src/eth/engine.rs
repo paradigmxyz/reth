@@ -8,6 +8,19 @@ use reth_primitives::{
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
+/// The list of supported Engine capabilities
+pub const CAPABILITIES: [&str; 9] = [
+    "engine_forkchoiceUpdatedV1",
+    "engine_forkchoiceUpdatedV2",
+    "engine_exchangeTransitionConfigurationV1",
+    "engine_getPayloadV1",
+    "engine_getPayloadV2",
+    "engine_newPayloadV1",
+    "engine_newPayloadV2",
+    "engine_getPayloadBodiesByHashV1",
+    "engine_getPayloadBodiesByRangeV1",
+];
+
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#executionpayloadv1>

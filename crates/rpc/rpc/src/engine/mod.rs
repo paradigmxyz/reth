@@ -7,7 +7,7 @@ use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{EngineApiError, EngineApiMessage, EngineApiResult};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBody, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    TransitionConfiguration,
+    TransitionConfiguration, CAPABILITIES,
 };
 use tokio::sync::{
     mpsc::UnboundedSender,
@@ -126,5 +126,10 @@ impl EngineApiServer for EngineApi {
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::ExchangeTransitionConfiguration(config, tx), rx)
             .await
+    }
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
+    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> Result<Vec<String>> {
+        Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())
     }
 }
