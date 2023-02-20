@@ -10,10 +10,10 @@ use reth_executor::{
     executor::{test_utils::InMemoryStateProvider, Executor},
     revm_wrap::{State, SubState},
 };
-use reth_primitives::{Account, ChainSpec, ChainSpecBuilder, Hardfork};
+use reth_interfaces::executor::BlockExecutor;
+use reth_primitives::{Block, ChainSpecBuilder, Hardfork, Header, U256};
 
 use clap::Parser;
-use serde::{Deserialize, Serialize};
 
 use std::{collections::BTreeMap, fs::File, path::PathBuf};
 
@@ -40,7 +40,7 @@ impl Command {
             serde_json::from_reader(prestate)?;
 
         let env = File::open(&self.env)?;
-        let _env: PrestateEnv = serde_json::from_reader(env)?;
+        let env: PrestateEnv = serde_json::from_reader(env)?;
 
         let txs = File::open(&self.txs)?;
         // todo: ethers-core transaction?
@@ -59,7 +59,20 @@ impl Command {
         let spec = ChainSpecBuilder::mainnet().build();
         let db = State::new(db);
         let mut db = SubState::new(db);
-        let _executor = Executor::new(&spec, &mut db);
+        let block = Block {
+            header: Header {
+                beneficiary: env.current_coinbase,
+                // TODO: Make RANDAO-aware for post-Shanghai blocks
+                difficulty: env.current_difficulty,
+                number: env.current_number.as_u64(),
+                timestamp: env.current_timestamp.to::<u64>(),
+                gas_limit: env.current_gas_limit.to::<u64>(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut executor = Executor::new(&spec, &mut db);
+        let result = executor.execute(&block, U256::ZERO, None);
 
         // TODO: Construct the header etc.
 

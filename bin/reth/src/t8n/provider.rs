@@ -18,11 +18,11 @@ pub struct PrestateAccount {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrestateEnv {
-    current_coinbase: Address,
-    current_difficulty: U256,
-    current_number: U64,
-    current_timestamp: U256,
-    current_gas_limit: U256,
+    pub current_coinbase: Address,
+    pub current_difficulty: U256,
+    pub current_number: U64,
+    pub current_timestamp: U256,
+    pub current_gas_limit: U256,
 }
 
 use serde::Serializer;
