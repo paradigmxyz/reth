@@ -40,7 +40,7 @@ impl From<SealedBlock> for ExecutionPayload {
             .body
             .iter()
             .map(|tx| {
-                let mut encoded = Vec::default();
+                let mut encoded = Vec::new();
                 tx.encode(&mut encoded);
                 encoded.into()
             })
@@ -77,7 +77,7 @@ pub struct ExecutionPayloadBody {
 impl From<Block> for ExecutionPayloadBody {
     fn from(value: Block) -> Self {
         let transactions = value.body.into_iter().map(|tx| {
-            let mut out = Vec::default();
+            let mut out = Vec::new();
             tx.encode(&mut out);
             out.into()
         });
