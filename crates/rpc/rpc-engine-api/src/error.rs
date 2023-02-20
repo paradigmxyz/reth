@@ -5,7 +5,7 @@ use thiserror::Error;
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
-#[derive(Error, Debug)]
+#[derive(Error, PartialEq, Debug)]
 pub enum EngineApiError {
     /// Invalid payload extra data.
     #[error("Invalid payload extra data: {0}")]
