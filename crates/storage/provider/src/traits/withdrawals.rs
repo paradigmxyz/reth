@@ -1,5 +1,5 @@
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, Withdrawal};
+use reth_primitives::{BlockId, Withdrawal};
 
 ///  Client trait for fetching [Withdrawal] related data.
 pub trait WithdrawalsProvider: Send + Sync {

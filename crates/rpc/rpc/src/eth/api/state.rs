@@ -4,7 +4,7 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{rpc::BlockId, Address, Bytes, H256, U256};
+use reth_primitives::{Address, BlockId, Bytes, H256, U256};
 use reth_provider::{BlockProvider, StateProvider, StateProviderFactory};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>

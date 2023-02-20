@@ -1,6 +1,6 @@
 use crate::BlockIdProvider;
 use reth_interfaces::Result;
-use reth_primitives::{rpc::BlockId, BlockNumber, TransactionSigned, TxHash, TxNumber};
+use reth_primitives::{BlockId, BlockNumber, TransactionSigned, TxHash, TxNumber};
 use std::ops::RangeBounds;
 
 ///  Client trait for fetching [TransactionSigned] related data.

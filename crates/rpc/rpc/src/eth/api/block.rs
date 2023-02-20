@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to blocks.
 
 use crate::{eth::error::EthResult, EthApi};
-use reth_primitives::{rpc::BlockId, H256};
+use reth_primitives::{BlockId, H256};
 use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::RichBlock;
 
@@ -14,7 +14,7 @@ where
         hash: H256,
         _full: bool,
     ) -> EthResult<Option<RichBlock>> {
-        let block = self.client().block(BlockId::Hash(hash.0.into()))?;
+        let block = self.client().block(hash.into())?;
         if let Some(_block) = block {
             // TODO: GET TD FOR BLOCK - needs block provider? or header provider?
             // let total_difficulty = todo!();

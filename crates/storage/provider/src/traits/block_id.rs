@@ -1,9 +1,6 @@
 use super::BlockHashProvider;
 use reth_interfaces::Result;
-use reth_primitives::{
-    rpc::{BlockId, BlockNumber},
-    ChainInfo, H256, U256,
-};
+use reth_primitives::{BlockId, BlockNumberOrTag, ChainInfo, H256, U256};
 
 /// Client trait for transforming [BlockId].
 #[auto_impl::auto_impl(&, Arc)]
@@ -11,18 +8,18 @@ pub trait BlockIdProvider: BlockHashProvider + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> Result<ChainInfo>;
 
-    /// Converts the `BlockNumber` variants.
+    /// Converts the `BlockNumberOrTag` variants.
     fn convert_block_number(
         &self,
-        num: BlockNumber,
+        num: BlockNumberOrTag,
     ) -> Result<Option<reth_primitives::BlockNumber>> {
         let num = match num {
-            BlockNumber::Latest => self.chain_info()?.best_number,
-            BlockNumber::Earliest => 0,
-            BlockNumber::Pending => return Ok(None),
-            BlockNumber::Number(num) => num.as_u64(),
-            BlockNumber::Finalized => return Ok(self.chain_info()?.last_finalized),
-            BlockNumber::Safe => return Ok(self.chain_info()?.safe_finalized),
+            BlockNumberOrTag::Latest => self.chain_info()?.best_number,
+            BlockNumberOrTag::Earliest => 0,
+            BlockNumberOrTag::Pending => return Ok(None),
+            BlockNumberOrTag::Number(num) => num,
+            BlockNumberOrTag::Finalized => return Ok(self.chain_info()?.last_finalized),
+            BlockNumberOrTag::Safe => return Ok(self.chain_info()?.safe_finalized),
         };
         Ok(Some(num))
     }
@@ -30,9 +27,9 @@ pub trait BlockIdProvider: BlockHashProvider + Send + Sync {
     /// Get the hash of the block by matching the given id.
     fn block_hash_for_id(&self, block_id: BlockId) -> Result<Option<H256>> {
         match block_id {
-            BlockId::Hash(hash) => Ok(Some(H256(hash.0))),
+            BlockId::Hash(hash) => Ok(Some(hash.into())),
             BlockId::Number(num) => {
-                if matches!(num, BlockNumber::Latest) {
+                if matches!(num, BlockNumberOrTag::Latest) {
                     return Ok(Some(self.chain_info()?.best_hash))
                 }
                 self.convert_block_number(num)?
@@ -49,7 +46,7 @@ pub trait BlockIdProvider: BlockHashProvider + Send + Sync {
         block_id: BlockId,
     ) -> Result<Option<reth_primitives::BlockNumber>> {
         match block_id {
-            BlockId::Hash(hash) => self.block_number(H256(hash.0)),
+            BlockId::Hash(hash) => self.block_number(hash.into()),
             BlockId::Number(num) => self.convert_block_number(num),
         }
     }

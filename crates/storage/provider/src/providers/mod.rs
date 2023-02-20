@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    rpc::BlockId, Block, BlockHash, BlockNumber, ChainInfo, ChainSpec, Hardfork, Header,
+    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Header,
     TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use std::{ops::RangeBounds, sync::Arc};
