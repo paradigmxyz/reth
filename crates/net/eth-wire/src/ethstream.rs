@@ -2,6 +2,7 @@ use crate::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     types::{EthMessage, ProtocolMessage, Status},
+    EthVersion,
 };
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
@@ -9,7 +10,7 @@ use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkFilter,
 };
-use reth_rlp::{Decodable, Encodable};
+use reth_rlp::Encodable;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -76,11 +77,12 @@ where
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
         }
 
-        let msg = match ProtocolMessage::decode(&mut their_msg.as_ref()) {
+        let version = EthVersion::try_from(status.version)?;
+        let msg = match ProtocolMessage::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::debug!("rlp decode error in eth handshake: msg={their_msg:x}");
-                return Err(err.into())
+                tracing::debug!("decode error in eth handshake: msg={their_msg:x}");
+                return Err(err)
             }
         };
 
@@ -120,7 +122,7 @@ where
 
                 // now we can create the `EthStream` because the peer has successfully completed
                 // the handshake
-                let stream = EthStream::new(self.inner);
+                let stream = EthStream::new(version, self.inner);
 
                 Ok((stream, resp))
             }
@@ -136,6 +138,7 @@ where
 #[pin_project]
 #[derive(Debug)]
 pub struct EthStream<S> {
+    version: EthVersion,
     #[pin]
     inner: S,
 }
@@ -143,8 +146,13 @@ pub struct EthStream<S> {
 impl<S> EthStream<S> {
     /// Creates a new unauthed [`EthStream`] from a provided stream. You will need
     /// to manually handshake a peer.
-    pub fn new(inner: S) -> Self {
-        Self { inner }
+    pub fn new(version: EthVersion, inner: S) -> Self {
+        Self { version, inner }
+    }
+
+    /// Returns the eth version.
+    pub fn version(&self) -> EthVersion {
+        self.version
     }
 
     /// Returns the underlying stream.
@@ -203,11 +211,11 @@ where
             return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
         }
 
-        let msg = match ProtocolMessage::decode(&mut bytes.as_ref()) {
+        let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
             Ok(m) => m,
             Err(err) => {
-                tracing::debug!("rlp decode error: msg={bytes:x}");
-                return Poll::Ready(Some(Err(err.into())))
+                tracing::debug!("decode error: msg={bytes:x}");
+                return Poll::Ready(Some(Err(err)))
             }
         };
 
@@ -337,7 +345,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = PassthroughCodec::default().framed(incoming);
-            let mut stream = EthStream::new(stream);
+            let mut stream = EthStream::new(EthVersion::Eth67, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -346,7 +354,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let sink = PassthroughCodec::default().framed(outgoing);
-        let mut client_stream = EthStream::new(sink);
+        let mut client_stream = EthStream::new(EthVersion::Eth67, sink);
 
         client_stream.send(test_msg).await.unwrap();
 
@@ -372,7 +380,7 @@ mod tests {
             // roughly based off of the design of tokio::net::TcpListener
             let (incoming, _) = listener.accept().await.unwrap();
             let stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
-            let mut stream = EthStream::new(stream);
+            let mut stream = EthStream::new(EthVersion::Eth67, stream);
 
             // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
@@ -386,7 +394,7 @@ mod tests {
 
         let outgoing = TcpStream::connect(local_addr).await.unwrap();
         let outgoing = ECIESStream::connect(outgoing, client_key, server_id).await.unwrap();
-        let mut client_stream = EthStream::new(outgoing);
+        let mut client_stream = EthStream::new(EthVersion::Eth67, outgoing);
 
         client_stream.send(test_msg).await.unwrap();
 

@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
+use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes66, SharedTransactions};
 use reth_interfaces::{
     p2p::headers::client::StatusUpdater,
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
@@ -144,7 +144,7 @@ impl NetworkHandle {
     pub fn send_transactions_hashes(&self, peer_id: PeerId, msg: Vec<TxHash>) {
         self.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
             peer_id,
-            msg: NewPooledTransactionHashes(msg),
+            msg: NewPooledTransactionHashes66(msg),
         })
     }
 
@@ -292,7 +292,7 @@ pub(crate) enum NetworkHandleMessage {
     /// Sends the list of transactions to the given peer.
     SendTransaction { peer_id: PeerId, msg: SharedTransactions },
     /// Sends the list of transactions hashes to the given peer.
-    SendPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
+    SendPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes66 },
     /// Send an `eth` protocol request to the peer.
     EthRequest {
         /// The peer to send the request to.

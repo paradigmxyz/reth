@@ -104,17 +104,31 @@ pub struct SharedTransactions(
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NewPooledTransactionHashes(
+pub struct NewPooledTransactionHashes66(
     /// Transaction hashes for new transactions that have appeared on the network.
     /// Clients should request the transactions with the given hashes using a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) message.
     pub Vec<H256>,
 );
 
-impl From<Vec<H256>> for NewPooledTransactionHashes {
+impl From<Vec<H256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<H256>) -> Self {
-        NewPooledTransactionHashes(v)
+        NewPooledTransactionHashes66(v)
     }
+}
+
+/// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
+/// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NewPooledTransactionHashes68 {
+    /// Transaction types for new transactions that have appeared on the network.
+    pub types: Vec<u8>,
+    /// Transaction sizes for new transactions that have appeared on the network.
+    pub sizes: Vec<usize>,
+    /// Transaction hashes for new transactions that have appeared on the network.
+    pub hashes: Vec<H256>,
 }
 
 #[cfg(test)]

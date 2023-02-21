@@ -11,13 +11,16 @@ pub struct ParseVersionError(String);
 
 /// The `eth` protocol version.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EthVersion {
     /// The `eth` protocol version 66.
     Eth66 = 66,
 
     /// The `eth` protocol version 67.
     Eth67 = 67,
+
+    /// The `eth` protocol version 68.
+    Eth68 = 68,
 }
 
 impl EthVersion {
@@ -25,8 +28,8 @@ impl EthVersion {
     pub fn total_messages(&self) -> u8 {
         match self {
             EthVersion::Eth66 => 15,
-            EthVersion::Eth67 => {
-                // eth/67 is eth/66 minus GetNodeData and NodeData messages
+            EthVersion::Eth67 | EthVersion::Eth68 => {
+                // eth/67,68 are eth/66 minus GetNodeData and NodeData messages
                 13
             }
         }
@@ -50,6 +53,7 @@ impl TryFrom<&str> for EthVersion {
         match s {
             "66" => Ok(EthVersion::Eth66),
             "67" => Ok(EthVersion::Eth67),
+            "68" => Ok(EthVersion::Eth68),
             _ => Err(ParseVersionError(s.to_string())),
         }
     }
@@ -72,6 +76,7 @@ impl TryFrom<u8> for EthVersion {
         match u {
             66 => Ok(EthVersion::Eth66),
             67 => Ok(EthVersion::Eth67),
+            68 => Ok(EthVersion::Eth68),
             _ => Err(ParseVersionError(u.to_string())),
         }
     }
@@ -99,6 +104,7 @@ impl From<EthVersion> for &'static str {
         match v {
             EthVersion::Eth66 => "66",
             EthVersion::Eth67 => "67",
+            EthVersion::Eth68 => "68",
         }
     }
 }
@@ -119,13 +125,15 @@ mod test {
     fn test_eth_version_try_from_str() {
         assert_eq!(EthVersion::Eth66, EthVersion::try_from("66").unwrap());
         assert_eq!(EthVersion::Eth67, EthVersion::try_from("67").unwrap());
-        assert_eq!(Err(ParseVersionError("68".to_string())), EthVersion::try_from("68"));
+        assert_eq!(EthVersion::Eth68, EthVersion::try_from("68").unwrap());
+        assert_eq!(Err(ParseVersionError("69".to_string())), EthVersion::try_from("69"));
     }
 
     #[test]
     fn test_eth_version_from_str() {
         assert_eq!(EthVersion::Eth66, "66".parse().unwrap());
         assert_eq!(EthVersion::Eth67, "67".parse().unwrap());
-        assert_eq!(Err(ParseVersionError("68".to_string())), "68".parse::<EthVersion>());
+        assert_eq!(EthVersion::Eth68, "68".parse().unwrap());
+        assert_eq!(Err(ParseVersionError("69".to_string())), "69".parse::<EthVersion>());
     }
 }

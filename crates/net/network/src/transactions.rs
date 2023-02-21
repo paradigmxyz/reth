@@ -10,7 +10,7 @@ use crate::{
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use reth_eth_wire::{
-    GetPooledTransactions, NewPooledTransactionHashes, PooledTransactions, Transactions,
+    GetPooledTransactions, NewPooledTransactionHashes66, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
 use reth_network_api::{Peers, ReputationChangeKind};
@@ -249,7 +249,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        msg: NewPooledTransactionHashes,
+        msg: NewPooledTransactionHashes66,
     ) {
         // If the node is currently syncing, ignore transactions
         if self.network.is_syncing() {
@@ -338,7 +338,7 @@ where
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
                 if !self.network.is_syncing() {
-                    let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
+                    let msg = NewPooledTransactionHashes66(self.pool.pooled_transactions());
                     self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
                         peer_id,
                         msg,
@@ -546,7 +546,7 @@ pub enum NetworkTransactionEvent {
     /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
+    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes66 },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
         peer_id: PeerId,
