@@ -70,12 +70,19 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
-    /// Returns hashes of all transactions in the pool.
+    /// Returns the _hashes_ of all transactions in the pool.
     ///
     /// Note: This returns a `Vec` but should guarantee that all hashes are unique.
     ///
     /// Consumer: P2P
-    fn pooled_transactions(&self) -> Vec<TxHash>;
+    fn pooled_transaction_hashes(&self) -> Vec<TxHash>;
+
+    /// Returns the _full_ transaction objects all transactions in the pool.
+    ///
+    /// Note: This returns a `Vec` but should guarantee that all transactions are unique.
+    ///
+    /// Consumer: P2P
+    fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
