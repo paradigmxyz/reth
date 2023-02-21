@@ -54,7 +54,10 @@
 use hyper::{http::HeaderValue, Method};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
-    core::{server::host_filtering::AllowHosts, server::rpc_module::Methods, Error as RpcError},
+    core::{
+        server::{host_filtering::AllowHosts, rpc_module::Methods},
+        Error as RpcError,
+    },
     server::{Server, ServerHandle},
     RpcModule,
 };
@@ -74,7 +77,7 @@ use std::{
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
@@ -618,8 +621,8 @@ impl RpcServerConfig {
         )));
 
         if let Some(builder) = self.http_server_config {
-            let cors = Self::create_cors_layer(self.http_cors_domains).unwrap();
-            if let Some(cors) = cors {
+            if let Some(cors) = self.http_cors_domains.as_deref().map(create_cors_layer) {
+                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
                 let middleware = tower::ServiceBuilder::new().layer(cors);
                 let http_server =
                     builder.set_middleware(middleware).build(http_socket_addr).await?;
@@ -653,38 +656,48 @@ impl RpcServerConfig {
 
         Ok(server)
     }
+}
 
-    fn create_cors_layer(http_cors_domains: Option<String>) -> Result<Option<CorsLayer>, RpcError> {
-        let mut cors = None;
-        if let Some(domains) = http_cors_domains {
-            match domains.as_str() {
-                "*" => {
-                    cors = Some(
-                        CorsLayer::new()
-                            .allow_methods([Method::GET, Method::POST])
-                            .allow_origin(Any)
-                            .allow_headers(Any),
-                    );
-                }
-                "" => {}
-                _ => {
-                    let origins = domains
-                        .split(",")
-                        .map(|domain| domain.parse::<HeaderValue>())
-                        .collect::<Result<Vec<HeaderValue>, _>>();
-                    if let Ok(origins) = origins {
-                        cors = Some(
-                            CorsLayer::new()
-                                .allow_methods([Method::GET, Method::POST])
-                                .allow_origin(origins)
-                                .allow_headers(Any),
-                        );
-                    }
-                }
+/// Error thrown when parsing cors domains went wrong
+#[derive(Debug, thiserror::Error)]
+enum CorsDomainError {
+    #[error("{domain} is an invalid header value")]
+    InvalidHeader { domain: String },
+    #[error("Wildcard origin (`*`) cannot be passed as part of a list: {input}")]
+    WildCardNotAllowed { input: String },
+}
+
+/// Creates a [CorsLayer] from the given domains
+fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, CorsDomainError> {
+    let cors = match http_cors_domains.trim() {
+        "*" => CorsLayer::new()
+            .allow_methods([Method::GET, Method::POST])
+            .allow_origin(Any)
+            .allow_headers(Any),
+        _ => {
+            let iter = http_cors_domains.split(',');
+            if iter.clone().any(|o| o == "*") {
+                return Err(CorsDomainError::WildCardNotAllowed {
+                    input: http_cors_domains.to_string(),
+                })
             }
+
+            let origins = iter
+                .map(|domain| {
+                    domain
+                        .parse::<HeaderValue>()
+                        .map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
+                })
+                .collect::<Result<Vec<HeaderValue>, _>>()?;
+
+            let origin = AllowOrigin::list(origins);
+            CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST])
+                .allow_origin(origin)
+                .allow_headers(Any)
         }
-        Ok(cors)
-    }
+    };
+    Ok(cors)
 }
 
 /// Holds modules to be installed per transport type
