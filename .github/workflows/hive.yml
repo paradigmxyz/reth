@@ -63,7 +63,9 @@ jobs:
       matrix:
         sim: [devp2p, issues/go-ethereum-14359, ethereum/consensus, ethereum/engine, ethereum/rpc-compat, ethereum/rpc, ethereum/sync, smoke/genesis, smoke/clique, smoke/network]
         include:
-          - limit: [eth, discv4]
+          - limit: discv4
+            sim: devp2p
+          - limit: eth
             sim: devp2p
         experimental: [true]
       fail-fast: false
@@ -98,7 +100,7 @@ jobs:
       - name: Run ${{ matrix.sim }} simulator
         run: |
           cd hivetests
-          hive --sim "${{ matrix.sim }}$" --sim.limit "${{ join(matrix.limit, '|') }}" --client reth
+          hive --sim "${{ matrix.sim }}$" --sim.limit "${{ matrix.limit }}" --client reth
 
       - name: Print simulator output
         if: ${{ failure() }}
