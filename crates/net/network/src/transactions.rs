@@ -338,7 +338,7 @@ where
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
                 if !self.network.is_syncing() {
-                    let msg = NewPooledTransactionHashes66(self.pool.pooled_transactions());
+                    let msg = NewPooledTransactionHashes66(self.pool.pooled_transaction_hashes());
                     self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
                         peer_id,
                         msg,

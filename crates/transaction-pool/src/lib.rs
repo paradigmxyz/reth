@@ -225,7 +225,11 @@ where
         self.pool.add_transaction_listener()
     }
 
-    fn pooled_transactions(&self) -> Vec<TxHash> {
+    fn pooled_transaction_hashes(&self) -> Vec<TxHash> {
+        self.pool.pooled_transactions_hashes()
+    }
+
+    fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.pooled_transactions()
     }
 
