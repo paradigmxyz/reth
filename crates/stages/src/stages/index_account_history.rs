@@ -56,25 +56,10 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
         let to_transition = tx.get_block_transition(to_block)?;
 
-        let account_changesets = tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk(Some(from_transition))?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition).unwrap_or_default())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let account_transtions = account_changesets
-            .into_iter()
-            // fold all account to one set of changed accounts
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
-                    accounts.entry(account.address).or_default().push(index);
-                    accounts
-                },
-            );
-
+        let indices =
+            tx.get_account_transition_ids_from_changeset(from_transition, to_transition)?;
         // Insert changeset to history index
-        tx.insert_account_history_index(account_transtions)?;
+        tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", "Stage finished");
         Ok(ExecOutput { stage_progress: to_block, done: true })

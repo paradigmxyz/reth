@@ -15,7 +15,14 @@ reth-interfaces = { path = "../../interfaces" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-db = { path = "../db" }
 reth-tracing = {path = "../../tracing"}
+reth-rlp = {path = "../../rlp"}
+
 revm-primitives = "1.0.0"
+
+# trie
+cita_trie = "4.0.0"
+hasher = "0.1.4"
+assert_matches = "1.5"
 
 # codecs
 postcard = { version = "1.0.2", features = ["alloc"] }
@@ -56,6 +63,11 @@ secp256k1 = { version = "0.24.2", default-features = false, features = [
     "rand",
 ] }
 parking_lot = "0.12"
+proptest = { version = "1.0" }
+eyre = "0.6.8"
+
+# trie
+triehash = "0.8"
 
 [features]
 bench = []

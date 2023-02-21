@@ -56,27 +56,9 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
         let to_transition = tx.get_block_transition(to_block)?;
 
-        let storage_changeset = tx
-            .cursor_read::<tables::StorageChangeSet>()?
-            .walk(Some((from_transition, Address::zero()).into()))?
-            .take_while(|res| {
-                res.as_ref().map(|(k, _)| k.transition_id() < to_transition).unwrap_or_default()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // fold all storages to one set of changes
-        let storage_changeset_lists = storage_changeset.into_iter().fold(
-            BTreeMap::new(),
-            |mut storages: BTreeMap<(Address, H256), Vec<u64>>, (index, storage)| {
-                storages
-                    .entry((index.address(), storage.key))
-                    .or_default()
-                    .push(index.transition_id());
-                storages
-            },
-        );
-
-        tx.insert_storage_history_index(storage_changeset_lists)?;
+        let indices =
+            tx.get_storage_transition_ids_from_changeset(from_transition, to_transition)?;
+        tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", "Stage finished");
         Ok(ExecOutput { stage_progress: to_block, done: true })

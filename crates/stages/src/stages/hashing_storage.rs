@@ -132,13 +132,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         } else {
             // Aggregate all transition changesets and and make list of storages that have been
             // changed.
-            let changes =
+            let lists =
                 tx.get_addresses_and_keys_of_changed_storages(from_transition, to_transition)?;
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
-            let changes = tx.get_plainstate_storages(changes.into_iter())?;
-            tx.insert_storage_for_hashing(changes.into_iter())?;
+            let storages = tx.get_plainstate_storages(lists.into_iter())?;
+            tx.insert_storage_for_hashing(storages.into_iter())?;
         }
 
         info!(target: "sync::stages::hashing_storage", "Stage finished");

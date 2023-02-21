@@ -1,3 +1,4 @@
+use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
@@ -11,20 +12,21 @@ use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
     H256, KECCAK_EMPTY, U256,
 };
-use reth_provider::Transaction;
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
     EMPTY_STRING_CODE,
 };
+use reth_tracing::tracing::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
     sync::Arc,
 };
-use tracing::*;
 
+/// Merkle Trie error types
+#[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum TrieError {
+pub enum TrieError {
     #[error("Some error occurred: {0}")]
     InternalError(#[from] cita_trie::TrieError),
     #[error("The root node wasn't found in the DB")]
@@ -190,12 +192,13 @@ impl EthAccount {
     }
 }
 
+/// Database Merkle Trie loader used inside cita_trie
 #[derive(Debug, Default)]
-pub(crate) struct DBTrieLoader;
+pub struct DBTrieLoader;
 
 impl DBTrieLoader {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
-    pub(crate) fn calculate_root<DB: Database>(
+    pub fn calculate_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
@@ -255,7 +258,7 @@ impl DBTrieLoader {
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
-    pub(crate) fn update_root<DB: Database>(
+    pub fn update_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         root: H256,
@@ -369,12 +372,12 @@ mod tests {
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
     use reth_primitives::{
+        chain_spec_value_parser,
         hex_literal::hex,
         keccak256,
         proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
         Address, ChainSpec,
     };
-    use reth_staged_sync::utils::chainspec::chain_spec_value_parser;
     use std::{collections::HashMap, str::FromStr};
     use triehash::sec_trie_root;
 

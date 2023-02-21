@@ -1,10 +1,7 @@
 use crate::dirs::{DbPath, PlatformPath};
 use clap::Parser;
-use reth_primitives::ChainSpec;
-use reth_staged_sync::utils::{
-    chainspec::genesis_value_parser,
-    init::{init_db, init_genesis},
-};
+use reth_primitives::{genesis_value_parser, ChainSpec};
+use reth_staged_sync::utils::init::{init_db, init_genesis};
 use std::sync::Arc;
 use tracing::info;
 

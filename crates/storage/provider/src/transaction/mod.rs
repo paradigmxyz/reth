@@ -7,17 +7,17 @@ use reth_db::{
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
-        AccountBeforeTx, ShardedKey, StoredBlockBody, TransitionIdAddress,
+        ShardedKey, StoredBlockBody, TransitionIdAddress,
     },
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
     TransitionList,
 };
-use reth_interfaces::{db::Error as DbError, provider::Error as ProviderError, Error};
+use reth_interfaces::{db::Error as DbError, provider::Error as ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, StorageEntry,
-    TransitionId, TxNumber, H256, U256,
+    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
+    StorageEntry, TransitionId, TxNumber, H256, U256,
 };
 use reth_tracing::tracing::{info, trace};
 use std::{
@@ -25,6 +25,8 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
+
+use crate::{insert_canonical_block, trie::DBTrieLoader};
 
 use self::execution_result::{AccountChangeSet, ExecutionResult};
 
@@ -271,6 +273,63 @@ impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
+    /// Insert full block and make it canonical
+    ///
+    /// This is atomic operation and transaction will do one commit at the end of the function.
+    pub fn insert_block(
+        &mut self,
+        block: &SealedBlock,
+        chain_spec: &ChainSpec,
+        changeset: ExecutionResult,
+    ) -> Result<(), TransactionError> {
+        // Header, Body, SenderRecovery, TD, TxLookup stages
+        let (from, to) = insert_canonical_block(self.deref_mut(), block, false).unwrap();
+
+        let parent_block_number = block.number - 1;
+
+        // execution stage
+        self.insert_execution_result(vec![changeset], chain_spec, parent_block_number)?;
+
+        // storage hashing stage
+        {
+            let lists = self.get_addresses_and_keys_of_changed_storages(from, to)?;
+            let storages = self.get_plainstate_storages(lists.into_iter())?;
+            self.insert_storage_for_hashing(storages.into_iter())?;
+        }
+
+        // account hashing stage
+        {
+            let lists = self.get_addresses_of_changed_accounts(from, to)?;
+            let accounts = self.get_plainstate_accounts(lists.into_iter())?;
+            self.insert_account_for_hashing(accounts.into_iter())?;
+        }
+
+        // merkle tree
+        {
+            let current_root = self.get_header(parent_block_number)?.state_root;
+            let loader = DBTrieLoader::default();
+            let _ = loader.update_root(self, current_root, from..to);
+            // TODO
+            //.map_err(|e| TransactionError::Fatal(Box::new(e)))?
+        }
+
+        // account history stage
+        {
+            let indices = self.get_account_transition_ids_from_changeset(from, to)?;
+            self.insert_account_history_index(indices)?;
+        }
+
+        // storage history stage
+        {
+            let indices = self.get_storage_transition_ids_from_changeset(from, to)?;
+            self.insert_storage_history_index(indices)?;
+        }
+
+        // commit block to database
+        self.commit()?;
+        Ok(())
+    }
+
     /// Iterate over account changesets and return all account address that were changed.
     pub fn get_addresses_and_keys_of_changed_storages(
         &self,
@@ -298,6 +357,7 @@ where
     }
 
     ///  Get plainstate storages
+    #[allow(clippy::type_complexity)]
     pub fn get_plainstate_storages(
         &self,
         iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = H256>)>,
@@ -323,10 +383,10 @@ where
     /// iterate over storages and insert them to hashing table
     pub fn insert_storage_for_hashing(
         &self,
-        iter: impl IntoIterator<Item = (Address, impl IntoIterator<Item = (H256, U256)>)>,
+        storages: impl IntoIterator<Item = (Address, impl IntoIterator<Item = (H256, U256)>)>,
     ) -> Result<(), TransactionError> {
         // hash values
-        let hashed = iter.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
+        let hashed = storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
             let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, (key, value)| {
                 map.insert(keccak256(key), value);
                 map
@@ -415,6 +475,59 @@ where
         Ok(())
     }
 
+    /// Get all transaction ids where account got changed.
+    pub fn get_storage_transition_ids_from_changeset(
+        &self,
+        from: TransitionId,
+        to: TransitionId,
+    ) -> Result<BTreeMap<(Address, H256), Vec<u64>>, TransactionError> {
+        let storage_changeset = self
+            .cursor_read::<tables::StorageChangeSet>()?
+            .walk(Some((from, Address::zero()).into()))?
+            .take_while(|res| res.as_ref().map(|(k, _)| k.transition_id() < to).unwrap_or_default())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // fold all storages to one set of changes
+        let storage_changeset_lists = storage_changeset.into_iter().fold(
+            BTreeMap::new(),
+            |mut storages: BTreeMap<(Address, H256), Vec<u64>>, (index, storage)| {
+                storages
+                    .entry((index.address(), storage.key))
+                    .or_default()
+                    .push(index.transition_id());
+                storages
+            },
+        );
+
+        Ok(storage_changeset_lists)
+    }
+
+    /// Get all transaction ids where account got changed.
+    pub fn get_account_transition_ids_from_changeset(
+        &self,
+        from: TransitionId,
+        to: TransitionId,
+    ) -> Result<BTreeMap<Address, Vec<u64>>, TransactionError> {
+        let account_changesets = self
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk(Some(from))?
+            .take_while(|res| res.as_ref().map(|(k, _)| *k < to).unwrap_or_default())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let account_transtions = account_changesets
+            .into_iter()
+            // fold all account to one set of changed accounts
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
+                    accounts.entry(account.address).or_default().push(index);
+                    accounts
+                },
+            );
+
+        Ok(account_transtions)
+    }
+
     /// Insert storage change index to database. Used inside StorageHistoryIndex stage
     pub fn insert_storage_history_index(
         &self,
@@ -492,6 +605,7 @@ where
         }
         Ok(())
     }
+
     /// Used inside execution stage to commit created account storage changesets for transaction or
     /// block state change.
     pub fn insert_execution_result(

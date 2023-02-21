@@ -1,3 +1,5 @@
+//! Output of execution.
+
 use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_primitives::{Account, Address, Receipt, H256, U256};
 use revm_primitives::Bytecode;

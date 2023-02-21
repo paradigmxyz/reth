@@ -39,8 +39,8 @@ pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock};
 pub use bloom::Bloom;
 pub use chain::{
-    AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
-    MAINNET, SEPOLIA,
+    chain_spec_value_parser, genesis_value_parser, AllGenesisFormats, Chain, ChainInfo, ChainSpec,
+    ChainSpecBuilder, ForkCondition, GOERLI, MAINNET, SEPOLIA,
 };
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,

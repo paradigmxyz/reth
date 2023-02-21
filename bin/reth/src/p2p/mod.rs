@@ -12,12 +12,11 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_network::FetchClient;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
-use reth_provider::ShareableDatabase;
-use reth_staged_sync::{
-    utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
-    Config,
+use reth_primitives::{
+    chain_spec_value_parser, BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader,
 };
+use reth_provider::ShareableDatabase;
+use reth_staged_sync::{utils::hash_or_num_value_parser, Config};
 use std::sync::Arc;
 
 /// `reth p2p` command

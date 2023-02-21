@@ -4,25 +4,31 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{provider::Error as ProviderError, Result};
-use reth_primitives::{SealedBlock, U256};
+use reth_primitives::{SealedBlock, TransitionId, U256};
 
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.
 ///
 ///
 /// Check parent dependency in [tables::HeaderNumbers] and in [tables::BlockBodies] tables.
-/// Inserts blocks data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers],
-/// and transactions data to [tables::TxSenders], [tables::Transactions],
-/// [tables::BlockBodies] and [tables::BlockBodies]
+/// Inserts header data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers].
+/// and transactions data to [tables::TxSenders], [tables::Transactions], [tables::TxHashNumber].
+/// and transition indexes to [tables::BlockTransitionIndex] and [tables::TxTransitionIndex].
+/// And block data [tables::BlockBodies], [tables::BlockBodies] and
+/// [tables::StoredBlockWithdrawals].
+///
+/// Return [TransitionId] `(from,to)`
 pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: &SealedBlock,
     has_block_reward: bool,
     parent_tx_num_transition_id: Option<(u64, u64)>,
-) -> Result<()> {
+) -> Result<(TransitionId, TransitionId)> {
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
     // Put header with canonical hashes.
     tx.put::<tables::Headers>(block.number, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
+
+    // TODO have total difficulty as option value
     tx.put::<tables::HeaderTD>(
         block.number,
         if has_block_reward {
@@ -56,7 +62,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
                 .ok_or(ProviderError::BlockTransition { block_number: prev_block_num })?;
             (prev_body.start_tx_id + prev_body.tx_count, last_transition_id)
         };
-
+    let from_transition = transition_id;
     // insert body data
     tx.put::<tables::BlockBodies>(
         block.number,
@@ -65,9 +71,11 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     for transaction in block.body.iter() {
         let rec_tx = transaction.clone().into_ecrecovered().unwrap();
+        let hash = rec_tx.hash();
         tx.put::<tables::TxSenders>(current_tx_id, rec_tx.signer())?;
         tx.put::<tables::Transactions>(current_tx_id, rec_tx.into())?;
         tx.put::<tables::TxTransitionIndex>(current_tx_id, transition_id)?;
+        tx.put::<tables::TxHashNumber>(hash, current_tx_id)?;
         transition_id += 1;
         current_tx_id += 1;
     }
@@ -88,7 +96,8 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     }
     tx.put::<tables::BlockTransitionIndex>(block.number, transition_id)?;
 
-    Ok(())
+    let to_transition = transition_id;
+    Ok((from_transition, to_transition))
 }
 
 /// Inserts canonical block in blockchain. Parent tx num and transition id is taken from
@@ -97,6 +106,6 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: &SealedBlock,
     has_block_reward: bool,
-) -> Result<()> {
+) -> Result<(TransitionId, TransitionId)> {
     insert_block(tx, block, has_block_reward, None)
 }

@@ -178,11 +178,11 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         } else {
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
-            let list = tx.get_addresses_of_changed_accounts(from_transition, to_transition)?;
+            let lists = tx.get_addresses_of_changed_accounts(from_transition, to_transition)?;
             // iterate over plain state and get newest value.
             // Assumption we are okay to make is that plainstate represent
             // `previous_stage_progress` state.
-            let accounts = tx.get_plainstate_accounts(list.into_iter())?;
+            let accounts = tx.get_plainstate_accounts(lists.into_iter())?;
             // insert and hash accounts to hashing table
             tx.insert_account_for_hashing(accounts.into_iter())?;
         }

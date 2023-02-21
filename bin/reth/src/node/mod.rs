@@ -34,12 +34,11 @@ use reth_network::{
     error::NetworkError, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
+use reth_primitives::{genesis_value_parser, BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 
 use reth_staged_sync::{
     utils::{
-        chainspec::genesis_value_parser,
         init::{init_db, init_genesis},
         parse_socket_address,
     },

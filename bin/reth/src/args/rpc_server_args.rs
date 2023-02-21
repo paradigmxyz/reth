@@ -198,7 +198,7 @@ mod tests {
         let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
         assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
         assert_eq!(
-            config.ws().unwrap().cloned().into_selection(),
+            config.ws().cloned().unwrap().into_selection(),
             vec![RethRpcModule::Admin, RethRpcModule::Eth]
         );
     }
