@@ -7,7 +7,7 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, EthStream, P2PStream, Status,
+    DisconnectReason, EthStream, EthVersion, P2PStream, Status,
 };
 use reth_net_common::bandwidth_meter::MeteredStream;
 use reth_primitives::PeerId;
@@ -51,6 +51,8 @@ pub(crate) struct ActiveSessionHandle {
     pub(crate) direction: Direction,
     /// The assigned id for this session
     pub(crate) session_id: SessionId,
+    /// negotiated eth version
+    pub(crate) version: EthVersion,
     /// The identifier of the remote peer
     pub(crate) remote_id: PeerId,
     /// The timestamp when the session has been established.
