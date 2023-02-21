@@ -173,3 +173,17 @@ impl ImportCommand {
         confy::load_path::<Config>(&self.config).wrap_err("Could not load config")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_common_import_command_chain_args() {
+        for chain in ["mainnet", "sepolia", "goerli"] {
+            let args: ImportCommand =
+                ImportCommand::parse_from(["reth", "--chain", chain, "--path", "."]);
+            assert_eq!(args.chain.chain, chain.parse().unwrap());
+        }
+    }
+}
