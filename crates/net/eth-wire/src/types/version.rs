@@ -24,6 +24,9 @@ pub enum EthVersion {
 }
 
 impl EthVersion {
+    /// The latest known eth version
+    pub const LATEST: EthVersion = EthVersion::Eth68;
+
     /// Returns the total number of messages the protocol version supports.
     pub fn total_messages(&self) -> u8 {
         match self {
