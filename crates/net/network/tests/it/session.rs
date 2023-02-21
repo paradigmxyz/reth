@@ -33,7 +33,7 @@ async fn test_session_established_with_highest_version() {
             }
             NetworkEvent::SessionEstablished { peer_id, status, .. } => {
                 assert_eq!(handle1.peer_id(), &peer_id);
-                assert_eq!(status.version, EthVersion::Eth67 as u8);
+                assert_eq!(status.version, EthVersion::Eth68 as u8);
             }
             ev => {
                 panic!("unexpected event {ev:?}")

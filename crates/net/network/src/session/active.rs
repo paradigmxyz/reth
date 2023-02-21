@@ -719,8 +719,7 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        EthVersion, GetBlockBodies, HelloMessage, ProtocolVersion, Status, StatusBuilder,
-        UnauthedEthStream, UnauthedP2PStream,
+        GetBlockBodies, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
@@ -730,13 +729,7 @@ mod tests {
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessage {
-        HelloMessage {
-            protocol_version: ProtocolVersion::V5,
-            client_version: "reth/1.0.0".to_string(),
-            capabilities: vec![EthVersion::Eth67.into()],
-            port: 30303,
-            id: pk2id(&server_key.public_key(SECP256K1)),
-        }
+        HelloMessage::builder(pk2id(&server_key.public_key(SECP256K1))).build()
     }
 
     struct SessionBuilder {
@@ -852,8 +845,8 @@ mod tests {
                         protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
                     }
                 }
-                _ => {
-                    panic!("unexpected message")
+                ev => {
+                    panic!("unexpected message {ev:?}")
                 }
             }
         }
@@ -1048,7 +1041,7 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             client_stream
-                .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
+                .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
                 .await
                 .unwrap();
             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;
@@ -1081,7 +1074,7 @@ mod tests {
             let message = builder.active_session_rx.next().await.unwrap();
             match message {
                 ActiveSessionMessage::ProtocolBreach { .. } => {}
-                _ => unreachable!(),
+                ev => unreachable!("{ev:?}"),
             }
         }
 
