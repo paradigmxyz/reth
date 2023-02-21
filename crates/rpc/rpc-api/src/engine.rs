@@ -66,4 +66,8 @@ pub trait EngineApi {
         &self,
         transition_configuration: TransitionConfiguration,
     ) -> Result<TransitionConfiguration>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
+    #[method(name = "engine_exchangeCapabilities")]
+    async fn exchange_capabilities(&self, capabilities: Vec<String>) -> Result<Vec<String>>;
 }
