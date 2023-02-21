@@ -147,6 +147,7 @@ impl Default for Status {
 
 #[cfg(test)]
 mod tests {
+    use crate::types::{EthVersion, Status};
     use ethers_core::types::Chain as NamedChain;
     use hex_literal::hex;
     use rand::Rng;
@@ -155,8 +156,6 @@ mod tests {
     };
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
-
-    use crate::types::{EthVersion, Status};
 
     #[test]
     fn encode_eth_status_message() {
