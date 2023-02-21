@@ -36,6 +36,10 @@ pub struct RpcServerArgs {
     #[arg(long = "http.api")]
     pub http_api: Option<RpcModuleSelection>,
 
+    /// Http Corsdomain to allow request from
+    #[arg(long = "http.corsdomain")]
+    pub http_corsdomain: Option<String>,
+
     /// Enable the WS-RPC server
     #[arg(long)]
     pub ws: bool,
@@ -136,7 +140,10 @@ impl RpcServerArgs {
                 self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
                 self.http_port.unwrap_or(DEFAULT_HTTP_RPC_PORT),
             );
-            config = config.with_http_address(socket_address).with_http(ServerBuilder::new());
+            config = config
+                .with_http_address(socket_address)
+                .with_http(ServerBuilder::new())
+                .with_cors(self.http_corsdomain.clone().unwrap_or("".to_string()));
         }
 
         if self.ws {
