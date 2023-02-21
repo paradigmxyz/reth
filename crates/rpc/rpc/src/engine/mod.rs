@@ -13,7 +13,7 @@ use reth_rpc_engine_api::{
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    TransitionConfiguration, CAPABILITIES
+    TransitionConfiguration, CAPABILITIES,
 };
 use tokio::sync::{
     mpsc::UnboundedSender,
