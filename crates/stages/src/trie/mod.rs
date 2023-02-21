@@ -122,9 +122,17 @@ where
 
     fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
         let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        let subkey = H256::from_slice(key);
+
         cursor
-            .seek_by_key_subkey(self.key, H256::from_slice(key))?
-            .map(|_| cursor.delete_current())
+            .seek_by_key_subkey(self.key, subkey)?
+            .map(|v| {
+                if v.hash == subkey {
+                    cursor.delete_current().map_err(|e| TrieError::DatabaseError(e))
+                } else {
+                    Err(TrieError::MissingRoot(self.key))
+                }
+            })
             .transpose()?;
         Ok(())
     }
