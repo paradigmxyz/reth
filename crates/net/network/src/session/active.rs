@@ -16,7 +16,7 @@ use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectReason, EthMessage, EthStream, P2PStream,
+    DisconnectReason, EthMessage, EthStream, EthVersion, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics_common::metered_sender::MeteredSender;
@@ -178,8 +178,22 @@ impl ActiveSession {
             EthMessage::Transactions(msg) => {
                 self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
             }
-            EthMessage::NewPooledTransactionHashes(msg) => {
+            EthMessage::NewPooledTransactionHashes66(msg) => {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg)).into()
+            }
+            EthMessage::NewPooledTransactionHashes68(msg) => {
+                if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::TransactionHashesInvalidLenOfFields {
+                            hashes_len: msg.hashes.len(),
+                            types_len: msg.types.len(),
+                            sizes_len: msg.sizes.len(),
+                        },
+                        message: EthMessage::NewPooledTransactionHashes68(msg),
+                    }
+                }
+                // TODO revise `PeerMessage::PooledTransactions` to have `types` and `sizes`
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.hashes.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
@@ -237,7 +251,13 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
             PeerMessage::PooledTransactions(msg) => {
-                self.queued_outgoing.push_back(EthMessage::NewPooledTransactionHashes(msg).into());
+                if self.conn.version() >= EthVersion::Eth68 {
+                    // TODO
+                    // we don't know types and sizes yet
+                } else {
+                    self.queued_outgoing
+                        .push_back(EthMessage::NewPooledTransactionHashes66(msg).into());
+                }
             }
             PeerMessage::EthRequest(req) => {
                 let deadline = self.request_deadline();
@@ -699,8 +719,8 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        EthVersion, GetBlockBodies, HelloMessage, NewPooledTransactionHashes, ProtocolVersion,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        EthVersion, GetBlockBodies, HelloMessage, ProtocolVersion, Status, StatusBuilder,
+        UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
@@ -929,9 +949,7 @@ mod tests {
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             for _ in 0..num_messages {
                 client_stream
-                    .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(
-                        vec![],
-                    )))
+                    .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
                     .await
                     .unwrap();
             }
@@ -1030,7 +1048,7 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             client_stream
-                .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(vec![])))
+                .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
                 .await
                 .unwrap();
             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;
