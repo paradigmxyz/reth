@@ -1,9 +1,7 @@
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
     table::*,
-    tables::*,
     transaction::{DbTx, DbTxMut},
 };
 use std::path::Path;
@@ -44,6 +42,7 @@ where
 }
 
 /// Sets up a clear database at `bench_db_path`.
+#[allow(clippy::ptr_arg)]
 fn set_up_db<T>(
     bench_db_path: &Path,
     pair: &Vec<(<T as Table>::Key, bytes::Bytes, <T as Table>::Value, bytes::Bytes)>,

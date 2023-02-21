@@ -74,8 +74,8 @@ async fn test_session_established_with_different_capability() {
                 assert_eq!(handle1.peer_id(), &peer_id);
                 assert_eq!(status.version, EthVersion::Eth66 as u8);
             }
-            _ => {
-                panic!("unexpected event")
+            ev => {
+                panic!("unexpected event: {ev:?}")
             }
         }
     }

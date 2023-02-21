@@ -110,7 +110,7 @@ mod tests {
         fn current_status(&self) -> Head {
             let status_lock = self.status.try_lock().expect("competing for status lock");
             let status = status_lock.as_ref().expect("no status receiver set").borrow();
-            status.clone()
+            *status
         }
     }
 

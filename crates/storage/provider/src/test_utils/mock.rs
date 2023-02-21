@@ -5,10 +5,8 @@ use crate::{
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
-    keccak256,
-    rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue,
-    TransactionSigned, TxHash, H256, U256,
+    keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumberOrTag, Bytes, ChainInfo,
+    Header, StorageKey, StorageValue, TransactionSigned, TxHash, H256, U256,
 };
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
 
@@ -191,9 +189,9 @@ impl BlockProvider for MockEthProvider {
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
-            BlockId::Hash(hash) => Ok(lock.get(&H256(hash.0)).cloned()),
-            BlockId::Number(BlockNumber::Number(num)) => {
-                Ok(lock.values().find(|b| b.number == num.as_u64()).cloned())
+            BlockId::Hash(hash) => Ok(lock.get(hash.as_ref()).cloned()),
+            BlockId::Number(BlockNumberOrTag::Number(num)) => {
+                Ok(lock.values().find(|b| b.number == num).cloned())
             }
             _ => {
                 unreachable!("unused in network tests")

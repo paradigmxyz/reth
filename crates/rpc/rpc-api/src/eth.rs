@@ -1,7 +1,7 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{
-    rpc::{transaction::eip2930::AccessListWithGasUsed, BlockId, BlockNumber},
-    Address, Bytes, H256, H64, U256, U64,
+    rpc::transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
+    H256, H64, U256, U64,
 };
 use reth_rpc_types::{
     CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
@@ -43,7 +43,11 @@ pub trait EthApi {
 
     /// Returns information about a block by number.
     #[method(name = "eth_getBlockByNumber")]
-    async fn block_by_number(&self, number: BlockNumber, full: bool) -> Result<Option<RichBlock>>;
+    async fn block_by_number(
+        &self,
+        number: BlockNumberOrTag,
+        full: bool,
+    ) -> Result<Option<RichBlock>>;
 
     /// Returns the number of transactions in a block from a block matching the given block hash.
     #[method(name = "eth_getBlockTransactionCountByHash")]
@@ -51,7 +55,10 @@ pub trait EthApi {
 
     /// Returns the number of transactions in a block matching the given block number.
     #[method(name = "eth_getBlockTransactionCountByNumber")]
-    async fn block_transaction_count_by_number(&self, number: BlockNumber) -> Result<Option<U256>>;
+    async fn block_transaction_count_by_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> Result<Option<U256>>;
 
     /// Returns the number of uncles in a block from a block matching the given block hash.
     #[method(name = "eth_getUncleCountByBlockHash")]
@@ -59,7 +66,7 @@ pub trait EthApi {
 
     /// Returns the number of uncles in a block with given block number.
     #[method(name = "eth_getUncleCountByBlockNumber")]
-    async fn block_uncles_count_by_number(&self, number: BlockNumber) -> Result<U256>;
+    async fn block_uncles_count_by_number(&self, number: BlockNumberOrTag) -> Result<U256>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "eth_getUncleByBlockHashAndIndex")]
@@ -73,7 +80,7 @@ pub trait EthApi {
     #[method(name = "eth_getUncleByBlockNumberAndIndex")]
     async fn uncle_by_block_number_and_index(
         &self,
-        number: BlockNumber,
+        number: BlockNumberOrTag,
         index: Index,
     ) -> Result<Option<RichBlock>>;
 
@@ -93,7 +100,7 @@ pub trait EthApi {
     #[method(name = "eth_getTransactionByBlockNumberAndIndex")]
     async fn transaction_by_block_number_and_index(
         &self,
-        number: BlockNumber,
+        number: BlockNumberOrTag,
         index: Index,
     ) -> Result<Option<Transaction>>;
 

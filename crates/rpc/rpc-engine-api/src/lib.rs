@@ -9,14 +9,14 @@
 //! [Read more](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 
 /// The Engine API implementation.
-pub mod engine_api;
+mod engine_api;
 
 /// The Engine API message type.
-pub mod message;
+mod message;
 
 /// Engine API error.
-pub mod error;
+mod error;
 
 pub use engine_api::{EngineApi, EngineApiSender};
-pub use error::{EngineApiError, EngineApiResult};
-pub use message::EngineApiMessage;
+pub use error::*;
+pub use message::{EngineApiMessage, EngineApiMessageVersion};

@@ -4,8 +4,8 @@ use crate::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, Bytes, ChainInfo, Header,
-    StorageKey, StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
+    Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytes, ChainInfo, Header, StorageKey,
+    StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use std::ops::RangeBounds;
 
