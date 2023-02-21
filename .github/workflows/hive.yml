@@ -39,6 +39,7 @@ jobs:
           repository: paradigmxyz/hive
           ref: master
           path: hivetests
+
       - uses: actions/setup-go@v3
         with:
           go-version: '^1.13.1'
@@ -87,8 +88,8 @@ jobs:
       - name: Checkout hive tests
         uses: actions/checkout@v3
         with:
-          repository: onbjerg/hive
-          ref: onbjerg/reth
+          repository: paradigmxyz/hive
+          ref: master
           path: hivetests
 
       - name: Run ${{ matrix.sim }} simulator
