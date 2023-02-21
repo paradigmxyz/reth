@@ -424,7 +424,10 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::types::message::RequestPair;
+    use crate::{
+        errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
+        NodeData, ProtocolMessage,
+    };
     use hex_literal::hex;
     use reth_rlp::{Decodable, Encodable};
 
@@ -432,6 +435,25 @@ mod test {
         let mut buf = vec![];
         value.encode(&mut buf);
         buf
+    }
+
+    #[test]
+    fn test_removed_message_at_eth67() {
+        let get_node_data =
+            EthMessage::GetNodeData(RequestPair { request_id: 1337, message: GetNodeData(vec![]) });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::GetNodeData,
+            message: get_node_data,
+        });
+        let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
+        assert!(matches!(msg, Err(EthStreamError::EthInvalidMessageError(..))));
+
+        let node_data =
+            EthMessage::NodeData(RequestPair { request_id: 1337, message: NodeData(vec![]) });
+        let buf =
+            encode(ProtocolMessage { message_type: EthMessageID::NodeData, message: node_data });
+        let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
+        assert!(matches!(msg, Err(EthStreamError::EthInvalidMessageError(..))));
     }
 
     #[test]
