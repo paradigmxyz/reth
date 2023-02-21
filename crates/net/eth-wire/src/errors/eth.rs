@@ -74,4 +74,6 @@ pub enum EthHandshakeError {
     MismatchedProtocolVersion { expected: u8, got: u8 },
     #[error("mismatched chain in Status message. expected: {expected:?}, got: {got:?}")]
     MismatchedChain { expected: Chain, got: Chain },
+    #[error("total difficulty bitlen is too large. maximum: {maximum:?}, got: {got:?}")]
+    TotalDifficultyBitLenTooLarge { maximum: usize, got: usize },
 }
