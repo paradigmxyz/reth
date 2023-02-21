@@ -26,7 +26,10 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{insert_canonical_block, trie::DBTrieLoader};
+use crate::{
+    insert_canonical_block,
+    trie::{DBTrieLoader, TrieError},
+};
 
 use self::execution_result::{AccountChangeSet, ExecutionResult};
 
@@ -308,9 +311,15 @@ where
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
             let loader = DBTrieLoader::default();
-            let _ = loader.update_root(self, current_root, from..to);
-            // TODO
-            //.map_err(|e| TransactionError::Fatal(Box::new(e)))?
+            let root = loader.update_root(self, current_root, from..to)?;
+            if root != block.state_root {
+                return Err(TransactionError::StateTrieRootMismatch {
+                    got: root,
+                    expected: block.state_root,
+                    block_number: block.number,
+                    block_hash: block.hash(),
+                })
+            }
         }
 
         // account history stage
@@ -737,4 +746,19 @@ pub enum TransactionError {
     /// The transaction encountered a database integrity error.
     #[error("A database integrity error occurred: {0}")]
     DatabaseIntegrity(#[from] ProviderError),
+    /// The transaction encountered merkle trie error.
+    #[error("Merkle trie calculation error: {0}")]
+    MerkleTrie(#[from] TrieError),
+    /// Root mismatch
+    #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{got:?}")]
+    StateTrieRootMismatch {
+        /// Expected root
+        expected: H256,
+        /// Calculated root
+        got: H256,
+        /// Block number
+        block_number: BlockNumber,
+        /// Block hash
+        block_hash: BlockHash,
+    },
 }

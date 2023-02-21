@@ -9,9 +9,12 @@ use crate::{
 use clap::{Parser, ValueEnum};
 use reth_consensus::beacon::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_primitives::{chain_spec_value_parser, ChainSpec};
+use reth_primitives::ChainSpec;
 use reth_provider::{ShareableDatabase, Transaction};
-use reth_staged_sync::{utils::init::init_db, Config};
+use reth_staged_sync::{
+    utils::{chainspec::chain_spec_value_parser, init::init_db},
+    Config,
+};
 use reth_stages::{
     stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
     ExecInput, Stage, StageId, UnwindInput,

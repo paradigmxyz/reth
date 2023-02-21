@@ -372,11 +372,10 @@ mod tests {
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
     use reth_primitives::{
-        chain_spec_value_parser,
         hex_literal::hex,
         keccak256,
         proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
-        Address, ChainSpec,
+        Address, ChainSpec, MAINNET,
     };
     use std::{collections::HashMap, str::FromStr};
     use triehash::sec_trie_root;
@@ -518,7 +517,7 @@ mod tests {
         let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
-        let ChainSpec { genesis, .. } = chain_spec_value_parser("mainnet").unwrap();
+        let ChainSpec { genesis, .. } = MAINNET.clone();
 
         // Insert account state
         for (address, account) in &genesis.alloc {

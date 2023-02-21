@@ -16,9 +16,12 @@ use reth_interfaces::{
     p2p::headers::client::NoopStatusUpdater,
     sync::SyncStateUpdater,
 };
-use reth_primitives::{genesis_value_parser, ChainSpec};
+use reth_primitives::ChainSpec;
 use reth_staged_sync::{
-    utils::init::{init_db, init_genesis},
+    utils::{
+        chainspec::genesis_value_parser,
+        init::{init_db, init_genesis},
+    },
     Config,
 };
 use reth_stages::{

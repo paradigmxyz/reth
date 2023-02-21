@@ -28,16 +28,16 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx.put::<tables::Headers>(block.number, block.header.as_ref().clone())?;
     tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
 
-    // TODO have total difficulty as option value
-    tx.put::<tables::HeaderTD>(
-        block.number,
-        if has_block_reward {
-            U256::ZERO
-        } else {
-            U256::from(58_750_000_000_000_000_000_000_u128) + block.difficulty
-        }
-        .into(),
-    )?;
+    // total difficulty
+    let ttd = if block.number == 0 {
+        U256::ZERO
+    } else {
+        let parent_block_number = block.number - 1;
+        let parent_ttd = tx.get::<tables::HeaderTD>(parent_block_number)?.unwrap_or_default();
+        parent_ttd.0 + block.difficulty
+    };
+
+    tx.put::<tables::HeaderTD>(block.number, ttd.into())?;
 
     // insert body ommers data
     if !block.ommers.is_empty() {
