@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use reth_primitives::{
-    bytes::BytesMut, Address, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64,
+    Address, Block, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64,
 };
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
@@ -40,9 +40,9 @@ impl From<SealedBlock> for ExecutionPayload {
             .body
             .iter()
             .map(|tx| {
-                let mut encoded = BytesMut::new();
+                let mut encoded = Vec::new();
                 tx.encode(&mut encoded);
-                encoded.freeze().into()
+                encoded.into()
             })
             .collect();
         ExecutionPayload {
@@ -70,9 +70,26 @@ impl From<SealedBlock> for ExecutionPayload {
 /// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPayloadBody {
-    transactions: Vec<Bytes>,
-    withdrawals: Vec<Withdrawal>,
+    pub transactions: Vec<Bytes>,
+    pub withdrawals: Vec<Withdrawal>,
 }
+
+impl From<Block> for ExecutionPayloadBody {
+    fn from(value: Block) -> Self {
+        let transactions = value.body.into_iter().map(|tx| {
+            let mut out = Vec::new();
+            tx.encode(&mut out);
+            out.into()
+        });
+        ExecutionPayloadBody {
+            transactions: transactions.collect(),
+            withdrawals: value.withdrawals.unwrap_or_default(),
+        }
+    }
+}
+
+/// The execution payload body response that allows for `null` values.
+pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
 
 /// This structure encapsulates the fork choice state
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,5 +186,32 @@ impl ForkchoiceUpdated {
     pub fn with_payload_id(mut self, id: H64) -> Self {
         self.payload_id = Some(id);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_interfaces::test_utils::generators::random_block_range;
+    use reth_primitives::{TransactionSigned, H256};
+    use reth_rlp::Decodable;
+
+    #[test]
+    fn payload_body_roundtrip() {
+        for block in random_block_range(0..100, H256::default(), 0..2) {
+            let unsealed = block.clone().unseal();
+            let payload_body: ExecutionPayloadBody = unsealed.into();
+
+            assert_eq!(
+                Ok(block.body),
+                payload_body
+                    .transactions
+                    .iter()
+                    .map(|x| TransactionSigned::decode(&mut &x[..]))
+                    .collect::<Result<Vec<_>, _>>(),
+            );
+
+            assert_eq!(block.withdrawals.unwrap_or_default(), payload_body.withdrawals);
+        }
     }
 }
