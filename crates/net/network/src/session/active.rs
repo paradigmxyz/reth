@@ -16,7 +16,7 @@ use reth_eth_wire::{
     capability::Capabilities,
     errors::{EthHandshakeError, EthStreamError, P2PStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    DisconnectReason, EthMessage, EthStream, EthVersion, P2PStream,
+    DisconnectReason, EthMessage, EthStream, P2PStream,
 };
 use reth_interfaces::p2p::error::RequestError;
 use reth_metrics_common::metered_sender::MeteredSender;
@@ -179,7 +179,7 @@ impl ActiveSession {
                 self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
             }
             EthMessage::NewPooledTransactionHashes66(msg) => {
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg)).into()
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
                 if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
@@ -192,8 +192,7 @@ impl ActiveSession {
                         message: EthMessage::NewPooledTransactionHashes68(msg),
                     }
                 }
-                // TODO revise `PeerMessage::PooledTransactions` to have `types` and `sizes`
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.hashes.into())).into()
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
@@ -251,12 +250,8 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
             PeerMessage::PooledTransactions(msg) => {
-                if self.conn.version() >= EthVersion::Eth68 {
-                    // TODO
-                    // we don't know types and sizes yet
-                } else {
-                    self.queued_outgoing
-                        .push_back(EthMessage::NewPooledTransactionHashes66(msg).into());
+                if msg.is_valid_for_version(self.conn.version()) {
+                    self.queued_outgoing.push_back(EthMessage::from(msg).into());
                 }
             }
             PeerMessage::EthRequest(req) => {

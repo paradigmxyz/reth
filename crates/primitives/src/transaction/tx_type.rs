@@ -14,12 +14,22 @@ pub enum TxType {
     EIP1559 = 2_isize,
 }
 
+impl From<TxType> for u8 {
+    fn from(value: TxType) -> Self {
+        match value {
+            TxType::Legacy => 0,
+            TxType::EIP2930 => 1,
+            TxType::EIP1559 => 2,
+        }
+    }
+}
+
 impl Compact for TxType {
     fn to_compact(self, _: &mut impl bytes::BufMut) -> usize {
         match self {
             TxType::Legacy => 0,
             TxType::EIP2930 => 1,
-            _ => 2,
+            TxType::EIP1559 => 2,
         }
     }
 
