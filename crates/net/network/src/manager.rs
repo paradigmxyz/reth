@@ -36,7 +36,7 @@ use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
-    DisconnectReason, Status,
+    DisconnectReason, EthVersion, Status,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
@@ -632,6 +632,7 @@ where
                             peer_id,
                             remote_addr,
                             capabilities,
+                            version,
                             messages,
                             status,
                             direction,
@@ -656,6 +657,7 @@ where
                             this.event_listeners.send(NetworkEvent::SessionEstablished {
                                 peer_id,
                                 capabilities,
+                                version,
                                 status,
                                 messages,
                             });
@@ -843,6 +845,8 @@ pub enum NetworkEvent {
         messages: PeerRequestSender,
         /// The status of the peer to which a session was established.
         status: Status,
+        /// negotiated eth version of the session
+        version: EthVersion,
     },
     /// Event emitted when a new peer is added
     PeerAdded(PeerId),
