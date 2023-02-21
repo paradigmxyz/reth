@@ -1,10 +1,10 @@
 #![allow(missing_docs)]
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes,
-    NodeData, PooledTransactions, Receipts, Status, Transactions,
+    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
+    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::SharedTransactions;
+use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
 use reth_primitives::bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
@@ -22,10 +22,9 @@ pub struct ProtocolMessage {
 
 impl ProtocolMessage {
     /// Create a new ProtocolMessage from a message type and message rlp bytes.
-    pub fn decode_message(
-        message_type: EthMessageID,
-        buf: &mut &[u8],
-    ) -> Result<Self, reth_rlp::DecodeError> {
+    pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, EthStreamError> {
+        let message_type = EthMessageID::decode(buf)?;
+
         let message = match message_type {
             EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
             EthMessageID::NewBlockHashes => {
@@ -34,7 +33,15 @@ impl ProtocolMessage {
             EthMessageID::NewBlock => EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?)),
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
-                EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes::decode(buf)?)
+                if version >= EthVersion::Eth68 {
+                    EthMessage::NewPooledTransactionHashes68(NewPooledTransactionHashes68::decode(
+                        buf,
+                    )?)
+                } else {
+                    EthMessage::NewPooledTransactionHashes66(NewPooledTransactionHashes66::decode(
+                        buf,
+                    )?)
+                }
             }
             EthMessageID::GetBlockHeaders => {
                 let request_pair = RequestPair::<GetBlockHeaders>::decode(buf)?;
@@ -61,10 +68,22 @@ impl ProtocolMessage {
                 EthMessage::PooledTransactions(request_pair)
             }
             EthMessageID::GetNodeData => {
+                if version >= EthVersion::Eth67 {
+                    return Err(EthStreamError::EthInvalidMessageError(
+                        version,
+                        EthMessageID::GetNodeData,
+                    ))
+                }
                 let request_pair = RequestPair::<GetNodeData>::decode(buf)?;
                 EthMessage::GetNodeData(request_pair)
             }
             EthMessageID::NodeData => {
+                if version >= EthVersion::Eth67 {
+                    return Err(EthStreamError::EthInvalidMessageError(
+                        version,
+                        EthMessageID::GetNodeData,
+                    ))
+                }
                 let request_pair = RequestPair::<NodeData>::decode(buf)?;
                 EthMessage::NodeData(request_pair)
             }
@@ -90,15 +109,6 @@ impl Encodable for ProtocolMessage {
     }
     fn length(&self) -> usize {
         self.message_type.length() + self.message.length()
-    }
-}
-
-/// Decodes a protocol message from bytes, using the first byte to determine the message type.
-/// This decodes `eth/66` request ids for each message type.
-impl Decodable for ProtocolMessage {
-    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
-        let message_type = EthMessageID::decode(buf)?;
-        Self::decode_message(message_type, buf)
     }
 }
 
@@ -133,7 +143,7 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
     }
 }
 
-/// Represents a message in the eth wire protocol, versions 66 and 67.
+/// Represents a message in the eth wire protocol, versions 66, 67 and 68.
 ///
 /// The ethereum wire protocol is a set of messages that are broadcasted to the network in two
 /// styles:
@@ -141,8 +151,15 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 ///  response message (such as [`PooledTransactions`]).
 ///  * A message that is broadcast to the network, without a corresponding request.
 ///
-///  The newer `eth/66` is an efficiency upgrade on top of `eth/65`, introducing a request id to
-///  correlate request-response message pairs. This allows for request multiplexing.
+/// The newer `eth/66` is an efficiency upgrade on top of `eth/65`, introducing a request id to
+/// correlate request-response message pairs. This allows for request multiplexing.
+///
+/// The `eth/67` is based on `eth/66` but only removes two messages, [`GetNodeData`] and
+/// [``NodeData].
+///
+/// The `eth/68` changes only NewPooledTransactionHashes to include `types` and `sized`. For
+/// it, NewPooledTransactionHashes is renamed as [`NewPooledTransactionHashes66`] and
+/// [`NewPooledTransactionHashes68`] is defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessage {
@@ -152,7 +169,8 @@ pub enum EthMessage {
     NewBlockHashes(NewBlockHashes),
     NewBlock(Box<NewBlock>),
     Transactions(Transactions),
-    NewPooledTransactionHashes(NewPooledTransactionHashes),
+    NewPooledTransactionHashes66(NewPooledTransactionHashes66),
+    NewPooledTransactionHashes68(NewPooledTransactionHashes68),
 
     // The following messages are request-response message pairs
     GetBlockHeaders(RequestPair<GetBlockHeaders>),
@@ -175,7 +193,8 @@ impl EthMessage {
             EthMessage::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             EthMessage::NewBlock(_) => EthMessageID::NewBlock,
             EthMessage::Transactions(_) => EthMessageID::Transactions,
-            EthMessage::NewPooledTransactionHashes(_) => EthMessageID::NewPooledTransactionHashes,
+            EthMessage::NewPooledTransactionHashes66(_) |
+            EthMessage::NewPooledTransactionHashes68(_) => EthMessageID::NewPooledTransactionHashes,
             EthMessage::GetBlockHeaders(_) => EthMessageID::GetBlockHeaders,
             EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
             EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
@@ -197,7 +216,8 @@ impl Encodable for EthMessage {
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
             EthMessage::NewBlock(new_block) => new_block.encode(out),
             EthMessage::Transactions(transactions) => transactions.encode(out),
-            EthMessage::NewPooledTransactionHashes(hashes) => hashes.encode(out),
+            EthMessage::NewPooledTransactionHashes66(hashes) => hashes.encode(out),
+            EthMessage::NewPooledTransactionHashes68(hashes) => hashes.encode(out),
             EthMessage::GetBlockHeaders(request) => request.encode(out),
             EthMessage::BlockHeaders(headers) => headers.encode(out),
             EthMessage::GetBlockBodies(request) => request.encode(out),
@@ -216,7 +236,8 @@ impl Encodable for EthMessage {
             EthMessage::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
             EthMessage::NewBlock(new_block) => new_block.length(),
             EthMessage::Transactions(transactions) => transactions.length(),
-            EthMessage::NewPooledTransactionHashes(hashes) => hashes.length(),
+            EthMessage::NewPooledTransactionHashes66(hashes) => hashes.length(),
+            EthMessage::NewPooledTransactionHashes68(hashes) => hashes.length(),
             EthMessage::GetBlockHeaders(request) => request.length(),
             EthMessage::BlockHeaders(headers) => headers.length(),
             EthMessage::GetBlockBodies(request) => request.length(),
@@ -403,7 +424,10 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::types::message::RequestPair;
+    use crate::{
+        errors::EthStreamError, types::message::RequestPair, EthMessage, EthMessageID, GetNodeData,
+        NodeData, ProtocolMessage,
+    };
     use hex_literal::hex;
     use reth_rlp::{Decodable, Encodable};
 
@@ -411,6 +435,25 @@ mod test {
         let mut buf = vec![];
         value.encode(&mut buf);
         buf
+    }
+
+    #[test]
+    fn test_removed_message_at_eth67() {
+        let get_node_data =
+            EthMessage::GetNodeData(RequestPair { request_id: 1337, message: GetNodeData(vec![]) });
+        let buf = encode(ProtocolMessage {
+            message_type: EthMessageID::GetNodeData,
+            message: get_node_data,
+        });
+        let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
+        assert!(matches!(msg, Err(EthStreamError::EthInvalidMessageError(..))));
+
+        let node_data =
+            EthMessage::NodeData(RequestPair { request_id: 1337, message: NodeData(vec![]) });
+        let buf =
+            encode(ProtocolMessage { message_type: EthMessageID::NodeData, message: node_data });
+        let msg = ProtocolMessage::decode_message(crate::EthVersion::Eth67, &mut &buf[..]);
+        assert!(matches!(msg, Err(EthStreamError::EthInvalidMessageError(..))));
     }
 
     #[test]

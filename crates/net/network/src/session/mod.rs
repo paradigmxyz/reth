@@ -17,7 +17,7 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
+    DisconnectReason, EthVersion, HelloMessage, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_metrics_common::metered_sender::MeteredSender;
 use reth_net_common::{
@@ -434,6 +434,9 @@ impl SessionManager {
                     self.initial_internal_request_timeout.as_millis() as u64,
                 ));
 
+                // negotiated version
+                let version = conn.version();
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -461,6 +464,7 @@ impl SessionManager {
                     direction,
                     session_id,
                     remote_id: peer_id,
+                    version,
                     established: Instant::now(),
                     capabilities: Arc::clone(&capabilities),
                     commands_to_session,
@@ -474,6 +478,7 @@ impl SessionManager {
                 Poll::Ready(SessionEvent::SessionEstablished {
                     peer_id,
                     remote_addr,
+                    version,
                     capabilities,
                     status,
                     messages,
@@ -590,6 +595,8 @@ pub(crate) enum SessionEvent {
         peer_id: PeerId,
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
+        /// negotiated eth version
+        version: EthVersion,
         status: Status,
         messages: PeerRequestSender,
         direction: Direction,

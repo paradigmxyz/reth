@@ -948,7 +948,7 @@ mod tests {
     #[test]
     fn test_peer_lower_capability_version() {
         let local_capabilities: Vec<Capability> =
-            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into()];
+            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
         let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
 
         let shared_capability =

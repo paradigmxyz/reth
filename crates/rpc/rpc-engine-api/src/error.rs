@@ -4,8 +4,13 @@ use thiserror::Error;
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
 
+/// Payload unknown error code.
+pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
+/// Request too large error code.
+pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
+
 /// Error returned by [`EngineApi`][crate::EngineApi]
-#[derive(Error, Debug)]
+#[derive(Error, PartialEq, Debug)]
 pub enum EngineApiError {
     /// Invalid payload extra data.
     #[error("Invalid payload extra data: {0}")]
@@ -41,6 +46,15 @@ pub enum EngineApiError {
     /// Unknown payload requested.
     #[error("Unknown payload")]
     PayloadUnknown,
+    /// The payload body request length is too large.
+    #[error("Payload request too large: {len}")]
+    PayloadRequestTooLarge {
+        /// The length that was requested.
+        len: u64,
+    },
+    /// The params are invalid.
+    #[error("Invalid params")]
+    InvalidParams,
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
         "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"

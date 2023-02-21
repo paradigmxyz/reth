@@ -1,4 +1,4 @@
-use crate::{rpc::BlockNumber as RpcBlockNumber, BlockNumber, H256};
+use crate::{BlockNumber, BlockNumberOrTag, H256};
 
 /// Current status of the blockchain's head.
 #[derive(Default, Debug, Eq, PartialEq)]
@@ -15,14 +15,14 @@ pub struct ChainInfo {
 
 impl ChainInfo {
     /// Attempts to convert a [BlockNumber](crate::rpc::BlockNumber) enum to a numeric value
-    pub fn convert_block_number(&self, number: RpcBlockNumber) -> Option<u64> {
+    pub fn convert_block_number(&self, number: BlockNumberOrTag) -> Option<u64> {
         match number {
-            RpcBlockNumber::Finalized => self.last_finalized,
-            RpcBlockNumber::Safe => self.safe_finalized,
-            RpcBlockNumber::Earliest => Some(0),
-            RpcBlockNumber::Number(num) => Some(num.as_u64()),
-            RpcBlockNumber::Pending => None,
-            RpcBlockNumber::Latest => Some(self.best_number),
+            BlockNumberOrTag::Finalized => self.last_finalized,
+            BlockNumberOrTag::Safe => self.safe_finalized,
+            BlockNumberOrTag::Earliest => Some(0),
+            BlockNumberOrTag::Number(num) => Some(num),
+            BlockNumberOrTag::Pending => None,
+            BlockNumberOrTag::Latest => Some(self.best_number),
         }
     }
 }

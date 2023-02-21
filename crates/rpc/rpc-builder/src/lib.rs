@@ -51,9 +51,13 @@
 //! }
 //! ```
 
+use hyper::{http::HeaderValue, Method};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
-    core::{server::rpc_module::Methods, Error as RpcError},
+    core::{
+        server::{host_filtering::AllowHosts, rpc_module::Methods},
+        Error as RpcError,
+    },
     server::{Server, ServerHandle},
     RpcModule,
 };
@@ -72,6 +76,8 @@ use std::{
     str::FromStr,
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
@@ -500,6 +506,8 @@ where
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder>,
+    /// Cors Domains
+    http_cors_domains: Option<String>,
     /// Configs for WS server
     ws_server_config: Option<ServerBuilder>,
     /// Address where to bind the http server to
@@ -529,10 +537,14 @@ impl RpcServerConfig {
     pub fn ipc(config: IpcServerBuilder) -> Self {
         Self::default().with_ipc(config)
     }
-
     /// Configures the http server
     pub fn with_http(mut self, config: ServerBuilder) -> Self {
         self.http_server_config = Some(config.http_only());
+        self
+    }
+    /// Configure the corsdomains
+    pub fn with_cors(mut self, cors_domain: String) -> Self {
+        self.http_cors_domains = Some(cors_domain);
         self
     }
 
@@ -609,9 +621,18 @@ impl RpcServerConfig {
         )));
 
         if let Some(builder) = self.http_server_config {
-            let http_server = builder.build(http_socket_addr).await?;
-            server.http_local_addr = http_server.local_addr().ok();
-            server.http = Some(http_server);
+            if let Some(cors) = self.http_cors_domains.as_deref().map(create_cors_layer) {
+                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
+                let middleware = tower::ServiceBuilder::new().layer(cors);
+                let http_server =
+                    builder.set_middleware(middleware).build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::WithCors(http_server));
+            } else {
+                let http_server = builder.build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::Plain(http_server));
+            }
         }
 
         let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
@@ -635,6 +656,48 @@ impl RpcServerConfig {
 
         Ok(server)
     }
+}
+
+/// Error thrown when parsing cors domains went wrong
+#[derive(Debug, thiserror::Error)]
+enum CorsDomainError {
+    #[error("{domain} is an invalid header value")]
+    InvalidHeader { domain: String },
+    #[error("Wildcard origin (`*`) cannot be passed as part of a list: {input}")]
+    WildCardNotAllowed { input: String },
+}
+
+/// Creates a [CorsLayer] from the given domains
+fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, CorsDomainError> {
+    let cors = match http_cors_domains.trim() {
+        "*" => CorsLayer::new()
+            .allow_methods([Method::GET, Method::POST])
+            .allow_origin(Any)
+            .allow_headers(Any),
+        _ => {
+            let iter = http_cors_domains.split(',');
+            if iter.clone().any(|o| o == "*") {
+                return Err(CorsDomainError::WildCardNotAllowed {
+                    input: http_cors_domains.to_string(),
+                })
+            }
+
+            let origins = iter
+                .map(|domain| {
+                    domain
+                        .parse::<HeaderValue>()
+                        .map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
+                })
+                .collect::<Result<Vec<HeaderValue>, _>>()?;
+
+            let origin = AllowOrigin::list(origins);
+            CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST])
+                .allow_origin(origin)
+                .allow_headers(Any)
+        }
+    };
+    Ok(cors)
 }
 
 /// Holds modules to be installed per transport type
@@ -742,11 +805,18 @@ pub struct RpcServer {
     /// The address of the ws server
     ws_local_addr: Option<SocketAddr>,
     /// http server
-    http: Option<Server>,
+    http: Option<HttpServer>,
     /// ws server
     ws: Option<Server>,
     /// ipc server
     ipc: Option<IpcServer>,
+}
+/// Http Servers Enum
+pub enum HttpServer {
+    /// Http server
+    Plain(Server),
+    /// Http server with cors
+    WithCors(Server<Stack<CorsLayer, Identity>>),
 }
 
 // === impl RpcServer ===
@@ -787,7 +857,14 @@ impl RpcServer {
         if let Some((server, module)) =
             self.http.and_then(|server| http.map(|module| (server, module)))
         {
-            handle.http = Some(server.start(module)?);
+            match server {
+                HttpServer::Plain(server) => {
+                    handle.http = Some(server.start(module)?);
+                }
+                HttpServer::WithCors(server) => {
+                    handle.http = Some(server.start(module)?);
+                }
+            }
         }
 
         if let Some((server, module)) = self.ws.and_then(|server| ws.map(|module| (server, module)))
