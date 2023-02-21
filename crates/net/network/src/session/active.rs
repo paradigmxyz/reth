@@ -1041,7 +1041,7 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             client_stream
-                .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
+                .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
                 .await
                 .unwrap();
             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;
