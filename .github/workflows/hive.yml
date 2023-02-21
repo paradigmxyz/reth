@@ -95,7 +95,7 @@ jobs:
       - name: Run ${{ matrix.sim }} simulator
         run: |
           cd hivetests
-          hive --sim ${{ matrix.sim }} --client reth
+          hive --sim "${{ matrix.sim }}$" --client reth
 
       - name: Print simulator output
         if: ${{ failure() }}
