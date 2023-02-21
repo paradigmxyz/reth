@@ -17,12 +17,13 @@ reth-rpc-types = { path = "../rpc-types" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 jsonrpsee = { version = "0.16", features = ["server"] }
+tower-http = { version = "0.3", features = ["full"] }
+tower = {version = "0.4" , features = ["full"] }
+hyper = "0.14"
 
 strum = { version = "0.24", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
-tower-http = { version = "0.3.4", features = ["full"] }
-hyper = "0.14.24"
-tower = {version = "0.4.13" , features = ["full"] }
+thiserror = "1.0"
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }
