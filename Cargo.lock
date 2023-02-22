@@ -4557,6 +4557,7 @@ name = "reth-eth-wire"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "async-trait",
  "bytes",
  "ethers-core",
  "futures",
