@@ -66,15 +66,15 @@ pub struct RpcServerArgs {
     pub ipcpath: Option<String>,
 
     /// Auth server address to listen on
-    #[arg(long = "auth.addr")]
+    #[arg(long = "authrpc.addr")]
     pub auth_addr: Option<IpAddr>,
 
     /// Auth server port to listen on
-    #[arg(long = "auth.port")]
+    #[arg(long = "authrpc.port")]
     pub auth_port: Option<u16>,
 
     /// Path to a JWT secret to use for authenticated RPC endpoints
-    #[arg(long = "auth.jwtsecret", value_name = "PATH", global = true, required = false)]
+    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
     auth_jwtsecret: Option<PlatformPath<JwtSecretPath>>,
 }
 
