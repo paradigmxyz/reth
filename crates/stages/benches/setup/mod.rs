@@ -11,7 +11,7 @@ use reth_interfaces::test_utils::generators::{
 };
 use reth_primitives::{Account, Address, SealedBlock, H256};
 use reth_stages::{
-    stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
+    stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestTransaction,
     DBTrieLoader, ExecInput, Stage, UnwindInput,
 };

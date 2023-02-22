@@ -1,7 +1,7 @@
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
@@ -54,7 +54,7 @@ where
         Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
     }
 
-    fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
+    fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
         assert!(false, "Use batch instead.");
         Ok(())
     }
@@ -78,7 +78,7 @@ where
         Ok(())
     }
 
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
+    fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
         assert!(false, "Use batch instead.");
         Ok(())
     }
@@ -133,7 +133,7 @@ where
         Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
     }
 
-    fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
+    fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
         assert!(false, "Use batch instead.");
         Ok(())
     }
@@ -162,7 +162,7 @@ where
         Ok(())
     }
 
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
+    fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
         assert!(false, "Use batch instead.");
         Ok(())
     }
