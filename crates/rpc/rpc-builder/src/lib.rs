@@ -85,6 +85,7 @@ pub mod auth;
 
 /// Common RPC constants.
 pub mod constants;
+use constants::*;
 
 /// Cors utilities.
 mod cors;
@@ -613,7 +614,7 @@ impl RpcServerConfig {
 
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::UNSPECIFIED,
-            constants::DEFAULT_HTTP_RPC_PORT,
+            DEFAULT_HTTP_RPC_PORT,
         )));
 
         if let Some(builder) = self.http_server_config {
@@ -633,7 +634,7 @@ impl RpcServerConfig {
 
         let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::UNSPECIFIED,
-            constants::DEFAULT_WS_RPC_PORT,
+            DEFAULT_WS_RPC_PORT,
         )));
 
         if let Some(builder) = self.ws_server_config {
@@ -645,7 +646,7 @@ impl RpcServerConfig {
         if let Some(builder) = self.ipc_server_config {
             let ipc_path = self
                 .ipc_endpoint
-                .unwrap_or_else(|| Endpoint::new(constants::DEFAULT_IPC_ENDPOINT.to_string()));
+                .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
             let ipc = builder.build(ipc_path.path())?;
             server.ipc = Some(ipc);
         }
