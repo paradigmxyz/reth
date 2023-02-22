@@ -6,6 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_primitives::{Address, TransactionKind, TxHash, U256};
+use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
@@ -76,6 +77,48 @@ pub trait TransactionValidator: Send + Sync {
             ))
         } else {
             Ok(())
+        }
+    }
+}
+
+pub struct EthTransactionValidator<Client: AccountProvider> {
+    /// This type fetches account info from the db
+    client: Client,
+    /// whether shanghai is enabled.
+    shanghai: bool,
+}
+
+#[async_trait::async_trait]
+impl<T: PoolTransaction + AccountProvider> TransactionValidator for EthTransactionValidator<T> {
+    type Transaction = T;
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        
+        // TODO : Checks for chainid
+
+        // TODO : Checks for gaslimit
+
+        let account = self.client.basic_account(transaction.sender())?.unwrap_or_default();
+
+        // Checks for nonce
+        if transaction.nonce() < account.nonce {
+            // return TransactionValidationOutcome::Invalid(transaction, PoolError::);
+        }
+
+        // Checks for max cost
+        if transaction.cost() > account.balance {
+            // return TransactionValidationOutcome::Invalid(transaction, PoolError::);
+        }
+
+        // Return the valid transaction
+        TransactionValidationOutcome::Valid {
+            balance: account.balance,
+            state_nonce: account.nonce,
+            transaction,
         }
     }
 }

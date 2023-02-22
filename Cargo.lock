@@ -5107,6 +5107,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-metrics-derive",
  "reth-primitives",
+ "reth-provider",
  "ruint",
  "serde",
  "thiserror",

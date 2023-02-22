@@ -19,6 +19,7 @@ normal = [
 
 # eth
 reth-primitives = { path  = "../primitives" }
+reth-provider = { path = "../storage/provider" }
 
 # async/futures
 async-trait = "0.1"
