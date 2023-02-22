@@ -3,6 +3,7 @@ use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
+use reth_rlp::Encodable;
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
@@ -287,6 +288,12 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
+
+    /// Returns the transaction type
+    fn tx_type(&self) -> u8;
+
+    /// Returns the length of the rlp encoded object
+    fn encoded_length(&self) -> usize;
 }
 
 /// The default [PoolTransaction] for the [Pool](crate::Pool).
@@ -371,6 +378,16 @@ impl PoolTransaction for PooledTransaction {
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize {
         self.transaction.transaction.input().len()
+    }
+
+    /// Returns the transaction type
+    fn tx_type(&self) -> u8 {
+        self.transaction.tx_type().into()
+    }
+
+    /// Returns the length of the rlp encoded object
+    fn encoded_length(&self) -> usize {
+        self.transaction.length()
     }
 }
 
