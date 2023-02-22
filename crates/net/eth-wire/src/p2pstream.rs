@@ -1,6 +1,7 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use crate::{
     capability::{Capability, SharedCapability},
+    disconnect::CanDisconnect,
     errors::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage,
@@ -69,25 +70,6 @@ impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
     pub fn new(inner: S) -> Self {
         Self { inner }
-    }
-}
-
-impl<S> UnauthedP2PStream<S>
-where
-    S: Sink<Bytes, Error = io::Error> + Unpin,
-{
-    /// Send a disconnect message during the handshake. This is sent without snappy compression.
-    pub async fn send_disconnect(
-        &mut self,
-        reason: DisconnectReason,
-    ) -> Result<(), P2PStreamError> {
-        let mut buf = BytesMut::new();
-        P2PMessage::Disconnect(reason).encode(&mut buf);
-        tracing::trace!(
-            %reason,
-            "Sending disconnect message during the handshake",
-        );
-        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
     }
 }
 
@@ -177,6 +159,35 @@ where
         let stream = P2PStream::new(self.inner, shared_capability);
 
         Ok((stream, their_hello))
+    }
+}
+
+impl<S> UnauthedP2PStream<S>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Send a disconnect message during the handshake. This is sent without snappy compression.
+    pub async fn send_disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Result<(), P2PStreamError> {
+        let mut buf = BytesMut::new();
+        P2PMessage::Disconnect(reason).encode(&mut buf);
+        tracing::trace!(
+            %reason,
+            "Sending disconnect message during the handshake",
+        );
+        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
+    }
+}
+
+#[async_trait::async_trait]
+impl<S> CanDisconnect<Bytes> for P2PStream<S>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
+{
+    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
+        self.disconnect(reason).await
     }
 }
 
@@ -284,13 +295,13 @@ impl<S> P2PStream<S> {
 
 impl<S> P2PStream<S>
 where
-    S: Sink<Bytes, Error = io::Error> + Unpin,
+    S: Sink<Bytes, Error = io::Error> + Unpin + Send,
 {
     /// Disconnects the connection by sending a disconnect message.
     ///
     /// This future resolves once the disconnect message has been sent and the stream has been
     /// closed.
-    pub async fn disconnect(mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
+    pub async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
         self.start_disconnect(reason)?;
         self.close().await
     }
@@ -821,7 +832,7 @@ mod tests {
 
             let (server_hello, _) = eth_hello();
 
-            let (p2p_stream, _) =
+            let (mut p2p_stream, _) =
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
             p2p_stream.disconnect(expected_disconnect).await.unwrap();
