@@ -1,7 +1,7 @@
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
@@ -55,13 +55,31 @@ where
     }
 
     fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
-        // Caching and bulk inserting shouldn't be needed, as the data is ordered
-        self.tx.put::<tables::AccountsTrie>(H256::from_slice(key.as_slice()), value)?;
+        assert!(false, "Use batch instead.");
+        Ok(())
+    }
+
+    // Insert a batch of data into the cache.
+    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        for i in 0..keys.len() {
+            cursor.upsert(H256::from_slice(keys[i].as_slice()), values[i].clone())?;
+        }
+        Ok(())
+    }
+
+    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
+        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        for i in 0..keys.len() {
+            if cursor.seek_exact(H256::from_slice(keys[i].as_slice()))?.is_some() {
+                cursor.delete_current()?;
+            }
+        }
         Ok(())
     }
 
     fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
-        self.tx.delete::<tables::AccountsTrie>(H256::from_slice(key), None)?;
+        assert!(false, "Use batch instead.");
         Ok(())
     }
 
@@ -104,7 +122,11 @@ where
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         let mut cursor = self.tx.cursor_dup_read::<tables::StoragesTrie>()?;
-        Ok(cursor.seek_by_key_subkey(self.key, H256::from_slice(key))?.map(|entry| entry.node))
+        let subkey = H256::from_slice(key);
+        Ok(cursor
+            .seek_by_key_subkey(self.key, subkey)?
+            .filter(|entry| entry.hash == subkey)
+            .map(|entry| entry.node))
     }
 
     fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
@@ -112,28 +134,36 @@ where
     }
 
     fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
-        // Caching and bulk inserting shouldn't be needed, as the data is ordered
-        self.tx.put::<tables::StoragesTrie>(
-            self.key,
-            StorageTrieEntry { hash: H256::from_slice(key.as_slice()), node: value },
-        )?;
+        assert!(false, "Use batch instead.");
+        Ok(())
+    }
+
+    /// Insert a batch of data into the cache.
+    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+        let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        for i in 0..keys.len() {
+            let hash = H256::from_slice(keys[i].as_slice());
+            if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
+                cursor.delete_current()?;
+            }
+            cursor.upsert(self.key, StorageTrieEntry { hash, node: values[i].clone() })?;
+        }
+        Ok(())
+    }
+
+    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
+        let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        for i in 0..keys.len() {
+            let hash = H256::from_slice(keys[i].as_slice());
+            if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
+                cursor.delete_current()?;
+            }
+        }
         Ok(())
     }
 
     fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
-        let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        let subkey = H256::from_slice(key);
-
-        cursor
-            .seek_by_key_subkey(self.key, subkey)?
-            .map(|v| {
-                if v.hash == subkey {
-                    cursor.delete_current().map_err(|e| TrieError::DatabaseError(e))
-                } else {
-                    Err(TrieError::MissingRoot(self.key))
-                }
-            })
-            .transpose()?;
+        assert!(false, "Use batch instead.");
         Ok(())
     }
 
@@ -147,7 +177,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
     fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        if cursor.seek_by_key_subkey(key, root)?.is_none() {
+        if cursor.seek_by_key_subkey(key, root)?.filter(|entry| entry.hash == root).is_none() {
             tx.put::<tables::StoragesTrie>(
                 key,
                 StorageTrieEntry { hash: root, node: [EMPTY_STRING_CODE].to_vec() },
@@ -163,6 +193,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
         }
         tx.cursor_dup_read::<tables::StoragesTrie>()?
             .seek_by_key_subkey(key, root)?
+            .filter(|entry| entry.hash == root)
             .ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx, key })
     }
@@ -320,7 +351,7 @@ impl DBTrieLoader {
 
         for key in changed_storages {
             if let Some(StorageEntry { value, .. }) =
-                storage_cursor.seek_by_key_subkey(address, key)?
+                storage_cursor.seek_by_key_subkey(address, key)?.filter(|e| e.key == key)
             {
                 let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes().to_vec(), out)?;
