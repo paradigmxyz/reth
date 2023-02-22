@@ -1,9 +1,4 @@
-use criterion::{
-    async_executor::FuturesExecutor, criterion_group, criterion_main, measurement::WallTime,
-    BenchmarkGroup, Criterion,
-};
 use itertools::concat;
-use pprof::criterion::{Output, PProfProfiler};
 use reth_db::{
     cursor::DbCursorRO,
     mdbx::{Env, WriteMap},
@@ -16,12 +11,9 @@ use reth_interfaces::test_utils::generators::{
 };
 use reth_primitives::{Account, Address, SealedBlock, H256};
 use reth_stages::{
-    stages::{
-        AccountHashingStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TotalDifficultyStage, TransactionLookupStage,
-    },
+    stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
     test_utils::TestTransaction,
-    DBTrieLoader, ExecInput, Stage, StageId, UnwindInput,
+    DBTrieLoader, ExecInput, Stage, UnwindInput,
 };
 use std::{
     collections::BTreeMap,
@@ -75,6 +67,9 @@ pub(crate) fn unwind_hashes<S: Clone + Stage<Env<WriteMap>>>(
 
         StorageHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
         AccountHashingStage::default().unwind(&mut db_tx, unwind).await.unwrap();
+
+        let target_root = db_tx.get_header(unwind.unwind_to).unwrap().state_root;
+        let _ = db_tx.delete::<tables::AccountsTrie>(target_root, None);
 
         // Clear previous run
         stage.unwind(&mut db_tx, unwind).await.unwrap();
