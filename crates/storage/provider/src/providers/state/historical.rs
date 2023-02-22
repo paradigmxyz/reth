@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider, Error,
-    StateProvider,
+    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
+    DBTrieLoader, Error, StateProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Account, Address, Bytes, StorageKey, StorageValue, TransitionId, H256, U256,
+    keccak256, Account, Address, Bytes, StorageKey, StorageValue, TransitionId, H256, U256,
 };
 use std::marker::PhantomData;
 
@@ -120,10 +120,29 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get account and storage proofs.
     fn proof(
         &self,
-        _address: Address,
-        _keys: Vec<H256>,
+        address: Address,
+        keys: Vec<H256>,
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
-        todo!()
+        let hashed_address = keccak256(address);
+        let loader = DBTrieLoader::default();
+        let root = self
+            .tx
+            .cursor_read::<tables::Headers>()?
+            .last()?
+            .ok_or(Error::Header { number: 0 })?
+            .1
+            .state_root;
+        let (acc_proof, stg_root) = loader
+            .generate_acount_proof(self.tx, root, hashed_address)
+            .map_err(|_| Error::StateTree)?;
+        let stg_proof = loader
+            .generate_storage_proofs(self.tx, stg_root, hashed_address, keys)
+            .map_err(|_| Error::StateTree)?;
+        Ok((
+            acc_proof.into_iter().map(Bytes::from).collect(),
+            stg_root,
+            stg_proof.into_iter().map(|v| v.into_iter().map(Bytes::from).collect()).collect(),
+        ))
     }
 }
 
