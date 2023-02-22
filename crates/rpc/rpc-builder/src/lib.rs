@@ -52,7 +52,6 @@
 //! ```
 
 use hyper::{http::HeaderValue, Method};
-pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     core::{
         server::{host_filtering::AllowHosts, rpc_module::Methods},
@@ -62,7 +61,6 @@ use jsonrpsee::{
     RpcModule,
 };
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{AdminApi, DebugApi, EthApi, NetApi, TraceApi, Web3Api};
@@ -77,21 +75,20 @@ use std::{
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
-use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
-/// The default port for the http server
-pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
-/// The default port for the ws server
-pub const DEFAULT_WS_RPC_PORT: u16 = 8546;
+/// Auth server utilities.
+pub mod auth;
 
-/// The default IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
+/// Common RPC constants.
+pub mod constants;
+use constants::*;
 
-/// The default IPC endpoint
-#[cfg(not(windows))]
-pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
+/// Cors utilities.
+mod cors;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Client, Pool, Network>(
@@ -508,10 +505,10 @@ pub struct RpcServerConfig {
     http_server_config: Option<ServerBuilder>,
     /// Cors Domains
     http_cors_domains: Option<String>,
-    /// Configs for WS server
-    ws_server_config: Option<ServerBuilder>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
+    /// Configs for WS server
+    ws_server_config: Option<ServerBuilder>,
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
@@ -621,7 +618,7 @@ impl RpcServerConfig {
         )));
 
         if let Some(builder) = self.http_server_config {
-            if let Some(cors) = self.http_cors_domains.as_deref().map(create_cors_layer) {
+            if let Some(cors) = self.http_cors_domains.as_deref().map(cors::create_cors_layer) {
                 let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
                 let middleware = tower::ServiceBuilder::new().layer(cors);
                 let http_server =
@@ -656,48 +653,6 @@ impl RpcServerConfig {
 
         Ok(server)
     }
-}
-
-/// Error thrown when parsing cors domains went wrong
-#[derive(Debug, thiserror::Error)]
-enum CorsDomainError {
-    #[error("{domain} is an invalid header value")]
-    InvalidHeader { domain: String },
-    #[error("Wildcard origin (`*`) cannot be passed as part of a list: {input}")]
-    WildCardNotAllowed { input: String },
-}
-
-/// Creates a [CorsLayer] from the given domains
-fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, CorsDomainError> {
-    let cors = match http_cors_domains.trim() {
-        "*" => CorsLayer::new()
-            .allow_methods([Method::GET, Method::POST])
-            .allow_origin(Any)
-            .allow_headers(Any),
-        _ => {
-            let iter = http_cors_domains.split(',');
-            if iter.clone().any(|o| o == "*") {
-                return Err(CorsDomainError::WildCardNotAllowed {
-                    input: http_cors_domains.to_string(),
-                })
-            }
-
-            let origins = iter
-                .map(|domain| {
-                    domain
-                        .parse::<HeaderValue>()
-                        .map_err(|_| CorsDomainError::InvalidHeader { domain: domain.to_string() })
-                })
-                .collect::<Result<Vec<HeaderValue>, _>>()?;
-
-            let origin = AllowOrigin::list(origins);
-            CorsLayer::new()
-                .allow_methods([Method::GET, Method::POST])
-                .allow_origin(origin)
-                .allow_headers(Any)
-        }
-    };
-    Ok(cors)
 }
 
 /// Holds modules to be installed per transport type

@@ -4369,6 +4369,7 @@ dependencies = [
  "reth-rlp",
  "reth-rpc",
  "reth-rpc-builder",
+ "reth-rpc-engine-api",
  "reth-staged-sync",
  "reth-stages",
  "reth-tasks",
@@ -4944,6 +4945,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
+ "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-tracing",
  "reth-transaction-pool",
@@ -5099,6 +5101,7 @@ version = "0.1.0"
 dependencies = [
  "aquamarine",
  "async-trait",
+ "auto_impl 1.0.1",
  "bitflags",
  "fnv",
  "futures-util",

@@ -36,6 +36,7 @@ use reth_network::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
+use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -50,7 +51,8 @@ use reth_stages::{
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
-use tracing::{debug, info, trace, warn};
+use tokio::sync::{mpsc::unbounded_channel, watch};
+use tracing::*;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -124,6 +126,7 @@ impl Command {
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint()?;
@@ -132,7 +135,7 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let consensus = self.init_consensus()?;
+        let (consensus, forkchoice_state_tx) = self.init_consensus()?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
         self.init_trusted_nodes(&mut config);
@@ -143,19 +146,29 @@ impl Command {
         let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
-        // TODO: Use the resolved secret to spawn the Engine API server
-        // Look at `reth_rpc::AuthLayer` for integration hints
-        let _secret = self.rpc.jwt_secret();
+        let test_transaction_pool = reth_transaction_pool::test_utils::testing_pool();
+        info!(target: "reth::cli", "Test transaction pool initialized");
 
         let _rpc_server = self
             .rpc
-            .start_server(
-                ShareableDatabase::new(db.clone(), self.chain.clone()),
-                reth_transaction_pool::test_utils::testing_pool(),
-                network.clone(),
-            )
+            .start_rpc_server(shareable_db.clone(), test_transaction_pool.clone(), network.clone())
             .await?;
         info!(target: "reth::cli", "Started RPC server");
+
+        let engine_api_handle =
+            self.init_engine_api(Arc::clone(&db), forkchoice_state_tx, &ctx.task_executor);
+        info!(target: "reth::cli", "Engine API handler initialized");
+
+        let _auth_server = self
+            .rpc
+            .start_auth_server(
+                shareable_db,
+                test_transaction_pool,
+                network.clone(),
+                engine_api_handle,
+            )
+            .await?;
+        info!(target: "reth::cli", "Started Auth server");
 
         let (mut pipeline, events) = self
             .build_networked_pipeline(
@@ -238,7 +251,7 @@ impl Command {
         }
     }
 
-    fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
+    fn init_consensus(&self) -> eyre::Result<(Arc<dyn Consensus>, watch::Sender<ForkchoiceState>)> {
         let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
 
         if let Some(tip) = self.tip {
@@ -255,7 +268,24 @@ impl Command {
             warn!(target: "reth::cli", warn_msg);
         }
 
-        Ok(consensus)
+        Ok((consensus, notifier))
+    }
+
+    fn init_engine_api(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        forkchoice_state_tx: watch::Sender<ForkchoiceState>,
+        task_executor: &TaskExecutor,
+    ) -> EngineApiHandle {
+        let (message_tx, message_rx) = unbounded_channel();
+        let engine_api = EngineApi::new(
+            ShareableDatabase::new(db, self.chain.clone()),
+            self.chain.clone(),
+            message_rx,
+            forkchoice_state_tx,
+        );
+        task_executor.spawn(engine_api);
+        message_tx
     }
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
