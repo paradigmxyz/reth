@@ -158,9 +158,16 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        loader
+        let root = loader
             .update_root(tx, current_root, from_transition..to_transition)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+        if root != target_root {
+            return Err(StageError::Fatal(
+                format!("Expected root [{target_root}] does not match calculated one [{root}]")
+                    .into(),
+            ))
+        }
 
         info!(target: "sync::stages::merkle::unwind", "Stage finished");
         Ok(UnwindOutput { stage_progress: input.unwind_to })
