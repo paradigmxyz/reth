@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
-    DBTrieLoader, Error, StateProvider,
+    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider, Error,
+    StateProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    keccak256, Account, Address, Bytes, StorageKey, StorageValue, TransitionId, H256, U256,
+    Account, Address, Bytes, StorageKey, StorageValue, TransitionId, H256, U256,
 };
 use std::marker::PhantomData;
 
@@ -120,11 +120,9 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get account and storage proofs.
     fn proof(
         &self,
-        address: Address,
-        keys: Vec<H256>,
+        _address: Address,
+        _keys: Vec<H256>,
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
-        let hashed_address = keccak256(address);
-        let loader = DBTrieLoader::default();
         todo!()
     }
 }

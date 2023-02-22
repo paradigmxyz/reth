@@ -572,8 +572,8 @@ mod tests {
 
         fn proof(
             &self,
-            address: Address,
-            keys: Vec<H256>,
+            _address: Address,
+            _keys: Vec<H256>,
         ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
             todo!()
         }

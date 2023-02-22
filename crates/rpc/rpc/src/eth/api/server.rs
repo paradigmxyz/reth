@@ -372,7 +372,7 @@ where
         keys: Vec<H256>,
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        Ok(EthApi::get_proof(&self, address, keys, block_number)?)
+        Ok(EthApi::get_proof(self, address, keys, block_number)?)
     }
 }
 
