@@ -32,16 +32,26 @@ use tower::layer::util::{Identity, Stack};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 /// TODO:
-pub async fn launch(
+pub async fn launch<Client, Pool, Network>(
+    client: Client,
+    pool: Pool,
+    network: Network,
     handle: EngineApiHandle,
     socket_addr: SocketAddr,
     secret: JwtSecret,
-) -> Result<ServerHandle, RpcError> {
-    // TODO: cors?
+) -> Result<ServerHandle, RpcError>
+where
+    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Pool: TransactionPool + Clone + 'static,
+    Network: NetworkInfo + Peers + Clone + 'static,
+{
     let middleware =
         tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
     // By default both http and ws are enabled.
     let server = ServerBuilder::new().set_middleware(middleware).build(socket_addr).await?;
-    let handle = server.start(EngineApi::new(handle).into_rpc())?;
+    let mut module = RpcModule::new(());
+    module.merge(EngineApi::new(handle).into_rpc());
+    module.merge(EthApi::new(client, pool, network).into_rpc());
+    let handle = server.start(module)?;
     Ok(handle)
 }

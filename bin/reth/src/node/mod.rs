@@ -126,6 +126,7 @@ impl Command {
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint()?;
@@ -145,13 +146,12 @@ impl Command {
         let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
+        let test_transaction_pool = reth_transaction_pool::test_utils::testing_pool();
+        info!(target: "reth::cli", "Test transaction pool initialized");
+
         let _rpc_server = self
             .rpc
-            .start_rpc_server(
-                ShareableDatabase::new(Arc::clone(&db), self.chain.clone()),
-                reth_transaction_pool::test_utils::testing_pool(),
-                network.clone(),
-            )
+            .start_rpc_server(shareable_db.clone(), test_transaction_pool.clone(), network.clone())
             .await?;
         info!(target: "reth::cli", "Started RPC server");
 
@@ -159,7 +159,15 @@ impl Command {
             self.init_engine_api(Arc::clone(&db), forkchoice_state_tx, &ctx.task_executor);
         info!(target: "reth::cli", "Engine API handler initialized");
 
-        let _auth_server = self.rpc.start_auth_server(engine_api_handle).await?;
+        let _auth_server = self
+            .rpc
+            .start_auth_server(
+                shareable_db,
+                test_transaction_pool,
+                network.clone(),
+                engine_api_handle,
+            )
+            .await?;
         info!(target: "reth::cli", "Started Auth server");
 
         let (mut pipeline, events) = self

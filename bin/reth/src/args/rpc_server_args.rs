@@ -125,16 +125,25 @@ impl RpcServerArgs {
     }
 
     /// Create Engine API server.
-    pub(crate) async fn start_auth_server(
+    pub(crate) async fn start_auth_server<Client, Pool, Network>(
         &self,
+        client: Client,
+        pool: Pool,
+        network: Network,
         handle: EngineApiHandle,
-    ) -> Result<RpcServerHandle, RpcError> {
+    ) -> Result<RpcServerHandle, RpcError>
+    where
+        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Pool: TransactionPool + Clone + 'static,
+        Network: NetworkInfo + Peers + Clone + 'static,
+    {
         let socket_address = SocketAddr::new(
             self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
         let secret = self.jwt_secret().map_err(|err| RpcError::Custom(err.to_string()))?;
-        reth_rpc_builder::auth::launch(handle, socket_address, secret).await?;
+        reth_rpc_builder::auth::launch(client, pool, network, handle, socket_address, secret)
+            .await?;
         todo!()
     }
 

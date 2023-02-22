@@ -5100,6 +5100,7 @@ version = "0.1.0"
 dependencies = [
  "aquamarine",
  "async-trait",
+ "auto_impl 1.0.1",
  "bitflags",
  "fnv",
  "futures-util",
