@@ -305,7 +305,7 @@ table!(
 /// List with transaction numbers.
 pub type TransitionList = IntegerList;
 /// Encoded stage id.
-pub type StageId = Vec<u8>;
+pub type StageId = String;
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
