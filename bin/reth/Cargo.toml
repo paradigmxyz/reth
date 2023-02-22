@@ -58,7 +58,7 @@ tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
 futures = "0.3.25"
 tempfile = { version = "3.3.0" }
-backon = "0.2.0"
+backon = "0.4"
 comfy-table = "6.1.4"
 crossterm = "0.25.0"
 tui = "0.19.0"

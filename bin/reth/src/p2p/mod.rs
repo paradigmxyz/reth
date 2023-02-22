@@ -3,7 +3,7 @@ use crate::{
     args::DiscoveryArgs,
     dirs::{ConfigPath, PlatformPath},
 };
-use backon::{ConstantBackoff, Retryable};
+use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
 use reth_discv4::NatResolver;
@@ -113,12 +113,12 @@ impl Command {
 
         let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);
-        let backoff = ConstantBackoff::default().with_max_times(retries);
+        let backoff = ConstantBuilder::default().with_max_times(retries);
 
         match self.command {
             Subcommands::Header { id } => {
                 let header = (move || self.get_single_header(fetch_client.clone(), id))
-                    .retry(backoff)
+                    .retry(&backoff)
                     .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                     .await?;
                 println!("Successfully downloaded header: {header:?}");
@@ -135,7 +135,7 @@ impl Command {
                                 BlockHashOrNumber::Number(number),
                             )
                         })
-                        .retry(backoff.clone())
+                        .retry(&backoff)
                         .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                         .await?;
                         header.hash()
@@ -145,7 +145,7 @@ impl Command {
                     let client = fetch_client.clone();
                     async move { client.get_block_bodies(vec![hash]).await }
                 })
-                .retry(backoff)
+                .retry(&backoff)
                 .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))
                 .await?
                 .split();
