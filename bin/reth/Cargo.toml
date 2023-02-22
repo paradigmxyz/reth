@@ -19,6 +19,7 @@ reth-transaction-pool = { path = "../../crates/transaction-pool", features = ["t
 reth-consensus = { path = "../../crates/consensus" }
 reth-executor = { path = "../../crates/executor" }
 reth-eth-wire = { path = "../../crates/net/eth-wire" }
+reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
 reth-rlp = { path = "../../crates/rlp" }
