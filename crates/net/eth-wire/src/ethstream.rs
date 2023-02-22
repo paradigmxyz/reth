@@ -43,8 +43,8 @@ impl<S> UnauthedEthStream<S> {
 
 impl<S, E> UnauthedEthStream<S>
 where
-    S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes, E = E> + Unpin,
-    EthStreamError: From<E>,
+    S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Unpin,
+    EthStreamError: From<E> + From<<S as Sink<Bytes>>::Error>,
 {
     /// Consumes the [`UnauthedEthStream`] and returns an [`EthStream`] after the `Status`
     /// handshake is completed successfully. This also returns the `Status` message sent by the
@@ -257,10 +257,10 @@ where
     }
 }
 
-impl<S, E> Sink<EthMessage> for EthStream<S>
+impl<S> Sink<EthMessage> for EthStream<S>
 where
-    S: Sink<Bytes, Error = E> + CanDisconnect<Bytes, E = E> + Unpin,
-    EthStreamError: From<E>,
+    S: CanDisconnect<Bytes> + Unpin,
+    EthStreamError: From<<S as Sink<Bytes>>::Error>,
 {
     type Error = EthStreamError;
 
@@ -294,13 +294,11 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S, SE> CanDisconnect<EthMessage> for EthStream<S>
+impl<S> CanDisconnect<EthMessage> for EthStream<S>
 where
-    S: CanDisconnect<Bytes, E = SE> + Send,
-    EthStreamError: From<SE>,
+    S: CanDisconnect<Bytes> + Send,
+    EthStreamError: From<<S as Sink<Bytes>>::Error>,
 {
-    type E = EthStreamError;
-
     async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
         self.inner.disconnect(reason).await.map_err(Into::into)
     }

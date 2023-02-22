@@ -1,7 +1,7 @@
 //! Disconnect
 
 use bytes::Bytes;
-use futures::{SinkExt, Sink};
+use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
 use reth_primitives::bytes::{Buf, BufMut};
@@ -152,14 +152,14 @@ impl Decodable for DisconnectReason {
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
 #[async_trait::async_trait]
-pub trait CanDisconnect<T>: Sink<T, Error = Self::E> + Unpin + Sized {
-    /// The error type that can be returned by [`disconnect`].
-    type E: From<std::io::Error>;
-
+pub trait CanDisconnect<T>: Sink<T> + Unpin + Sized {
     /// Disconnects from the underlying stream, using a [`DisconnectReason`] as disconnect
     /// information if the stream implements a protocol that can carry the additional disconnect
     /// metadata.
-    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), Self::E>;
+    async fn disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Result<(), <Self as Sink<T>>::Error>;
 }
 
 // basic impls for things like Framed<TcpStream, etc>
@@ -168,11 +168,11 @@ impl<T, I, U> CanDisconnect<I> for Framed<T, U>
 where
     T: AsyncWrite + Unpin + Send,
     U: Encoder<I> + Send,
-    U::Error: From<std::io::Error>,
 {
-    type E = U::Error;
-
-    async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), Self::E> {
+    async fn disconnect(
+        &mut self,
+        _reason: DisconnectReason,
+    ) -> Result<(), <Self as Sink<I>>::Error> {
         self.close().await
     }
 }
@@ -182,9 +182,7 @@ impl<S> CanDisconnect<Bytes> for ECIESStream<S>
 where
     S: AsyncWrite + Unpin + Send,
 {
-    type E = std::io::Error;
-
-    async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), Self::E> {
+    async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), std::io::Error> {
         self.close().await
     }
 }
