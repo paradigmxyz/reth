@@ -43,7 +43,7 @@ where
                 .client()
                 .header_td(&block_hash)?
                 .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-            let block = Block::from_block(block, total_difficulty, full.into())?;
+            let block = Block::from_block(block, total_difficulty, full.into(), Some(block_hash))?;
             Ok(Some(block.into()))
         } else {
             Ok(None)
