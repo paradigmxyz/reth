@@ -1,7 +1,7 @@
 //! Disconnect
 
 use bytes::Bytes;
-use futures::SinkExt;
+use futures::{SinkExt, Sink};
 use reth_codecs::derive_arbitrary;
 use reth_ecies::stream::ECIESStream;
 use reth_primitives::bytes::{Buf, BufMut};
@@ -152,7 +152,7 @@ impl Decodable for DisconnectReason {
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
 #[async_trait::async_trait]
-pub trait CanDisconnect<T>: SinkExt<T, Error = Self::E> + Unpin + Sized {
+pub trait CanDisconnect<T>: Sink<T, Error = Self::E> + Unpin + Sized {
     /// The error type that can be returned by [`disconnect`].
     type E: From<std::io::Error>;
 
