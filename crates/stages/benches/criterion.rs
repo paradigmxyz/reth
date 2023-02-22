@@ -5,10 +5,7 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
 use reth_stages::{
-    stages::{
-        AccountHashingStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
-        TotalDifficultyStage, TransactionLookupStage,
-    },
+    stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
@@ -19,10 +16,12 @@ use setup::StageRange;
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
     targets = transaction_lookup, account_hashing, senders, total_difficulty, merkle
 }
 criterion_main!(benches);
+
+const DEFAULT_NUM_BLOCKS: u64 = 10_000;
 
 fn account_hashing(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
@@ -49,11 +48,10 @@ fn senders(c: &mut Criterion) {
     group.sample_size(10);
 
     for batch in [1000usize, 10_000, 100_000, 250_000] {
-        let num_blocks = 10_000;
-        let stage = SenderRecoveryStage { commit_threshold: num_blocks };
+        let stage = SenderRecoveryStage { commit_threshold: DEFAULT_NUM_BLOCKS };
         let label = format!("SendersRecovery-batch-{batch}");
 
-        measure_stage(&mut group, setup::stage_unwind, stage, 0..num_blocks + 1, label);
+        measure_stage(&mut group, setup::stage_unwind, stage, 0..DEFAULT_NUM_BLOCKS, label);
     }
 }
 
@@ -61,15 +59,13 @@ fn transaction_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("Stages");
     // don't need to run each stage for that many times
     group.sample_size(10);
-
-    let num_blocks = 10_000;
-    let stage = TransactionLookupStage::new(num_blocks);
+    let stage = TransactionLookupStage::new(DEFAULT_NUM_BLOCKS);
 
     measure_stage(
         &mut group,
         setup::stage_unwind,
         stage,
-        0..num_blocks + 1,
+        0..DEFAULT_NUM_BLOCKS,
         "TransactionLookup".to_string(),
     );
 }
@@ -80,15 +76,13 @@ fn total_difficulty(c: &mut Criterion) {
     group.warm_up_time(std::time::Duration::from_millis(2000));
     // don't need to run each stage for that many times
     group.sample_size(10);
-
-    let num_blocks = 10_000;
     let stage = TotalDifficultyStage::default();
 
     measure_stage(
         &mut group,
         setup::stage_unwind,
         stage,
-        0..num_blocks + 1,
+        0..DEFAULT_NUM_BLOCKS,
         "TotalDifficulty".to_string(),
     );
 }
@@ -98,14 +92,12 @@ fn merkle(c: &mut Criterion) {
     // don't need to run each stage for that many times
     group.sample_size(10);
 
-    let num_blocks = 10_000;
-
-    let stage = MerkleStage::Both { clean_threshold: num_blocks + 1 };
+    let stage = MerkleStage::Both { clean_threshold: u64::MAX };
     measure_stage(
         &mut group,
         setup::unwind_hashes,
         stage,
-        1..num_blocks + 1,
+        1..DEFAULT_NUM_BLOCKS + 1,
         "Merkle-incremental".to_string(),
     );
 
@@ -114,7 +106,7 @@ fn merkle(c: &mut Criterion) {
         &mut group,
         setup::unwind_hashes,
         stage,
-        1..num_blocks + 1,
+        1..DEFAULT_NUM_BLOCKS + 1,
         "Merkle-fullhash".to_string(),
     );
 }
@@ -159,7 +151,7 @@ fn measure_stage<F, S>(
     S: Clone + Stage<Env<WriteMap>>,
     F: Fn(S, &TestTransaction, StageRange),
 {
-    let path = setup::txs_testdata(block_interval.end - 1);
+    let path = setup::txs_testdata(block_interval.end);
 
     measure_stage_with_path(
         path,
@@ -168,12 +160,12 @@ fn measure_stage<F, S>(
         stage,
         (
             ExecInput {
-                previous_stage: Some((StageId("Another"), block_interval.end - 1)),
+                previous_stage: Some((StageId("Another"), block_interval.end)),
                 stage_progress: Some(block_interval.start),
             },
             UnwindInput {
-                stage_progress: Some(block_interval.end - 1),
-                unwind_to: Some(block_interval.start),
+                stage_progress: block_interval.end,
+                unwind_to: block_interval.start,
                 bad_block: None,
             },
         ),
