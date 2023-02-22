@@ -29,36 +29,44 @@ where
     Client: BlockProvider + HeaderProvider + StateProviderFactory + 'static,
     Network: 'static,
 {
+    /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
         EthApiSpec::protocol_version(self).await.to_rpc_result()
     }
 
+    /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_coinbase`
     async fn author(&self) -> Result<Address> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_accounts`
     async fn accounts(&self) -> Result<Vec<Address>> {
         Ok(EthApiSpec::accounts(self))
     }
 
+    /// Handler for: `eth_blockNumber`
     fn block_number(&self) -> Result<U256> {
         Ok(U256::from(
             EthApiSpec::chain_info(self).with_message("failed to read chain info")?.best_number,
         ))
     }
 
+    /// Handler for: `eth_chainId`
     async fn chain_id(&self) -> Result<Option<U64>> {
         Ok(Some(EthApiSpec::chain_id(self)))
     }
 
+    /// Handler for: `eth_getBlockByHash`
     async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
         Ok(EthApi::block(self, hash, full).await?)
     }
 
+    /// Handler for: `eth_getBlockByNumber`
     async fn block_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -67,10 +75,12 @@ where
         Ok(EthApi::block(self, number, full).await?)
     }
 
+    /// Handler for: `eth_getBlockTransactionCountByHash`
     async fn block_transaction_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
         Ok(EthApi::block_transaction_count(self, hash).await?.map(U256::from))
     }
 
+    /// Handler for: `eth_getBlockTransactionCountByNumber`
     async fn block_transaction_count_by_number(
         &self,
         number: BlockNumberOrTag,
@@ -78,14 +88,17 @@ where
         Ok(EthApi::block_transaction_count(self, number).await?.map(U256::from))
     }
 
+    /// Handler for: `eth_getUncleCountByBlockHash`
     async fn block_uncles_count_by_hash(&self, _hash: H256) -> Result<U256> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getUncleCountByBlockNumber`
     async fn block_uncles_count_by_number(&self, _number: BlockNumberOrTag) -> Result<U256> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getUncleByBlockHashAndIndex`
     async fn uncle_by_block_hash_and_index(
         &self,
         _hash: H256,
@@ -94,6 +107,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getUncleByBlockNumberAndIndex`
     async fn uncle_by_block_number_and_index(
         &self,
         _number: BlockNumberOrTag,
@@ -102,6 +116,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(
         &self,
         _hash: H256,
@@ -109,6 +124,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getTransactionByBlockHashAndIndex`
     async fn transaction_by_block_hash_and_index(
         &self,
         _hash: H256,
@@ -117,6 +133,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
     async fn transaction_by_block_number_and_index(
         &self,
         _number: BlockNumberOrTag,
@@ -125,14 +142,17 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getTransactionReceipt`
     async fn transaction_receipt(&self, _hash: H256) -> Result<Option<TransactionReceipt>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
         Ok(EthApi::balance(self, address, block_number)?)
     }
 
+    /// Handler for: `eth_getStorageAt`
     async fn storage_at(
         &self,
         address: Address,
@@ -142,6 +162,7 @@ where
         Ok(EthApi::storage_at(self, address, index, block_number)?)
     }
 
+    /// Handler for: `eth_getTransactionCount`
     async fn transaction_count(
         &self,
         address: Address,
@@ -150,14 +171,17 @@ where
         Ok(EthApi::get_transaction_count(self, address, block_number)?)
     }
 
+    /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
         Ok(EthApi::get_code(self, address, block_number)?)
     }
 
+    /// Handler for: `eth_call`
     async fn call(&self, _request: CallRequest, _block_number: Option<BlockId>) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
         _request: CallRequest,
@@ -166,6 +190,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_estimateGas`
     async fn estimate_gas(
         &self,
         _request: CallRequest,
@@ -174,6 +199,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
         Err(internal_rpc_err("unimplemented"))
     }
@@ -186,6 +212,7 @@ where
     // To minimize the number of database seeks required to query the missing data, we calculate the
     // first non-cached block number and last non-cached block number. After that, we query this
     // range of consecutive blocks from the database.
+    /// Handler for: `eth_feeHistory`
     async fn fee_history(
         &self,
         block_count: U64,
@@ -283,50 +310,62 @@ where
         })
     }
 
+    /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_mining`
     async fn is_mining(&self) -> Result<bool> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_hashrate`
     async fn hashrate(&self) -> Result<U256> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getWork`
     async fn get_work(&self) -> Result<Work> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_submitHashrate`
     async fn submit_hashrate(&self, _hashrate: U256, _id: H256) -> Result<bool> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_submitWork`
     async fn submit_work(&self, _nonce: H64, _pow_hash: H256, _mix_digest: H256) -> Result<bool> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_sendTransaction`
     async fn send_transaction(&self, _request: TransactionRequest) -> Result<H256> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
         Ok(EthApi::send_raw_transaction(self, tx).await?)
     }
 
+    /// Handler for: `eth_sign`
     async fn sign(&self, _address: Address, _message: Bytes) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_signTransaction`
     async fn sign_transaction(&self, _transaction: CallRequest) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_signTypedData`
     async fn sign_typed_data(&self, _address: Address, _data: Value) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for: `eth_getProof`
     async fn get_proof(
         &self,
         _address: Address,
@@ -353,6 +392,7 @@ mod tests {
     use crate::EthApi;
 
     #[tokio::test]
+    /// Handler for: `eth_test_fee_history`
     async fn test_fee_history() {
         let eth_api = EthApi::new(NoopProvider::default(), testing_pool(), NoopNetwork::default());
 
