@@ -4653,6 +4653,7 @@ name = "reth-rpc-builder"
 version = "0.1.0"
 dependencies = [
  "jsonrpsee",
+ "reth-interfaces",
  "reth-ipc",
  "reth-network-api",
  "reth-primitives",

@@ -179,14 +179,19 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
-    // caching of it in the LRU cache.
-    // When new RPC call is executed, the cache gets locked, we check it for the historical fees
-    // according to the requested block range, and fill any cache misses (in both RPC response
-    // and cache itself) with the actual data queried from the database.
-    // To minimize the number of database seeks required to query the missing data, we calculate the
-    // first non-cached block number and last non-cached block number. After that, we query this
-    // range of consecutive blocks from the database.
+    /// FeeHistory is calculated primarily based on cached historical block fees,
+    /// and lazy evaluation of those blocks which are not cached with further caching of them.
+    ///
+    /// When new RPC call is executed, the cache gets locked, we check it for the historical fees
+    /// according to the requested block range, and fill any cache misses (in both RPC response
+    /// and cache itself) with the actual data queried from the database.
+    ///
+    /// To minimize the number of database seeks required to query the missing data, we calculate
+    /// the first non-cached block number and last non-cached block number. After that, we query
+    /// this range of consecutive blocks from the database.
+    ///
+    /// The most common expected scenario is querying the `latest-1024..latest` block range,
+    /// which should be cached in an LRU cache.
     async fn fee_history(
         &self,
         block_count: U64,
@@ -194,7 +199,6 @@ where
         _reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         let block_count = block_count.as_u64();
-
         if block_count == 0 {
             return Ok(FeeHistory::default())
         }
@@ -209,16 +213,6 @@ where
 
         let start_block = end_block - block_count;
 
-        // Query canonical block hashes for the whole block range to compare them against cache
-        // We need it due to the possibility of reorgs when block numbers match but hashes don't
-        let block_hashes =
-            self.inner.client.canonical_hashes_range(start_block..=end_block).to_rpc_result()?;
-
-        // We should receive exactly the amount of blocks specified by the passed range
-        if block_hashes.len() != (end_block - start_block + 1) as usize {
-            return Err(EthApiError::InvalidBlockRange.into())
-        }
-
         let mut fee_history_cache = self.fee_history_cache.0.lock().await;
 
         // Sorted map that's populated in two rounds:
@@ -229,53 +223,49 @@ where
 
         let mut first_non_cached_block = None;
         let mut last_non_cached_block = None;
-        for (block, block_hash) in (start_block..=end_block).zip(block_hashes.iter()) {
+        for block in start_block..=end_block {
             // Check if block with the matching hash exists in cache, and move it to the head of the
             // list if so
-            match fee_history_cache.get(&block) {
-                Some(fee_history_cache_item @ FeeHistoryCacheItem { hash, .. })
-                    if hash == block_hash =>
-                {
-                    fee_history_cache_items.insert(block, fee_history_cache_item.clone());
-                }
-                _ => {
-                    // If block doesn't exist in cache, set it as a first non-cached block to query
-                    // it from the database
-                    first_non_cached_block.get_or_insert(block);
-                    // And last non-cached block, so we could query the database until we reach it
-                    last_non_cached_block = Some(block);
-                }
+            if let Some(fee_history_cache_item) = fee_history_cache.get(&block) {
+                fee_history_cache_items.insert(block, fee_history_cache_item.clone());
+            } else {
+                // If block doesn't exist in cache, set it as a first non-cached block to query
+                // it from the database
+                first_non_cached_block.get_or_insert(block);
+                // And last non-cached block, so we could query the database until we reach it
+                last_non_cached_block = Some(block);
             }
         }
 
         // If we had any cache misses, query the database starting with the first non-cached block
         // and ending with the last
-        if let (Some(start_non_cached_block), Some(end_non_cahced_block)) =
+        if let (Some(start_non_cached_block), Some(end_non_cached_block)) =
             (first_non_cached_block, last_non_cached_block)
         {
-            let headers: Vec<Header> = self
+            let block_hashes = self
                 .inner
                 .client
-                .headers_range(start_non_cached_block..=end_non_cahced_block)
+                .canonical_hashes_range(start_non_cached_block..=end_non_cached_block)
                 .to_rpc_result()?;
 
-            // We should receive exactly the amount of blocks missing from the cache
-            if headers.len() != (end_non_cahced_block - start_non_cached_block + 1) as usize {
+            // We should receive exactly the amount of block hashes missing from the cache
+            if block_hashes.len() != (end_block - start_block + 1) as usize {
                 return Err(EthApiError::InvalidBlockRange.into())
             }
 
-            for (i, header) in headers.iter().enumerate() {
-                let base_fee_per_gas = header.base_fee_per_gas.
-                        unwrap_or_default(). // Zero for pre-EIP-1559 blocks
-                        try_into().unwrap(); // u64 -> U256 won't fail
-                let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
+            let headers: Vec<Header> = self
+                .inner
+                .client
+                .headers_range(start_non_cached_block..=end_non_cached_block)
+                .to_rpc_result()?;
 
-                let fee_history_cache_item = FeeHistoryCacheItem {
-                    hash: block_hashes[(start_non_cached_block - start_block) as usize + i],
-                    base_fee_per_gas,
-                    gas_used_ratio,
-                    reward: None, // TODO: calculate rewards per transaction
-                };
+            // We should receive exactly the amount of headers missing from the cache
+            if headers.len() != (end_non_cached_block - start_non_cached_block + 1) as usize {
+                return Err(EthApiError::InvalidBlockRange.into())
+            }
+
+            for (header, hash) in headers.iter().zip(block_hashes) {
+                let fee_history_cache_item = FeeHistoryCacheItem::new_from_header(hash, header);
 
                 // Insert missing cache entries in the map for further response composition from it
                 fee_history_cache_items.insert(header.number, fee_history_cache_item.clone());

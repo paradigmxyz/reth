@@ -1,5 +1,5 @@
 use lru::LruCache;
-use reth_primitives::{BlockNumber, H256, U256};
+use reth_primitives::{BlockNumber, Header, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{num::NonZeroUsize, sync::Arc};
 use tokio::sync::Mutex;
@@ -36,7 +36,7 @@ impl FeeHistoryCache {
 }
 
 /// [FeeHistoryCache] item.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct FeeHistoryCacheItem {
     /// Block hash
     pub hash: H256,
@@ -47,4 +47,16 @@ pub struct FeeHistoryCacheItem {
     /// An (optional) array of effective priority fee per gas data points for a
     /// block. All zeroes are returned if the block is empty.
     pub reward: Option<Vec<U256>>,
+}
+
+impl FeeHistoryCacheItem {
+    /// Creates a new [`FeeHistoryCacheItem`] instance from block hash and header.
+    pub fn new_from_header(hash: impl Into<H256>, header: &Header) -> Self {
+        Self {
+            hash: hash.into(),
+            base_fee_per_gas: header.base_fee_per_gas.unwrap_or_default().try_into().unwrap(), /* u64 -> U256 won't fail */
+            gas_used_ratio: header.gas_used as f64 / header.gas_limit as f64,
+            reward: None,
+        }
+    }
 }

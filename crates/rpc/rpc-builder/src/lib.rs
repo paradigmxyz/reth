@@ -57,6 +57,7 @@ use jsonrpsee::{
     server::{Server, ServerHandle},
     RpcModule,
 };
+use reth_interfaces::events::ChainEventSubscriptions;
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, Peers};

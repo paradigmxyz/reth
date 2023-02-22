@@ -14,9 +14,12 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
-use reth_rpc_types::FeeHistoryCache;
+use reth_interfaces::events::ChainEventSubscriptions;
+use reth_rpc_types::{FeeHistoryCache, FeeHistoryCacheItem};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 mod block;
 mod server;
@@ -60,19 +63,57 @@ pub trait EthApiSpec: Send + Sync {
 pub struct EthApi<Client, Pool, Network> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Client, Pool, Network>>,
+    /// LRU cache for the `eth_feeHistory` RPC response generation. It's populated in two ways:
+    /// 1. Through Tokio task started by [`EthApi::start_fee_history_cache`] and chain event
+    /// subscriptions passed into it.
+    /// 2. Through [`EthApi::fee_history`] RPC calls which contain cache misses.
+    /// Blocks not found in cache are populated by querying the database.
     fee_history_cache: FeeHistoryCache,
+    /// The type that's used to spawn subscription tasks.
+    task_spawner: Box<dyn TaskSpawner>,
 }
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     /// Creates a new, shareable instance.
     pub fn new(client: Client, pool: Pool, network: Network) -> Self {
+        Self::new_with_task_spawner(client, pool, network, Box::<TokioTaskExecutor>::default())
+    }
+
+    /// Creates a new, shareable instance with task spawner.
+    pub fn new_with_task_spawner(
+        client: Client,
+        pool: Pool,
+        network: Network,
+        task_spawner: Box<dyn TaskSpawner>,
+    ) -> Self {
         let inner = EthApiInner { client, pool, network, signers: Default::default() };
         Self {
             inner: Arc::new(inner),
             fee_history_cache: FeeHistoryCache::new(
                 NonZeroUsize::new(FEE_HISTORY_CACHE_LIMIT).unwrap(),
             ),
+            task_spawner,
         }
+    }
+
+    /// Starts listening to the [`ChainEventSubscriptions`] and populates the LRU cache
+    /// required for `eth_feeHistory` RPC with new blocks.
+    pub fn start_fee_history_cache(
+        &self,
+        chain_event_subscriptions: impl ChainEventSubscriptions,
+    ) -> JoinHandle<()> {
+        let mut new_blocks_rx = chain_event_subscriptions.subscribe_new_blocks();
+        let fee_history_cache = self.fee_history_cache.clone();
+
+        self.task_spawner.spawn(Box::pin(async move {
+            while let Some(new_block) = new_blocks_rx.recv().await {
+                let mut cache = fee_history_cache.0.lock().await;
+                let fee_history_cache_item =
+                    cache.get_or_insert_mut(new_block.header.number, Default::default);
+                *fee_history_cache_item =
+                    FeeHistoryCacheItem::new_from_header(new_block.hash, new_block.header.as_ref());
+            }
+        }))
     }
 
     /// Returns the inner `Client`
