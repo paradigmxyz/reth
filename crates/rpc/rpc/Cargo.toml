@@ -19,7 +19,11 @@ reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"]}
 reth-network-api = { path = "../../net/network-api", features = ["test-utils"] }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
+reth-executor = { path = "../../executor" }
 reth-tasks = { path = "../../tasks" }
+
+# eth
+revm = "3.0.0"
 
 # rpc
 jsonrpsee = { version = "0.16" }
