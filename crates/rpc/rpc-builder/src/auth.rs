@@ -45,10 +45,14 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
+    // Create auth middleware.
     let middleware =
         tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
+
     // By default both http and ws are enabled.
     let server = ServerBuilder::new().set_middleware(middleware).build(socket_addr).await?;
+
+    // Configure the module and start the server.
     let mut module = RpcModule::new(());
     module.merge(EngineApi::new(handle).into_rpc());
     module.merge(EthApi::new(client, pool, network).into_rpc());
