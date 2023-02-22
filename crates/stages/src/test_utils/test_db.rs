@@ -1,5 +1,5 @@
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     mdbx::{
         test_utils::{create_test_db, create_test_db_with_path},
         tx::Tx,
@@ -271,8 +271,25 @@ impl TestTransaction {
                 storage.into_iter().filter(|e| e.value != U256::ZERO).try_for_each(|entry| {
                     let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
 
-                    tx.put::<tables::PlainStorageState>(address, entry)?;
-                    tx.put::<tables::HashedStorage>(hashed_address, hashed_entry)
+                    let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+                    if let Some(e) = cursor
+                        .seek_by_key_subkey(address, entry.key)?
+                        .filter(|e| e.key == entry.key)
+                    {
+                        cursor.delete_current()?;
+                    }
+                    cursor.upsert(address, entry)?;
+
+                    let mut cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
+                    if let Some(e) = cursor
+                        .seek_by_key_subkey(hashed_address, hashed_entry.key)?
+                        .filter(|e| e.key == hashed_entry.key)
+                    {
+                        cursor.delete_current()?;
+                    }
+                    cursor.upsert(hashed_address, hashed_entry)?;
+
+                    Ok(())
                 })
             })
         })
