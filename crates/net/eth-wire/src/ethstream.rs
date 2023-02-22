@@ -270,8 +270,15 @@ where
 
     fn start_send(self: Pin<&mut Self>, item: EthMessage) -> Result<(), Self::Error> {
         if matches!(item, EthMessage::Status(_)) {
-            // TODO: figure out how to disconnect here - do we need to send a message?
-            // self.project().inner.disconnect(DisconnectReason::ProtocolBreach);
+            // TODO: to disconnect here we would need to do something similar to P2PStream's
+            // start_disconnect, which would ideally be a part of the CanDisconnect trait, or at
+            // least similar.
+            //
+            // Other parts of reth do not need traits like CanDisconnect because they work
+            // exclusively with EthStream<P2PStream<S>>, where the inner P2PStream is accessible,
+            // allowing for its start_disconnect method to be called.
+            //
+            // self.project().inner.start_disconnect(DisconnectReason::ProtocolBreach);
             return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
         }
 
