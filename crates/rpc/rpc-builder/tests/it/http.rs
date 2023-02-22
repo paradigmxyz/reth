@@ -71,6 +71,7 @@ where
     EthApiClient::block_by_number(client, block_number, false).await.unwrap();
     EthApiClient::block_transaction_count_by_number(client, block_number).await.unwrap();
     EthApiClient::block_transaction_count_by_hash(client, hash).await.unwrap();
+    EthApiClient::get_proof(client, address, vec![], None).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
@@ -141,9 +142,6 @@ where
             .await
             .err()
             .unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::get_proof(client, address, vec![], None).await.err().unwrap()
     ));
 }
 
