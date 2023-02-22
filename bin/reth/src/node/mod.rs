@@ -36,7 +36,6 @@ use reth_network::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
-
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -497,6 +496,19 @@ pub async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
                 let stage = state.current_stage.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string());
                 info!(target: "reth::cli", connected_peers = state.connected_peers, %stage, checkpoint = state.current_checkpoint, "Status");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_common_node_command_chain_args() {
+        for chain in ["mainnet", "sepolia", "goerli"] {
+            let args: Command = Command::parse_from(["reth", "--chain", chain]);
+            assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
     }
 }
