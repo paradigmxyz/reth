@@ -45,6 +45,26 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
+    launch_with_eth_api(EthApi::new(client, pool, network), handle, socket_addr, secret).await
+}
+
+/// Configure and launch an auth server with existing EthApi implementation.
+pub async fn launch_with_eth_api<Client, Pool, Network>(
+    eth_api: EthApi<Client, Pool, Network>,
+    handle: EngineApiHandle,
+    socket_addr: SocketAddr,
+    secret: JwtSecret,
+) -> Result<ServerHandle, RpcError>
+where
+    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Pool: TransactionPool + Clone + 'static,
+    Network: NetworkInfo + Peers + Clone + 'static,
+{
+    // Configure the module and start the server.
+    let mut module = RpcModule::new(());
+    module.merge(EngineApi::new(handle).into_rpc());
+    module.merge(eth_api.into_rpc());
+
     // Create auth middleware.
     let middleware =
         tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
@@ -52,9 +72,5 @@ where
     // By default both http and ws are enabled.
     let server = ServerBuilder::new().set_middleware(middleware).build(socket_addr).await?;
 
-    // Configure the module and start the server.
-    let mut module = RpcModule::new(());
-    module.merge(EngineApi::new(handle).into_rpc());
-    module.merge(EthApi::new(client, pool, network).into_rpc());
     server.start(module)
 }
