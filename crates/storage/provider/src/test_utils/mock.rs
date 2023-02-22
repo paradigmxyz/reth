@@ -227,6 +227,14 @@ impl StateProvider for MockEthProvider {
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
     }
+
+    fn proof(
+        &self,
+        address: Address,
+        keys: Vec<H256>,
+    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        todo!()
+    }
 }
 
 impl StateProviderFactory for MockEthProvider {

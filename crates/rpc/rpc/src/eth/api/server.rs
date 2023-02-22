@@ -368,11 +368,11 @@ where
     /// Handler for: `eth_getProof`
     async fn get_proof(
         &self,
-        _address: Address,
-        _keys: Vec<H256>,
-        _block_number: Option<BlockId>,
+        address: Address,
+        keys: Vec<H256>,
+        block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::get_proof(&self, address, keys, block_number)?)
     }
 }
 

@@ -4,8 +4,9 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{Address, BlockId, Bytes, H256, U256};
-use reth_provider::{BlockProvider, StateProvider, StateProviderFactory};
+use reth_primitives::{Address, BlockId, Bytes, H256, KECCAK_EMPTY, U256};
+use reth_provider::{AccountProvider, BlockProvider, StateProvider, StateProviderFactory};
+use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
@@ -47,5 +48,41 @@ where
         let storage_key = H256(index.to_be_bytes());
         let value = state.storage(address, storage_key)?.unwrap_or_default();
         Ok(H256(value.to_be_bytes()))
+    }
+
+    pub(crate) fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<H256>,
+        block_id: Option<BlockId>,
+    ) -> EthResult<EIP1186AccountProofResponse> {
+        let state =
+            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let mut proof =
+            EIP1186AccountProofResponse { address, code_hash: KECCAK_EMPTY, ..Default::default() };
+        if let Some(account) = state.basic_account(address)? {
+            let (account_proof, storage_hash, stg_proofs) = state.proof(address, keys.clone())?;
+            let storage_proof = keys
+                .into_iter()
+                .zip(stg_proofs)
+                .map(|(key, proof)| {
+                    state.storage(address, key).map(|op| StorageProof {
+                        key: U256::from_be_bytes(*key.as_fixed_bytes()),
+                        value: op.unwrap_or_default(),
+                        proof,
+                    })
+                })
+                .collect::<Result<_, _>>()?;
+            proof = EIP1186AccountProofResponse {
+                balance: account.balance,
+                nonce: account.nonce.into(),
+                code_hash: account.get_bytecode_hash(),
+                storage_hash,
+                account_proof,
+                storage_proof,
+                ..proof
+            };
+        }
+        Ok(proof)
     }
 }

@@ -458,25 +458,26 @@ impl DBTrieLoader {
     }
 
     /// Returns a list of encoded nodes from the root of the trie to the given
-    /// account, and optionally a list of proofs for the given keys.
+    /// account, the account's storage root hash, and optionally a list of
+    /// proofs for the given keys (starting at the storage root).
     pub fn generate_acount_proof<'tx, 'itx>(
         &self,
         tx: &'tx impl DbTx<'itx>,
         root: H256,
         address: H256,
         keys: Vec<H256>,
-    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<Vec<u8>>>), TrieError> {
+    ) -> Result<(Vec<Vec<u8>>, H256, Vec<Vec<Vec<u8>>>), TrieError> {
         let db = Arc::new(HashDatabase::from_root(tx, root)?);
         let hasher = Arc::new(HasherKeccak::new());
 
         let trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
         let proof = trie.get_proof(keccak256(address).as_bytes())?;
 
-        let Some(account) = trie.get(address.as_slice())? else { return Ok((proof, vec![])) };
+        let Some(account) = trie.get(address.as_slice())? else { return Ok((proof, KECCAK_EMPTY, vec![])) };
 
         let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
 
-        Ok((proof, self.generate_storage_proofs(tx, storage_root, address, keys)?))
+        Ok((proof, storage_root, self.generate_storage_proofs(tx, storage_root, address, keys)?))
     }
 
     fn generate_storage_proofs<'tx, 'itx>(

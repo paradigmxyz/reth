@@ -68,4 +68,7 @@ pub enum Error {
     /// Reached the end of the transaction sender table.
     #[error("Got to the end of the transaction sender table")]
     EndOfTransactionSenderTable,
+    /// Some error occurred while interacting with the state tree.
+    #[error("Unknown error occurred while interacting with the state tree.")]
+    StateTree,
 }

@@ -569,6 +569,14 @@ mod tests {
         fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytes>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
+
+        fn proof(
+            &self,
+            address: Address,
+            keys: Vec<H256>,
+        ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+            todo!()
+        }
     }
 
     #[test]

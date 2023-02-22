@@ -1,10 +1,14 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
-    StateProvider,
+    DBTrieLoader, StateProvider,
 };
-use reth_db::{cursor::DbDupCursorRO, tables, transaction::DbTx};
-use reth_interfaces::Result;
-use reth_primitives::{Account, Address, Bytes, StorageKey, StorageValue, H256, U256};
+use reth_db::{
+    cursor::{DbCursorRO, DbDupCursorRO},
+    tables,
+    transaction::DbTx,
+};
+use reth_interfaces::{provider::Error, Result};
+use reth_primitives::{keccak256, Account, Address, Bytes, StorageKey, StorageValue, H256, U256};
 use std::marker::PhantomData;
 
 /// State provider over latest state that takes tx reference.
@@ -51,6 +55,30 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
         self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
+    }
+
+    fn proof(
+        &self,
+        address: Address,
+        keys: Vec<H256>,
+    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        let hashed_address = keccak256(address);
+        let loader = DBTrieLoader::default();
+        let root = self
+            .db
+            .cursor_read::<tables::Headers>()?
+            .last()?
+            .ok_or(Error::Header { number: 0 })?
+            .1
+            .state_root;
+        let (acc_proof, stg_root, stg_proof) = loader
+            .generate_acount_proof(self.db, root, hashed_address, keys)
+            .map_err(|_| Error::StateTree)?;
+        Ok((
+            acc_proof.into_iter().map(Bytes::from).collect(),
+            stg_root,
+            stg_proof.into_iter().map(|v| v.into_iter().map(Bytes::from).collect()).collect(),
+        ))
     }
 }
 

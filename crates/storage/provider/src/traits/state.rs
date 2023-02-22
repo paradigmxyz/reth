@@ -9,11 +9,18 @@ use reth_primitives::{
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Box)]
 pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
-    /// Get storage.
+    /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
 
-    /// Get account code by its hash
+    /// Get account code by its hash.
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>;
+
+    /// Get account and storage proofs.
+    fn proof(
+        &self,
+        address: Address,
+        keys: Vec<H256>,
+    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
 
     /// Get account code by its address.
     ///
