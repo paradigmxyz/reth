@@ -438,6 +438,7 @@ impl MockTransactionFactory {
         transaction: MockTransaction,
     ) -> MockValidTx {
         let transaction_id = self.tx_id(&transaction);
+        let encoded_length = transaction.encoded_length();
         MockValidTx {
             propagate: false,
             transaction_id,
@@ -445,6 +446,7 @@ impl MockTransactionFactory {
             transaction,
             timestamp: Instant::now(),
             origin,
+            encoded_length,
         }
     }
 
