@@ -152,7 +152,7 @@ impl Decodable for DisconnectReason {
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
 #[async_trait::async_trait]
-pub trait CanDisconnect<T>: SinkExt<T, Error = Self::E> + Unpin + Sized + Send {
+pub trait CanDisconnect<T>: SinkExt<T, Error = Self::E> + Unpin + Sized {
     /// The error type that can be returned by [`disconnect`].
     type E: From<std::io::Error>;
 
