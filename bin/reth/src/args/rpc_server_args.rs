@@ -2,7 +2,7 @@
 
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
-use jsonrpsee::core::Error as RpcError;
+use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
@@ -131,7 +131,7 @@ impl RpcServerArgs {
         pool: Pool,
         network: Network,
         handle: EngineApiHandle,
-    ) -> Result<RpcServerHandle, RpcError>
+    ) -> Result<ServerHandle, RpcError>
     where
         Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
         Pool: TransactionPool + Clone + 'static,
@@ -142,9 +142,7 @@ impl RpcServerArgs {
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
         let secret = self.jwt_secret().map_err(|err| RpcError::Custom(err.to_string()))?;
-        reth_rpc_builder::auth::launch(client, pool, network, handle, socket_address, secret)
-            .await?;
-        todo!()
+        reth_rpc_builder::auth::launch(client, pool, network, handle, socket_address, secret).await
     }
 
     /// Creates the [TransportRpcModuleConfig] from cli args.

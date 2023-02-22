@@ -31,7 +31,7 @@ use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
-/// TODO:
+/// Configure and launch an auth server with `engine` and `eth` namespaces.
 pub async fn launch<Client, Pool, Network>(
     client: Client,
     pool: Pool,
@@ -52,6 +52,5 @@ where
     let mut module = RpcModule::new(());
     module.merge(EngineApi::new(handle).into_rpc());
     module.merge(EthApi::new(client, pool, network).into_rpc());
-    let handle = server.start(module)?;
-    Ok(handle)
+    server.start(module)
 }
