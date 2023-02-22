@@ -225,6 +225,7 @@ where
     }
 
     /// Appends all logs emitted in the `block` that match the `filter` to the `logs` vector.
+    #[allow(clippy::ptr_arg)]
     fn append_matching_block_logs(
         &self,
         _logs: &mut Vec<Log>,
