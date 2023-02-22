@@ -198,6 +198,10 @@ impl BlockProvider for MockEthProvider {
             }
         }
     }
+
+    fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
 }
 
 impl AccountProvider for MockEthProvider {
