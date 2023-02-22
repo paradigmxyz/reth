@@ -5,10 +5,7 @@ use reth_rpc_builder::{
     TransportRpcModuleConfig,
 };
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 /// Localhost with port 0 so a free port is used.
 pub fn test_address() -> SocketAddr {
@@ -53,7 +50,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
 }
 
 /// Returns an [RpcModuleBuilder] with testing components.
-pub fn test_rpc_builder() -> RpcModuleBuilder<NoopProvider, Arc<TestPool>, NoopNetwork> {
+pub fn test_rpc_builder() -> RpcModuleBuilder<NoopProvider, TestPool, NoopNetwork> {
     RpcModuleBuilder::default()
         .with_client(NoopProvider::default())
         .with_pool(testing_pool())
