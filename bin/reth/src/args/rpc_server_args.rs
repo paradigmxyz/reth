@@ -197,10 +197,9 @@ impl RpcServerArgs {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddrV4;
-
     use super::*;
     use clap::Parser;
+    use std::net::SocketAddrV4;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]

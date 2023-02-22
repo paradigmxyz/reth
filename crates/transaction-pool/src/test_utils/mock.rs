@@ -13,7 +13,7 @@ use rand::{
 };
 use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, H256, U128, U256,
+    TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, TxType, H256, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
@@ -343,6 +343,17 @@ impl PoolTransaction for MockTransaction {
     }
 
     fn size(&self) -> usize {
+        0
+    }
+
+    fn tx_type(&self) -> u8 {
+        match self {
+            MockTransaction::Legacy { .. } => TxType::Legacy.into(),
+            MockTransaction::Eip1559 { .. } => TxType::EIP1559.into(),
+        }
+    }
+
+    fn encoded_length(&self) -> usize {
         0
     }
 }

@@ -17,8 +17,9 @@ normal = [
 
 [dependencies]
 
-# eth
+# reth
 reth-primitives = { path  = "../primitives" }
+reth-rlp = { path = "../rlp" }
 
 # async/futures
 async-trait = "0.1"

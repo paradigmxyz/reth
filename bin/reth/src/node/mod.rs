@@ -529,3 +529,16 @@ pub async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_common_node_command_chain_args() {
+        for chain in ["mainnet", "sepolia", "goerli"] {
+            let args: Command = Command::parse_from(["reth", "--chain", chain]);
+            assert_eq!(args.chain.chain, chain.parse().unwrap());
+        }
+    }
+}

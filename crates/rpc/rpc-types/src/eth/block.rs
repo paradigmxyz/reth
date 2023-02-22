@@ -73,16 +73,21 @@ pub struct Block {
 impl Block {
     /// Converts the given primitive block into a [Block] response with the given
     /// [BlockTransactionsKind]
+    ///
+    /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
     pub fn from_block(
         block: PrimitiveBlock,
         total_difficulty: U256,
         kind: BlockTransactionsKind,
+        block_hash: Option<H256>,
     ) -> Result<Self, BlockError> {
         match kind {
             BlockTransactionsKind::Hashes => {
-                Ok(Self::from_block_hashes_only(block, total_difficulty))
+                Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
             }
-            BlockTransactionsKind::Full => Self::from_block_full(block, total_difficulty),
+            BlockTransactionsKind::Full => {
+                Self::from_block_full(block, total_difficulty, block_hash)
+            }
         }
     }
 
@@ -91,8 +96,12 @@ impl Block {
     ///
     /// This will populate the `transactions` field with only the hashes of the transactions in the
     /// block: [BlockTransactions::Hashes]
-    pub fn from_block_hashes_only(block: PrimitiveBlock, total_difficulty: U256) -> Self {
-        let block_hash = block.header.hash_slow();
+    pub fn from_block_with_tx_hashes(
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+        block_hash: Option<H256>,
+    ) -> Self {
+        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
         let transactions = block.body.iter().map(|tx| tx.hash).collect();
 
         Self::from_block_with_transactions(
@@ -111,8 +120,9 @@ impl Block {
     pub fn from_block_full(
         block: PrimitiveBlock,
         total_difficulty: U256,
+        block_hash: Option<H256>,
     ) -> Result<Self, BlockError> {
-        let block_hash = block.header.hash_slow();
+        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
         let block_number = block.number;
         let mut transactions = Vec::with_capacity(block.body.len());
         for (idx, tx) in block.body.iter().enumerate() {
