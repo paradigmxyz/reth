@@ -12,6 +12,17 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
 {
+    /// Returns the uncle headers of the given block
+    ///
+    /// Returns an empty vec if there are none.
+    pub(crate) fn ommers(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> EthResult<Option<Vec<reth_primitives::Header>>> {
+        let block_id = block_id.into();
+        Ok(self.client().ommers(block_id)?)
+    }
+
     pub(crate) async fn block_transaction_count(
         &self,
         block_id: impl Into<BlockId>,
