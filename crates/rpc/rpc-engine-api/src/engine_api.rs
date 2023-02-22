@@ -1,4 +1,4 @@
-use crate::{EngineApiError, EngineApiMessage, EngineApiResult};
+use crate::{message::EngineApiMessageVersion, EngineApiError, EngineApiMessage, EngineApiResult};
 use futures::StreamExt;
 use reth_executor::{
     executor,
@@ -7,16 +7,16 @@ use reth_executor::{
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
-    ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned, H64, U256,
+    BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
+    H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
-    TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum, TransitionConfiguration,
 };
 use std::{
-    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -28,6 +28,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// The Engine API response sender
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
+/// The upper limit for payload bodies request.
+const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
+
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
 #[must_use = "EngineApi does nothing unless polled."]
@@ -37,9 +40,8 @@ pub struct EngineApi<Client> {
     chain_spec: ChainSpec,
     message_rx: UnboundedReceiverStream<EngineApiMessage>,
     forkchoice_state_tx: watch::Sender<ForkchoiceState>,
-    // TODO: Placeholder for storing future blocks. Make cache bounded.
-    // Use [lru](https://crates.io/crates/lru) crate
-    local_store: HashMap<H64, ExecutionPayload>,
+    // TODO: Placeholder for storing future blocks. Make cache bounded. Use lru
+    // local_store: HashMap<H64, ExecutionPayload>,
     // remote_store: HashMap<H64, ExecutionPayload>,
 }
 
@@ -49,16 +51,70 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             EngineApiMessage::GetPayload(payload_id, tx) => {
                 let _ = tx.send(self.get_payload(payload_id).ok_or(EngineApiError::PayloadUnknown));
             }
-            EngineApiMessage::NewPayload(payload, tx) => {
+            EngineApiMessage::GetPayloadBodiesByHash(hashes, tx) => {
+                let _ = tx.send(self.get_payload_bodies_by_hash(hashes));
+            }
+            EngineApiMessage::GetPayloadBodiesByRange(start, count, tx) => {
+                let _ = tx.send(self.get_payload_bodies_by_range(start, count));
+            }
+            EngineApiMessage::NewPayload(version, payload, tx) => {
+                if let Err(err) = self.validate_withdrawals_presence(
+                    version,
+                    payload.timestamp.as_u64(),
+                    payload.withdrawals.is_some(),
+                ) {
+                    let _ = tx.send(Err(err));
+                    return
+                }
                 let _ = tx.send(self.new_payload(payload));
             }
-            EngineApiMessage::ForkchoiceUpdated(state, attrs, tx) => {
+            EngineApiMessage::ForkchoiceUpdated(version, state, attrs, tx) => {
+                if let Some(attributes) = &attrs {
+                    if let Err(err) = self.validate_withdrawals_presence(
+                        version,
+                        attributes.timestamp.as_u64(),
+                        attributes.withdrawals.is_some(),
+                    ) {
+                        let _ = tx.send(Err(err));
+                        return
+                    }
+                }
+
                 let _ = tx.send(self.fork_choice_updated(state, attrs));
             }
             EngineApiMessage::ExchangeTransitionConfiguration(config, tx) => {
                 let _ = tx.send(self.exchange_transition_configuration(config));
             }
         }
+    }
+
+    /// Validates the presence of the `withdrawals` field according to the payload timestamp.
+    /// After Shanghai, withdrawals field must be [Some].
+    /// Before Shanghai, withdrawals field must be [None];
+    fn validate_withdrawals_presence(
+        &self,
+        version: EngineApiMessageVersion,
+        timestamp: u64,
+        has_withdrawals: bool,
+    ) -> EngineApiResult<()> {
+        let is_shanghai = self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp);
+
+        match version {
+            EngineApiMessageVersion::V1 => {
+                if is_shanghai || has_withdrawals {
+                    return Err(EngineApiError::InvalidParams)
+                }
+            }
+            EngineApiMessageVersion::V2 => {
+                let shanghai_with_no_withdrawals = is_shanghai && !has_withdrawals;
+                let not_shanghai_with_withdrawals = !is_shanghai && has_withdrawals;
+                if shanghai_with_no_withdrawals || not_shanghai_with_withdrawals {
+                    return Err(EngineApiError::InvalidParams)
+                }
+            }
+        };
+
+        Ok(())
     }
 
     /// Try to construct a block from given payload. Perform addition validation of `extra_data` and
@@ -130,8 +186,50 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
     ///
     /// NOTE: Will always result in `PayloadUnknown` since we don't support block
     /// building for now.
-    pub fn get_payload(&self, payload_id: H64) -> Option<ExecutionPayload> {
-        self.local_store.get(&payload_id).cloned()
+    pub fn get_payload(&self, _payload_id: H64) -> Option<ExecutionPayload> {
+        None
+    }
+
+    /// Called to retrieve execution payload bodies by range.
+    pub fn get_payload_bodies_by_range(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodies> {
+        if count > MAX_PAYLOAD_BODIES_LIMIT {
+            return Err(EngineApiError::PayloadRequestTooLarge { len: count })
+        }
+
+        if start == 0 || count == 0 {
+            return Err(EngineApiError::InvalidParams)
+        }
+
+        let mut result = Vec::with_capacity(count as usize);
+        for num in start..start + count {
+            let block = self.client.block(BlockId::Number(num.into()))?;
+            result.push(block.map(Into::into));
+        }
+
+        Ok(result)
+    }
+
+    /// Called to retrieve execution payload bodies by hashes.
+    pub fn get_payload_bodies_by_hash(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodies> {
+        let len = hashes.len() as u64;
+        if len > MAX_PAYLOAD_BODIES_LIMIT {
+            return Err(EngineApiError::PayloadRequestTooLarge { len })
+        }
+
+        let mut result = Vec::with_capacity(hashes.len());
+        for hash in hashes {
+            let block = self.client.block(BlockId::Hash(hash.into()))?;
+            result.push(block.map(Into::into));
+        }
+
+        Ok(result)
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
@@ -321,7 +419,46 @@ mod tests {
     use reth_interfaces::test_utils::generators::random_block;
     use reth_primitives::{H256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
-    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::{
+        mpsc::{unbounded_channel, UnboundedSender},
+        watch::Receiver as WatchReceiver,
+    };
+
+    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<MockEthProvider>) {
+        let chain_spec = MAINNET.clone();
+        let client = Arc::new(MockEthProvider::default());
+        let (msg_tx, msg_rx) = unbounded_channel();
+        let (forkchoice_state_tx, forkchoice_state_rx) = watch::channel(ForkchoiceState::default());
+        let api = EngineApi {
+            client: client.clone(),
+            chain_spec: chain_spec.clone(),
+            message_rx: UnboundedReceiverStream::new(msg_rx),
+            forkchoice_state_tx,
+        };
+        let handle = EngineApiTestHandle { chain_spec, client, msg_tx, forkchoice_state_rx };
+        (handle, api)
+    }
+
+    struct EngineApiTestHandle {
+        chain_spec: ChainSpec,
+        client: Arc<MockEthProvider>,
+        msg_tx: UnboundedSender<EngineApiMessage>,
+        forkchoice_state_rx: WatchReceiver<ForkchoiceState>,
+    }
+
+    impl EngineApiTestHandle {
+        fn send_message(&self, msg: EngineApiMessage) {
+            self.msg_tx.send(msg).expect("failed to send engine msg");
+        }
+
+        fn forkchoice_state(&self) -> ForkchoiceState {
+            self.forkchoice_state_rx.borrow().clone()
+        }
+
+        fn forkchoice_state_has_changed(&self) -> bool {
+            self.forkchoice_state_rx.has_changed().unwrap()
+        }
+    }
 
     mod new_payload {
         use super::*;
@@ -350,15 +487,7 @@ mod tests {
 
         #[tokio::test]
         async fn payload_validation() {
-            let (_msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let engine = EngineApi {
-                client: Arc::new(MockEthProvider::default()),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
+            let (_, api) = setup_engine_api();
 
             let block = random_block(100, Some(H256::random()), Some(3), Some(0));
 
@@ -367,7 +496,7 @@ mod tests {
                 b.header.extra_data = BytesMut::zeroed(32).freeze().into();
                 b
             });
-            assert_matches!(engine.try_construct_block(block_with_valid_extra_data.into()), Ok(_));
+            assert_matches!(api.try_construct_block(block_with_valid_extra_data.into()), Ok(_));
 
             // Invalid extra data
             let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
@@ -376,7 +505,7 @@ mod tests {
                 b
             });
             assert_matches!(
-                engine.try_construct_block(invalid_extra_data_block.into()),
+                api.try_construct_block(invalid_extra_data_block.into()),
                 Err(EngineApiError::PayloadExtraData(data)) if data == block_with_invalid_extra_data
             );
 
@@ -386,7 +515,7 @@ mod tests {
                 b
             });
             assert_matches!(
-                engine.try_construct_block(block_with_zero_base_fee.into()),
+                api.try_construct_block(block_with_zero_base_fee.into()),
                 Err(EngineApiError::PayloadBaseFee(val)) if val == U256::ZERO
             );
 
@@ -396,7 +525,7 @@ mod tests {
                 *tx = Bytes::new().into();
             });
             assert_matches!(
-                engine.try_construct_block(payload_with_invalid_txs),
+                api.try_construct_block(payload_with_invalid_txs),
                 Err(EngineApiError::Decode(DecodeError::InputTooShort))
             );
 
@@ -406,7 +535,7 @@ mod tests {
                 b
             });
             assert_matches!(
-                engine.try_construct_block(block_with_ommers.clone().into()),
+                api.try_construct_block(block_with_ommers.clone().into()),
                 Err(EngineApiError::PayloadBlockHash { consensus, .. })
                     if consensus == block_with_ommers.hash()
             );
@@ -417,7 +546,7 @@ mod tests {
                 b
             });
             assert_matches!(
-                engine.try_construct_block(block_with_difficulty.clone().into()),
+                api.try_construct_block(block_with_difficulty.clone().into()),
                 Err(EngineApiError::PayloadBlockHash { consensus, .. })
                     if consensus == block_with_difficulty.hash()
             );
@@ -428,135 +557,93 @@ mod tests {
                 b
             });
             assert_matches!(
-                engine.try_construct_block(block_with_nonce.clone().into()),
+                api.try_construct_block(block_with_nonce.clone().into()),
                 Err(EngineApiError::PayloadBlockHash { consensus, .. })
                     if consensus == block_with_nonce.hash()
             );
 
             // Valid block
             let valid_block = block;
-            assert_matches!(engine.try_construct_block(valid_block.into()), Ok(_));
+            assert_matches!(api.try_construct_block(valid_block.into()), Ok(_));
         }
 
         #[tokio::test]
         async fn payload_known() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let client = Arc::new(MockEthProvider::default());
-            let engine = EngineApi {
-                client: client.clone(),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let block = random_block(100, Some(H256::random()), None, Some(0)); // payload must have no ommers
             let block_hash = block.hash();
             let execution_payload = block.clone().into();
 
-            client.add_header(block_hash, block.header.unseal());
+            handle.client.add_header(block_hash, block.header.unseal());
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::NewPayload(execution_payload, result_tx))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::NewPayload(
+                EngineApiMessageVersion::V1,
+                execution_payload,
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
             let expected_result = PayloadStatus::new(PayloadStatusEnum::Valid, block_hash);
-            assert_eq!(result.unwrap().unwrap(), expected_result);
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
         }
 
         #[tokio::test]
         async fn payload_parent_unknown() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let engine = EngineApi {
-                client: Arc::new(MockEthProvider::default()),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let (result_tx, result_rx) = oneshot::channel();
             let block = random_block(100, Some(H256::random()), None, Some(0)); // payload must have no ommers
-            msg_tx
-                .send(EngineApiMessage::NewPayload(block.into(), result_tx))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::NewPayload(
+                EngineApiMessageVersion::V1,
+                block.into(),
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
-            assert_eq!(result.unwrap().unwrap(), expected_result);
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
         }
 
         #[tokio::test]
         async fn payload_pre_merge() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let chain_spec = MAINNET.clone();
-            let client = Arc::new(MockEthProvider::default());
-            let engine = EngineApi {
-                client: client.clone(),
-                chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
-            tokio::spawn(engine);
-
-            let (result_tx, result_rx) = oneshot::channel();
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
                 b.header.difficulty =
-                    chain_spec.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1);
+                    handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1);
                 b
             });
             let block = random_block(101, Some(parent.hash()), None, Some(0));
 
-            client.add_block(parent.hash(), parent.clone().unseal());
+            handle.client.add_block(parent.hash(), parent.clone().unseal());
 
-            msg_tx
-                .send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
-                .expect("failed to send engine msg");
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::NewPayload(
+                EngineApiMessageVersion::V1,
+                block.clone().into(),
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadPreMerge.to_string(),
             });
-            assert_eq!(result.unwrap().unwrap(), expected_result);
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
         }
 
         #[tokio::test]
         async fn invalid_payload_timestamp() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let chain_spec = MAINNET.clone();
-            let client = Arc::new(MockEthProvider::default());
-            let engine = EngineApi {
-                client: client.clone(),
-                chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
-            tokio::spawn(engine);
-
-            let (result_tx, result_rx) = oneshot::channel();
             let block_timestamp = 100;
             let parent_timestamp = block_timestamp + 10;
             let parent = transform_block(random_block(100, None, None, Some(0)), |mut b| {
                 b.header.timestamp = parent_timestamp;
                 b.header.difficulty =
-                    chain_spec.fork(Hardfork::Paris).ttd().unwrap() + U256::from(1);
+                    handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() + U256::from(1);
                 b
             });
             let block =
@@ -565,14 +652,15 @@ mod tests {
                     b
                 });
 
-            client.add_block(parent.hash(), parent.clone().unseal());
+            handle.client.add_block(parent.hash(), parent.clone().unseal());
 
-            msg_tx
-                .send(EngineApiMessage::NewPayload(block.clone().into(), result_tx))
-                .expect("failed to send engine msg");
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::NewPayload(
+                EngineApiMessageVersion::V1,
+                block.clone().into(),
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadTimestamp {
                     invalid: block_timestamp,
@@ -580,7 +668,7 @@ mod tests {
                 }
                 .to_string(),
             });
-            assert_eq!(result.unwrap().unwrap(), expected_result);
+            assert_matches!( result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
         }
 
         // TODO: add execution tests
@@ -593,115 +681,187 @@ mod tests {
 
         #[tokio::test]
         async fn payload_unknown() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let engine = EngineApi {
-                client: Arc::new(MockEthProvider::default()),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let payload_id = H64::random();
-
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::GetPayload(payload_id, result_tx))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::GetPayload(payload_id, result_tx));
 
             assert_matches!(result_rx.await, Ok(Err(EngineApiError::PayloadUnknown)));
         }
     }
 
-    mod fork_choice_updated {
-        use reth_interfaces::test_utils::generators::random_header;
-
+    // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
+    mod get_payload_bodies {
         use super::*;
+        use reth_interfaces::test_utils::generators::random_block_range;
+
+        #[tokio::test]
+        async fn invalid_params() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let by_range_tests = [
+                // (start, count)
+                (0, 0),
+                (0, 1),
+                (1, 0),
+            ];
+
+            // test [EngineApiMessage::GetPayloadBodiesByRange]
+            for (start, count) in by_range_tests {
+                let (result_tx, result_rx) = oneshot::channel();
+                handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(
+                    start, count, result_tx,
+                ));
+                assert_matches!(result_rx.await, Ok(Err(EngineApiError::InvalidParams)));
+            }
+        }
+
+        #[tokio::test]
+        async fn request_too_large() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let request_count = MAX_PAYLOAD_BODIES_LIMIT + 1;
+
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(
+                0,
+                request_count,
+                result_tx,
+            ));
+            assert_matches!(
+                result_rx.await,
+                Ok(Err(EngineApiError::PayloadRequestTooLarge { .. }))
+            );
+
+            let (result_tx, result_rx) = oneshot::channel();
+            let hashes = std::iter::repeat(H256::default()).take(request_count as usize).collect();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByHash(hashes, result_tx));
+            assert_matches!(result_rx.await, Ok(Err(EngineApiError::PayloadRequestTooLarge { .. })))
+        }
+
+        #[tokio::test]
+        async fn returns_payload_bodies() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let (start, count) = (1, 10);
+            let blocks = random_block_range(start..start + count, H256::default(), 0..2);
+            handle.client.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
+
+            let expected =
+                blocks.iter().cloned().map(|b| Some(b.unseal().into())).collect::<Vec<_>>();
+
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(start, count, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+
+            let (result_tx, result_rx) = oneshot::channel();
+            let hashes = blocks.iter().map(|b| b.hash()).collect();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByHash(hashes, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+        }
+
+        #[tokio::test]
+        async fn returns_payload_bodies_with_gaps() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let (start, count) = (1, 100);
+            let blocks = random_block_range(start..start + count, H256::default(), 0..2);
+
+            // Insert only blocks in ranges 1-25 and 50-75
+            let first_missing_range = 26..=50;
+            let second_missing_range = 76..=100;
+            handle.client.extend_blocks(
+                blocks
+                    .iter()
+                    .filter(|b| {
+                        !first_missing_range.contains(&b.number) &&
+                            !second_missing_range.contains(&b.number)
+                    })
+                    .map(|b| (b.hash(), b.clone().unseal())),
+            );
+
+            let expected = blocks
+                .iter()
+                .cloned()
+                .map(|b| {
+                    if first_missing_range.contains(&b.number) ||
+                        second_missing_range.contains(&b.number)
+                    {
+                        None
+                    } else {
+                        Some(b.unseal().into())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(start, count, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+
+            let (result_tx, result_rx) = oneshot::channel();
+            let hashes = blocks.iter().map(|b| b.hash()).collect();
+            handle.send_message(EngineApiMessage::GetPayloadBodiesByHash(hashes, result_tx));
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected));
+        }
+    }
+
+    mod fork_choice_updated {
+        use super::*;
+        use reth_interfaces::test_utils::generators::random_header;
 
         #[tokio::test]
         async fn empty_head() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
-            let engine = EngineApi {
-                client: Arc::new(MockEthProvider::default()),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ForkchoiceUpdated(
-                    ForkchoiceState::default(),
-                    None,
-                    result_tx,
-                ))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ForkchoiceUpdated(
+                EngineApiMessageVersion::V1,
+                ForkchoiceState::default(),
+                None,
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
-            assert_eq!(
-                result.unwrap().unwrap(),
-                ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                    validation_error: EngineApiError::ForkchoiceEmptyHead.to_string(),
-                })
-            );
-            assert!(!tip_rx.has_changed().unwrap());
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::ForkchoiceEmptyHead.to_string(),
+            });
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            assert!(!handle.forkchoice_state_has_changed());
         }
 
         #[tokio::test]
         async fn unknown_head_hash() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
-            let engine = EngineApi {
-                client: Arc::new(MockEthProvider::default()),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let state = ForkchoiceState { head_block_hash: H256::random(), ..Default::default() };
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ForkchoiceUpdated(state, None, result_tx))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ForkchoiceUpdated(
+                EngineApiMessageVersion::V1,
+                state,
+                None,
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
-            assert_eq!(
-                result.unwrap().unwrap(),
-                ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing)
-            );
-            assert!(!tip_rx.has_changed().unwrap());
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            assert!(!handle.forkchoice_state_has_changed());
         }
 
         #[tokio::test]
         async fn unknown_finalized_hash() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
-            let client = Arc::new(MockEthProvider::default());
-            let engine = EngineApi {
-                client: client.clone(),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let head = random_header(100, None);
-            client.add_header(head.hash(), head.clone().unseal());
+            handle.client.add_header(head.hash(), head.clone().unseal());
 
             let state = ForkchoiceState {
                 head_block_hash: head.hash(),
@@ -710,37 +870,26 @@ mod tests {
             };
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ForkchoiceUpdated(state, None, result_tx))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ForkchoiceUpdated(
+                EngineApiMessageVersion::V1,
+                state,
+                None,
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
-            assert_eq!(
-                result.unwrap().unwrap(),
-                ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing)
-            );
-            assert!(!tip_rx.has_changed().unwrap());
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            assert!(!handle.forkchoice_state_has_changed());
         }
 
         #[tokio::test]
         async fn forkchoice_state_is_updated() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, tip_rx) = watch::channel(ForkchoiceState::default());
-            let client = Arc::new(MockEthProvider::default());
-            let engine = EngineApi {
-                client: client.clone(),
-                chain_spec: MAINNET.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let finalized = random_header(90, None);
             let head = random_header(100, None);
-            client.extend_headers([
+            handle.client.extend_headers([
                 (head.hash(), head.clone().unseal()),
                 (finalized.hash(), finalized.clone().unseal()),
             ]);
@@ -752,25 +901,24 @@ mod tests {
             };
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ForkchoiceUpdated(state.clone(), None, result_tx))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ForkchoiceUpdated(
+                EngineApiMessageVersion::V1,
+                state.clone(),
+                None,
+                result_tx,
+            ));
 
-            let result = result_rx.await;
-            assert_matches!(result, Ok(Ok(_)));
-            assert_eq!(
-                result.unwrap().unwrap(),
-                ForkchoiceUpdated {
-                    payload_id: None,
-                    payload_status: PayloadStatus {
-                        status: PayloadStatusEnum::Valid,
-                        latest_valid_hash: Some(head.hash())
-                    }
-                }
-            );
+            let expected_result = ForkchoiceUpdated {
+                payload_id: None,
+                payload_status: PayloadStatus {
+                    status: PayloadStatusEnum::Valid,
+                    latest_valid_hash: Some(head.hash()),
+                },
+            };
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
-            assert!(tip_rx.has_changed().unwrap());
-            assert_eq!(tip_rx.borrow().clone(), state);
+            assert!(handle.forkchoice_state_has_changed());
+            assert_eq!(handle.forkchoice_state(), state);
         }
     }
 
@@ -780,144 +928,98 @@ mod tests {
 
         #[tokio::test]
         async fn terminal_td_mismatch() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let chain_spec = MAINNET.clone();
-            let engine = EngineApi {
-                client: Arc::new(MockEthProvider::default()),
-                chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ExchangeTransitionConfiguration(
-                    transition_config.clone(),
-                    result_tx,
-                ))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ));
 
-            assert_matches!(
-                result_rx.await,
-                Ok(Err(EngineApiError::TerminalTD { execution, consensus }))
-                    if execution == chain_spec.fork(Hardfork::Paris).ttd().unwrap()
-                        && consensus == U256::from(transition_config.terminal_total_difficulty)
-            );
+            let expected_error = EngineApiError::TerminalTD {
+                execution: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
+                consensus: U256::from(transition_config.terminal_total_difficulty),
+            };
+            assert_matches!(result_rx.await, Ok(Err(error)) => assert_eq!(error, expected_error));
         }
 
         #[tokio::test]
         async fn terminal_block_hash_mismatch() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let client = Arc::new(MockEthProvider::default());
-            let chain_spec = MAINNET.clone();
-            let engine = EngineApi {
-                client: client.clone(),
-                chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let terminal_block_number = 1000;
             let consensus_terminal_block = random_block(terminal_block_number, None, None, None);
             let execution_terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
 
             // Unknown block number
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ExchangeTransitionConfiguration(
-                    transition_config.clone(),
-                    result_tx,
-                ))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ));
 
-            assert_matches!(
-                result_rx.await,
-                Ok(Err(EngineApiError::TerminalBlockHash { execution, consensus }))
-                    if execution.is_none()
-                        && consensus == transition_config.terminal_block_hash
-            );
+            let expected_error = EngineApiError::TerminalBlockHash {
+                execution: None,
+                consensus: transition_config.terminal_block_hash,
+            };
+            assert_matches!(result_rx.await, Ok(Err(error)) => assert_eq!(error, expected_error));
 
             // Add block and to provider local store and test for mismatch
-            client.add_block(
+            handle.client.add_block(
                 execution_terminal_block.hash(),
                 execution_terminal_block.clone().unseal(),
             );
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ExchangeTransitionConfiguration(
-                    transition_config.clone(),
-                    result_tx,
-                ))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ));
 
-            assert_matches!(
-                result_rx.await,
-                Ok(Err(EngineApiError::TerminalBlockHash { execution, consensus }))
-                    if execution == Some(execution_terminal_block.hash())
-                        && consensus == transition_config.terminal_block_hash
-            );
+            let expected_error = EngineApiError::TerminalBlockHash {
+                execution: Some(execution_terminal_block.hash()),
+                consensus: transition_config.terminal_block_hash,
+            };
+            assert_matches!(result_rx.await, Ok(Err(error)) => assert_eq!(error, expected_error));
         }
 
         #[tokio::test]
         async fn configurations_match() {
-            let (msg_tx, msg_rx) = unbounded_channel();
-            let (tip_tx, _tip_rx) = watch::channel(ForkchoiceState::default());
-            let client = Arc::new(MockEthProvider::default());
-            let chain_spec = MAINNET.clone();
-            let engine = EngineApi {
-                client: client.clone(),
-                chain_spec: chain_spec.clone(),
-                local_store: Default::default(),
-                message_rx: UnboundedReceiverStream::new(msg_rx),
-                forkchoice_state_tx: tip_tx,
-            };
-
-            tokio::spawn(engine);
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
 
             let terminal_block_number = 1000;
             let terminal_block = random_block(terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: terminal_block_number.into(),
             };
 
-            client.add_block(terminal_block.hash(), terminal_block.clone().unseal());
+            handle.client.add_block(terminal_block.hash(), terminal_block.clone().unseal());
 
             let (result_tx, result_rx) = oneshot::channel();
-            msg_tx
-                .send(EngineApiMessage::ExchangeTransitionConfiguration(
-                    transition_config.clone(),
-                    result_tx,
-                ))
-                .expect("failed to send engine msg");
+            handle.send_message(EngineApiMessage::ExchangeTransitionConfiguration(
+                transition_config.clone(),
+                result_tx,
+            ));
 
-            assert_matches!(
-                result_rx.await,
-                Ok(Ok(config)) if config == transition_config
-            );
+            assert_matches!(result_rx.await, Ok(Ok(config)) => assert_eq!(config, transition_config));
         }
     }
 }

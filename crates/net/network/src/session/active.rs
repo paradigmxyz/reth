@@ -178,8 +178,21 @@ impl ActiveSession {
             EthMessage::Transactions(msg) => {
                 self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
             }
-            EthMessage::NewPooledTransactionHashes(msg) => {
-                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg)).into()
+            EthMessage::NewPooledTransactionHashes66(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
+            EthMessage::NewPooledTransactionHashes68(msg) => {
+                if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::TransactionHashesInvalidLenOfFields {
+                            hashes_len: msg.hashes.len(),
+                            types_len: msg.types.len(),
+                            sizes_len: msg.sizes.len(),
+                        },
+                        message: EthMessage::NewPooledTransactionHashes68(msg),
+                    }
+                }
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
                 on_request!(req, BlockHeaders, GetBlockHeaders)
@@ -237,7 +250,9 @@ impl ActiveSession {
                 self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
             }
             PeerMessage::PooledTransactions(msg) => {
-                self.queued_outgoing.push_back(EthMessage::NewPooledTransactionHashes(msg).into());
+                if msg.is_valid_for_version(self.conn.version()) {
+                    self.queued_outgoing.push_back(EthMessage::from(msg).into());
+                }
             }
             PeerMessage::EthRequest(req) => {
                 let deadline = self.request_deadline();
@@ -699,8 +714,7 @@ mod tests {
     };
     use reth_ecies::util::pk2id;
     use reth_eth_wire::{
-        EthVersion, GetBlockBodies, HelloMessage, NewPooledTransactionHashes, ProtocolVersion,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        GetBlockBodies, HelloMessage, Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_net_common::bandwidth_meter::BandwidthMeter;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
@@ -710,13 +724,7 @@ mod tests {
 
     /// Returns a testing `HelloMessage` and new secretkey
     fn eth_hello(server_key: &SecretKey) -> HelloMessage {
-        HelloMessage {
-            protocol_version: ProtocolVersion::V5,
-            client_version: "reth/1.0.0".to_string(),
-            capabilities: vec![EthVersion::Eth67.into()],
-            port: 30303,
-            id: pk2id(&server_key.public_key(SECP256K1)),
-        }
+        HelloMessage::builder(pk2id(&server_key.public_key(SECP256K1))).build()
     }
 
     struct SessionBuilder {
@@ -745,9 +753,9 @@ mod tests {
             &self,
             local_addr: SocketAddr,
             f: F,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>>
+        ) -> Pin<Box<dyn Future<Output = ()> + Send>>
         where
-            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>>) -> O + Send + Sync + 'static,
+            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
         {
             let status = self.status;
@@ -832,8 +840,8 @@ mod tests {
                         protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
                     }
                 }
-                _ => {
-                    panic!("unexpected message")
+                ev => {
+                    panic!("unexpected message {ev:?}")
                 }
             }
         }
@@ -929,9 +937,7 @@ mod tests {
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             for _ in 0..num_messages {
                 client_stream
-                    .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(
-                        vec![],
-                    )))
+                    .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
                     .await
                     .unwrap();
             }
@@ -1030,7 +1036,7 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
             client_stream
-                .send(EthMessage::NewPooledTransactionHashes(NewPooledTransactionHashes(vec![])))
+                .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
                 .await
                 .unwrap();
             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;
@@ -1063,7 +1069,7 @@ mod tests {
             let message = builder.active_session_rx.next().await.unwrap();
             match message {
                 ActiveSessionMessage::ProtocolBreach { .. } => {}
-                _ => unreachable!(),
+                ev => unreachable!("{ev:?}"),
             }
         }
 

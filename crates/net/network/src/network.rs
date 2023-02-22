@@ -13,7 +13,7 @@ use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, NetworkStatus, PeerKind, Peers, PeersInfo, ReputationChangeKind,
 };
-use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, TxHash, H256};
+use reth_primitives::{Head, NodeRecord, PeerId, TransactionSigned, H256};
 use std::{
     net::SocketAddr,
     sync::{
@@ -141,11 +141,8 @@ impl NetworkHandle {
     }
 
     /// Send transactions hashes to the peer.
-    pub fn send_transactions_hashes(&self, peer_id: PeerId, msg: Vec<TxHash>) {
-        self.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
-            peer_id,
-            msg: NewPooledTransactionHashes(msg),
-        })
+    pub fn send_transactions_hashes(&self, peer_id: PeerId, msg: NewPooledTransactionHashes) {
+        self.send_message(NetworkHandleMessage::SendPooledTransactionHashes { peer_id, msg })
     }
 
     /// Send full transactions to the peer

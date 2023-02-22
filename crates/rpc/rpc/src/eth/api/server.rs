@@ -56,26 +56,26 @@ where
     }
 
     async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
-        Ok(EthApi::block_by_hash(self, hash, full).await?)
+        Ok(EthApi::block(self, hash, full).await?)
     }
 
     async fn block_by_number(
         &self,
-        _number: BlockNumberOrTag,
-        _full: bool,
+        number: BlockNumberOrTag,
+        full: bool,
     ) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::block(self, number, full).await?)
     }
 
-    async fn block_transaction_count_by_hash(&self, _hash: H256) -> Result<Option<U256>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn block_transaction_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+        Ok(EthApi::block_transaction_count(self, hash).await?.map(U256::from))
     }
 
     async fn block_transaction_count_by_number(
         &self,
-        _number: BlockNumberOrTag,
+        number: BlockNumberOrTag,
     ) -> Result<Option<U256>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::block_transaction_count(self, number).await?.map(U256::from))
     }
 
     async fn block_uncles_count_by_hash(&self, _hash: H256) -> Result<U256> {

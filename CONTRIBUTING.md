@@ -90,7 +90,7 @@ If you are working in VSCode, we recommend you install the [rust-analyzer](https
 ```json
 "editor.formatOnSave": true,
 "rust-analyzer.rustfmt.extraArgs": ["+nightly"],
-"rust-analyzer.checkOnSave.overrideCommand": [
+"rust-analyzer.check.overrideCommand": [
   "cargo",
   "+nightly",
   "clippy",
