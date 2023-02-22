@@ -135,6 +135,18 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
 
         Ok(None)
     }
+
+    fn ommers(&self, id: BlockId) -> Result<Option<Vec<Header>>> {
+        if let Some(number) = self.block_number_for_id(id)? {
+            let tx = self.db.tx()?;
+            // TODO: this can be optimized to return empty Vec post-merge
+            let ommers =
+                tx.get::<tables::BlockOmmers>(number)?.map(|o| o.ommers).unwrap_or_default();
+            return Ok(Some(ommers))
+        }
+
+        Ok(None)
+    }
 }
 
 impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
