@@ -13,11 +13,14 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
+use crate::eth::error::EthResult;
+use reth_provider::providers::ChainState;
 use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
 use std::sync::Arc;
 
 mod block;
+mod call;
 mod server;
 mod state;
 mod transactions;
@@ -98,6 +101,14 @@ where
 {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
+    }
+
+    /// Helper function to execute a closure with the database at a specific block.
+    pub(crate) fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    where
+        F: FnOnce(ChainState<'_>) -> T,
+    {
+        unimplemented!()
     }
 
     /// Returns the state at the given [BlockId] enum or the latest.
