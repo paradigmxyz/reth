@@ -184,7 +184,7 @@ where
 #[async_trait::async_trait]
 impl<S> CanDisconnect<Bytes> for P2PStream<S>
 where
-    S: Sink<Bytes, Error = io::Error> + Unpin + Send,
+    S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
 {
     async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
         self.disconnect(reason).await
