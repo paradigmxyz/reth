@@ -74,7 +74,7 @@ impl Transaction {
     ///
     /// The block hash, number, and tx index fields should be from the original block where the
     /// transaction was mined.
-    pub(crate) fn from_recovered_with_block_context(
+    pub fn from_recovered_with_block_context(
         tx: TransactionSignedEcRecovered,
         block_hash: H256,
         block_number: BlockNumber,
@@ -142,7 +142,7 @@ impl Transaction {
             max_fee_per_gas,
             max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas().map(U128::from),
             signature: Some(Signature::from_primitive_signature(
-                signed_tx.signature().clone(),
+                *signed_tx.signature(),
                 signed_tx.chain_id(),
             )),
             gas: U256::from(signed_tx.gas_limit()),
