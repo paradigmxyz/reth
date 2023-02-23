@@ -235,6 +235,7 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
     type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
     type LatestSP<'a> = LatestStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
+
     /// Storage provider for latest block
     fn latest(&self) -> Result<Self::LatestSP<'_>> {
         Ok(LatestStateProvider::new(self.db.tx()?))

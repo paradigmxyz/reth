@@ -123,6 +123,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
         address: Address,
         keys: Vec<H256>,
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        // TODO: this uses the current state
         let hashed_address = keccak256(address);
         let loader = DBTrieLoader::default();
         let root = self

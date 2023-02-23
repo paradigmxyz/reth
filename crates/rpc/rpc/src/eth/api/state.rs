@@ -5,7 +5,7 @@ use crate::{
     EthApi,
 };
 use reth_primitives::{Address, BlockId, Bytes, H256, KECCAK_EMPTY, U256};
-use reth_provider::{AccountProvider, BlockProvider, StateProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, StateProviderFactory};
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
