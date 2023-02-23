@@ -365,6 +365,8 @@ impl Command {
             debug!(target: "reth::cli", ?tip, number, "Successfully looked up tip in the database");
             return Ok(number)
         }
+
+        debug!(target: "reth::cli", ?tip, "Fetching tip header from the network.");
         loop {
             match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
                 Ok(tip_header) => {
