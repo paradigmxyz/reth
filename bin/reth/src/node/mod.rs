@@ -374,7 +374,7 @@ impl Command {
                     return Ok(tip_header.number)
                 }
                 Err(error) => {
-                    error!(target: "reth::cli", ?error, "Failed to fetch the tip. Retrying...");
+                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
                 }
             }
         }
