@@ -206,9 +206,18 @@ impl Command {
         task_executor: &TaskExecutor,
     ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
     {
-        // building network downloaders using the fetch client
-        let fetch_client = Arc::new(network.fetch_client().await?);
+        let fetch_client = network.fetch_client().await?;
+        let max_block = if let Some(block) = self.max_block {
+            Some(block)
+        } else if let Some(tip) = self.tip {
+            Some(self.fetch_or_lookup_tip(db.clone(), fetch_client.clone(), tip).await?)
+        } else {
+            None
+        };
 
+        // TODO: remove Arc requirement from downloader builders.
+        // building network downloaders using the fetch client
+        let fetch_client = Arc::new(fetch_client);
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(fetch_client.clone(), consensus.clone())
             .into_task_with(task_executor);
@@ -216,14 +225,6 @@ impl Command {
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
             .build(fetch_client.clone(), consensus.clone(), db.clone())
             .into_task_with(task_executor);
-
-        let max_block = if let Some(block) = self.max_block {
-            Some(block)
-        } else if let Some(tip) = self.tip {
-            Some(self.fetch_or_lookup_tip(db.clone(), fetch_client, tip).await?)
-        } else {
-            None
-        };
 
         let mut pipeline = self
             .build_pipeline(
@@ -358,7 +359,7 @@ impl Command {
     async fn fetch_or_lookup_tip(
         &self,
         db: Arc<Env<WriteMap>>,
-        fetch_client: Arc<FetchClient>,
+        fetch_client: FetchClient,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error> {
         if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {

@@ -108,7 +108,7 @@ impl Command {
             .start_network()
             .await?;
 
-        let fetch_client = Arc::new(network.fetch_client().await?);
+        let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);
         let backoff = ConstantBuilder::default().with_max_times(retries);
 

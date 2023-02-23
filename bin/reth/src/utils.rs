@@ -7,11 +7,10 @@ use reth_interfaces::p2p::{
 };
 use reth_network::FetchClient;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
-use std::sync::Arc;
 
 /// Get a single header from network
 pub async fn get_single_header(
-    client: Arc<FetchClient>,
+    client: FetchClient,
     id: BlockHashOrNumber,
 ) -> eyre::Result<SealedHeader> {
     let request = HeadersRequest { direction: HeadersDirection::Rising, limit: 1, start: id };
