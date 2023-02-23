@@ -131,3 +131,11 @@ pub enum Error {
     #[error("Missing withdrawals")]
     BodyWithdrawalsMissing,
 }
+
+impl From<crate::error::Error> for Error {
+    fn from(error: crate::error::Error) -> Self {
+        match error {
+            _ => Error::TransactionSignerRecoveryError,
+        }
+    }
+}

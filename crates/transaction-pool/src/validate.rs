@@ -5,6 +5,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
 };
+use reth_interfaces::consensus::Error;
 use reth_primitives::{Address, TransactionKind, TxHash, U256};
 use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
@@ -54,7 +55,7 @@ pub trait TransactionValidator: Send + Sync {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction>;
+    ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error>;
 
     /// Ensure that the code size is not greater than `max_init_code_size`.
     /// `max_init_code_size` should be configurable so this will take it as an argument.
@@ -81,45 +82,77 @@ pub trait TransactionValidator: Send + Sync {
     }
 }
 
-pub struct EthTransactionValidator<Client: AccountProvider> {
+pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
+    ///
+    chain_id: u64,
     /// This type fetches account info from the db
     client: Client,
     /// whether shanghai is enabled.
     shanghai: bool,
+    ///  
+    currentMaxGasLimit: u64,
 }
 
 #[async_trait::async_trait]
-impl<T: PoolTransaction + AccountProvider> TransactionValidator for EthTransactionValidator<T> {
+impl<T: PoolTransaction + AccountProvider> TransactionValidator
+    for EthTransactionValidatorConfig<T>
+{
     type Transaction = T;
 
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        
-        // TODO : Checks for chainid
+    ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
+        // Checks for chainid
+        // can never be valid
+        // if transaction.chain_id() != self.chain_id {
+        //     return Err(PoolError::TxInvalidChainId(
+        //         *transaction.hash(),
+        //         transaction.chain_id(),
+        //         self.chain_id,
+        //     ));
+        // }
 
-        // TODO : Checks for gaslimit
+        // Checks for gaslimit
+        // if transaction.gas_limit() > self.currentMaxGasLimit {
+        //     return Err(PoolError::TxExceedsGasLimit(
+        //         *transaction.hash(),
+        //         transaction.gas_limit(),
+        //         self.currentMaxGasLimit,
+        //     ))
+        // }
 
-        let account = self.client.basic_account(transaction.sender())?.unwrap_or_default();
+        let account = match self.client.basic_account(transaction.sender())? {
+            Some(account) => account,
+            // None => return Err(PoolError::AccountNotFound(*transaction.hash())),
+            None => {
+                return Ok(TransactionValidationOutcome::Invalid(
+                    transaction,
+                    PoolError::AccountNotFound(*transaction.hash()),
+                ))
+            }
+        };
 
         // Checks for nonce
         if transaction.nonce() < account.nonce {
-            // return TransactionValidationOutcome::Invalid(transaction, PoolError::);
+            return Err(Error::TransactionNonceNotConsistent)
         }
 
         // Checks for max cost
         if transaction.cost() > account.balance {
-            // return TransactionValidationOutcome::Invalid(transaction, PoolError::);
+            return Err(Error::InsufficientFunds {
+                max_fee: transaction.max_fee_per_gas().unwrap_or_default(),
+                available_funds: account.balance,
+            })
         }
 
         // Return the valid transaction
-        TransactionValidationOutcome::Valid {
+        Ok(TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
             transaction,
-        }
+        })
     }
 }
 

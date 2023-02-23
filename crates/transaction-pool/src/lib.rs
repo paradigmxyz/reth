@@ -97,6 +97,7 @@ use crate::{
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
+use reth_interfaces::consensus::Error;
 
 mod config;
 pub mod error;
@@ -145,7 +146,7 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
+    ) -> PoolResult<HashMap<TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>>> {
         let outcome = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
@@ -161,7 +162,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
+    ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>) {
         let hash = *transaction.hash();
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
@@ -204,7 +205,7 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+        self.pool.add_transactions(origin, std::iter::once(tx?)).pop().expect("exists; qed")
     }
 
     async fn add_transactions(

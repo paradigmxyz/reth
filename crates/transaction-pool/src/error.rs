@@ -1,5 +1,6 @@
 //! Transaction pool errors
 
+use reth_interfaces::Error;
 use reth_primitives::{Address, TxHash};
 
 /// Transaction pool result type.
@@ -29,7 +30,19 @@ pub enum PoolError {
     /// respect the max_init_code_size.
     #[error("[{0:?}] Transaction's size {1} exceeds max_init_code_size {2}.")]
     TxExceedsMaxInitCodeSize(TxHash, usize, usize),
+    /// Thrown if a replacement transaction's gas price is below the already imported transaction
+    #[error("[{0:?}]: insufficient gas price to replace existing transaction.")]
+    AccountNotFound(TxHash),
 }
+
+// impl From<Error> for PoolError {
+//     fn from(error: Error) -> Self {
+//         match error {
+//             error => PoolError::AccountNotFound(TxHash::default()),
+//             _ => PoolError::DiscardedOnInsert(TxHash::default()),
+//         }
+//     }
+// }
 
 // === impl PoolError ===
 
@@ -43,6 +56,7 @@ impl PoolError {
             PoolError::DiscardedOnInsert(hash) => hash,
             PoolError::TxExceedsGasLimit(hash, _, _) => hash,
             PoolError::TxExceedsMaxInitCodeSize(hash, _, _) => hash,
+            PoolError::AccountNotFound(hash) => hash,
         }
     }
 }

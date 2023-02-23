@@ -202,6 +202,7 @@ where
             TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
+                let encoded_length = transaction.encoded_length();
 
                 let tx = ValidPoolTransaction {
                     cost: transaction.cost(),
@@ -210,6 +211,7 @@ where
                     propagate: false,
                     timestamp: Instant::now(),
                     origin,
+                    encoded_length,
                 };
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;

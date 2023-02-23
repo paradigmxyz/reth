@@ -77,6 +77,7 @@ impl From<PoolError> for GethTxPoolError {
             PoolError::DiscardedOnInsert(_) => GethTxPoolError::TxPoolOverflow,
             PoolError::TxExceedsGasLimit(_, _, _) => GethTxPoolError::GasLimit,
             PoolError::TxExceedsMaxInitCodeSize(_, _, _) => GethTxPoolError::OversizedData,
+            PoolError::AccountNotFound(_) => GethTxPoolError::InvalidSender,
         }
     }
 }
