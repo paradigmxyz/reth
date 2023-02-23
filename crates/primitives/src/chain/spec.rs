@@ -1126,7 +1126,7 @@ mod tests {
         "#;
         let genesis = serde_json::from_str::<AllGenesisFormats>(&hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
-        assert_eq!(chainspec.genesis_hash, None)
+        assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(Chain::Named(EtherType::Chain::Optimism), chainspec.chain);
         assert_eq!(
             chainspec.hardforks.get(&Hardfork::Homestead).unwrap(),
