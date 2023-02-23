@@ -584,12 +584,11 @@ impl ForkCondition {
 #[cfg(test)]
 mod tests {
     use revm_primitives::U256;
-
     use crate::{
-        Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
-        Head, GOERLI, MAINNET, SEPOLIA, AllGenesisFormats
+        AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId,
+        Genesis, Hardfork, Head, GOERLI, MAINNET, SEPOLIA,
     };
-    use ethers_core::utils::Genesis as EthersGenesis;
+    use ethers_core::types as EtherType;
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1112,36 +1111,26 @@ mod tests {
         },
 
         "config": {
-
             "ethash": {},
-
             "chainId": 10,
-
             "homesteadBlock": 0,
-
             "eip150Block": 0,
-
             "eip155Block": 0,
-
             "eip158Block": 0,
-
             "byzantiumBlock": 0,
-
             "constantinopleBlock": 0,
-
             "petersburgBlock": 0,
-
             "istanbulBlock": 0
         }
         }
         "#;
         let genesis = serde_json::from_str::<AllGenesisFormats>(&hive_json).unwrap();
-        let genesis: EthersGenesis =
-            match genesis {
-                AllGenesisFormats::Geth(genesis) => genesis,
-                _ => panic!("Wrong genesis format")
-            };
-        let [nonce] = genesis.nonce.0;
-        assert_eq!(nonce, u64::from_str_radix("42", 16).unwrap());
+        let chainspec: ChainSpec = genesis.into();
+        assert_eq!(Chain::Named(EtherType::Chain::Optimism), chainspec.chain);
+        assert_eq!(
+            chainspec.hardforks.get(&Hardfork::Homestead).unwrap(),
+            &ForkCondition::Block(0)
+        );
+        assert_eq!(chainspec.hardforks.get(&Hardfork::Byzantium).unwrap(), &ForkCondition::Block(0));
     }
 }
