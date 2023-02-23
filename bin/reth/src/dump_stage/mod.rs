@@ -8,6 +8,9 @@ use hashing_account::dump_hashing_account_stage;
 mod execution;
 use execution::dump_execution_stage;
 
+mod merkle;
+use merkle::dump_merkle_stage;
+
 use crate::{
     db::DbTool,
     dirs::{DbPath, PlatformPath},
@@ -45,6 +48,8 @@ pub enum Stages {
     StorageHashing(StageCommand),
     /// AccountHashing stage.
     AccountHashing(StageCommand),
+    /// Merkle stage.
+    Merkle(StageCommand),
 }
 
 /// Stage command that takes a range
@@ -93,6 +98,9 @@ impl Command {
             }
             Stages::AccountHashing(StageCommand { output_db, from, to, dry_run, .. }) => {
                 dump_hashing_account_stage(&mut tool, *from, *to, output_db, *dry_run).await?
+            }
+            Stages::Merkle(StageCommand { output_db, from, to, dry_run, .. }) => {
+                dump_merkle_stage(&mut tool, *from, *to, output_db, *dry_run).await?
             }
         }
 
