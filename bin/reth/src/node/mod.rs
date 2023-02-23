@@ -210,7 +210,7 @@ impl Command {
         let max_block = if let Some(block) = self.max_block {
             Some(block)
         } else if let Some(tip) = self.tip {
-            Some(self.fetch_or_lookup_tip(db.clone(), fetch_client.clone(), tip).await?)
+            Some(self.lookup_or_fetch_tip(db.clone(), fetch_client.clone(), tip).await?)
         } else {
             None
         };
@@ -360,7 +360,7 @@ impl Command {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_or_lookup_tip(
+    async fn lookup_or_fetch_tip(
         &self,
         db: Arc<Env<WriteMap>>,
         fetch_client: FetchClient,
