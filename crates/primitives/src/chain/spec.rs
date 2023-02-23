@@ -298,7 +298,7 @@ impl From<EthersGenesis> for ChainSpec {
 }
 
 /// A helper type for compatibility with geth's config
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum AllGenesisFormats {
     /// The geth genesis format
@@ -587,9 +587,9 @@ mod tests {
 
     use crate::{
         Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId, Genesis, Hardfork,
-        Head, GOERLI, MAINNET, SEPOLIA,
+        Head, GOERLI, MAINNET, SEPOLIA, AllGenesisFormats
     };
-
+    use ethers_core::utils::Genesis as EthersGenesis;
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1027,5 +1027,121 @@ mod tests {
             chainspec.hardforks.get(&Hardfork::Shanghai).unwrap(),
             &ForkCondition::Timestamp(0)
         );
+    }
+
+    #[test]
+    fn hive_geth_json() {
+        let hive_json = r#"
+        {
+        "nonce": "0x0000000000000042",
+
+        "difficulty": "0x2123456",
+
+        "mixHash": "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",
+
+        "coinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+
+        "timestamp": "0x123456",
+
+        "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+
+        "extraData": "0xfafbfcfd",
+
+        "gasLimit": "0x2fefd8",
+
+        "alloc": {
+
+            "dbdbdb2cbd23b783741e8d7fcf51e459b497e4a6": {
+
+            "balance": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+            },
+
+            "e6716f9544a56c530d868e4bfbacb172315bdead": {
+
+            "balance": "0x11",
+
+            "code": "0x12"
+
+            },
+
+            "b9c015918bdaba24b4ff057a92a3873d6eb201be": {
+
+            "balance": "0x21",
+
+            "storage": {
+
+                "0x0000000000000000000000000000000000000000000000000000000000000001": "0x22"
+
+            }
+
+            },
+
+            "1a26338f0d905e295fccb71fa9ea849ffa12aaf4": {
+
+            "balance": "0x31",
+
+            "nonce": "0x32"
+
+            },
+
+            "0000000000000000000000000000000000000001": {
+
+            "balance": "0x41"
+
+            },
+
+            "0000000000000000000000000000000000000002": {
+
+            "balance": "0x51"
+
+            },
+
+            "0000000000000000000000000000000000000003": {
+
+            "balance": "0x61"
+
+            },
+
+            "0000000000000000000000000000000000000004": {
+
+            "balance": "0x71"
+
+            }
+
+        },
+
+        "config": {
+
+            "ethash": {},
+
+            "chainId": 10,
+
+            "homesteadBlock": 0,
+
+            "eip150Block": 0,
+
+            "eip155Block": 0,
+
+            "eip158Block": 0,
+
+            "byzantiumBlock": 0,
+
+            "constantinopleBlock": 0,
+
+            "petersburgBlock": 0,
+
+            "istanbulBlock": 0
+        }
+        }
+        "#;
+        let genesis = serde_json::from_str::<AllGenesisFormats>(&hive_json).unwrap();
+        let genesis: EthersGenesis =
+            match genesis {
+                AllGenesisFormats::Geth(genesis) => genesis,
+                _ => panic!("Wrong genesis format")
+            };
+        let [nonce] = genesis.nonce.0;
+        assert_eq!(nonce, u64::from_str_radix("42", 16).unwrap());
     }
 }
