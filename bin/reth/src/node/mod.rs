@@ -8,12 +8,11 @@ use crate::{
     runner::CliContext,
     utils::get_single_header,
 };
-use backon::ConstantBuilder;
 use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
-use reth_consensus::{beacon::BeaconConsensus, validation::validate_header_standalone};
+use reth_consensus::beacon::BeaconConsensus;
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -28,11 +27,7 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
         bodies::downloader::BodyDownloader,
-        headers::{
-            client::{HeadersClient, HeadersRequest, StatusUpdater},
-            downloader::HeaderDownloader,
-        },
-        priority::Priority,
+        headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
     sync::SyncStateUpdater,
 };
@@ -40,7 +35,7 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, Head, HeadersDirection, H256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -225,7 +220,7 @@ impl Command {
         let max_block = if let Some(block) = self.max_block {
             Some(block)
         } else if let Some(tip) = self.tip {
-            Some(self.fetch_tip(fetch_client, tip).await)
+            Some(self.fetch_or_lookup_tip(db.clone(), fetch_client, tip).await?)
         } else {
             None
         };
@@ -360,12 +355,24 @@ impl Command {
         .map_err(Into::into)
     }
 
-    async fn fetch_tip(&self, fetch_client: Arc<FetchClient>, tip: H256) -> u64 {
+    async fn fetch_or_lookup_tip(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        fetch_client: Arc<FetchClient>,
+        tip: H256,
+    ) -> Result<u64, reth_interfaces::Error> {
+        if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {
+            debug!(target: "reth::cli", ?tip, number, "Successfully looked up tip in the database");
+            return Ok(number)
+        }
         loop {
             match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
-                Ok(tip) => return tip.number,
+                Ok(tip_header) => {
+                    debug!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip");
+                    return Ok(tip_header.number)
+                }
                 Err(error) => {
-                    error!(target: "reth::cli", ?error, "Failed to fetch the tip. Retrying...")
+                    error!(target: "reth::cli", ?error, "Failed to fetch the tip. Retrying...");
                 }
             }
         }

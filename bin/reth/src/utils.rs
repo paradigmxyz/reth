@@ -1,3 +1,5 @@
+//! Common CLI utility functions.
+
 use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
