@@ -9,7 +9,7 @@ use reth_db::{
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
-    provider::Error as ProviderError,
+    provider::ProviderError,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use reth_provider::Transaction;

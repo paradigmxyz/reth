@@ -11,6 +11,7 @@ description = "Reth storage provider."
 # reth
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
+reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
 
 # misc
