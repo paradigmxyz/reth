@@ -62,6 +62,7 @@ where
         let state =
             self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
 
+        // TODO: remove when HistoricalStateProviderRef::proof is implemented
         if matches!(state, SP::History(_)) {
             return Err(EthApiError::InvalidBlockRange)
         }
