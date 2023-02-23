@@ -1,7 +1,10 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::{
+        api::SP,
+        error::{EthApiError, EthResult},
+    },
     EthApi,
 };
 use reth_primitives::{Address, BlockId, Bytes, H256, KECCAK_EMPTY, U256};
@@ -58,10 +61,17 @@ where
     ) -> EthResult<EIP1186AccountProofResponse> {
         let state =
             self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+
+        if matches!(state, SP::History(_)) {
+            return Err(EthApiError::InvalidBlockRange)
+        }
+
         let mut proof =
             EIP1186AccountProofResponse { address, code_hash: KECCAK_EMPTY, ..Default::default() };
+
         if let Some(account) = state.basic_account(address)? {
             let (account_proof, storage_hash, stg_proofs) = state.proof(address, keys.clone())?;
+
             let storage_proof = keys
                 .into_iter()
                 .zip(stg_proofs)
@@ -73,6 +83,7 @@ where
                     })
                 })
                 .collect::<Result<_, _>>()?;
+
             proof = EIP1186AccountProofResponse {
                 balance: account.balance,
                 nonce: account.nonce.into(),

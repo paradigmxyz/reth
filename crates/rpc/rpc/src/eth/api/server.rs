@@ -372,7 +372,12 @@ where
         keys: Vec<H256>,
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        Ok(EthApi::get_proof(self, address, keys, block_number)?)
+        let res = EthApi::get_proof(self, address, keys, block_number);
+
+        Ok(res.map_err(|e| match e {
+            EthApiError::InvalidBlockRange => internal_rpc_err("unimplemented"),
+            _ => e.into(),
+        })?)
     }
 }
 
