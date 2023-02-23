@@ -8,8 +8,8 @@ use jsonrpsee::{
     server::{IdProvider, RandomIntegerIdProvider},
 };
 use reth_primitives::{
-    rpc::{Filter, FilterBlockOption, FilteredParams},
-    U256,
+    filter::{Filter, FilterBlockOption, FilteredParams},
+    Block, U256,
 };
 use reth_provider::BlockProvider;
 use reth_rpc_api::EthFilterApiServer;
@@ -197,43 +197,49 @@ where
     ///  - underlying database error
     ///  - amount of matches exceeds configured limit
     #[allow(dead_code)]
-    fn filter_logs(
-        &self,
-        filter: &Filter,
-        _from_block: u64,
-        _to_block: u64,
-    ) -> RpcResult<Vec<Log>> {
-        let logs = Vec::new();
-        let topics = if filter.has_topics() {
-            let params = FilteredParams::new(Some(filter.clone()));
-            Some(params.flat_topics)
-        } else {
-            None
-        };
+    fn filter_logs(&self, filter: &Filter, from_block: u64, to_block: u64) -> RpcResult<Vec<Log>> {
+        let mut logs = Vec::new();
+        let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        let _address_filter = FilteredParams::address_filter(&filter.address);
-        let _topics_filter = FilteredParams::topics_filter(&topics);
+        let topics =
+            if filter.has_topics() { Some(filter_params.flat_topics.clone()) } else { None };
 
-        // TODO blocked by <https://github.com/paradigmxyz/reth/issues/1371>
-        // let block_number = from_block;
-        //
-        // while block_number <= to_block {
-        //     let _block = self
-        //         .client
-        //         .block_by_number(BlockNumberOrTag::Number(block_number.into()))
-        //         .to_rpc_result()?
-        //         .ok_or(EthApiError::UnknownBlockNumber)?;
-        //
-        //
-        //
-        //     if FilteredParams::matches_address(block.header.logs_bloom, &address_filter) &&
-        //         FilteredParams::matches_topics(block.header.logs_bloom, &topics_filter)
-        //     {
-        //         // TODO filter logs from transactions
-        //     }
-        // }
+        // derive bloom filters from filter input
+        let address_filter = FilteredParams::address_filter(&filter.address);
+        let topics_filter = FilteredParams::topics_filter(&topics);
+
+        for block_number in from_block..=to_block {
+            if let Some(block) = self.client.block_by_number(block_number).to_rpc_result()? {
+                // only if filter matches
+                if FilteredParams::matches_address(block.header.logs_bloom, &address_filter) &&
+                    FilteredParams::matches_topics(block.header.logs_bloom, &topics_filter)
+                {
+                    self.append_matching_block_logs(&mut logs, &filter_params, block);
+
+                    // TODO size check
+                }
+            }
+        }
 
         Ok(logs)
+    }
+
+    /// Appends all logs emitted in the `block` that match the `filter` to the `logs` vector.
+    #[allow(clippy::ptr_arg)]
+    fn append_matching_block_logs(
+        &self,
+        _logs: &mut Vec<Log>,
+        _filter: &FilteredParams,
+        block: Block,
+    ) {
+        let _block_log_index: u32 = 0;
+        let _block_hash = block.hash_slow();
+
+        // loop over all transactions in the block
+        for tx in block.body {
+            let _transaction_log_index: u32 = 0;
+            let _transaction_hash = tx.hash;
+        }
     }
 }
 

@@ -5,18 +5,19 @@ use crate::{
     manager::NetworkEvent,
     message::{PeerRequest, PeerRequestSender},
     metrics::TransactionsManagerMetrics,
-    network::NetworkHandleMessage,
     NetworkHandle,
 };
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use reth_eth_wire::{
-    GetPooledTransactions, NewPooledTransactionHashes66, PooledTransactions, Transactions,
+    EthVersion, GetPooledTransactions, NewPooledTransactionHashes, NewPooledTransactionHashes66,
+    NewPooledTransactionHashes68, PooledTransactions, Transactions,
 };
 use reth_interfaces::{p2p::error::RequestResult, sync::SyncStateProvider};
 use reth_network_api::{Peers, ReputationChangeKind};
 use reth_primitives::{
     FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, TransactionSigned, TxHash, H256,
 };
+use reth_rlp::Encodable;
 use reth_transaction_pool::{
     error::PoolResult, PropagateKind, PropagatedTransactions, TransactionPool,
 };
@@ -197,7 +198,8 @@ where
                 .get_all(hashes)
                 .into_iter()
                 .map(|tx| {
-                    (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_signed()))
+                    let tx = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
+                    PropagateTransaction::new(tx)
                 })
                 .collect(),
         );
@@ -206,9 +208,13 @@ where
         self.pool.on_propagated(propagated);
     }
 
+    /// Propagate the transactions to all connected peers either as full objects or hashes
+    ///
+    /// The message for new pooled hashes depends on the negotiated version of the stream.
+    /// See [NewPooledTransactionHashes](NewPooledTransactionHashes)
     fn propagate_transactions(
         &mut self,
-        txs: Vec<(TxHash, Arc<TransactionSigned>)>,
+        to_propagate: Vec<PropagateTransaction>,
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
 
@@ -218,21 +224,29 @@ where
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
-            let (hashes, full): (Vec<_>, Vec<_>) =
-                txs.iter().filter(|(hash, _)| peer.transactions.insert(*hash)).cloned().unzip();
+            // filter all transactions unknown to the peer
+            let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
+            let mut full_transactions = Vec::new();
+            for tx in to_propagate.iter() {
+                if peer.transactions.insert(tx.hash()) {
+                    hashes.push(tx);
+                    full_transactions.push(Arc::clone(&tx.transaction));
+                }
+            }
+            let hashes = hashes.build();
 
-            if !full.is_empty() {
+            if !full_transactions.is_empty() {
                 if idx > max_num_full {
-                    for hash in &hashes {
-                        propagated.0.entry(*hash).or_default().push(PropagateKind::Hash(*peer_id));
+                    for hash in hashes.iter_hashes().copied() {
+                        propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
                     }
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, hashes);
                 } else {
                     // send full transactions
-                    self.network.send_transactions(*peer_id, full);
+                    self.network.send_transactions(*peer_id, full_transactions);
 
-                    for hash in hashes {
+                    for hash in hashes.into_iter_hashes() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
                     }
                 }
@@ -249,7 +263,7 @@ where
     fn on_new_pooled_transaction_hashes(
         &mut self,
         peer_id: PeerId,
-        msg: NewPooledTransactionHashes66,
+        msg: NewPooledTransactionHashes,
     ) {
         // If the node is currently syncing, ignore transactions
         if self.network.is_syncing() {
@@ -259,18 +273,17 @@ where
         let mut num_already_seen = 0;
 
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            let mut transactions = msg.0;
-
+            let mut hashes = msg.into_hashes();
             // keep track of the transactions the peer knows
-            for tx in transactions.iter().copied() {
+            for tx in hashes.iter().copied() {
                 if !peer.transactions.insert(tx) {
                     num_already_seen += 1;
                 }
             }
 
-            self.pool.retain_unknown(&mut transactions);
+            self.pool.retain_unknown(&mut hashes);
 
-            if transactions.is_empty() {
+            if hashes.is_empty() {
                 // nothing to request
                 return
             }
@@ -278,7 +291,7 @@ where
             // request the missing transactions
             let (response, rx) = oneshot::channel();
             let req = PeerRequest::GetPooledTransactions {
-                request: GetPooledTransactions(transactions),
+                request: GetPooledTransactions(hashes),
                 response,
             };
 
@@ -323,7 +336,7 @@ where
                 // remove the peer
                 self.peers.remove(&peer_id);
             }
-            NetworkEvent::SessionEstablished { peer_id, messages, .. } => {
+            NetworkEvent::SessionEstablished { peer_id, messages, version, .. } => {
                 // insert a new peer
                 self.peers.insert(
                     peer_id,
@@ -332,17 +345,19 @@ where
                             NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
                         ),
                         request_tx: messages,
+                        version,
                     },
                 );
 
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
                 if !self.network.is_syncing() {
-                    let msg = NewPooledTransactionHashes66(self.pool.pooled_transactions());
-                    self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
-                        peer_id,
-                        msg,
-                    })
+                    todo!("get access to full tx");
+                    // let msg = NewPooledTransactionHashes66(self.pool.pooled_transactions());
+                    // self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
+                    //     peer_id,
+                    //     msg,
+                    // })
                 }
             }
             // TODO Add remaining events
@@ -502,6 +517,64 @@ where
     }
 }
 
+/// A transaction that's about to be propagated
+struct PropagateTransaction {
+    tx_type: u8,
+    length: usize,
+    transaction: Arc<TransactionSigned>,
+}
+
+// === impl PropagateTransaction ===
+
+impl PropagateTransaction {
+    fn hash(&self) -> TxHash {
+        self.transaction.hash
+    }
+
+    fn new(transaction: Arc<TransactionSigned>) -> Self {
+        Self { tx_type: transaction.tx_type().into(), length: transaction.length(), transaction }
+    }
+}
+
+/// A helper type to create the pooled transactions message based on the negotiated version of the
+/// session with the peer
+enum PooledTransactionsHashesBuilder {
+    Eth66(NewPooledTransactionHashes66),
+    Eth68(NewPooledTransactionHashes68),
+}
+
+// === impl PooledTransactionsHashesBuilder ===
+
+impl PooledTransactionsHashesBuilder {
+    fn push(&mut self, tx: &PropagateTransaction) {
+        match self {
+            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(tx.hash()),
+            PooledTransactionsHashesBuilder::Eth68(msg) => {
+                msg.hashes.push(tx.hash());
+                msg.sizes.push(tx.length);
+                msg.types.push(tx.tx_type);
+            }
+        }
+    }
+
+    /// Create a builder for the negotiated version of the peer's session
+    fn new(version: EthVersion) -> Self {
+        match version {
+            EthVersion::Eth66 | EthVersion::Eth67 => {
+                PooledTransactionsHashesBuilder::Eth66(Default::default())
+            }
+            EthVersion::Eth68 => PooledTransactionsHashesBuilder::Eth68(Default::default()),
+        }
+    }
+
+    fn build(self) -> NewPooledTransactionHashes {
+        match self {
+            PooledTransactionsHashesBuilder::Eth66(msg) => msg.into(),
+            PooledTransactionsHashesBuilder::Eth68(msg) => msg.into(),
+        }
+    }
+}
+
 /// How we received the transactions.
 enum TransactionSource {
     /// Transactions were broadcast to us via [`Transactions`] message.
@@ -532,6 +605,8 @@ struct Peer {
     transactions: LruCache<H256>,
     /// A communication channel directly to the session task.
     request_tx: PeerRequestSender,
+    /// negotiated version of the session.
+    version: EthVersion,
 }
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
@@ -546,7 +621,7 @@ pub enum NetworkTransactionEvent {
     /// Received list of transactions from the given peer.
     IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
-    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes66 },
+    IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
         peer_id: PeerId,

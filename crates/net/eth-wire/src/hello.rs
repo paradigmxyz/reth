@@ -99,8 +99,9 @@ impl HelloMessageBuilder {
         HelloMessage {
             protocol_version: protocol_version.unwrap_or_default(),
             client_version: client_version.unwrap_or_else(|| DEFAULT_CLIENT_VERSION.to_string()),
-            capabilities: capabilities
-                .unwrap_or_else(|| vec![EthVersion::Eth67.into(), EthVersion::Eth66.into()]),
+            capabilities: capabilities.unwrap_or_else(|| {
+                vec![EthVersion::Eth68.into(), EthVersion::Eth67.into(), EthVersion::Eth66.into()]
+            }),
             port: port.unwrap_or(30303),
             id,
         }

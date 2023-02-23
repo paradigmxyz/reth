@@ -198,6 +198,10 @@ impl BlockProvider for MockEthProvider {
             }
         }
     }
+
+    fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
 }
 
 impl AccountProvider for MockEthProvider {
@@ -226,6 +230,26 @@ impl StateProvider for MockEthProvider {
 }
 
 impl StateProviderFactory for MockEthProvider {
+    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
+    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
+
+    fn latest(&self) -> Result<Self::LatestSP<'_>> {
+        Ok(self)
+    }
+
+    fn history_by_block_number(
+        &self,
+        _block: reth_primitives::BlockNumber,
+    ) -> Result<Self::HistorySP<'_>> {
+        todo!()
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+        todo!()
+    }
+}
+
+impl StateProviderFactory for Arc<MockEthProvider> {
     type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
     type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
 

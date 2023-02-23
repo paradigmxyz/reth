@@ -297,9 +297,9 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "backon"
-version = "0.2.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cd1a59bc091e593ee9ed62df4e4a07115e00a0e0a52fd7e0e04540773939b80"
+checksum = "f34fac4d7cdaefa2deded0eda2d5d59dbfd43370ff3f856209e72340ae84c294"
 dependencies = [
  "futures",
  "pin-project",
@@ -4369,6 +4369,7 @@ dependencies = [
  "reth-rlp",
  "reth-rpc",
  "reth-rpc-builder",
+ "reth-rpc-engine-api",
  "reth-staged-sync",
  "reth-stages",
  "reth-tasks",
@@ -4557,6 +4558,7 @@ name = "reth-eth-wire"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "async-trait",
  "bytes",
  "ethers-core",
  "futures",
@@ -4913,6 +4915,7 @@ dependencies = [
  "jsonwebtoken",
  "pin-project",
  "rand 0.8.5",
+ "reth-executor",
  "reth-interfaces",
  "reth-network-api",
  "reth-primitives",
@@ -4923,6 +4926,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
+ "revm",
  "secp256k1 0.26.0",
  "serde",
  "serde_json",
@@ -4955,6 +4959,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
+ "reth-rpc-engine-api",
  "reth-rpc-types",
  "reth-tracing",
  "reth-transaction-pool",
@@ -5108,6 +5113,7 @@ version = "0.1.0"
 dependencies = [
  "aquamarine",
  "async-trait",
+ "auto_impl 1.0.1",
  "bitflags",
  "fnv",
  "futures-util",
@@ -5117,6 +5123,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-metrics-derive",
  "reth-primitives",
+ "reth-rlp",
  "ruint",
  "serde",
  "thiserror",
@@ -5252,8 +5259,7 @@ dependencies = [
 [[package]]
 name = "ruint"
 version = "1.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ad3a104dc8c3867f653b0fec89c65e00b0ceb752718ad282177a7e0f33257ac"
+source = "git+https://github.com/mattsse/uint?branch=matt/skip-leading-zeros#7aa078a0d3ea5a05c09e7a2b42c06921d55e7c67"
 dependencies = [
  "arbitrary",
  "derive_more",
@@ -5269,8 +5275,7 @@ dependencies = [
 [[package]]
 name = "ruint-macro"
 version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62cc5760263ea229d367e7dff3c0cbf09e4797a125bd87059a6c095804f3b2d1"
+source = "git+https://github.com/mattsse/uint?branch=matt/skip-leading-zeros#7aa078a0d3ea5a05c09e7a2b42c06921d55e7c67"
 
 [[package]]
 name = "rustc-demangle"

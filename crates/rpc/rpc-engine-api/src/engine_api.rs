@@ -10,7 +10,7 @@ use reth_primitives::{
     BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
     H64, U256,
 };
-use reth_provider::{BlockProvider, HeaderProvider, StateProvider};
+use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
@@ -19,13 +19,15 @@ use reth_rpc_types::engine::{
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// The Engine API response sender
+/// The Engine API handle.
+pub type EngineApiHandle = mpsc::UnboundedSender<EngineApiMessage>;
+
+/// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
 /// The upper limit for payload bodies request.
@@ -35,7 +37,7 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 /// functions in the Execution layer that are crucial for the consensus process.
 #[must_use = "EngineApi does nothing unless polled."]
 pub struct EngineApi<Client> {
-    client: Arc<Client>,
+    client: Client,
     /// Consensus configuration
     chain_spec: ChainSpec,
     message_rx: UnboundedReceiverStream<EngineApiMessage>,
@@ -45,7 +47,22 @@ pub struct EngineApi<Client> {
     // remote_store: HashMap<H64, ExecutionPayload>,
 }
 
-impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
+impl<Client: HeaderProvider + BlockProvider + StateProviderFactory> EngineApi<Client> {
+    /// Create new instance of [EngineApi].
+    pub fn new(
+        client: Client,
+        chain_spec: ChainSpec,
+        message_rx: mpsc::UnboundedReceiver<EngineApiMessage>,
+        forkchoice_state_tx: watch::Sender<ForkchoiceState>,
+    ) -> Self {
+        Self {
+            client,
+            chain_spec,
+            message_rx: UnboundedReceiverStream::new(message_rx),
+            forkchoice_state_tx,
+        }
+    }
+
     fn on_message(&mut self, msg: EngineApiMessage) {
         match msg {
             EngineApiMessage::GetPayload(payload_id, tx) => {
@@ -285,14 +302,14 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
             }))
         }
 
-        let mut state_provider = SubState::new(State::new(&*self.client));
+        let state_provider = self.client.latest()?;
         let total_difficulty = parent_td + block.header.difficulty;
         match executor::execute_and_verify_receipt(
             &block.unseal(),
             total_difficulty,
             None,
             &self.chain_spec,
-            &mut state_provider,
+            &mut SubState::new(State::new(&state_provider)),
         ) {
             Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash)),
             Err(err) => Ok(PayloadStatus::new(
@@ -394,7 +411,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProvider> EngineApi<Client> {
 
 impl<Client> Future for EngineApi<Client>
 where
-    Client: HeaderProvider + BlockProvider + StateProvider + Unpin,
+    Client: HeaderProvider + BlockProvider + StateProviderFactory + Unpin,
 {
     type Output = ();
 
@@ -419,12 +436,13 @@ mod tests {
     use reth_interfaces::test_utils::generators::random_block;
     use reth_primitives::{H256, MAINNET};
     use reth_provider::test_utils::MockEthProvider;
+    use std::sync::Arc;
     use tokio::sync::{
         mpsc::{unbounded_channel, UnboundedSender},
         watch::Receiver as WatchReceiver,
     };
 
-    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<MockEthProvider>) {
+    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
         let chain_spec = MAINNET.clone();
         let client = Arc::new(MockEthProvider::default());
         let (msg_tx, msg_rx) = unbounded_channel();
