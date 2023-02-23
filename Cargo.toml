@@ -41,3 +41,5 @@ default-members = ["bin/reth"]
 [patch.crates-io]
 revm = { git = "https://github.com/bluealloy/revm" }
 revm-primitives = { git = "https://github.com/bluealloy/revm" }
+# patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
+ruint = { git = "https://github.com/mattsse/uint", branch = "matt/skip-leading-zeros" }

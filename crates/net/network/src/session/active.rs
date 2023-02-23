@@ -753,9 +753,9 @@ mod tests {
             &self,
             local_addr: SocketAddr,
             f: F,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + Sync>>
+        ) -> Pin<Box<dyn Future<Output = ()> + Send>>
         where
-            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>>) -> O + Send + Sync + 'static,
+            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
         {
             let status = self.status;

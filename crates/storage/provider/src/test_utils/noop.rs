@@ -35,14 +35,18 @@ impl BlockProvider for NoopProvider {
     fn block(&self, _id: BlockId) -> Result<Option<Block>> {
         Ok(None)
     }
+
+    fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
 }
 
 impl TransactionsProvider for NoopProvider {
-    fn transaction_by_hash(&self, _hash: TxHash) -> Result<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
         Ok(None)
     }
 
-    fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, _hash: TxHash) -> Result<Option<TransactionSigned>> {
         Ok(None)
     }
 
