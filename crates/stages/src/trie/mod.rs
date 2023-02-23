@@ -55,8 +55,7 @@ where
     }
 
     fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
-        assert!(false, "Use batch instead.");
-        Ok(())
+        unreachable!("Use batch instead.");
     }
 
     // Insert a batch of data into the cache.
@@ -79,8 +78,7 @@ where
     }
 
     fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
-        assert!(false, "Use batch instead.");
-        Ok(())
+        unreachable!("Use batch instead.");
     }
 
     fn flush(&self) -> Result<(), Self::Error> {
@@ -134,8 +132,7 @@ where
     }
 
     fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
-        assert!(false, "Use batch instead.");
-        Ok(())
+        unreachable!("Use batch instead.");
     }
 
     /// Insert a batch of data into the cache.
@@ -163,8 +160,7 @@ where
     }
 
     fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
-        assert!(false, "Use batch instead.");
-        Ok(())
+        unreachable!("Use batch instead.");
     }
 
     fn flush(&self) -> Result<(), Self::Error> {
