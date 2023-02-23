@@ -61,16 +61,16 @@ where
     // Insert a batch of data into the cache.
     fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
         let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
-        for i in 0..keys.len() {
-            cursor.upsert(H256::from_slice(keys[i].as_slice()), values[i].clone())?;
+        for (key, value) in keys.into_iter().zip(values.into_iter()) {
+            cursor.upsert(H256::from_slice(key.as_slice()), value)?;
         }
         Ok(())
     }
 
     fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
         let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
-        for i in 0..keys.len() {
-            if cursor.seek_exact(H256::from_slice(keys[i].as_slice()))?.is_some() {
+        for key in keys {
+            if cursor.seek_exact(H256::from_slice(key.as_slice()))?.is_some() {
                 cursor.delete_current()?;
             }
         }
@@ -138,20 +138,20 @@ where
     /// Insert a batch of data into the cache.
     fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
         let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        for i in 0..keys.len() {
-            let hash = H256::from_slice(keys[i].as_slice());
+        for (key, node) in keys.into_iter().zip(values.into_iter()) {
+            let hash = H256::from_slice(key.as_slice());
             if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
                 cursor.delete_current()?;
             }
-            cursor.upsert(self.key, StorageTrieEntry { hash, node: values[i].clone() })?;
+            cursor.upsert(self.key, StorageTrieEntry { hash, node })?;
         }
         Ok(())
     }
 
     fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
         let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        for i in 0..keys.len() {
-            let hash = H256::from_slice(keys[i].as_slice());
+        for key in keys {
+            let hash = H256::from_slice(key.as_slice());
             if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
                 cursor.delete_current()?;
             }
