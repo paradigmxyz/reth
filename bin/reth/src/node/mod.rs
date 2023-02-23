@@ -6,12 +6,14 @@ use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     runner::CliContext,
+    utils::get_single_header,
 };
+use backon::ConstantBuilder;
 use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
-use reth_consensus::beacon::BeaconConsensus;
+use reth_consensus::{beacon::BeaconConsensus, validation::validate_header_standalone};
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -26,15 +28,19 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
         bodies::downloader::BodyDownloader,
-        headers::{client::StatusUpdater, downloader::HeaderDownloader},
+        headers::{
+            client::{HeadersClient, HeadersRequest, StatusUpdater},
+            downloader::HeaderDownloader,
+        },
+        priority::Priority,
     },
     sync::SyncStateUpdater,
 };
 use reth_network::{
-    error::NetworkError, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
+    error::NetworkError, FetchClient, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, Head, HeadersDirection, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -216,8 +222,23 @@ impl Command {
             .build(fetch_client.clone(), consensus.clone(), db.clone())
             .into_task_with(task_executor);
 
+        let max_block = if let Some(block) = self.max_block {
+            Some(block)
+        } else if let Some(tip) = self.tip {
+            Some(self.fetch_tip(fetch_client, tip).await)
+        } else {
+            None
+        };
+
         let mut pipeline = self
-            .build_pipeline(config, header_downloader, body_downloader, network.clone(), consensus)
+            .build_pipeline(
+                config,
+                header_downloader,
+                body_downloader,
+                network.clone(),
+                consensus,
+                max_block,
+            )
             .await?;
 
         let events = stream_select(
@@ -316,7 +337,7 @@ impl Command {
         Ok(handle)
     }
 
-    fn fetch_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
+    fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
         db.view(|tx| {
             let head = FINISH.get_progress(tx)?.unwrap_or_default();
             let header = tx
@@ -339,13 +360,24 @@ impl Command {
         .map_err(Into::into)
     }
 
+    async fn fetch_tip(&self, fetch_client: Arc<FetchClient>, tip: H256) -> u64 {
+        loop {
+            match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
+                Ok(tip) => return tip.number,
+                Err(error) => {
+                    error!(target: "reth::cli", ?error, "Failed to fetch the tip. Retrying...")
+                }
+            }
+        }
+    }
+
     fn load_network_config(
         &self,
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
-        let head = self.fetch_head(Arc::clone(&db)).expect("the head block is missing");
+        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
             .network_config(config, self.chain.clone())
@@ -361,6 +393,7 @@ impl Command {
         body_downloader: B,
         updater: U,
         consensus: &Arc<dyn Consensus>,
+        max_block: Option<u64>,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
     where
         H: HeaderDownloader + 'static,
@@ -371,7 +404,7 @@ impl Command {
 
         let mut builder = Pipeline::builder();
 
-        if let Some(max_block) = self.max_block {
+        if let Some(max_block) = max_block {
             debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
             builder = builder.with_max_block(max_block)
         }
