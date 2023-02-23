@@ -1,4 +1,4 @@
-#![warn(missing_docs, unreachable_pub)]
+#![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
@@ -11,8 +11,8 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, HeaderProvider,
-    StateProvider, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
