@@ -6,6 +6,7 @@ use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     runner::CliContext,
+    utils::get_single_header,
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -31,10 +32,10 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
 };
 use reth_network::{
-    error::NetworkError, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
+    error::NetworkError, FetchClient, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -205,9 +206,18 @@ impl Command {
         task_executor: &TaskExecutor,
     ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
     {
-        // building network downloaders using the fetch client
-        let fetch_client = Arc::new(network.fetch_client().await?);
+        let fetch_client = network.fetch_client().await?;
+        let max_block = if let Some(block) = self.max_block {
+            Some(block)
+        } else if let Some(tip) = self.tip {
+            Some(self.lookup_or_fetch_tip(db.clone(), fetch_client.clone(), tip).await?)
+        } else {
+            None
+        };
 
+        // TODO: remove Arc requirement from downloader builders.
+        // building network downloaders using the fetch client
+        let fetch_client = Arc::new(fetch_client);
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(fetch_client.clone(), consensus.clone())
             .into_task_with(task_executor);
@@ -217,7 +227,14 @@ impl Command {
             .into_task_with(task_executor);
 
         let mut pipeline = self
-            .build_pipeline(config, header_downloader, body_downloader, network.clone(), consensus)
+            .build_pipeline(
+                config,
+                header_downloader,
+                body_downloader,
+                network.clone(),
+                consensus,
+                max_block,
+            )
             .await?;
 
         let events = stream_select(
@@ -316,7 +333,7 @@ impl Command {
         Ok(handle)
     }
 
-    fn fetch_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
+    fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
         db.view(|tx| {
             let head = FINISH.get_progress(tx)?.unwrap_or_default();
             let header = tx
@@ -339,13 +356,42 @@ impl Command {
         .map_err(Into::into)
     }
 
+    /// Attempt to look up the block number for the tip hash in the database.
+    /// If it doesn't exist, download the header and return the block number.
+    ///
+    /// NOTE: The download is attempted with infinite retries.
+    async fn lookup_or_fetch_tip(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        fetch_client: FetchClient,
+        tip: H256,
+    ) -> Result<u64, reth_interfaces::Error> {
+        if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {
+            debug!(target: "reth::cli", ?tip, number, "Successfully looked up tip in the database");
+            return Ok(number)
+        }
+
+        debug!(target: "reth::cli", ?tip, "Fetching tip header from the network.");
+        loop {
+            match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
+                Ok(tip_header) => {
+                    debug!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip");
+                    return Ok(tip_header.number)
+                }
+                Err(error) => {
+                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                }
+            }
+        }
+    }
+
     fn load_network_config(
         &self,
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
-        let head = self.fetch_head(Arc::clone(&db)).expect("the head block is missing");
+        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
             .network_config(config, self.chain.clone())
@@ -361,6 +407,7 @@ impl Command {
         body_downloader: B,
         updater: U,
         consensus: &Arc<dyn Consensus>,
+        max_block: Option<u64>,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
     where
         H: HeaderDownloader + 'static,
@@ -371,7 +418,7 @@ impl Command {
 
         let mut builder = Pipeline::builder();
 
-        if let Some(max_block) = self.max_block {
+        if let Some(max_block) = max_block {
             debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
             builder = builder.with_max_block(max_block)
         }

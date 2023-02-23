@@ -15,11 +15,14 @@ pub(crate) enum ControlFlow {
         /// The progress of the last stage
         progress: BlockNumber,
     },
-    NoProgress,
+    NoProgress {
+        /// The current stage progress.
+        stage_progress: Option<BlockNumber>,
+    },
 }
 
 impl ControlFlow {
     pub(crate) fn should_continue(&self) -> bool {
-        matches!(self, ControlFlow::Continue { .. } | ControlFlow::NoProgress)
+        matches!(self, ControlFlow::Continue { .. } | ControlFlow::NoProgress { .. })
     }
 }
