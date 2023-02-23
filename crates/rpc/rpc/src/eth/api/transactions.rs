@@ -1,13 +1,14 @@
 //! Contains RPC handler implementations specific to transactions
-
 use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{Bytes, FromRecoveredTransaction, TransactionSigned, H256};
+use reth_primitives::{
+    BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, TransactionSigned, H256, U256,
+};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
-use reth_rpc_types::TransactionRequest;
+use reth_rpc_types::{Index, Transaction, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
@@ -18,6 +19,90 @@ where
 {
     pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
         unimplemented!()
+    }
+
+    /// Finds a given trasaction by its hash.
+    pub(crate) async fn transaction_by_hash(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<reth_rpc_types::Transaction>> {
+        let tx_by_hash = match self.client().transaction_by_hash(hash) {
+            Ok(Some(item)) => item,
+            Ok(None) => return Ok(None),
+            Err(_) => return Err(EthApiError::EmptyRawTransactionData),
+        };
+
+        let tx: reth_rpc_types::Transaction = Transaction::from_recovered_with_block_context(
+            tx_by_hash.into_ecrecovered().unwrap(),
+            // this is just stubbed out for now still need to fully implement
+            H256::default(),
+            u64::default(),
+            U256::from(usize::from(Index::default())),
+        );
+        Ok(Some(tx))
+    }
+
+    /// Find a transaction at a specific index in a block, after finding the block by its hash.
+    pub(crate) async fn transaction_by_block_hash_and_index(
+        &self,
+        hash: H256,
+        index: Index,
+    ) -> EthResult<Option<reth_rpc_types::Transaction>> {
+        let block_by_hash = match self.client().block_by_hash(hash) {
+            Ok(item) => item,
+            Err(_) => return Err(EthApiError::UnknownBlockNumber),
+        };
+
+        if let Some(block) = block_by_hash {
+            let txs = block.body;
+            let tx = txs[usize::from(index)].clone();
+            Ok(Some(Transaction::from_recovered_with_block_context(
+                tx.into_ecrecovered().unwrap(),
+                hash,
+                block.header.number,
+                U256::from(usize::from(index)),
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Find a transaction at a specific index in a block, after finging the block by its block
+    /// number.
+    pub(crate) async fn transaction_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> EthResult<Option<reth_rpc_types::Transaction>> {
+        // get the u64 equivalent of the BlockNumber
+        let block_number = match self.client().convert_block_number(number) {
+            Ok(Some(number)) => number,
+            Ok(None) => return Ok(None),
+            Err(_) => return Err(EthApiError::InvalidBlockRange),
+        };
+        // get the Block by number from the client
+        let block_by_number = match self.client().block_by_number(block_number) {
+            Ok(item) => item,
+            Err(_) => return Err(EthApiError::UnknownBlockNumber),
+        };
+        // get the tx from the block
+        let txs = match self.client().transactions_by_block(BlockId::from(number)) {
+            Ok(Some(txs)) => txs,
+            Ok(None) => return Ok(None),
+            Err(_) => return Err(EthApiError::UnknownBlockNumber),
+        };
+        let tx = txs[usize::from(index)].clone();
+
+        if let Some(block) = block_by_number {
+            Ok(Some(Transaction::from_recovered_with_block_context(
+                tx.into_ecrecovered().unwrap(),
+                BlockId::from(number).as_block_hash().unwrap(),
+                block.header.number,
+                U256::from(usize::from(index)),
+            )))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.

@@ -10,7 +10,7 @@
 //! Provides all relevant types for the various RPC endpoints, grouped by namespace.
 
 mod admin;
-mod eth;
+pub mod eth;
 
 pub use admin::*;
 pub use eth::*;
