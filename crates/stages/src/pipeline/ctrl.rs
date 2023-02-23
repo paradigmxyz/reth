@@ -16,8 +16,8 @@ pub(crate) enum ControlFlow {
         progress: BlockNumber,
     },
     NoProgress {
-        /// The previous progress of the current stage.
-        previous_progress: Option<BlockNumber>,
+        /// The current stage progress.
+        stage_progress: Option<BlockNumber>,
     },
 }
 

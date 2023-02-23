@@ -182,8 +182,8 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 .await?;
 
             match next {
-                ControlFlow::NoProgress { previous_progress } => {
-                    if let Some(progress) = previous_progress {
+                ControlFlow::NoProgress { stage_progress } => {
+                    if let Some(progress) = stage_progress {
                         self.progress.update(progress);
                     }
                 }
@@ -284,7 +284,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
-                return Ok(ControlFlow::NoProgress { previous_progress: prev_progress })
+                return Ok(ControlFlow::NoProgress { stage_progress: prev_progress })
             }
 
             self.listeners
@@ -315,7 +315,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                         return Ok(if made_progress {
                             ControlFlow::Continue { progress: stage_progress }
                         } else {
-                            ControlFlow::NoProgress { previous_progress: Some(stage_progress) }
+                            ControlFlow::NoProgress { stage_progress: Some(stage_progress) }
                         })
                     }
                 }
@@ -412,7 +412,7 @@ impl PipelineProgress {
     fn next_ctrl(&self) -> ControlFlow {
         match self.progress {
             Some(progress) => ControlFlow::Continue { progress },
-            None => ControlFlow::NoProgress { previous_progress: None },
+            None => ControlFlow::NoProgress { stage_progress: None },
         }
     }
 }
@@ -465,7 +465,7 @@ mod tests {
     fn progress_ctrl_flow() {
         let mut progress = PipelineProgress::default();
 
-        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { previous_progress: None });
+        assert_eq!(progress.next_ctrl(), ControlFlow::NoProgress { stage_progress: None });
 
         progress.update(1);
         assert_eq!(progress.next_ctrl(), ControlFlow::Continue { progress: 1 });
