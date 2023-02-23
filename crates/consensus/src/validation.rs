@@ -1,10 +1,10 @@
 //! Collection of methods for block validation.
 use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
 use reth_primitives::{
-    BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock, SealedHeader,
+    BlockId, BlockNumber, BlockNumberOrTag, ChainSpec, Hardfork, Header,InvalidTransactionError, SealedBlock, SealedHeader,
     Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
-use reth_provider::{AccountProvider, HeaderProvider};
+use reth_provider::{AccountProvider, HeaderProvider, WithdrawalsProvider};
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::SystemTime,
@@ -348,9 +348,10 @@ pub fn validate_header_regarding_parent(
 /// Checks:
 ///  If we already know the block.
 ///  If parent is known
+///  If withdarwals are valid
 ///
 /// Returns parent block header
-pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
+pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider>(
     block: &SealedBlock,
     provider: &PROV,
 ) -> RethResult<SealedHeader> {
@@ -366,12 +367,25 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider>(
         .header(&block.parent_hash)?
         .ok_or(ConsensusError::ParentUnknown { hash: block.parent_hash })?;
 
+    // Check if withdrawals are valid.
+    let parent_block_id = BlockId::Number(BlockNumberOrTag::Number(parent.number));
+    let latest_withdrawal = provider.lastest_withdrawal(parent_block_id, parent.timestamp)?;
+    if let Some(withdrawals) = &block.withdrawals {
+        if !withdrawals.is_empty() {
+            let withdrawal_index = withdrawals.first().unwrap().index;
+            let lastest_withdrawal_index = latest_withdrawal.map_or(0, |w| w.index);
+            if lastest_withdrawal_index + 1 != withdrawal_index {
+                return Err(ConsensusError::BlockKnown { hash, number: block.header.number }.into())
+            }
+        }
+    }
+
     // Return parent header.
     Ok(parent.seal(block.parent_hash))
 }
 
 /// Full validation of block before execution.
-pub fn full_validation<Provider: HeaderProvider + AccountProvider>(
+pub fn full_validation<Provider: HeaderProvider + AccountProvider + WithdrawalsProvider>(
     block: &SealedBlock,
     provider: Provider,
     chain_spec: &ChainSpec,
@@ -481,6 +495,24 @@ mod tests {
 
         fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
             Ok(vec![])
+        }
+    }
+
+    impl WithdrawalsProvider for Provider {
+        fn lastest_withdrawal(
+            &self,
+            _block_id: BlockId,
+            _timestamp: u64,
+        ) -> Result<Option<Withdrawal>> {
+            Ok(None)
+        }
+
+        fn withdrawals_by_block(
+            &self,
+            _id: BlockId,
+            _timestamp: u64,
+        ) -> RethResult<Option<Vec<Withdrawal>>> {
+            Ok(None)
         }
     }
 

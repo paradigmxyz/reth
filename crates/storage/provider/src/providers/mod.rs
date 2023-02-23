@@ -267,6 +267,25 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
         }
         Ok(None)
     }
+
+    fn lastest_withdrawal(&self, id: BlockId, timestamp: u64) -> Result<Option<Withdrawal>> {
+        match self.withdrawals_by_block(id, timestamp)? {
+            None => Ok(None),
+            Some(withdrawals) => {
+                if !withdrawals.is_empty() {
+                    Ok(withdrawals.last().cloned())
+                } else {
+                    // find the lastest withdrawal in previous block
+                    let number = self.block_number_for_id(id)?.unwrap();
+                    if number == 0 {
+                        return Ok(None)
+                    }
+                    let id = BlockId::Number((number - 1).into());
+                    self.lastest_withdrawal(id, timestamp)
+                }
+            }
+        }
+    }
 }
 
 impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
