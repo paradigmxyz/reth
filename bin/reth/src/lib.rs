@@ -20,3 +20,4 @@ pub mod runner;
 pub mod stage;
 pub mod test_eth_chain;
 pub mod test_vectors;
+pub mod utils;
