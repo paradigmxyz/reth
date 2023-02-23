@@ -145,6 +145,13 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                     .zip(self.max_block)
                     .map_or(false, |(progress, target)| progress >= target)
             {
+                trace!(
+                    target: "sync::pipeline",
+                    ?next_action,
+                    minimum_progress = ?self.progress.minimum_progress,
+                    max_block = ?self.max_block,
+                    "Terminating pipeline."
+                );
                 return Ok(())
             }
         }
