@@ -60,8 +60,6 @@ mod util;
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
-pub use trie::DBTrieLoader;
-
 /// A re-export of common structs and traits.
 pub mod prelude;
 
@@ -74,6 +72,7 @@ pub use error::*;
 pub use id::*;
 pub use pipeline::*;
 pub use stage::*;
+pub use trie::DBTrieLoader;
 
 // NOTE: Needed so the link in the module-level rustdoc works.
 #[allow(unused_extern_crates)]

@@ -309,20 +309,21 @@ impl DBTrieLoader {
         let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
 
         for (address, changed_storages) in changed_accounts {
-            if let Some(account) = trie.get(address.as_slice())? {
-                let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
+            let storage_root = if let Some(account) = trie.get(address.as_slice())? {
                 trie.remove(address.as_bytes())?;
 
-                if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
-                    let value = EthAccount::from_with_root(
-                        account,
-                        self.update_storage_root(tx, storage_root, address, changed_storages)?,
-                    );
+                let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
+                self.update_storage_root(tx, storage_root, address, changed_storages)?
+            } else {
+                self.calculate_storage_root(tx, address)?
+            };
 
-                    let mut out = Vec::new();
-                    Encodable::encode(&value, &mut out);
-                    trie.insert(address.as_bytes().to_vec(), out)?;
-                }
+            if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
+                let value = EthAccount::from_with_root(account, storage_root);
+
+                let mut out = Vec::new();
+                Encodable::encode(&value, &mut out);
+                trie.insert(address.as_bytes().to_vec(), out)?;
             }
         }
 
