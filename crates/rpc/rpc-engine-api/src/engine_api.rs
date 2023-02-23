@@ -1,9 +1,6 @@
 use crate::{message::EngineApiMessageVersion, EngineApiError, EngineApiMessage, EngineApiResult};
 use futures::StreamExt;
-use reth_executor::{
-    executor,
-    revm_wrap::{State, SubState},
-};
+use reth_executor::executor;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
@@ -11,6 +8,7 @@ use reth_primitives::{
     H64, U256,
 };
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_revm::database::{State, SubState};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,

@@ -1,70 +1,33 @@
-use reth_interfaces::Error;
+use crate::config::revm_spec;
 use reth_primitives::{
-    Account, Address, Header, Log as RethLog, Transaction, TransactionKind, TransactionSigned,
-    TxEip1559, TxEip2930, TxLegacy, H160, H256, KECCAK_EMPTY, U256,
+    Address, ChainSpec, Head, Header, Transaction, TransactionKind, TransactionSigned, TxEip1559,
+    TxEip2930, TxLegacy, U256,
 };
-use reth_provider::StateProvider;
-use revm::{
-    db::{CacheDB, DatabaseRef},
-    primitives::{AccountInfo, BlockEnv, Bytecode, Log, TransactTo, TxEnv},
-};
+use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, TransactTo, TxEnv};
 
-/// SubState of database. Uses revm internal cache with binding to reth StateProvider trait.
-pub type SubState<DB> = CacheDB<State<DB>>;
+/// Fill [CfgEnv] fields according to the chain spec and given header
+pub fn fill_cfg_env(
+    cfg_env: &mut CfgEnv,
+    chain_spec: &ChainSpec,
+    header: &Header,
+    total_difficulty: U256,
+) {
+    let spec_id = revm_spec(
+        chain_spec,
+        Head {
+            number: header.number,
+            timestamp: header.timestamp,
+            difficulty: header.difficulty,
+            total_difficulty,
+            hash: Default::default(),
+        },
+    );
 
-/// Wrapper around StateProvider that implements revm database trait
-pub struct State<DB: StateProvider>(pub DB);
-
-impl<DB: StateProvider> State<DB> {
-    /// Create new State with generic StateProvider.
-    pub fn new(db: DB) -> Self {
-        Self(db)
-    }
-
-    /// Return inner state reference
-    pub fn state(&self) -> &DB {
-        &self.0
-    }
-
-    /// Return inner state mutable reference
-    pub fn state_mut(&mut self) -> &mut DB {
-        &mut self.0
-    }
-
-    /// Consume State and return inner StateProvider.
-    pub fn into_inner(self) -> DB {
-        self.0
-    }
+    cfg_env.chain_id = U256::from(chain_spec.chain().id());
+    cfg_env.spec_id = spec_id;
+    cfg_env.perf_all_precompiles_have_balance = false;
+    cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Raw;
 }
-
-impl<DB: StateProvider> DatabaseRef for State<DB> {
-    type Error = Error;
-
-    fn basic(&self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.0.basic_account(address)?.map(|account| AccountInfo {
-            balance: account.balance,
-            nonce: account.nonce,
-            code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
-            code: None,
-        }))
-    }
-
-    fn code_by_hash(&self, code_hash: H256) -> Result<Bytecode, Self::Error> {
-        let bytecode = self.0.bytecode_by_hash(code_hash)?.unwrap_or_default();
-        Ok(Bytecode::new_raw(bytecode.0))
-    }
-
-    fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {
-        let index = H256(index.to_be_bytes());
-        let ret = self.0.storage(address, index)?.unwrap_or_default();
-        Ok(ret)
-    }
-
-    fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
-        Ok(self.0.block_hash(number)?.unwrap_or_default())
-    }
-}
-
 /// Fill block environment from Block.
 pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
     block_env.number = U256::from(header.number);
@@ -177,37 +140,5 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: 
                 })
                 .collect();
         }
-    }
-}
-
-/// Check equality between [`reth_primitives::Log`] and [`revm::primitives::Log`]
-pub fn is_log_equal(revm_log: &Log, reth_log: &reth_primitives::Log) -> bool {
-    revm_log.topics.len() == reth_log.topics.len() &&
-        revm_log.address.0 == reth_log.address.0 &&
-        revm_log.data == reth_log.data.0 &&
-        !revm_log
-            .topics
-            .iter()
-            .zip(reth_log.topics.iter())
-            .any(|(revm_topic, reth_topic)| revm_topic.0 != reth_topic.0)
-}
-
-/// Into reth primitive [Log] from [revm::primitives::Log].
-pub fn into_reth_log(log: Log) -> RethLog {
-    RethLog {
-        address: H160(log.address.0),
-        topics: log.topics.into_iter().map(|h| H256(h.0)).collect(),
-        data: log.data.into(),
-    }
-}
-
-/// Create reth primitive [Account] from [revm::primitives::AccountInfo].
-/// Check if revm bytecode hash is [KECCAK_EMPTY] and put None to reth [Account]
-pub fn to_reth_acc(revm_acc: &AccountInfo) -> Account {
-    let code_hash = revm_acc.code_hash;
-    Account {
-        balance: revm_acc.balance,
-        nonce: revm_acc.nonce,
-        bytecode_hash: if code_hash == KECCAK_EMPTY { None } else { Some(code_hash) },
     }
 }
