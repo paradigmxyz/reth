@@ -356,6 +356,10 @@ impl Command {
         .map_err(Into::into)
     }
 
+    /// Attempt to look up the block number for the tip hash in the database.
+    /// If it doesn't exist, download the header and return the block number.
+    ///
+    /// NOTE: The download is attempted with infinite retries.
     async fn fetch_or_lookup_tip(
         &self,
         db: Arc<Env<WriteMap>>,
