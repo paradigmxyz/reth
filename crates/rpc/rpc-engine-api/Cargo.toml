@@ -13,6 +13,7 @@ reth-interfaces = { path = "../../interfaces" }
 reth-provider = { path = "../../storage/provider" }
 reth-rlp = { path = "../../rlp" }
 reth-executor = { path = "../../executor" }
+reth-revm = { path = "../../revm" }
 reth-rpc-types = { path = "../rpc-types" }
 
 # async
