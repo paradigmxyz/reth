@@ -13,8 +13,7 @@ use reth_primitives::{SealedBlock, TransitionId, U256};
 /// Inserts header data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers].
 /// and transactions data to [tables::TxSenders], [tables::Transactions], [tables::TxHashNumber].
 /// and transition indexes to [tables::BlockTransitionIndex] and [tables::TxTransitionIndex].
-/// And block data [tables::BlockBodies], [tables::BlockBodies] and
-/// [tables::StoredBlockWithdrawals].
+/// And block data [tables::BlockBodies], [tables::BlockBodies] and [tables::BlockWithdrawals].
 ///
 /// Return [TransitionId] `(from,to)`
 pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
