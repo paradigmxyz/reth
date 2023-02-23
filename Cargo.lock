@@ -4598,6 +4598,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "revm",
  "rlp",
@@ -4841,6 +4842,16 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "thiserror",
+]
+
+[[package]]
+name = "reth-revm"
+version = "0.1.0"
+dependencies = [
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "revm",
 ]
 
 [[package]]
