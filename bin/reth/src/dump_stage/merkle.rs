@@ -68,8 +68,8 @@ async fn unwind_and_copy<DB: Database>(
     };
 
     // Unwind hashes all the way to FROM
-    StorageHashingStage::default().unwind(&mut unwind_tx, unwind.clone()).await.unwrap();
-    AccountHashingStage::default().unwind(&mut unwind_tx, unwind.clone()).await.unwrap();
+    StorageHashingStage::default().unwind(&mut unwind_tx, unwind).await.unwrap();
+    AccountHashingStage::default().unwind(&mut unwind_tx, unwind).await.unwrap();
 
     MerkleStage::default_unwind().unwind(&mut unwind_tx, unwind).await?;
 
