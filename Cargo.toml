@@ -16,6 +16,7 @@ members = [
     "crates/net/network",
     "crates/net/downloaders",
     "crates/primitives",
+    "crates/revm",
     "crates/rlp",
     "crates/rlp/rlp-derive",
     "crates/rpc/ipc",

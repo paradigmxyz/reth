@@ -3,9 +3,9 @@
 #![allow(unused)] // TODO rm later
 
 use crate::{eth::error::EthResult, EthApi};
-use reth_executor::revm_wrap::{State, SubState};
 use reth_primitives::{BlockId, U256};
 use reth_provider::{BlockProvider, StateProvider, StateProviderFactory};
+use reth_revm::database::{State, SubState};
 use reth_rpc_types::CallRequest;
 use revm::primitives::{BlockEnv, Env, ResultAndState};
 

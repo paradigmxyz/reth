@@ -4598,6 +4598,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "revm",
  "rlp",
@@ -4845,6 +4846,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-revm"
+version = "0.1.0"
+dependencies = [
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "revm",
+]
+
+[[package]]
 name = "reth-rlp"
 version = "0.1.2"
 dependencies = [
@@ -4888,11 +4899,11 @@ dependencies = [
  "jsonwebtoken",
  "pin-project",
  "rand 0.8.5",
- "reth-executor",
  "reth-interfaces",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "reth-rpc-api",
  "reth-rpc-engine-api",
@@ -4954,6 +4965,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "reth-rpc-types",
  "thiserror",
@@ -5049,6 +5061,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "reth-staged-sync",
  "serde",
