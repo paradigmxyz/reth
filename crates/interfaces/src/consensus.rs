@@ -97,7 +97,7 @@ pub enum Error {
     #[error("Transaction nonce is not consistent.")]
     TransactionNonceNotConsistent,
     #[error("Account does not have enough funds ({available_funds:?}) to cover transaction max fee: {max_fee:?}.")]
-    InsufficientFunds { max_fee: u128, available_funds: u128 },
+    InsufficientFunds { max_fee: u128, available_funds: U256 },
     #[error("Eip2930 transaction is enabled after berlin hardfork.")]
     TransactionEip2930Disabled,
     #[error("Old legacy transaction before Spurious Dragon should not have chain_id.")]

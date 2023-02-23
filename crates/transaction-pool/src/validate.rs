@@ -104,32 +104,28 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
+        
         // Checks for chainid
-        // can never be valid
-        // if transaction.chain_id() != self.chain_id {
-        //     return Err(PoolError::TxInvalidChainId(
-        //         *transaction.hash(),
-        //         transaction.chain_id(),
-        //         self.chain_id,
-        //     ));
-        // }
-
+        
+        let invalid_transaction = transaction.clone();
         // Checks for gaslimit
-        // if transaction.gas_limit() > self.currentMaxGasLimit {
-        //     return Err(PoolError::TxExceedsGasLimit(
-        //         *transaction.hash(),
-        //         transaction.gas_limit(),
-        //         self.currentMaxGasLimit,
-        //     ))
-        // }
+        if transaction.gas_limit() > self.currentMaxGasLimit {
+            return Ok(TransactionValidationOutcome::Invalid(
+                transaction,
+                PoolError::TxExceedsGasLimit(
+                    *invalid_transaction.hash(),
+                    invalid_transaction.gas_limit(),
+                    self.currentMaxGasLimit,
+                ),
+            ))
+        }
 
         let account = match self.client.basic_account(transaction.sender())? {
             Some(account) => account,
-            // None => return Err(PoolError::AccountNotFound(*transaction.hash())),
             None => {
                 return Ok(TransactionValidationOutcome::Invalid(
                     transaction,
-                    PoolError::AccountNotFound(*transaction.hash()),
+                    PoolError::AccountNotFound(*invalid_transaction.hash()),
                 ))
             }
         };

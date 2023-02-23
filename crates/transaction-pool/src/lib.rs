@@ -89,15 +89,15 @@ pub use crate::{
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{
-    error::PoolResult,
+    error::{PoolError, PoolResult},
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
     validate::ValidPoolTransaction,
 };
+use reth_interfaces::consensus::Error;
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
-use reth_interfaces::consensus::Error;
 
 mod config;
 pub mod error;
@@ -146,7 +146,7 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>>> {
+    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
         let outcome = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
@@ -162,13 +162,25 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>) {
+    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
+        let invalid_transaction = transaction.clone();
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
-        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
-
-        (hash, outcome)
+        // let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
+        // (hash, outcome)
+        match self.pool.validator().validate_transaction(origin, transaction).await {
+            Ok(TransactionValidationOutcome::Valid { balance, state_nonce, transaction }) => {
+                (hash, TransactionValidationOutcome::Valid { balance, state_nonce, transaction })
+            }
+            Ok(TransactionValidationOutcome::Invalid(transaction, error)) => {
+                (hash, TransactionValidationOutcome::Invalid(transaction, error))
+            }
+            Err(err) => {
+                let error = PoolError::from(err);
+                (hash, TransactionValidationOutcome::Invalid(invalid_transaction, error))
+            }
+        }
     }
 
     /// Number of transactions in the entire pool
@@ -205,7 +217,7 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx?)).pop().expect("exists; qed")
+        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
     }
 
     async fn add_transactions(

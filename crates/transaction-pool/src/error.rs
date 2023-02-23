@@ -1,7 +1,7 @@
 //! Transaction pool errors
 
-use reth_interfaces::Error;
 use reth_primitives::{Address, TxHash};
+use reth_interfaces::consensus::Error;
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -35,14 +35,14 @@ pub enum PoolError {
     AccountNotFound(TxHash),
 }
 
-// impl From<Error> for PoolError {
-//     fn from(error: Error) -> Self {
-//         match error {
-//             error => PoolError::AccountNotFound(TxHash::default()),
-//             _ => PoolError::DiscardedOnInsert(TxHash::default()),
-//         }
-//     }
-// }
+impl From<Error> for PoolError {
+    fn from(error: Error) -> Self {
+        match error {
+            error => PoolError::AccountNotFound(TxHash::default()),
+            _ => PoolError::DiscardedOnInsert(TxHash::default()),
+        }
+    }
+}
 
 // === impl PoolError ===
 
