@@ -2,14 +2,15 @@
 
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
-use jsonrpsee::core::Error as RpcError;
+use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
-    IpcServerBuilder, RethRpcModule, RpcModuleSelection, RpcServerConfig, RpcServerHandle,
-    ServerBuilder, TransportRpcModuleConfig, DEFAULT_HTTP_RPC_PORT, DEFAULT_IPC_ENDPOINT,
+    constants, IpcServerBuilder, RethRpcModule, RpcModuleSelection, RpcServerConfig,
+    RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
+use reth_rpc_engine_api::EngineApiHandle;
 use reth_transaction_pool::TransactionPool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -48,7 +49,7 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.addr")]
     pub ws_addr: Option<IpAddr>,
 
-    /// Http server port to listen on
+    /// Ws server port to listen on
     #[arg(long = "ws.port")]
     pub ws_port: Option<u16>,
 
@@ -64,9 +65,17 @@ pub struct RpcServerArgs {
     #[arg(long)]
     pub ipcpath: Option<String>,
 
+    /// Auth server address to listen on
+    #[arg(long = "authrpc.addr")]
+    pub auth_addr: Option<IpAddr>,
+
+    /// Auth server port to listen on
+    #[arg(long = "authrpc.port")]
+    pub auth_port: Option<u16>,
+
     /// Path to a JWT secret to use for authenticated RPC endpoints
     #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
-    authrpc_jwtsecret: Option<PlatformPath<JwtSecretPath>>,
+    auth_jwtsecret: Option<PlatformPath<JwtSecretPath>>,
 }
 
 impl RpcServerArgs {
@@ -81,7 +90,7 @@ impl RpcServerArgs {
     /// duration of the execution, and SHOULD store the hex-encoded secret as a jwt.hex file on
     /// the filesystem. This file can then be used to provision the counterpart client.
     pub(crate) fn jwt_secret(&self) -> Result<JwtSecret, JwtError> {
-        let arg = self.authrpc_jwtsecret.as_ref();
+        let arg = self.auth_jwtsecret.as_ref();
         let path: Option<&Path> = arg.map(|p| p.as_ref());
         match path {
             Some(fpath) => JwtSecret::from_file(fpath),
@@ -94,7 +103,7 @@ impl RpcServerArgs {
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub(crate) async fn start_server<Client, Pool, Network>(
+    pub(crate) async fn start_rpc_server<Client, Pool, Network>(
         &self,
         client: Client,
         pool: Pool,
@@ -113,6 +122,27 @@ impl RpcServerArgs {
             self.rpc_server_config(),
         )
         .await
+    }
+
+    /// Create Engine API server.
+    pub(crate) async fn start_auth_server<Client, Pool, Network>(
+        &self,
+        client: Client,
+        pool: Pool,
+        network: Network,
+        handle: EngineApiHandle,
+    ) -> Result<ServerHandle, RpcError>
+    where
+        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Pool: TransactionPool + Clone + 'static,
+        Network: NetworkInfo + Peers + Clone + 'static,
+    {
+        let socket_address = SocketAddr::new(
+            self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
+        );
+        let secret = self.jwt_secret().map_err(|err| RpcError::Custom(err.to_string()))?;
+        reth_rpc_builder::auth::launch(client, pool, network, handle, socket_address, secret).await
     }
 
     /// Creates the [TransportRpcModuleConfig] from cli args.
@@ -138,7 +168,7 @@ impl RpcServerArgs {
         if self.http {
             let socket_address = SocketAddr::new(
                 self.http_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-                self.http_port.unwrap_or(DEFAULT_HTTP_RPC_PORT),
+                self.http_port.unwrap_or(constants::DEFAULT_HTTP_RPC_PORT),
             );
             config = config
                 .with_http_address(socket_address)
@@ -149,7 +179,7 @@ impl RpcServerArgs {
         if self.ws {
             let socket_address = SocketAddr::new(
                 self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-                self.ws_port.unwrap_or(DEFAULT_HTTP_RPC_PORT),
+                self.ws_port.unwrap_or(constants::DEFAULT_HTTP_RPC_PORT),
             );
             config = config.with_ws_address(socket_address).with_http(ServerBuilder::new());
         }
@@ -157,7 +187,7 @@ impl RpcServerArgs {
         if !self.ipcdisable {
             let ipc_builder = IpcServerBuilder::default();
             config = config.with_ipc(ipc_builder).with_ipc_endpoint(
-                self.ipcpath.as_ref().unwrap_or(&DEFAULT_IPC_ENDPOINT.to_string()),
+                self.ipcpath.as_ref().unwrap_or(&constants::DEFAULT_IPC_ENDPOINT.to_string()),
             );
         }
 
@@ -226,12 +256,15 @@ mod tests {
         let config = args.rpc_server_config();
         assert_eq!(
             config.http_address().unwrap(),
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_HTTP_RPC_PORT))
+            SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::UNSPECIFIED,
+                constants::DEFAULT_HTTP_RPC_PORT
+            ))
         );
         assert_eq!(
             config.ws_address().unwrap(),
             SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
         );
-        assert_eq!(config.ipc_endpoint().unwrap().path(), DEFAULT_IPC_ENDPOINT);
+        assert_eq!(config.ipc_endpoint().unwrap().path(), constants::DEFAULT_IPC_ENDPOINT);
     }
 }

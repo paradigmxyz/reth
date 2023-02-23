@@ -1,22 +1,22 @@
-use crate::{
-    config::{revm_spec, WEI_2ETH, WEI_3ETH, WEI_5ETH},
-    execution_result::{
-        AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
-    },
-    revm_wrap::{self, into_reth_log, to_reth_acc, SubState},
+use crate::execution_result::{
+    AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
 };
 use hashbrown::hash_map::Entry;
 use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Head, Header, Log,
-    Receipt, TransactionSigned, H256, U256,
+    bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
+    TransactionSigned, H256, U256,
 };
 use reth_provider::StateProvider;
+use reth_revm::{
+    config::{WEI_2ETH, WEI_3ETH, WEI_5ETH},
+    database::SubState,
+    env::{fill_block_env, fill_cfg_env, fill_tx_env},
+    into_reth_log, to_reth_acc,
+};
 use revm::{
     db::AccountState,
-    primitives::{
-        Account as RevmAccount, AccountInfo, AnalysisKind, Bytecode, ResultAndState, SpecId,
-    },
+    primitives::{Account as RevmAccount, AccountInfo, Bytecode, ResultAndState, SpecId},
     EVM,
 };
 use std::collections::{BTreeMap, HashMap};
@@ -63,24 +63,11 @@ where
         }
     }
 
-    fn init_block_env(&mut self, header: &Header, total_difficulty: U256) {
-        let spec_id = revm_spec(
-            self.chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                hash: Default::default(),
-            },
-        );
-
-        self.evm.env.cfg.chain_id = U256::from(self.chain_spec.chain().id());
-        self.evm.env.cfg.spec_id = spec_id;
-        self.evm.env.cfg.perf_all_precompiles_have_balance = false;
-        self.evm.env.cfg.perf_analyse_created_bytecodes = AnalysisKind::Raw;
-
-        revm_wrap::fill_block_env(&mut self.evm.env.block, header, spec_id >= SpecId::MERGE);
+    /// Initializes the config and block env.
+    fn init_env(&mut self, header: &Header, total_difficulty: U256) {
+        fill_cfg_env(&mut self.evm.env.cfg, self.chain_spec, header, total_difficulty);
+        let after_merge = self.evm.env.cfg.spec_id >= SpecId::MERGE;
+        fill_block_env(&mut self.evm.env.block, header, after_merge);
     }
 
     /// Commit change to database and return change diff that is used to update state and create
@@ -356,7 +343,7 @@ where
     ) -> Result<ExecutionResult, Error> {
         let senders = self.recover_senders(&block.body, senders)?;
 
-        self.init_block_env(&block.header, total_difficulty);
+        self.init_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
         // output of execution
@@ -374,7 +361,7 @@ where
             }
 
             // Fill revm structure.
-            revm_wrap::fill_tx_env(&mut self.evm.env.tx, transaction, sender);
+            fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
             // Execute transaction.
             let out = if self.use_printer_tracer {
@@ -507,12 +494,12 @@ pub fn execute<DB: StateProvider>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::revm_wrap::State;
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
         StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
+    use reth_revm::database::State;
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 

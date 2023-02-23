@@ -21,7 +21,11 @@ reth-transaction-pool = { path = "../../transaction-pool", features = [
 ] }
 reth-network-api = { path = "../../net/network-api", features = ["test-utils"] }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
+reth-revm = { path = "../../revm" }
 reth-tasks = { path = "../../tasks" }
+
+# eth
+revm = "3.0.0"
 
 # rpc
 jsonrpsee = { version = "0.16" }

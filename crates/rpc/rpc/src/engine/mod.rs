@@ -8,22 +8,26 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{BlockHash, BlockNumber, H64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{
-    EngineApiError, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
+    EngineApiError, EngineApiHandle, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
     REQUEST_TOO_LARGE_CODE, UNKNOWN_PAYLOAD_CODE,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
     TransitionConfiguration, CAPABILITIES,
 };
-use tokio::sync::{
-    mpsc::UnboundedSender,
-    oneshot::{self, Receiver},
-};
+use tokio::sync::oneshot::{self, Receiver};
 
 /// The server implementation of Engine API
 pub struct EngineApi {
     /// Handle to the consensus engine
-    engine_tx: UnboundedSender<EngineApiMessage>,
+    engine_tx: EngineApiHandle,
+}
+
+impl EngineApi {
+    /// Creates a new instance of [EngineApi].
+    pub fn new(engine_tx: EngineApiHandle) -> Self {
+        Self { engine_tx }
+    }
 }
 
 impl std::fmt::Debug for EngineApi {

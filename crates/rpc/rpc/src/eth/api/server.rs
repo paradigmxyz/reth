@@ -89,13 +89,13 @@ where
     }
 
     /// Handler for: `eth_getUncleCountByBlockHash`
-    async fn block_uncles_count_by_hash(&self, _hash: H256) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn block_uncles_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+        Ok(EthApi::ommers(self, hash)?.map(|ommers| U256::from(ommers.len())))
     }
 
     /// Handler for: `eth_getUncleCountByBlockNumber`
-    async fn block_uncles_count_by_number(&self, _number: BlockNumberOrTag) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn block_uncles_count_by_number(&self, number: BlockNumberOrTag) -> Result<Option<U256>> {
+        Ok(EthApi::ommers(self, number)?.map(|ommers| U256::from(ommers.len())))
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`

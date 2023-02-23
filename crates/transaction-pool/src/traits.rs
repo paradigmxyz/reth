@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
 #[async_trait::async_trait]
+#[auto_impl::auto_impl(Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
