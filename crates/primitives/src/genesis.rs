@@ -84,10 +84,9 @@ impl Encodable for GenesisAccount {
             .as_ref()
             .map_or(EMPTY_ROOT, |storage| {
                 let storage_values =
-                    storage.iter().filter(|(_k, &v)| v != KECCAK_EMPTY).map(|(&k, v)| {
-                        let mut value_rlp = BytesMut::new();
-                        v.encode(&mut value_rlp);
-                        (k, value_rlp.freeze())
+                    storage.iter().filter(|(_k, &v)| v != H256::zero()).map(|(&k, v)| {
+                        let v256 = reth_rlp::encode_fixed_size(&(U256::from_be_bytes(*v.as_fixed_bytes())));
+                        (k, v256)
                     });
 
                 sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
