@@ -1,7 +1,4 @@
-use crate::{
-    BlockHashProvider, BlockIdProvider, BlockProvider, Error, HeaderProvider, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
-};
+use crate::{BlockHashProvider, BlockIdProvider, BlockProvider, Error, EvmEnvProviderError, HeaderProvider, StateProviderFactory, TransactionsProvider, WithdrawalsProvider};
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
@@ -230,6 +227,8 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
         }
     }
 }
+
+
 
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
     type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;

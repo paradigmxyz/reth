@@ -13,7 +13,7 @@ mod block_id;
 pub use block_id::BlockIdProvider;
 
 mod evm_env;
-pub use evm_env::EvmEnvProvider;
+pub use evm_env::{EvmEnvProvider, EvmEnvProviderError};
 
 mod header;
 pub use header::HeaderProvider;
