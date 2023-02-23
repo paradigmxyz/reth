@@ -1128,10 +1128,15 @@ mod tests {
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(Chain::Named(EtherType::Chain::Optimism), chainspec.chain);
-        assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Homestead).unwrap(),
-            &ForkCondition::Block(0)
-        );
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Byzantium).unwrap(), &ForkCondition::Block(0));
+        let hard_forks = vec![
+            Hardfork::Byzantium,
+            Hardfork::Homestead,
+            Hardfork::Istanbul,
+            Hardfork::Petersburg,
+            Hardfork::Constantinople
+        ];
+        for ref fork in hard_forks {
+            assert_eq!(chainspec.hardforks.get(fork).unwrap(), &ForkCondition::Block(0));
+        }
     }
 }
