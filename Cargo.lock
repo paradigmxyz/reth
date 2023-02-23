@@ -4835,28 +4835,12 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0"
 dependencies = [
- "arbitrary",
- "async-trait",
  "auto_impl 1.0.1",
- "bytes",
- "futures",
- "heapless",
- "hex-literal",
- "modular-bitfield",
- "parity-scale-codec",
  "parking_lot 0.12.1",
- "postcard",
- "rand 0.8.5",
- "reth-codecs",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
- "reth-rpc-types",
- "secp256k1 0.24.3",
- "test-fuzz",
  "thiserror",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

@@ -8,52 +8,22 @@ readme = "README.md"
 description = "Reth storage provider."
 
 [dependencies]
-#reth
-reth-codecs = { path = "../codecs" }
+# reth
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
-reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-db = { path = "../db" }
 
-# codecs
-postcard = { version = "1.0.2", features = ["alloc"] }
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-
 # misc
-async-trait = "0.1.57"
 thiserror = "1.0.37"
 auto_impl = "1.0"
-tokio = { version = "1.21.2", features = ["sync"] }
-bytes = "1.4"
-futures = "0.3.25"
-tokio-stream = "0.1.11"
-rand = "0.8.5"
-modular-bitfield = "0.11.2"
-heapless = "0.7.16"
 
 # feature test-utils
-arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
-secp256k1 = { version = "0.24.2", default-features = false, features = [
-    "alloc",
-    "recovery",
-    "rand",
-], optional = true }
 parking_lot = { version = "0.12", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
-test-fuzz = "3.0.4"
-tokio = { version = "1.21.2", features = ["full"] }
-tokio-stream = { version = "0.1.11", features = ["sync"] }
-arbitrary = { version = "1.1.7", features = ["derive"] }
-hex-literal = "0.3"
-secp256k1 = { version = "0.24.2", default-features = false, features = [
-    "alloc",
-    "recovery",
-    "rand",
-] }
 parking_lot = "0.12"
 
 [features]
 bench = []
-test-utils = ["tokio-stream/sync", "secp256k1", "parking_lot"]
+test-utils = ["parking_lot"]
