@@ -194,6 +194,9 @@ impl Command {
         tx.await??;
 
         info!(target: "reth::cli", "Pipeline has finished.");
+
+        // The pipeline has finished downloading blocks up to `--debug.tip` or `--debug.max-block`.
+        // Keep other node components alive for further usage.
         futures::future::pending().await
     }
 
