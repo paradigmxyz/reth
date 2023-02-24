@@ -1,10 +1,11 @@
 //! Error variants for the `eth_` namespace.
 
-use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
-
 use crate::result::{internal_rpc_err, rpc_err};
+use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
+use reth_primitives::U128;
 use reth_rpc_types::BlockError;
 use reth_transaction_pool::error::PoolError;
+use revm::primitives::EVMError;
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
@@ -48,6 +49,19 @@ pub(crate) enum EthApiError {
     UnknownBlockNumber,
     #[error("Invalid block range")]
     InvalidBlockRange,
+    /// An internal error where prevrandao is not set in the evm's environment
+    #[error("Prevrandao not in th EVM's environment after merge")]
+    PrevrandaoNotSet,
+    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} and maxFeePerGas {max_fee_per_gas} set")]
+    ConflictingRequestGasPrice { gas_price: U128, max_fee_per_gas: U128 },
+    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} maxFeePerGas {max_fee_per_gas} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
+    ConflictingRequestGasPriceAndTipSet {
+        gas_price: U128,
+        max_fee_per_gas: U128,
+        max_priority_fee_per_gas: U128,
+    },
+    #[error("Conflicting fee values in request. Legacy gasPrice {gas_price} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
+    RequestLegacyGasPriceAndTipSet { gas_price: U128, max_priority_fee_per_gas: U128 },
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
     /// Thrown when constructing an RPC block from a primitive block data failed.
@@ -72,9 +86,30 @@ impl From<EthApiError> for RpcError {
     }
 }
 
-/// An error due to invalid transaction
+impl<T> From<EVMError<T>> for EthApiError
+where
+    T: Into<EthApiError>,
+{
+    fn from(err: EVMError<T>) -> Self {
+        match err {
+            EVMError::Transaction(err) => InvalidTransactionError::from(err).into(),
+            EVMError::PrevrandaoNotSet => EthApiError::PrevrandaoNotSet,
+            EVMError::Database(err) => err.into(),
+        }
+    }
+}
+
+/// An error due to invalid transaction.
 ///
-/// These error variants can be thrown when the transaction is checked prior to execution
+/// This adds compatibility with geth.
+///
+/// These error variants can be thrown when the transaction is checked prior to execution.
+///
+/// ## Nomenclature
+///
+/// This type is explicitly modeled after geth's error variants and uses
+///   `fee cap` for `max_fee_per_gas`
+///   `tip` for `max_priority_fee_per_gas`
 #[derive(thiserror::Error, Debug)]
 pub enum InvalidTransactionError {
     /// returned if the nonce of a transaction is lower than the one present in the local chain.
@@ -143,6 +178,35 @@ impl InvalidTransactionError {
 impl From<InvalidTransactionError> for RpcError {
     fn from(err: InvalidTransactionError) -> Self {
         rpc_err(err.error_code(), err.to_string(), None)
+    }
+}
+
+impl From<revm::primitives::InvalidTransaction> for InvalidTransactionError {
+    fn from(err: revm::primitives::InvalidTransaction) -> Self {
+        use revm::primitives::InvalidTransaction;
+        match err {
+            InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
+                InvalidTransactionError::TipAboveFeeCap
+            }
+            InvalidTransaction::GasPriceLessThanBasefee => InvalidTransactionError::FeeCapTooLow,
+            InvalidTransaction::CallerGasLimitMoreThanBlock => InvalidTransactionError::GasTooHigh,
+            InvalidTransaction::CallGasCostMoreThanGasLimit => InvalidTransactionError::GasTooHigh,
+            InvalidTransaction::RejectCallerWithCode => InvalidTransactionError::SenderNoEOA,
+            InvalidTransaction::LackOfFundForGasLimit { .. } => {
+                InvalidTransactionError::InsufficientFunds
+            }
+            InvalidTransaction::OverflowPaymentInTransaction => {
+                InvalidTransactionError::GasUintOverflow
+            }
+            InvalidTransaction::NonceOverflowInTransaction => {
+                InvalidTransactionError::NonceMaxValue
+            }
+            InvalidTransaction::CreateInitcodeSizeLimit => {
+                InvalidTransactionError::MaxInitCodeSizeExceeded
+            }
+            InvalidTransaction::NonceTooHigh { .. } => InvalidTransactionError::NonceTooHigh,
+            InvalidTransaction::NonceTooLow { .. } => InvalidTransactionError::NonceTooLow,
+        }
     }
 }
 
