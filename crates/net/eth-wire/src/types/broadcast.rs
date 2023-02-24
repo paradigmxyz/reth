@@ -1,8 +1,11 @@
 //! Types for broadcasting new data.
 use crate::{EthMessage, EthVersion};
+use bytes::Bytes;
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, TransactionSigned, H256, U128};
-use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use reth_rlp::{
+    Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
+};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -193,7 +196,7 @@ impl From<Vec<H256>> for NewPooledTransactionHashes66 {
 /// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
 #[derive_arbitrary(rlp)]
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
     /// Transaction types for new transactions that have appeared on the network.
@@ -202,6 +205,59 @@ pub struct NewPooledTransactionHashes68 {
     pub sizes: Vec<usize>,
     /// Transaction hashes for new transactions that have appeared on the network.
     pub hashes: Vec<H256>,
+}
+
+impl Encodable for NewPooledTransactionHashes68 {
+    fn length(&self) -> usize {
+        #[derive(RlpEncodable)]
+        struct EncodableNewPooledTransactionHashes68 {
+            types: Bytes,
+            sizes: Vec<usize>,
+            hashes: Vec<H256>,
+        }
+
+        let encodable = EncodableNewPooledTransactionHashes68 {
+            types: Bytes::from(self.types.clone()),
+            sizes: self.sizes.clone(),
+            hashes: self.hashes.clone(),
+        };
+
+        encodable.length()
+    }
+    fn encode(&self, out: &mut dyn bytes::BufMut) {
+        #[derive(RlpEncodable)]
+        struct EncodableNewPooledTransactionHashes68 {
+            types: Bytes,
+            sizes: Vec<usize>,
+            hashes: Vec<H256>,
+        }
+
+        let encodable = EncodableNewPooledTransactionHashes68 {
+            types: Bytes::from(self.types.clone()),
+            sizes: self.sizes.clone(),
+            hashes: self.hashes.clone(),
+        };
+
+        encodable.encode(out);
+    }
+}
+
+impl Decodable for NewPooledTransactionHashes68 {
+    fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
+        #[derive(RlpDecodable)]
+        struct EncodableNewPooledTransactionHashes68 {
+            types: Bytes,
+            sizes: Vec<usize>,
+            hashes: Vec<H256>,
+        }
+
+        let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
+        Ok(Self {
+            types: encodable.types.to_vec(),
+            sizes: encodable.sizes,
+            hashes: encodable.hashes,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -227,16 +283,24 @@ mod tests {
 
     #[test]
     fn eth_68_tx_hash_roundtrip() {
-        let message = hex!("e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124");
+        let message =
+            hex!("e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124");
         let expected = NewPooledTransactionHashes68 {
             types: vec![0x02],
             sizes: vec![0xb6],
-            hashes: vec![H256::from_str("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124").unwrap()],
+            hashes: vec![H256::from_str(
+                "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
+            )
+            .unwrap()],
         };
 
         let mut encoded_expected = Vec::new();
         expected.encode(&mut encoded_expected);
-        assert_eq!(encoded_expected, message, "encoded {:x?} does not match expected {:x?}", encoded_expected, message);
+        assert_eq!(
+            encoded_expected, message,
+            "encoded {:x?} does not match expected {:x?}",
+            encoded_expected, message
+        );
 
         let msg = NewPooledTransactionHashes68::decode(&mut &message[..]).unwrap();
         assert_eq!(msg, expected);

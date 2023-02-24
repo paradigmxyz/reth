@@ -619,17 +619,7 @@ mod tests {
     #[test]
     fn rlp_list() {
         assert_eq!(encoded_list::<u64>(&[]), &hex!("c0")[..]);
-
-        // byte slices from geth:
-        // https://github.com/ethereum/go-ethereum/blob/82d934b1dd80cdd8190803ea9f73ed2c345e2576/rlp/encode_test.go#L171-L176
-        assert_eq!(encoded_list::<u8>(&[]), &hex!("80")[..]);
-        assert_eq!(encoded_list::<u8>(&[0x00u8]), &hex!("00")[..]);
-        assert_eq!(encoded_list::<u8>(&[0x02u8]), &hex!("02")[..]);
-        assert_eq!(encoded_list::<u8>(&[0x7eu8, 0x7eu8]), &hex!("7e")[..]);
-        assert_eq!(encoded_list::<u8>(&[0x7fu8, 0x7fu8]), &hex!("7f")[..]);
-        assert_eq!(encoded_list::<u8>(&[0x80u8]), &hex!("8180")[..]);
-        assert_eq!(encoded_list::<u8>(&[0x01u8, 0x02u8, 0x03u8]), &hex!("83010203")[..]);
-
+        assert_eq!(encoded_list::<u8>(&[0x00u8]), &hex!("c180")[..]);
         assert_eq!(encoded_list(&[0xFFCCB5_u64, 0xFFC0B5_u64]), &hex!("c883ffccb583ffc0b5")[..]);
     }
 

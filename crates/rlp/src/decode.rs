@@ -680,23 +680,11 @@ mod tests {
         ])
     }
 
-
-
     #[test]
     fn rlp_vectors() {
         check_decode_list(vec![
             (Ok(vec![]), &hex!("C0")[..]),
             (Ok(vec![0xBBCCB5_u64, 0xFFC0B5_u64]), &hex!("C883BBCCB583FFC0B5")[..]),
-        ]);
-
-        // byte slices from geth:
-        // https://github.com/ethereum/go-ethereum/blob/82d934b1dd80cdd8190803ea9f73ed2c345e2576/rlp/encode_test.go#L171-L176
-        check_decode_list(vec![
-            (Ok(vec![0x00u8]), &hex!("00")[..]),
-            (Ok(vec![0x7eu8]), &hex!("7E")[..]),
-            (Ok(vec![0x7fu8]), &hex!("7F")[..]),
-            (Ok(vec![0x80u8]), &hex!("8180")[..]),
-            (Ok(vec![0x01u8, 0x02u8, 0x03u8]), &hex!("83010203")[..]),
         ]);
     }
 
