@@ -367,15 +367,15 @@ impl Command {
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error> {
         if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {
-            debug!(target: "reth::cli", ?tip, number, "Successfully looked up tip in the database");
+            info!(target: "reth::cli", ?tip, number, "Successfully looked up tip block number in the database");
             return Ok(number)
         }
 
-        debug!(target: "reth::cli", ?tip, "Fetching tip header from the network.");
+        info!(target: "reth::cli", ?tip, "Fetching tip block number from the network.");
         loop {
             match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
                 Ok(tip_header) => {
-                    debug!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip");
+                    info!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip block number");
                     return Ok(tip_header.number)
                 }
                 Err(error) => {
