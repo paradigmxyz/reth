@@ -685,7 +685,7 @@ mod tests {
         check_decode_list(vec![
             (Ok(vec![]), &hex!("C0")[..]),
             (Ok(vec![0xBBCCB5_u64, 0xFFC0B5_u64]), &hex!("C883BBCCB583FFC0B5")[..]),
-        ]);
+        ])
     }
 
     #[cfg(feature = "smol_str")]
