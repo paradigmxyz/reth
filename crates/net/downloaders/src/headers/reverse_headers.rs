@@ -4,6 +4,7 @@ use super::task::TaskDownloader;
 use crate::metrics::DownloaderMetrics;
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
+use rayon::prelude::*;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -200,9 +201,8 @@ where
         let sync_target_hash = self.existing_sync_target_hash();
         let mut validated = Vec::with_capacity(headers.len());
 
-        for parent in headers {
-            let parent = parent.seal_slow();
-
+        let sealed_headers = headers.into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
+        for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
                 validated.last().or_else(|| self.lowest_validated_header())
