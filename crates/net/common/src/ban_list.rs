@@ -27,6 +27,8 @@ pub struct BanList {
 
 impl BanList {
     /// Creates a new ban list that bans the given peers and ips indefinitely.
+    ///
+    /// This will ban non-global IPs if they are included in `banned_ips`
     pub fn new(
         banned_peers: impl IntoIterator<Item = PeerId>,
         banned_ips: impl IntoIterator<Item = IpAddr>,
@@ -38,15 +40,13 @@ impl BanList {
     }
 
     /// Creates a new ban list that bans the given peers and ips with an optional timeout.
+    ///
+    /// This will ban non-global IPs if they are included in `banned_ips`
     pub fn new_with_timeout(
         banned_peers: HashMap<PeerId, Option<Instant>>,
         banned_ips: HashMap<IpAddr, Option<Instant>>,
     ) -> Self {
-        // filter out non globally routable IP addresses
-        Self {
-            banned_ips: banned_ips.into_iter().filter(|(ip, _)| is_global(ip)).collect(),
-            banned_peers,
-        }
+        Self { banned_ips, banned_peers }
     }
 
     /// Removes all peers that are no longer banned.
@@ -117,6 +117,8 @@ impl BanList {
     }
 
     /// Bans the IP until the timestamp.
+    ///
+    /// This does not ban non-global IPs.
     pub fn ban_ip_until(&mut self, ip: IpAddr, until: Instant) {
         self.ban_ip_with(ip, Some(until));
     }
@@ -127,6 +129,8 @@ impl BanList {
     }
 
     /// Bans the IP indefinitely.
+    ///
+    /// This does not ban non-global IPs.
     pub fn ban_ip(&mut self, ip: IpAddr) {
         self.ban_ip_with(ip, None);
     }
@@ -142,6 +146,8 @@ impl BanList {
     }
 
     /// Bans the ip indefinitely or until the given timeout.
+    ///
+    /// This does not ban non-global IPs.
     pub fn ban_ip_with(&mut self, ip: IpAddr, until: Option<Instant>) {
         if is_global(&ip) {
             self.banned_ips.insert(ip, until);
