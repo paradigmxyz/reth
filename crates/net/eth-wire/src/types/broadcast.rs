@@ -253,7 +253,7 @@ impl Decodable for NewPooledTransactionHashes68 {
 
         let encodable = EncodableNewPooledTransactionHashes68::decode(buf)?;
         Ok(Self {
-            types: encodable.types.to_vec(),
+            types: encodable.types.into(),
             sizes: encodable.sizes,
             hashes: encodable.hashes,
         })
