@@ -206,6 +206,11 @@ pub struct NewPooledTransactionHashes68 {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use hex_literal::hex;
+    use reth_rlp::{Decodable, Encodable};
+
     use super::*;
 
     #[test]
@@ -218,5 +223,34 @@ mod tests {
         blocks.0.push(BlockHashNumber { hash: H256::random(), number: 2 });
         let latest = blocks.latest().unwrap();
         assert_eq!(latest.number, 100);
+    }
+
+    #[test]
+    fn eth_68_tx_hash_roundtrip() {
+        let message = hex!("e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124");
+        let expected = NewPooledTransactionHashes68 {
+            types: vec![0x02],
+            sizes: vec![0xb6],
+            hashes: vec![H256::from_str("0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124").unwrap()],
+        };
+
+        let mut encoded_expected = Vec::new();
+        expected.encode(&mut encoded_expected);
+        assert_eq!(encoded_expected, message, "encoded {:x?} does not match expected {:x?}", encoded_expected, message);
+
+        let msg = NewPooledTransactionHashes68::decode(&mut &message[..]).unwrap();
+        assert_eq!(msg, expected);
+    }
+
+    #[test]
+    fn eth_68_tx_hashes_decoding() {
+        let messages = vec![
+            &hex!("f85282ffffca84ffffffff84fffffffff842a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")[..],
+            &hex!("e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124")[..],
+        ];
+
+        for message in messages {
+            let _msg = NewPooledTransactionHashes68::decode(&mut &message[..]).unwrap();
+        }
     }
 }
