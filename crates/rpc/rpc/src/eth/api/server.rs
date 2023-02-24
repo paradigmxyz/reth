@@ -383,6 +383,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::EthApi;
     use jsonrpsee::{
         core::{error::Error as RpcError, RpcResult},
         types::error::{CallError, INVALID_PARAMS_CODE},
@@ -393,8 +394,6 @@ mod tests {
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-
-    use crate::EthApi;
 
     #[tokio::test]
     /// Handler for: `eth_test_fee_history`
