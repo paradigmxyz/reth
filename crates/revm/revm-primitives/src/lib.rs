@@ -7,8 +7,11 @@
 
 //! revm utils and implementations specific to reth.
 
-/// Contains glue code for integrating reth database into revm's [Database](revm::Database).
-pub mod database;
+pub mod config;
 
-/// reexport for convenience
-pub use reth_revm_primitives::*;
+/// Helpers for configuring revm [Env](revm::primitives::Env)
+pub mod env;
+
+/// Helpers for type compatibility between reth and revm types
+mod compat;
+pub use compat::*;

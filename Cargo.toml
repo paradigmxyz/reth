@@ -17,6 +17,8 @@ members = [
     "crates/net/downloaders",
     "crates/primitives",
     "crates/revm",
+    "crates/revm/revm-primitives",
+    "crates/revm/revm-inspectors",
     "crates/rlp",
     "crates/rlp/rlp-derive",
     "crates/rpc/ipc",
