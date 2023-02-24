@@ -111,6 +111,10 @@ pub struct Command {
     #[arg(long = "debug.max-block", help_heading = "Debug")]
     max_block: Option<u64>,
 
+    /// Flag indicating whether the node should be terminated after the pipeline sync.
+    #[arg(long = "debug.terminate", help_heading = "Debug")]
+    terminate: bool,
+
     #[clap(flatten)]
     rpc: RpcServerArgs,
 }
@@ -196,8 +200,15 @@ impl Command {
 
         tx.await??;
 
-        info!(target: "reth::cli", "Finishing up");
-        Ok(())
+        info!(target: "reth::cli", "Pipeline has finished.");
+
+        if self.terminate {
+            Ok(())
+        } else {
+            // The pipeline has finished downloading blocks up to `--debug.tip` or
+            // `--debug.max-block`. Keep other node components alive for further usage.
+            futures::future::pending().await
+        }
     }
 
     async fn build_networked_pipeline(
