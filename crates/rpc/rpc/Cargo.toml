@@ -23,7 +23,7 @@ reth-revm = { path = "../../revm" }
 reth-tasks = { path = "../../tasks" }
 
 # eth
-revm = "3.0.0"
+revm = { version = "3.0.0", features = ["optional_block_gas_limit"] }
 
 # rpc
 jsonrpsee = { version = "0.16" }
@@ -39,7 +39,6 @@ tower = "0.4"
 tokio-stream = "0.1"
 pin-project = "1.0"
 
-# misc
 secp256k1 = { version = "0.26.0", features = [
     "global-context",
     "rand-std",
