@@ -149,8 +149,8 @@ where
 
     /// Fetch the current page
     fn fetch_page(&mut self) {
-        self.reset();
         self.entries = (self.fetch)(self.start, self.count);
+        self.reset();
     }
 
     /// Show the [DbListTUI] in the terminal.
@@ -320,11 +320,16 @@ where
             .start_corner(Corner::TopLeft);
         f.render_stateful_widget(key_list, inner_chunks[0], &mut app.list_state);
 
+        let values = app.entries.values().collect::<Vec<_>>();
         let value_display = Paragraph::new(
-            serde_json::to_string_pretty(
-                &app.entries.values().collect::<Vec<_>>()[app.list_state.selected().unwrap_or(0)],
-            )
-            .unwrap_or(String::from("Error serializing value")),
+            app.list_state
+                .selected()
+                .and_then(|selected| values.get(selected))
+                .map(|entry| {
+                    serde_json::to_string_pretty(entry)
+                        .unwrap_or(String::from("Error serializing value"))
+                })
+                .unwrap_or("No value selected".to_string()),
         )
         .block(Block::default().borders(Borders::ALL).title("Value (JSON)"))
         .wrap(Wrap { trim: false })
