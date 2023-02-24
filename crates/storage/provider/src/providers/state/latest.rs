@@ -7,7 +7,7 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
-use reth_interfaces::{provider::Error, Result};
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{keccak256, Account, Address, Bytes, StorageKey, StorageValue, H256, U256};
 use std::marker::PhantomData;
 
@@ -68,15 +68,15 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .db
             .cursor_read::<tables::Headers>()?
             .last()?
-            .ok_or(Error::Header { number: 0 })?
+            .ok_or(ProviderError::Header { number: 0 })?
             .1
             .state_root;
         let (acc_proof, stg_root) = loader
             .generate_acount_proof(self.db, root, hashed_address)
-            .map_err(|_| Error::StateTree)?;
+            .map_err(|_| ProviderError::StateTree)?;
         let stg_proof = loader
             .generate_storage_proofs(self.db, stg_root, hashed_address, keys)
-            .map_err(|_| Error::StateTree)?;
+            .map_err(|_| ProviderError::StateTree)?;
         Ok((
             acc_proof.into_iter().map(Bytes::from).collect(),
             stg_root,

@@ -1,4 +1,5 @@
 use crate::{Address, H256};
+use revm_primitives::U256;
 
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
@@ -18,3 +19,18 @@ pub struct AccessListItem {
 #[main_codec(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodableWrapper, RlpEncodableWrapper)]
 pub struct AccessList(pub Vec<AccessListItem>);
+
+impl AccessList {
+    /// Converts the list into a vec, expected by revm
+    pub fn flattened(self) -> Vec<(Address, Vec<U256>)> {
+        self.0
+            .into_iter()
+            .map(|item| {
+                (
+                    item.address,
+                    item.storage_keys.into_iter().map(|slot| U256::from_be_bytes(slot.0)).collect(),
+                )
+            })
+            .collect()
+    }
+}

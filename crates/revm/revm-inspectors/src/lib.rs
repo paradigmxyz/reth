@@ -5,10 +5,7 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! revm utils and implementations specific to reth.
+//! revm [Inspector](revm::Inspector) implementations
 
-/// Contains glue code for integrating reth database into revm's [Database](revm::Database).
-pub mod database;
-
-/// reexport for convenience
-pub use reth_revm_primitives::*;
+/// An inspector implementation for an EIP2930 Accesslist
+pub mod access_list;

@@ -1,4 +1,4 @@
-use reth_primitives::{rpc::transaction::eip2930::AccessListItem, Address, Bytes, U128, U256};
+use reth_primitives::{AccessList, Address, Bytes, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Call request
@@ -23,9 +23,8 @@ pub struct CallRequest {
     pub data: Option<Bytes>,
     /// Nonce
     pub nonce: Option<U256>,
+    /// chain id
+    pub chain_id: Option<U64>,
     /// AccessList
-    pub access_list: Option<Vec<AccessListItem>>,
-    /// EIP-2718 type
-    #[serde(rename = "type")]
-    pub transaction_type: Option<U256>,
+    pub access_list: Option<AccessList>,
 }

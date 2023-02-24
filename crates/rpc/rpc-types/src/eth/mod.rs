@@ -9,6 +9,7 @@ mod filter;
 mod index;
 mod log;
 pub mod pubsub;
+pub mod state;
 mod syncing;
 pub mod trace;
 mod transaction;

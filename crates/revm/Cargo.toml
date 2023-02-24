@@ -11,5 +11,6 @@ description = "reth specific revm utilities"
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-provider = { path = "../storage/provider" }
+reth-revm-primitives = { path = "./revm-primitives" }
 
 revm = { version = "3.0.0"}

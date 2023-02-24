@@ -12,6 +12,9 @@ pub use block_hash::BlockHashProvider;
 mod block_id;
 pub use block_id::BlockIdProvider;
 
+mod evm_env;
+pub use evm_env::EvmEnvProvider;
+
 mod header;
 pub use header::HeaderProvider;
 
