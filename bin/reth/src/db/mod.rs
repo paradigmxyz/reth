@@ -152,9 +152,9 @@ impl Command {
                                         return Ok(());
                                     }
 
-                                    tui::DbListTUI::<_, tables::$table>::show_tui(|start, count| {
+                                    tui::DbListTUI::<_, tables::$table>::new(|start, count| {
                                         tool.list::<tables::$table>(start, count).unwrap()
-                                    }, $start, $len, total_entries)
+                                    }, $start, $len, total_entries).run()
                                 })??
                             },)*
                             _ => {

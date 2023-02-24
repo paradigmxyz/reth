@@ -34,7 +34,7 @@ struct ExpListState {
     pub(crate) offset: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Eq, PartialEq)]
 pub(crate) enum ViewMode {
     /// Normal list view mode
     #[default]
@@ -52,28 +52,29 @@ where
     ///
     /// The fetcher is passed the index of the first item to fetch, and the number of items to
     /// fetch from that item.
-    pub(crate) fetch: F,
+    fetch: F,
     /// The starting index of the key list in the DB.
-    pub(crate) start: usize,
+    start: usize,
     /// The amount of entries to show per page
-    pub(crate) count: usize,
+    count: usize,
     /// The total number of entries in the database
-    pub(crate) total_entries: usize,
+    total_entries: usize,
     /// The current view mode
-    pub(crate) mode: ViewMode,
+    mode: ViewMode,
     /// The current state of the input buffer
-    pub(crate) input: String,
+    input: String,
     /// The state of the key list.
-    pub(crate) list_state: ListState,
+    list_state: ListState,
     /// Entries to show in the TUI.
-    pub(crate) entries: BTreeMap<T::Key, T::Value>,
+    entries: BTreeMap<T::Key, T::Value>,
 }
 
 impl<F, T: Table> DbListTUI<F, T>
 where
     F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
 {
-    fn new(fetch: F, start: usize, count: usize, total_entries: usize) -> Self {
+    /// Create a new database list TUI
+    pub(crate) fn new(fetch: F, start: usize, count: usize, total_entries: usize) -> Self {
         Self {
             fetch,
             start,
@@ -140,128 +141,146 @@ where
         self.fetch_page();
     }
 
+    /// Go to a specific page.
     fn go_to_page(&mut self, page: usize) {
         self.start = (self.count * page).min(self.total_entries - self.count);
         self.fetch_page();
     }
 
+    /// Fetch the current page
     fn fetch_page(&mut self) {
         self.reset();
         self.entries = (self.fetch)(self.start, self.count);
     }
 
     /// Show the [DbListTUI] in the terminal.
-    pub(crate) fn show_tui(
-        fetch: F,
-        start: usize,
-        count: usize,
-        total_entries: usize,
-    ) -> eyre::Result<()> {
-        // setup terminal
+    pub(crate) fn run(mut self) -> eyre::Result<()> {
+        // Setup backend
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
-        // create app and run it
-        let tick_rate = Duration::from_millis(250);
-        let mut app = DbListTUI::<F, T>::new(fetch, start, count, total_entries);
-        app.entries = (app.fetch)(start, count);
-        app.list_state.select(Some(0));
-        let res = run(&mut terminal, app, tick_rate);
+        // Load initial page
+        self.fetch_page();
 
-        // restore terminal
+        // Run event loop
+        let tick_rate = Duration::from_millis(250);
+        let res = event_loop(&mut terminal, &mut self, tick_rate);
+
+        // Restore terminal
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
         terminal.show_cursor()?;
 
+        // Handle errors
         if let Err(err) = res {
             error!("{:?}", err)
         }
-
         Ok(())
     }
 }
 
-fn run<B: Backend, F, T: Table>(
+/// Run the event loop
+fn event_loop<B: Backend, F, T: Table>(
     terminal: &mut Terminal<B>,
-    mut app: DbListTUI<F, T>,
+    app: &mut DbListTUI<F, T>,
     tick_rate: Duration,
 ) -> io::Result<()>
 where
     F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
 {
     let mut last_tick = Instant::now();
-    loop {
-        terminal.draw(|f| ui(f, &mut app))?;
+    let mut running = true;
+    while running {
+        // Render
+        terminal.draw(|f| ui(f, app))?;
 
+        // Calculate timeout
         let timeout =
             tick_rate.checked_sub(last_tick.elapsed()).unwrap_or_else(|| Duration::from_secs(0));
+
+        // Poll events
         if crossterm::event::poll(timeout)? {
-            match app.mode {
-                ViewMode::Normal => match event::read()? {
-                    Event::Key(key) => match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(()),
-                        KeyCode::Down => app.next(),
-                        KeyCode::Up => app.previous(),
-                        KeyCode::Right => app.next_page(),
-                        KeyCode::Left => app.previous_page(),
-                        KeyCode::Char('G') => {
-                            app.mode = ViewMode::GoToPage;
-                        }
-                        _ => {}
-                    },
-                    Event::Mouse(e) => match e.kind {
-                        MouseEventKind::ScrollDown => app.next(),
-                        MouseEventKind::ScrollUp => app.previous(),
-                        // TODO: This click event can be triggered outside of the list widget.
-                        MouseEventKind::Down(_) => {
-                            // SAFETY: The pointer to the app's state will always be valid for
-                            // reads here, and the source is larger than the destination.
-                            //
-                            // This is technically unsafe, but because the alignment requirements
-                            // in both the source and destination are the same and we can ensure
-                            // that the pointer to `app.state` is valid for reads, this is safe.
-                            let state: ExpListState =
-                                unsafe { std::mem::transmute_copy(&app.list_state) };
-                            let new_idx = (e.row as usize + state.offset).saturating_sub(1);
-                            if new_idx < app.entries.len() {
-                                app.list_state.select(Some(new_idx));
-                            }
-                        }
-                        _ => {}
-                    },
-                    _ => {}
-                },
-                ViewMode::GoToPage => match event::read()? {
-                    Event::Key(key) => match key.code {
-                        KeyCode::Enter => {
-                            let input = std::mem::take(&mut app.input);
-                            if let Ok(page) = input.parse() {
-                                app.go_to_page(page);
-                            }
-                            app.mode = ViewMode::Normal;
-                        }
-                        KeyCode::Char(c) => {
-                            app.input.push(c);
-                        }
-                        KeyCode::Backspace => {
-                            app.input.pop();
-                        }
-                        KeyCode::Esc => app.mode = ViewMode::Normal,
-                        _ => {}
-                    },
-                    _ => {}
-                },
-            }
+            running = !handle_event(app, event::read()?)?;
         }
+
         if last_tick.elapsed() >= tick_rate {
             last_tick = Instant::now();
         }
     }
+
+    Ok(())
 }
 
+/// Handle incoming events
+fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
+where
+    F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
+{
+    if app.mode == ViewMode::GoToPage {
+        if let Event::Key(key) = event {
+            match key.code {
+                KeyCode::Enter => {
+                    let input = std::mem::take(&mut app.input);
+                    if let Ok(page) = input.parse() {
+                        app.go_to_page(page);
+                    }
+                    app.mode = ViewMode::Normal;
+                }
+                KeyCode::Char(c) => {
+                    app.input.push(c);
+                }
+                KeyCode::Backspace => {
+                    app.input.pop();
+                }
+                KeyCode::Esc => app.mode = ViewMode::Normal,
+                _ => {}
+            }
+        }
+
+        return Ok(false)
+    }
+
+    match event {
+        Event::Key(key) => match key.code {
+            KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(true),
+            KeyCode::Down => app.next(),
+            KeyCode::Up => app.previous(),
+            KeyCode::Right => app.next_page(),
+            KeyCode::Left => app.previous_page(),
+            KeyCode::Char('G') => {
+                app.mode = ViewMode::GoToPage;
+            }
+            _ => {}
+        },
+        Event::Mouse(e) => match e.kind {
+            MouseEventKind::ScrollDown => app.next(),
+            MouseEventKind::ScrollUp => app.previous(),
+            // TODO: This click event can be triggered outside of the list widget.
+            MouseEventKind::Down(_) => {
+                // SAFETY: The pointer to the app's state will always be valid for
+                // reads here, and the source is larger than the destination.
+                //
+                // This is technically unsafe, but because the alignment requirements
+                // in both the source and destination are the same and we can ensure
+                // that the pointer to `app.state` is valid for reads, this is safe.
+                let state: ExpListState = unsafe { std::mem::transmute_copy(&app.list_state) };
+                let new_idx = (e.row as usize + state.offset).saturating_sub(1);
+                if new_idx < app.entries.len() {
+                    app.list_state.select(Some(new_idx));
+                }
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+/// Render the UI
 fn ui<B: Backend, F, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<F, T>)
 where
     F: FnMut(usize, usize) -> BTreeMap<T::Key, T::Value>,
