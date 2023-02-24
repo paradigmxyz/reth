@@ -193,8 +193,8 @@ impl Command {
 
         tx.await??;
 
-        info!(target: "reth::cli", "Finishing up");
-        Ok(())
+        info!(target: "reth::cli", "Pipeline has finished.");
+        futures::future::pending().await
     }
 
     async fn build_networked_pipeline(
