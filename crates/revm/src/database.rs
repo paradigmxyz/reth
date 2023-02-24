@@ -48,7 +48,9 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
 
     fn code_by_hash(&self, code_hash: H256) -> Result<Bytecode, Self::Error> {
         let bytecode = self.0.bytecode_by_hash(code_hash)?.unwrap_or_default();
-        Ok(Bytecode::new_raw(bytecode.0))
+        // SAFETY: We are requesting the code by its hash, so it is almost tautological why this
+        // would be safe.
+        Ok(unsafe { Bytecode::new_raw_with_hash(bytecode.0, code_hash) })
     }
 
     fn storage(&self, address: H160, index: U256) -> Result<U256, Self::Error> {
