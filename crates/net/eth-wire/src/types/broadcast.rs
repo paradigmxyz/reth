@@ -264,10 +264,26 @@ impl Decodable for NewPooledTransactionHashes68 {
 mod tests {
     use std::str::FromStr;
 
+    use bytes::BytesMut;
     use hex_literal::hex;
     use reth_rlp::{Decodable, Encodable};
 
     use super::*;
+
+    /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
+    /// message, and decode to the exact struct.
+    fn test_encoding_vector<T: Encodable + Decodable + PartialEq + std::fmt::Debug>(
+        input: (T, &[u8]),
+    ) {
+        let (expected_decoded, expected_encoded) = input;
+        let mut encoded = BytesMut::new();
+        expected_decoded.encode(&mut encoded);
+
+        assert_eq!(hex::encode(&encoded), hex::encode(expected_encoded));
+
+        let decoded = T::decode(&mut encoded.as_ref()).unwrap();
+        assert_eq!(expected_decoded, decoded);
+    }
 
     #[test]
     fn can_return_latest_block() {
@@ -283,38 +299,122 @@ mod tests {
 
     #[test]
     fn eth_68_tx_hash_roundtrip() {
-        let message =
-            hex!("e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124");
-        let expected = NewPooledTransactionHashes68 {
-            types: vec![0x02],
-            sizes: vec![0xb6],
-            hashes: vec![H256::from_str(
-                "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
-            )
-            .unwrap()],
-        };
-
-        let mut encoded_expected = Vec::new();
-        expected.encode(&mut encoded_expected);
-        assert_eq!(
-            encoded_expected, message,
-            "encoded {:x?} does not match expected {:x?}",
-            encoded_expected, message
-        );
-
-        let msg = NewPooledTransactionHashes68::decode(&mut &message[..]).unwrap();
-        assert_eq!(msg, expected);
-    }
-
-    #[test]
-    fn eth_68_tx_hashes_decoding() {
-        let messages = vec![
-            &hex!("f85282ffffca84ffffffff84fffffffff842a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")[..],
+        let vectors = vec![
+            (
+            NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] },
+            &hex!("c380c0c0")[..],
+            ),
+            (
+            NewPooledTransactionHashes68 {
+                types: vec![0x00],
+                sizes: vec![0x00],
+                hashes: vec![H256::from_str(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000",
+                )
+                .unwrap()],
+            },
+            &hex!("e500c180e1a00000000000000000000000000000000000000000000000000000000000000000")[..],
+            ),
+            (
+            NewPooledTransactionHashes68 {
+                types: vec![0x00, 0x00],
+                sizes: vec![0x00, 0x00],
+                hashes: vec![
+                    H256::from_str(
+                        "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    )
+                    .unwrap(),
+                    H256::from_str(
+                        "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    )
+                    .unwrap(),
+                ],
+            },
+            &hex!("f84a820000c28080f842a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000")[..],
+            ),
+            (
+            NewPooledTransactionHashes68 {
+                types: vec![0x02],
+                sizes: vec![0xb6],
+                hashes: vec![H256::from_str(
+                    "0xfecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124",
+                )
+                .unwrap()],
+            },
             &hex!("e602c281b6e1a0fecbed04c7b88d8e7221a0a3f5dc33f220212347fc167459ea5cc9c3eb4c1124")[..],
+            ),
+            (
+            NewPooledTransactionHashes68 {
+                types: vec![0xff, 0xff],
+                sizes: vec![0xffffffff, 0xffffffff],
+                hashes: vec![
+                    H256::from_str(
+                        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                    )
+                    .unwrap(),
+                    H256::from_str(
+                        "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                    )
+                    .unwrap(),
+                ],
+            },
+            &hex!("f85282ffffca84ffffffff84fffffffff842a0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")[..],
+            ),
+            (
+            NewPooledTransactionHashes68 {
+                types: vec![0xff, 0xff],
+                sizes: vec![0xffffffff, 0xffffffff],
+                hashes: vec![
+                    H256::from_str(
+                        "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
+                    )
+                    .unwrap(),
+                    H256::from_str(
+                        "0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe",
+                    )
+                    .unwrap(),
+                ],
+            },
+            &hex!("f85282ffffca84ffffffff84fffffffff842a0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafea0beefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafe")[..],
+            ),
+            (
+            NewPooledTransactionHashes68 {
+                types: vec![0x10, 0x10],
+                sizes: vec![0xdeadc0de, 0xdeadc0de],
+                hashes: vec![
+                    H256::from_str(
+                        "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
+                    )
+                    .unwrap(),
+                    H256::from_str(
+                        "0x3b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2",
+                    )
+                    .unwrap(),
+                ],
+            },
+            &hex!("f852821010ca84deadc0de84deadc0def842a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2a03b9aca00f0671c9a2a1b817a0a78d3fe0c0f776cccb2a8c3c1b412a4f4e4d4e2")[..],
+            ),
+            (
+            NewPooledTransactionHashes68 {
+                types: vec![0x6f, 0x6f],
+                sizes: vec![0x7fffffff, 0x7fffffff],
+                hashes: vec![
+                    H256::from_str(
+                        "0x0000000000000000000000000000000000000000000000000000000000000002",
+                    )
+                    .unwrap(),
+                    H256::from_str(
+                        "0x0000000000000000000000000000000000000000000000000000000000000002",
+                    )
+                    .unwrap(),
+                ],
+            },
+            &hex!("f852826f6fca847fffffff847ffffffff842a00000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000002")[..],
+            ),
         ];
 
-        for message in messages {
-            let _msg = NewPooledTransactionHashes68::decode(&mut &message[..]).unwrap();
+        for vector in vectors {
+            test_encoding_vector(vector);
         }
     }
 }

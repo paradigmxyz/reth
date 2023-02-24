@@ -4564,6 +4564,7 @@ dependencies = [
  "bytes",
  "ethers-core",
  "futures",
+ "hex",
  "hex-literal",
  "metrics",
  "pin-project",
