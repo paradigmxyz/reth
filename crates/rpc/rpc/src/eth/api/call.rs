@@ -2,12 +2,14 @@
 
 #![allow(unused)] // TODO rm later
 
+use revm::Database;
 use crate::{eth::error::EthResult, EthApi};
 use reth_primitives::{BlockId, U256};
 use reth_provider::{BlockProvider, StateProvider, StateProviderFactory};
 use reth_revm::database::{State, SubState};
 use reth_rpc_types::CallRequest;
-use revm::primitives::{BlockEnv, Env, ResultAndState};
+use revm::primitives::{BlockEnv, CfgEnv, Env, ResultAndState};
+use crate::eth::error::EthApiError;
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
@@ -18,23 +20,27 @@ where
         todo!()
     }
 
-    /// Executes the call request against the given `state` without committing any changes to the
+    /// Executes the call request with the provided database and evm environment without committing any changes to the
     /// database
-    pub(crate) fn call_with<S>(
+    pub(crate) fn call_with_db_and_env<S>(
         &self,
         request: CallRequest,
-        state: S,
+        db: S,
         block_env: BlockEnv,
-        // TODO add overrides
+        cfg_env: CfgEnv
     ) -> EthResult<ResultAndState>
     where
-        S: StateProvider,
+        S: Database,
+        <S as Database>::Error: Into<EthApiError>
     {
         // the revm database impl
-        let mut db = SubState::new(State::new(state));
+
+        // initialize the db
         let mut evm = revm::EVM::new();
-        evm.env = self.build_call_env(request, block_env);
+        evm.env.cfg = cfg_env;
+        evm.env.block = block_env;
         evm.database(db);
+
         // TODO error conversion from EMVError to EthApiErr
         let res = evm.transact_ref().unwrap();
         Ok(res)
@@ -56,7 +62,7 @@ where
     where
         S: StateProvider,
     {
-        // TODO: check if transfer
+        let mut db = SubState::new(State::new(state));
         // binary search over range to find best gas
 
         todo!()
