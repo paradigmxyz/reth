@@ -3,6 +3,7 @@ use crate::dirs::{DbPath, PlatformPath};
 use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::{Result, WrapErr};
+use human_bytes::human_bytes;
 use reth_db::{
     cursor::{DbCursorRO, Walker},
     database::Database,
@@ -91,7 +92,7 @@ impl Command {
                     "Branch Pages",
                     "Leaf Pages",
                     "Overflow Pages",
-                    "Total Size (KB)",
+                    "Total Size",
                 ]);
 
                 tool.db.view(|tx| {
@@ -120,7 +121,7 @@ impl Command {
                             .add_cell(Cell::new(branch_pages))
                             .add_cell(Cell::new(leaf_pages))
                             .add_cell(Cell::new(overflow_pages))
-                            .add_cell(Cell::new(table_size / 1024));
+                            .add_cell(Cell::new(human_bytes(table_size as f64)));
                         stats_table.add_row(row);
                     }
                     Ok::<(), eyre::Report>(())
