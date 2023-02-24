@@ -1,9 +1,9 @@
 use reth_primitives::{Address, BlockHash, BlockNumber, TransitionId, TxNumber, H256};
 
-/// KV error type. They are using u32 to represent error code.
+/// Bundled errors variants thrown by various providers.
 #[allow(missing_docs)]
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
-pub enum Error {
+pub enum ProviderError {
     /// The header hash is missing from the database.
     #[error("Block number {block_number} does not exist in database")]
     CanonicalHeader { block_number: BlockNumber },
@@ -68,4 +68,7 @@ pub enum Error {
     /// Reached the end of the transaction sender table.
     #[error("Got to the end of the transaction sender table")]
     EndOfTransactionSenderTable,
+    /// Thrown when required header related data was not found but was required.
+    #[error("requested data not found")]
+    HeaderNotFound,
 }

@@ -426,7 +426,7 @@ mod tests {
     use crate::{StageId, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
-    use reth_interfaces::{consensus, provider::Error as ProviderError, sync::NoopSyncStateUpdate};
+    use reth_interfaces::{consensus, provider::ProviderError, sync::NoopSyncStateUpdate};
     use tokio_stream::StreamExt;
     use utils::TestStage;
 

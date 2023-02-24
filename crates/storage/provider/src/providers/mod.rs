@@ -1,6 +1,6 @@
 use crate::{
-    BlockHashProvider, BlockIdProvider, BlockProvider, Error, HeaderProvider, StateProviderFactory,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
+    ProviderError, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{
     cursor::DbCursorRO,
@@ -10,9 +10,14 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Header,
+    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header,
     TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
+use reth_revm_primitives::{
+    config::revm_spec,
+    env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
+};
+use revm_primitives::{BlockEnv, CfgEnv, Env, SpecId};
 use std::{ops::RangeBounds, sync::Arc};
 
 mod state;
@@ -74,6 +79,10 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
         })?
     }
 
+    fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
+        self.db.view(|tx| Ok(tx.get::<tables::HeaderTD>(number)?.map(|td| td.0)))?
+    }
+
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
         self.db
             .view(|tx| {
@@ -119,7 +128,7 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
                 let id = BlockId::Number(number.into());
                 let tx = self.db.tx()?;
                 let transactions =
-                    self.transactions_by_block(id)?.ok_or(Error::BlockBody { number })?;
+                    self.transactions_by_block(id)?.ok_or(ProviderError::BlockBody { number })?;
 
                 let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
                 let withdrawals = self.withdrawals_by_block(id, header.timestamp)?;
@@ -231,6 +240,60 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
     }
 }
 
+impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
+    fn fill_env_at(&self, env: &mut Env, at: BlockId) -> Result<()> {
+        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+        self.fill_env_with_header(env, &header)
+    }
+
+    fn fill_env_with_header(&self, env: &mut Env, header: &Header) -> Result<()> {
+        let total_difficulty =
+            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
+        fill_cfg_and_block_env(env, &self.chain_spec, header, total_difficulty);
+        Ok(())
+    }
+
+    fn fill_block_env_at(&self, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
+        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+
+        self.fill_block_env_with_header(block_env, &header)
+    }
+
+    fn fill_block_env_with_header(&self, block_env: &mut BlockEnv, header: &Header) -> Result<()> {
+        let total_difficulty =
+            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
+        let spec_id = revm_spec(
+            &self.chain_spec,
+            Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                // Not required
+                hash: Default::default(),
+            },
+        );
+        let after_merge = spec_id >= SpecId::MERGE;
+        fill_block_env(block_env, header, after_merge);
+        Ok(())
+    }
+
+    fn fill_cfg_env_at(&self, cfg: &mut CfgEnv, at: BlockId) -> Result<()> {
+        let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
+        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
+        self.fill_cfg_env_with_header(cfg, &header)
+    }
+
+    fn fill_cfg_env_with_header(&self, cfg: &mut CfgEnv, header: &Header) -> Result<()> {
+        let total_difficulty =
+            self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
+        fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        Ok(())
+    }
+}
+
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
     type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
     type LatestSP<'a> = LatestStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
@@ -245,7 +308,7 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         // get transition id
         let transition = tx
             .get::<tables::BlockTransitionIndex>(block_number)?
-            .ok_or(Error::BlockTransition { block_number })?;
+            .ok_or(ProviderError::BlockTransition { block_number })?;
 
         Ok(HistoricalStateProvider::new(tx, transition))
     }
@@ -253,13 +316,14 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
     fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<Self::HistorySP<'_>> {
         let tx = self.db.tx()?;
         // get block number
-        let block_number =
-            tx.get::<tables::HeaderNumbers>(block_hash)?.ok_or(Error::BlockHash { block_hash })?;
+        let block_number = tx
+            .get::<tables::HeaderNumbers>(block_hash)?
+            .ok_or(ProviderError::BlockHash { block_hash })?;
 
         // get transition id
         let transition = tx
             .get::<tables::BlockTransitionIndex>(block_number)?
-            .ok_or(Error::BlockTransition { block_number })?;
+            .ok_or(ProviderError::BlockTransition { block_number })?;
 
         Ok(HistoricalStateProvider::new(tx, transition))
     }

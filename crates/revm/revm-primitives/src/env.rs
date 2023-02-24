@@ -3,7 +3,19 @@ use reth_primitives::{
     Address, ChainSpec, Head, Header, Transaction, TransactionKind, TransactionSigned, TxEip1559,
     TxEip2930, TxLegacy, U256,
 };
-use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, TransactTo, TxEnv};
+use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, Env, SpecId, TransactTo, TxEnv};
+
+/// Convenience function to call both [fill_cfg_env] and [fill_block_env]
+pub fn fill_cfg_and_block_env(
+    env: &mut Env,
+    chain_spec: &ChainSpec,
+    header: &Header,
+    total_difficulty: U256,
+) {
+    fill_cfg_env(&mut env.cfg, chain_spec, header, total_difficulty);
+    let after_merge = env.cfg.spec_id >= SpecId::MERGE;
+    fill_block_env(&mut env.block, header, after_merge);
+}
 
 /// Fill [CfgEnv] fields according to the chain spec and given header
 pub fn fill_cfg_env(
