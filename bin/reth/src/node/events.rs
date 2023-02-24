@@ -1,13 +1,12 @@
 //! Support for handling events emitted by node components.
 
-use futures::Stream;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use reth_network::{NetworkEvent, NetworkHandle};
+use reth_network_api::PeersInfo;
 use reth_primitives::BlockNumber;
 use reth_stages::{PipelineEvent, StageId};
 use std::time::Duration;
 use tracing::{info, warn};
-use reth_network_api::PeersInfo;
 
 /// The current high-level state of the node.
 struct NodeState {
@@ -25,7 +24,7 @@ impl NodeState {
     }
 
     fn num_connected_peers(&self) -> usize {
-        self.network.as_ref().map(|net|net.num_connected_peers()).unwrap_or_default()
+        self.network.as_ref().map(|net| net.num_connected_peers()).unwrap_or_default()
     }
 
     /// Processes an event emitted by the pipeline
