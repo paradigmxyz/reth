@@ -151,8 +151,10 @@ impl Command {
                                         );
                                         return Ok(());
                                     }
-                                    let map = tool.list::<tables::$table>($start, $len)?;
-                                    tui::DbListTUI::<tables::$table>::show_tui(map, $start, total_entries)
+
+                                    tui::DbListTUI::<_, tables::$table>::show_tui(|start, count| {
+                                        tool.list::<tables::$table>(start, count).unwrap()
+                                    }, $start, $len, total_entries)
                                 })??
                             },)*
                             _ => {
