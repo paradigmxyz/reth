@@ -14,7 +14,7 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
-use reth_interfaces::events::ChainEventSubscriptions;
+use reth_interfaces::events::NewBlockNotifications;
 use reth_rpc_types::{FeeHistoryCache, FeeHistoryCacheItem};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -96,13 +96,13 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
         }
     }
 
-    /// Starts listening to the [`ChainEventSubscriptions`] and populates the LRU cache
+    /// Starts listening to the [`NewBlockNotifications`] and populates the LRU cache
     /// required for `eth_feeHistory` RPC with new blocks.
     pub fn start_fee_history_cache(
         &self,
-        chain_event_subscriptions: impl ChainEventSubscriptions,
+        new_block_notifications: NewBlockNotifications,
     ) -> JoinHandle<()> {
-        let mut new_blocks_rx = chain_event_subscriptions.subscribe_new_blocks();
+        let mut new_blocks_rx = new_block_notifications;
         let fee_history_cache = self.fee_history_cache.clone();
 
         self.task_spawner.spawn(Box::pin(async move {

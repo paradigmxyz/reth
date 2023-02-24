@@ -250,7 +250,9 @@ where
 
             // We should receive exactly the amount of block hashes missing from the cache
             if block_hashes.len() != (end_block - start_block + 1) as usize {
-                return Err(EthApiError::InvalidBlockRange.into())
+                return Err(internal_rpc_err(
+                    "amount of database block hashes doesn't match cache misses count",
+                ))
             }
 
             let headers: Vec<Header> = self
@@ -261,7 +263,9 @@ where
 
             // We should receive exactly the amount of headers missing from the cache
             if headers.len() != (end_non_cached_block - start_non_cached_block + 1) as usize {
-                return Err(EthApiError::InvalidBlockRange.into())
+                return Err(internal_rpc_err(
+                    "amount of database headers doesn't match cache misses count",
+                ))
             }
 
             for (header, hash) in headers.iter().zip(block_hashes) {
@@ -353,11 +357,15 @@ mod tests {
         types::error::{CallError, INVALID_PARAMS_CODE},
     };
     use rand::random;
+    use reth_interfaces::{
+        events::ChainEventSubscriptions, test_utils::TestChainEventSubscriptions,
+    };
     use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{rpc::BlockNumber, Block, Header, H256, U256};
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
+    use std::collections::HashMap;
 
     use crate::EthApi;
 
@@ -365,7 +373,8 @@ mod tests {
     async fn test_fee_history() {
         let eth_api = EthApi::new(NoopProvider::default(), testing_pool(), NoopNetwork::default());
 
-        // Invalid block range because no blocks are mocked, but we request 1 block in the past
+        // Invalid block range because no blocks are in the cache or mocked,
+        // but we request 1 block in the past
         let response = eth_api.fee_history(1.into(), BlockNumber::Latest.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
@@ -374,11 +383,14 @@ mod tests {
         let block_count = 10;
         let newest_block = 1337;
 
+        let mut headers = HashMap::new();
+
+        let mut chain_event_subscriptions = TestChainEventSubscriptions::new();
+        eth_api.start_fee_history_cache(chain_event_subscriptions.subscribe_new_blocks());
+
         let mut oldest_block = None;
         let mut gas_used_ratios = Vec::new();
         let mut base_fees_per_gas = Vec::new();
-
-        let mock_provider = MockEthProvider::default();
 
         for i in (0..=block_count).rev() {
             let hash = H256::random();
@@ -395,13 +407,29 @@ mod tests {
                 ..Default::default()
             };
 
-            mock_provider.add_block(hash, Block { header: header.clone(), ..Default::default() });
-            mock_provider.add_header(hash, header);
+            headers.insert(hash, header.clone());
+
+            chain_event_subscriptions.add_new_block(hash, header);
 
             oldest_block.get_or_insert(hash);
             gas_used_ratios.push(gas_used as f64 / gas_limit as f64);
             base_fees_per_gas
                 .push(base_fee_per_gas.map(|fee| U256::try_from(fee).unwrap()).unwrap_or_default());
+        }
+
+        // Success with all blocks cached
+        let fee_history =
+            eth_api.fee_history(block_count.into(), newest_block.into(), None).await.unwrap();
+
+        assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
+        assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
+        assert_eq!(fee_history.oldest_block, U256::from_be_bytes(oldest_block.unwrap().0));
+
+        let mock_provider = MockEthProvider::default();
+
+        for (hash, header) in headers {
+            mock_provider.add_header(hash, header.clone());
+            mock_provider.add_block(hash, Block { header, ..Default::default() })
         }
 
         let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());

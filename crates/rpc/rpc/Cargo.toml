@@ -10,7 +10,7 @@ Reth RPC implementation
 """
 [dependencies]
 # reth
-reth-interfaces = { path = "../../interfaces" }
+reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-primitives = { path = "../../primitives" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rlp = { path = "../../rlp" }
