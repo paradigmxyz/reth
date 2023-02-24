@@ -11,8 +11,8 @@
 /// Various provider traits.
 mod traits;
 pub use traits::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, HeaderProvider,
-    StateProvider, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
@@ -35,4 +35,4 @@ pub use utils::{insert_block, insert_canonical_block};
 pub mod test_utils;
 
 /// Re-export provider error.
-pub use reth_interfaces::provider::Error;
+pub use reth_interfaces::provider::ProviderError;

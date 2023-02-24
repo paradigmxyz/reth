@@ -462,6 +462,10 @@ mod tests {
             Ok(None)
         }
 
+        fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>> {
+            Ok(None)
+        }
+
         fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
             Ok(vec![])
         }

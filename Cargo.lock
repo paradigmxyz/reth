@@ -4842,6 +4842,8 @@ dependencies = [
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
+ "reth-revm-primitives",
+ "revm-primitives",
  "thiserror",
 ]
 

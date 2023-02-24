@@ -13,7 +13,7 @@ use reth_db::{
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-    provider::Error as ProviderError,
+    provider::ProviderError,
 };
 use reth_provider::Transaction;
 use std::sync::Arc;

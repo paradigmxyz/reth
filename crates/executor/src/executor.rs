@@ -11,12 +11,12 @@ use reth_provider::StateProvider;
 use reth_revm::{
     config::{WEI_2ETH, WEI_3ETH, WEI_5ETH},
     database::SubState,
-    env::{fill_block_env, fill_cfg_env, fill_tx_env},
+    env::{fill_cfg_and_block_env, fill_tx_env},
     into_reth_log, to_reth_acc,
 };
 use revm::{
     db::AccountState,
-    primitives::{Account as RevmAccount, AccountInfo, Bytecode, ResultAndState, SpecId},
+    primitives::{Account as RevmAccount, AccountInfo, Bytecode, ResultAndState},
     EVM,
 };
 use std::collections::{BTreeMap, HashMap};
@@ -65,9 +65,7 @@ where
 
     /// Initializes the config and block env.
     fn init_env(&mut self, header: &Header, total_difficulty: U256) {
-        fill_cfg_env(&mut self.evm.env.cfg, self.chain_spec, header, total_difficulty);
-        let after_merge = self.evm.env.cfg.spec_id >= SpecId::MERGE;
-        fill_block_env(&mut self.evm.env.block, header, after_merge);
+        fill_cfg_and_block_env(&mut self.evm.env, self.chain_spec, header, total_difficulty);
     }
 
     /// Commit change to database and return change diff that is used to update state and create

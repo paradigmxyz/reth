@@ -11,6 +11,7 @@ description = "Reth storage provider."
 # reth
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
+reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
 
 # misc
@@ -19,6 +20,7 @@ auto_impl = "1.0"
 
 # feature test-utils
 parking_lot = { version = "0.12", optional = true }
+revm-primitives = "1.0"
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }

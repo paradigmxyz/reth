@@ -28,6 +28,9 @@ pub trait HeaderProvider: Send + Sync {
     /// Get total difficulty by block hash.
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
 
+    /// Get total difficulty by block number.
+    fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>>;
+
     /// Get headers in range of block numbers
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>>;
 }

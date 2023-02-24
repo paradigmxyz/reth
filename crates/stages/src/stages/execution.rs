@@ -10,7 +10,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_executor::execution_result::AccountChangeSet;
-use reth_interfaces::provider::Error as ProviderError;
+use reth_interfaces::provider::ProviderError;
 use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, MAINNET, U256};
 use reth_provider::{LatestStateProviderRef, Transaction};
 use reth_revm::database::{State, SubState};
