@@ -345,9 +345,6 @@ where
 
                 trace!(target: "downloaders::headers", len=%headers.len(), "Received headers response");
 
-                // sort headers from highest to lowest block number
-                headers.sort_unstable_by_key(|h| Reverse(h.number));
-
                 if headers.is_empty() {
                     return Err(HeadersResponseError {
                         request,
@@ -355,6 +352,20 @@ where
                         error: DownloadError::EmptyResponse,
                     })
                 }
+
+                if (headers.len() as u64) != request.limit {
+                    return Err(HeadersResponseError {
+                        peer_id: Some(peer_id),
+                        error: DownloadError::HeadersResponseTooShort {
+                            received: headers.len() as u64,
+                            expected: request.limit,
+                        },
+                        request,
+                    })
+                }
+
+                // sort headers from highest to lowest block number
+                headers.sort_unstable_by_key(|h| Reverse(h.number));
 
                 // validate the response
                 let highest = &headers[0];
@@ -369,17 +380,6 @@ where
                             received: highest.number,
                             expected: requested_block_number,
                         },
-                    })
-                }
-
-                if (headers.len() as u64) != request.limit {
-                    return Err(HeadersResponseError {
-                        peer_id: Some(peer_id),
-                        error: DownloadError::HeadersResponseTooShort {
-                            received: headers.len() as u64,
-                            expected: request.limit,
-                        },
-                        request,
                     })
                 }
 
