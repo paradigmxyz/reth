@@ -1,6 +1,6 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
-    node::{handle_events, NodeEvent},
+    node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -109,7 +109,7 @@ impl ImportCommand {
         let (mut pipeline, events) =
             self.build_import_pipeline(config, db.clone(), &consensus, file_client).await?;
 
-        tokio::spawn(handle_events(events));
+        tokio::spawn(handle_events(None, events));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
