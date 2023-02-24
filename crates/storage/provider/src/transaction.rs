@@ -1,5 +1,3 @@
-pub mod execution_result;
-
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -14,7 +12,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     TransitionList,
 };
-use reth_interfaces::{db::Error as DbError, provider::Error as ProviderError};
+use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
     StorageEntry, TransitionId, TxNumber, H256, U256,
@@ -31,7 +29,7 @@ use crate::{
     trie::{DBTrieLoader, TrieError},
 };
 
-use self::execution_result::{AccountChangeSet, ExecutionResult};
+use crate::execution_result::{AccountChangeSet, ExecutionResult};
 
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.

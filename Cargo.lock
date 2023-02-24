@@ -4506,6 +4506,7 @@ dependencies = [
  "itertools 0.10.5",
  "metrics",
  "pin-project",
+ "rayon",
  "reth-db",
  "reth-eth-wire",
  "reth-interfaces",
@@ -4598,6 +4599,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "revm",
  "rlp",
@@ -4837,38 +4839,51 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0"
 dependencies = [
- "arbitrary",
  "assert_matches",
- "async-trait",
  "auto_impl 1.0.1",
- "bytes",
  "cita_trie",
  "eyre",
- "futures",
  "hasher",
- "heapless",
- "hex-literal",
  "itertools 0.10.5",
- "modular-bitfield",
- "parity-scale-codec",
  "parking_lot 0.12.1",
- "postcard",
  "proptest",
- "rand 0.8.5",
- "reth-codecs",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
+ "reth-revm-primitives",
  "reth-rlp",
- "reth-rpc-types",
  "reth-tracing",
  "revm-primitives",
- "secp256k1 0.24.3",
- "test-fuzz",
  "thiserror",
- "tokio",
- "tokio-stream",
  "triehash",
+]
+
+[[package]]
+name = "reth-revm"
+version = "0.1.0"
+dependencies = [
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm-primitives",
+ "revm",
+]
+
+[[package]]
+name = "reth-revm-inspectors"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.13.2",
+ "reth-primitives",
+ "revm",
+]
+
+[[package]]
+name = "reth-revm-primitives"
+version = "0.1.0"
+dependencies = [
+ "reth-primitives",
+ "revm",
 ]
 
 [[package]]
@@ -4915,11 +4930,11 @@ dependencies = [
  "jsonwebtoken",
  "pin-project",
  "rand 0.8.5",
- "reth-executor",
  "reth-interfaces",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "reth-rpc-api",
  "reth-rpc-engine-api",
@@ -4981,6 +4996,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "reth-rpc-types",
  "thiserror",
@@ -5074,6 +5090,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "reth-staged-sync",
  "serde",

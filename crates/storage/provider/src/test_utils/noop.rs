@@ -1,12 +1,13 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, HeaderProvider,
-    StateProvider, StateProviderFactory, TransactionsProvider,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytes, ChainInfo, Header, StorageKey,
     StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
+use revm_primitives::{BlockEnv, CfgEnv, Env};
 use std::ops::RangeBounds;
 
 /// Supports various api interfaces for testing purposes.
@@ -75,6 +76,10 @@ impl HeaderProvider for NoopProvider {
         Ok(None)
     }
 
+    fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>> {
+        Ok(None)
+    }
+
     fn headers_range(&self, _range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>> {
         Ok(vec![])
     }
@@ -93,6 +98,36 @@ impl StateProvider for NoopProvider {
 
     fn bytecode_by_hash(&self, _code_hash: H256) -> Result<Option<Bytes>> {
         Ok(None)
+    }
+}
+
+impl EvmEnvProvider for NoopProvider {
+    fn fill_env_at(&self, _env: &mut Env, _at: BlockId) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_env_with_header(&self, _env: &mut Env, _header: &Header) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockId) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_block_env_with_header(
+        &self,
+        _block_env: &mut BlockEnv,
+        _header: &Header,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockId) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> Result<()> {
+        Ok(())
     }
 }
 

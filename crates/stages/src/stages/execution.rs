@@ -9,10 +9,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_executor::revm_wrap::{State, SubState};
-use reth_interfaces::provider::Error as ProviderError;
+use reth_interfaces::provider::ProviderError;
 use reth_primitives::{Address, Block, ChainSpec, MAINNET, U256};
 use reth_provider::{LatestStateProviderRef, Transaction};
+use reth_revm::database::{State, SubState};
 use std::fmt::Debug;
 use tracing::*;
 
