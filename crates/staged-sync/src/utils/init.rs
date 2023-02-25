@@ -22,11 +22,20 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 }
 
 /// Write the genesis block if it has not already been written
+///
+/// # Panics
+///
+/// Panics if the database has already been initialized with a different genesis block.
 #[allow(clippy::field_reassign_with_default)]
 pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256, reth_db::Error> {
     let genesis = chain.genesis();
+
+    let header = chain.genesis_header();
+    let hash = header.hash_slow();
+
     let tx = db.tx()?;
-    if let Some((_, hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
+    if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
+        assert_eq!(hash, db_hash, "Genesis hash mismatch: expected {}, got {}", hash, db_hash);
         debug!("Genesis already written, skipping.");
         return Ok(hash)
     }
@@ -48,9 +57,6 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256,
     }
 
     // Insert header
-    let header = chain.genesis_header();
-
-    let hash = header.hash_slow();
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
     tx.put::<tables::HeaderNumbers>(hash, 0)?;
     tx.put::<tables::BlockBodies>(0, Default::default())?;
@@ -96,5 +102,15 @@ mod tests {
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS);
+    }
+
+    #[test]
+    #[should_panic = "Genesis hash mismatch"]
+    fn fail_init_inconsistent_db() {
+        let db = create_test_rw_db();
+        init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
+
+        // Try to init db with a different genesis block
+        init_genesis(db, MAINNET.clone()).unwrap();
     }
 }
