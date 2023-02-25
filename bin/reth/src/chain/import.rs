@@ -181,8 +181,7 @@ mod tests {
     #[test]
     fn parse_common_import_command_chain_args() {
         for chain in ["mainnet", "sepolia", "goerli"] {
-            let args: ImportCommand =
-                ImportCommand::parse_from(["reth", "--chain", chain, "."]);
+            let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
     }
