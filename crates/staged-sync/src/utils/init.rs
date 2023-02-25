@@ -23,15 +23,22 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 
 /// Database initialization error type.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
-enum InitDatabaseError {
+pub enum InitDatabaseError {
     /// Attempted to reinitialize database with inconsistent genesis block
     #[error("Genesis hash mismatch: expected {expected}, got {actual}")]
     GenesisHashMismatch { expected: H256, actual: H256 },
+
+    // Low-level database error.
+    #[error(transparent)]
+    DBError(#[from] reth_db::Error),
 }
 
 /// Write the genesis block if it has not already been written
 #[allow(clippy::field_reassign_with_default)]
-pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> eyre::Result<H256> {
+pub fn init_genesis<DB: Database>(
+    db: Arc<DB>,
+    chain: ChainSpec,
+) -> Result<H256, InitDatabaseError> {
     let genesis = chain.genesis();
 
     let header = chain.genesis_header();
@@ -44,7 +51,7 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> eyre::Result
             return Ok(hash)
         }
 
-        return Err(InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash }.into())
+        return Err(InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash })
     }
 
     drop(tx);
@@ -119,9 +126,8 @@ mod tests {
         // Try to init db with a different genesis block
         let genesis_hash = init_genesis(db, MAINNET.clone());
 
-        let err = genesis_hash.unwrap_err().downcast::<InitDatabaseError>().unwrap();
         assert_eq!(
-            err,
+            genesis_hash.unwrap_err(),
             InitDatabaseError::GenesisHashMismatch {
                 expected: MAINNET_GENESIS,
                 actual: SEPOLIA_GENESIS
