@@ -5274,7 +5274,7 @@ dependencies = [
 [[package]]
 name = "ruint"
 version = "1.7.0"
-source = "git+https://github.com/mattsse/uint?branch=matt/skip-leading-zeros#7aa078a0d3ea5a05c09e7a2b42c06921d55e7c67"
+source = "git+https://github.com/paradigmxyz/uint#c14ed24f9611546e6614b6f9b3524de11cb35ea5"
 dependencies = [
  "arbitrary",
  "derive_more",
@@ -5290,7 +5290,7 @@ dependencies = [
 [[package]]
 name = "ruint-macro"
 version = "1.0.2"
-source = "git+https://github.com/mattsse/uint?branch=matt/skip-leading-zeros#7aa078a0d3ea5a05c09e7a2b42c06921d55e7c67"
+source = "git+https://github.com/paradigmxyz/uint#c14ed24f9611546e6614b6f9b3524de11cb35ea5"
 
 [[package]]
 name = "rustc-demangle"
