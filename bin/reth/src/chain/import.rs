@@ -69,7 +69,7 @@ pub struct ImportCommand {
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
     /// remaining stages are executed.
-    #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment)]
+    #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PlatformPath<ConfigPath>,
 }
 
@@ -182,7 +182,7 @@ mod tests {
     fn parse_common_import_command_chain_args() {
         for chain in ["mainnet", "sepolia", "goerli"] {
             let args: ImportCommand =
-                ImportCommand::parse_from(["reth", "--chain", chain, "--path", "."]);
+                ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
     }
