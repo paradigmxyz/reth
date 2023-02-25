@@ -21,13 +21,17 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
     Ok(db)
 }
 
+/// Database initialization error type.
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+enum InitDatabaseError {
+    /// Attempted to reinitialize database with inconsistent genesis block
+    #[error("Genesis hash mismatch: expected {expected}, got {actual}")]
+    GenesisHashMismatch { expected: H256, actual: H256 },
+}
+
 /// Write the genesis block if it has not already been written
-///
-/// # Panics
-///
-/// Panics if the database has already been initialized with a different genesis block.
 #[allow(clippy::field_reassign_with_default)]
-pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256, reth_db::Error> {
+pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> eyre::Result<H256> {
     let genesis = chain.genesis();
 
     let header = chain.genesis_header();
@@ -35,9 +39,14 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256,
 
     let tx = db.tx()?;
     if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
-        assert_eq!(hash, db_hash, "Genesis hash mismatch: expected {}, got {}", hash, db_hash);
-        debug!("Genesis already written, skipping.");
-        return Ok(hash)
+        if db_hash == hash {
+            debug!("Genesis already written, skipping.");
+            return Ok(hash);
+        }
+
+        return Err(
+            InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash }.into()
+        );
     }
 
     drop(tx);
@@ -71,7 +80,7 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> Result<H256,
 #[cfg(test)]
 mod tests {
 
-    use super::init_genesis;
+    use super::{init_genesis, InitDatabaseError};
     use reth_db::mdbx::test_utils::create_test_rw_db;
     use reth_primitives::{
         GOERLI, GOERLI_GENESIS, MAINNET, MAINNET_GENESIS, SEPOLIA, SEPOLIA_GENESIS,
@@ -105,12 +114,20 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "Genesis hash mismatch"]
     fn fail_init_inconsistent_db() {
         let db = create_test_rw_db();
         init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        init_genesis(db, MAINNET.clone()).unwrap();
+        let genesis_hash = init_genesis(db, MAINNET.clone());
+
+        let err = genesis_hash.unwrap_err().downcast::<InitDatabaseError>().unwrap();
+        assert_eq!(
+            err,
+            InitDatabaseError::GenesisHashMismatch {
+                expected: MAINNET_GENESIS,
+                actual: SEPOLIA_GENESIS
+            }
+        )
     }
 }
