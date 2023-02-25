@@ -41,12 +41,10 @@ pub fn init_genesis<DB: Database>(db: Arc<DB>, chain: ChainSpec) -> eyre::Result
     if let Some((_, db_hash)) = tx.cursor_read::<tables::CanonicalHeaders>()?.first()? {
         if db_hash == hash {
             debug!("Genesis already written, skipping.");
-            return Ok(hash);
+            return Ok(hash)
         }
 
-        return Err(
-            InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash }.into()
-        );
+        return Err(InitDatabaseError::GenesisHashMismatch { expected: hash, actual: db_hash }.into())
     }
 
     drop(tx);
