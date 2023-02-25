@@ -4357,7 +4357,6 @@ dependencies = [
  "futures",
  "human_bytes",
  "jsonrpsee",
- "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
  "proptest",
@@ -4365,8 +4364,6 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
- "reth-eth-wire",
- "reth-executor",
  "reth-interfaces",
  "reth-net-nat",
  "reth-network",
@@ -4386,12 +4383,9 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "tempfile",
- "thiserror",
  "tokio",
- "tokio-stream",
  "tracing",
  "tui",
- "walkdir",
 ]
 
 [[package]]
