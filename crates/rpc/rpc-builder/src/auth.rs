@@ -12,7 +12,7 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{
     AdminApi, AuthLayer, DebugApi, EngineApi, EthApi, JwtAuthValidator, JwtSecret, NetApi,
     TraceApi, Web3Api,
@@ -41,7 +41,8 @@ pub async fn launch<Client, Pool, Network>(
     secret: JwtSecret,
 ) -> Result<ServerHandle, RpcError>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -56,7 +57,8 @@ pub async fn launch_with_eth_api<Client, Pool, Network>(
     secret: JwtSecret,
 ) -> Result<ServerHandle, RpcError>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {

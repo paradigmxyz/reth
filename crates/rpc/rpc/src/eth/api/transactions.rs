@@ -5,7 +5,7 @@ use crate::{
     EthApi,
 };
 use reth_primitives::{Bytes, FromRecoveredTransaction, TransactionSigned, H256};
-use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
 use reth_rpc_types::TransactionRequest;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -13,7 +13,7 @@ use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
