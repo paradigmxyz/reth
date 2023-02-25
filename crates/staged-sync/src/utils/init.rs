@@ -28,7 +28,7 @@ pub enum InitDatabaseError {
     #[error("Genesis hash mismatch: expected {expected}, got {actual}")]
     GenesisHashMismatch { expected: H256, actual: H256 },
 
-    // Low-level database error.
+    /// Low-level database error.
     #[error(transparent)]
     DBError(#[from] reth_db::Error),
 }
