@@ -1,12 +1,15 @@
 //! `eth_` PubSub RPC handler implementation
 
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
-use reth_interfaces::events::ChainEventSubscriptions;
+use reth_interfaces::{events::ChainEventSubscriptions, sync::SyncStateProvider};
 use reth_primitives::{rpc::FilteredParams, TxHash};
 use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
-    pubsub::{Params, SubscriptionKind, SubscriptionResult as EthSubscriptionResult},
+    pubsub::{
+        Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
+        SyncStatusMetadata,
+    },
     Header,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -51,7 +54,7 @@ impl<Client, Pool, Events> EthPubSub<Client, Pool, Events> {
 
 impl<Client, Pool, Events> EthPubSubApiServer for EthPubSub<Client, Pool, Events>
 where
-    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
+    Client: BlockProvider + EvmEnvProvider + SyncStateProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
 {
@@ -79,7 +82,7 @@ async fn handle_accepted<Client, Pool, Events>(
     kind: SubscriptionKind,
     params: Option<Params>,
 ) where
-    Client: BlockProvider + EvmEnvProvider + 'static,
+    Client: BlockProvider + EvmEnvProvider + SyncStateProvider +'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + 'static,
 {
@@ -107,6 +110,58 @@ async fn handle_accepted<Client, Pool, Events>(
         }
         SubscriptionKind::Syncing => {
             // TODO subscribe new blocks -> read is_syncing from network
+            tokio::spawn(async move {
+                let mut block_subscription = pubsub.chain_events.subscribe_new_blocks();
+                let initial_sync_status = pubsub.client.is_syncing();
+
+                let initial_sub_res = if initial_sync_status {
+                    EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(
+                        SyncStatusMetadata {
+                            syncing: true,
+                            starting_block: 0,
+                            current_block: pubsub.client.chain_info().unwrap().best_number,
+                            highest_block: None,
+                        },
+                    ))
+                } else {
+                    EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
+                };
+
+                match accepted_sink.send(&initial_sub_res) {
+                    Ok(_) => {
+                        // The message was successfully sent
+                    }
+                    Err(_) => {
+                        // An error occurred while sending the message
+                    }
+                }
+
+                while let Some(_) = block_subscription.recv().await {
+                    let sub_res = if pubsub.client.is_syncing() {
+                        EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(
+                            SyncStatusMetadata {
+                                syncing: true,
+                                starting_block: 0,
+                                current_block: pubsub.client.chain_info().unwrap().best_number,
+                                highest_block: None,
+                            },
+                        ))
+                    } else {
+                        EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
+                    };
+
+                    if pubsub.client.is_syncing() != initial_sync_status {
+                        match accepted_sink.send(&sub_res) {
+                            Ok(_) => {
+                                // The message was successfully sent
+                            }
+                            Err(_) => {
+                                // An error occurred while sending the message
+                            }
+                        }
+                    }
+                }
+            });
         }
     }
 }
