@@ -7,7 +7,7 @@ use crate::{
     EthApi,
 };
 use reth_primitives::{AccessList, Address, BlockId, Bytes, TransactionKind, U128, U256};
-use reth_provider::{BlockProvider, StateProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::database::{State, SubState};
 use reth_rpc_types::CallRequest;
 use revm::{
@@ -20,7 +20,7 @@ pub(crate) const MIN_TRANSACTION_GAS: U256 = Uint::from_limbs([21_000, 0, 0, 0])
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Executes the call request at the given [BlockId]
     pub(crate) fn call_at(

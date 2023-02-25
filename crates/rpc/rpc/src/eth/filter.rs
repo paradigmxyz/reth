@@ -11,7 +11,7 @@ use reth_primitives::{
     filter::{Filter, FilterBlockOption, FilteredParams},
     Block, U256,
 };
-use reth_provider::BlockProvider;
+use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{FilterChanges, FilterId, Log};
 use reth_transaction_pool::TransactionPool;
@@ -51,7 +51,7 @@ impl<Client, Pool> EthFilter<Client, Pool> {
 #[async_trait]
 impl<Client, Pool> EthFilterApiServer for EthFilter<Client, Pool>
 where
-    Client: BlockProvider + 'static,
+    Client: BlockProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -172,7 +172,7 @@ struct EthFilterInner<Client, Pool> {
 
 impl<Client, Pool> EthFilterInner<Client, Pool>
 where
-    Client: BlockProvider + 'static,
+    Client: BlockProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
     /// Installs a new filter and returns the new identifier.
