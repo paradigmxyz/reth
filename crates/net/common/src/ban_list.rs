@@ -27,8 +27,6 @@ pub struct BanList {
 
 impl BanList {
     /// Creates a new ban list that bans the given peers and ips indefinitely.
-    ///
-    /// This will ban non-global IPs if they are included in `banned_ips`
     pub fn new(
         banned_peers: impl IntoIterator<Item = PeerId>,
         banned_ips: impl IntoIterator<Item = IpAddr>,
@@ -40,8 +38,6 @@ impl BanList {
     }
 
     /// Creates a new ban list that bans the given peers and ips with an optional timeout.
-    ///
-    /// This will ban non-global IPs if they are included in `banned_ips`
     pub fn new_with_timeout(
         banned_peers: HashMap<PeerId, Option<Instant>>,
         banned_ips: HashMap<IpAddr, Option<Instant>>,
