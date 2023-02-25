@@ -183,7 +183,7 @@ impl RpcServerArgs {
             config = config
                 .with_http_address(socket_address)
                 .with_http(ServerBuilder::new())
-                .with_cors(self.http_corsdomain.clone().unwrap_or("".to_string()));
+                .with_cors(self.http_corsdomain.clone().unwrap_or_default());
         }
 
         if self.ws {

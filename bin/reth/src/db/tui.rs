@@ -190,7 +190,7 @@ fn ui<B: Backend, T: Table>(f: &mut Frame<'_, B>, app: &mut DbListTUI<T>) {
             serde_json::to_string_pretty(
                 &app.entries.values().collect::<Vec<_>>()[app.state.selected().unwrap_or(0)],
             )
-            .unwrap_or(String::from("Error serializing value!")),
+            .unwrap_or_else(|_| String::from("Error serializing value!")),
         )
         .block(Block::default().borders(Borders::ALL).title("Value (JSON)"))
         .wrap(Wrap { trim: false })
