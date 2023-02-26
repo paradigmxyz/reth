@@ -28,3 +28,6 @@ lru = "0.9"
 
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+
+[features]
+optimism = ["reth-primitives/optimism"]
