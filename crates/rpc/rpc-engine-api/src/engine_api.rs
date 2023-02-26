@@ -16,6 +16,7 @@ use reth_rpc_types::engine::{
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot, watch};
@@ -36,7 +37,7 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 pub struct EngineApi<Client> {
     client: Client,
     /// Consensus configuration
-    chain_spec: ChainSpec,
+    chain_spec: Arc<ChainSpec>,
     message_rx: UnboundedReceiverStream<EngineApiMessage>,
     forkchoice_state_tx: watch::Sender<ForkchoiceState>,
     // TODO: Placeholder for storing future blocks. Make cache bounded. Use lru
@@ -56,7 +57,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
     ) -> Self {
         Self {
             client,
-            chain_spec,
+            chain_spec: Arc::new(chain_spec),
             message_rx: UnboundedReceiverStream::new(message_rx),
             forkchoice_state_tx,
         }
@@ -305,7 +306,6 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         let total_difficulty = parent_td + block.header.difficulty;
 
         let mut db = SubState::new(State::new(&state_provider));
-        // TODO: Replace with ARC
         let mut executor = reth_executor::executor::Executor::new(self.chain_spec.clone(), &mut db);
         match executor.execute_and_verify_receipt(&block.unseal(), total_difficulty, None) {
             Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash)),
