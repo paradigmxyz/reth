@@ -30,3 +30,6 @@ default = ["jsonrpsee-types"]
 # misc
 rand.workspace = true
 similar-asserts = "1.4"
+
+[features]
+optimism = ["reth-primitives/optimism"]
