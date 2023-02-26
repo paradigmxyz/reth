@@ -341,6 +341,30 @@ where
         }
     }
 
+    /// Execute and verify block
+    pub fn execute_and_verify_receipt(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<ExecutionResult, Error> {
+        let execution_result = self.execute(block, total_difficulty, senders)?;
+
+        let receipts_iter =
+            execution_result.tx_changesets.iter().map(|changeset| &changeset.receipt);
+
+        if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
+            verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
+        }
+
+        // TODO Before Byzantium, receipts contained state root that would mean that expensive
+        // operation as hashing that is needed for state root got calculated in every
+        // transaction This was replaced with is_success flag.
+        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
+
+        Ok(execution_result)
+    }
+
     /// Runs a single transaction in the configured environment and proceeds
     /// to return the result and state diff (without applying it).
     ///
@@ -464,30 +488,6 @@ where
     }
 }
 
-/// Execute and verify block
-pub fn execute_and_verify_receipt<DB: StateProvider>(
-    block: &Block,
-    total_difficulty: U256,
-    senders: Option<Vec<Address>>,
-    chain_spec: &ChainSpec,
-    db: &mut SubState<DB>,
-) -> Result<ExecutionResult, Error> {
-    let execution_result = execute(block, total_difficulty, senders, chain_spec, db)?;
-
-    let receipts_iter = execution_result.tx_changesets.iter().map(|changeset| &changeset.receipt);
-
-    if chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
-        verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
-    }
-
-    // TODO Before Byzantium, receipts contained state root that would mean that expensive operation
-    // as hashing that is needed for state root got calculated in every transaction
-    // This was replaced with is_success flag.
-    // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-
-    Ok(execution_result)
-}
-
 /// Verify receipts
 pub fn verify_receipt<'a>(
     expected_receipts_root: H256,
@@ -509,22 +509,6 @@ pub fn verify_receipt<'a>(
         })
     }
     Ok(())
-}
-
-/// Verify block. Execute all transaction and compare results.
-/// Returns ChangeSet on transaction granularity.
-/// NOTE: If block reward is still active (Before Paris/Merge) we would return
-/// additional TransactionStatechangeset for account that receives the reward.
-pub fn execute<DB: StateProvider>(
-    block: &Block,
-    total_difficulty: U256,
-    senders: Option<Vec<Address>>,
-    chain_spec: &ChainSpec,
-    db: &mut SubState<DB>,
-) -> Result<ExecutionResult, Error> {
-    let mut executor = Executor::new(chain_spec, db)
-        .with_stack(InspectorStack::new(InspectorStackConfig::default()));
-    executor.execute(block, total_difficulty, senders)
 }
 
 #[cfg(test)]
@@ -645,8 +629,8 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
+        let mut executor = Executor::new(&chain_spec, &mut db);
+        let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
 
@@ -772,14 +756,14 @@ mod tests {
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
-        let out = execute_and_verify_receipt(
-            &Block { header, body: vec![], ommers: vec![], withdrawals: None },
-            U256::ZERO,
-            None,
-            &chain_spec,
-            &mut db,
-        )
-        .unwrap();
+        let mut executor = Executor::new(&chain_spec, &mut db);
+        let out = executor
+            .execute_and_verify_receipt(
+                &Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                U256::ZERO,
+                None,
+            )
+            .unwrap();
         assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
         // Check if cache is set
@@ -863,8 +847,8 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
+        let mut executor = Executor::new(&chain_spec, &mut db);
+        let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
 
@@ -912,12 +896,12 @@ mod tests {
         let mut db = SubState::new(State::new(StateProviderTest::default()));
 
         // execute chain and verify receipts
-        let out =
-            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
+        let mut executor = Executor::new(&chain_spec, &mut db);
+        let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
         assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
         let withdrawal_sum = withdrawals.iter().fold(U256::ZERO, |sum, w| sum + w.amount_wei());
-        let beneficiary_account = db.accounts.get(&withdrawal_beneficiary).unwrap();
+        let beneficiary_account = executor.db().accounts.get(&withdrawal_beneficiary).unwrap();
         assert_eq!(beneficiary_account.info.balance, withdrawal_sum);
         assert_eq!(beneficiary_account.info.nonce, 0);
         assert_eq!(beneficiary_account.account_state, AccountState::StorageCleared);
@@ -931,8 +915,7 @@ mod tests {
         );
 
         // Execute same block again
-        let out =
-            execute_and_verify_receipt(&block, U256::ZERO, None, &chain_spec, &mut db).unwrap();
+        let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
         assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
         assert_eq!(out.block_changesets.len(), 1);
