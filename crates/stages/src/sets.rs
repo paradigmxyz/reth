@@ -170,7 +170,7 @@ impl<DB: Database> StageSet<DB> for ExecutionStages {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())
-            .add_stage(ExecutionStage { chain_spec: self.chain_spec, ..Default::default() })
+            .add_stage(ExecutionStage::<crate::DefaultDB<'_>>::from(self.chain_spec))
     }
 }
 
