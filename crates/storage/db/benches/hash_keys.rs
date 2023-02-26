@@ -39,7 +39,7 @@ pub fn hash_keys(c: &mut Criterion) {
 
     group.sample_size(10);
 
-    for size in vec![10_000, 100_000, 1_000_000] {
+    for size in [10_000, 100_000, 1_000_000] {
         measure_table_insertion::<TxHashNumber>(&mut group, size);
     }
 }
@@ -176,7 +176,7 @@ where
                 crsr.append(k, v).expect("submit");
             }
 
-            tx.inner.commit().unwrap();
+            tx.inner.commit().unwrap()
         });
     }
     db
@@ -197,7 +197,7 @@ where
                 crsr.insert(k, v).expect("submit");
             }
 
-            tx.inner.commit().unwrap();
+            tx.inner.commit().unwrap()
         });
     }
     db
@@ -214,7 +214,7 @@ where
                 tx.put::<T>(k, v).expect("submit");
             }
 
-            tx.inner.commit().unwrap();
+            tx.inner.commit().unwrap()
         });
     }
     db
