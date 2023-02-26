@@ -90,8 +90,13 @@ pprof = { version = "0.12", features = ["flamegraph", "frame-pointer", "criterio
 
 [features]
 default = []
-arbitrary = ["revm-primitives/arbitrary", "dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-test-utils = []
+optimism = []
+arbitrary = [
+    "revm-primitives/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-derive",
+]
 
 [[bench]]
 name = "recover_ecdsa_crit"
