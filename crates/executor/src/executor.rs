@@ -21,7 +21,10 @@ use revm::{
     primitives::{Account as RevmAccount, AccountInfo, Bytecode, ResultAndState},
     EVM,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 /// Main block executor
 pub struct Executor<'a, DB>
@@ -29,20 +32,24 @@ where
     DB: StateProvider,
 {
     /// The configured chain-spec
-    pub chain_spec: &'a ChainSpec,
+    pub chain_spec: Arc<ChainSpec>,
     evm: EVM<&'a mut SubState<DB>>,
     stack: InspectorStack,
 }
 
-impl<'a, DB> From<&'a ChainSpec> for Executor<'a, DB>
+impl<'a, DB> From<ChainSpec> for Executor<'a, DB>
 where
     DB: StateProvider,
 {
     /// Instantiates a new executor from the chainspec. Must call
     /// `with_db` to set the database before executing.
-    fn from(chain_spec: &'a ChainSpec) -> Self {
+    fn from(chain_spec: ChainSpec) -> Self {
         let evm = EVM::new();
-        Executor { chain_spec, evm, use_printer_tracer: false }
+        Executor {
+            chain_spec: Arc::new(chain_spec),
+            evm,
+            stack: InspectorStack::new(InspectorStackConfig::default()),
+        }
     }
 }
 
@@ -51,9 +58,10 @@ where
     DB: StateProvider,
 {
     /// Creates a new executor from the given chain spec and database.
-    pub fn new(chain_spec: &'a ChainSpec, db: &'a mut SubState<DB>) -> Self {
+    pub fn new(chain_spec: Arc<ChainSpec>, db: &'a mut SubState<DB>) -> Self {
         let mut evm = EVM::new();
         evm.database(db);
+
         Executor { chain_spec, evm, stack: InspectorStack::new(InspectorStackConfig::default()) }
     }
 
@@ -69,8 +77,13 @@ where
     }
 
     /// Overrides the database
-    pub fn with_db(&mut self, db: &'a mut SubState<DB>) {
-        self.evm.database(db);
+    pub fn with_db<OtherDB: StateProvider>(
+        self,
+        db: &'a mut SubState<OtherDB>,
+    ) -> Executor<'a, OtherDB> {
+        let mut evm = EVM::new();
+        evm.database(db);
+        Executor { chain_spec: self.chain_spec.clone(), evm, stack: self.stack }
     }
 
     fn recover_senders(
@@ -94,7 +107,7 @@ where
         fill_cfg_and_block_env(
             &mut self.evm.env.cfg,
             &mut self.evm.env.block,
-            self.chain_spec,
+            &self.chain_spec,
             header,
             total_difficulty,
         );
@@ -648,7 +661,7 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(&chain_spec, &mut db);
+        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
@@ -775,7 +788,7 @@ mod tests {
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
-        let mut executor = Executor::new(&chain_spec, &mut db);
+        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
         let out = executor
             .execute_and_verify_receipt(
                 &Block { header, body: vec![], ommers: vec![], withdrawals: None },
@@ -866,7 +879,7 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(&chain_spec, &mut db);
+        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
@@ -915,7 +928,7 @@ mod tests {
         let mut db = SubState::new(State::new(StateProviderTest::default()));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(&chain_spec, &mut db);
+        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
         assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
