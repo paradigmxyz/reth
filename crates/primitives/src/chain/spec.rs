@@ -583,12 +583,12 @@ impl ForkCondition {
 
 #[cfg(test)]
 mod tests {
-    use revm_primitives::U256;
     use crate::{
         AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId,
-        Genesis, Hardfork, Head, GOERLI, MAINNET, SEPOLIA,
+        Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA,
     };
     use ethers_core::types as EtherType;
+    use revm_primitives::U256;
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1032,96 +1032,57 @@ mod tests {
     fn hive_geth_json() {
         let hive_json = r#"
         {
-        "nonce": "0x0000000000000042",
-
-        "difficulty": "0x2123456",
-
-        "mixHash": "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",
-
-        "coinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-
-        "timestamp": "0x123456",
-
-        "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-
-        "extraData": "0xfafbfcfd",
-
-        "gasLimit": "0x2fefd8",
-
-        "alloc": {
-
-            "dbdbdb2cbd23b783741e8d7fcf51e459b497e4a6": {
-
-            "balance": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-
+            "nonce": "0x0000000000000042",
+            "difficulty": "0x2123456",
+            "mixHash": "0x123456789abcdef123456789abcdef123456789abcdef123456789abcdef1234",
+            "coinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "timestamp": "0x123456",
+            "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "extraData": "0xfafbfcfd",
+            "gasLimit": "0x2fefd8",
+            "alloc": {
+                "dbdbdb2cbd23b783741e8d7fcf51e459b497e4a6": {
+                    "balance": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                },
+                "e6716f9544a56c530d868e4bfbacb172315bdead": {
+                    "balance": "0x11",
+                    "code": "0x12"
+                },
+                "b9c015918bdaba24b4ff057a92a3873d6eb201be": {
+                    "balance": "0x21",
+                    "storage": {
+                        "0x0000000000000000000000000000000000000000000000000000000000000001": "0x22"
+                    }
+                },
+                "1a26338f0d905e295fccb71fa9ea849ffa12aaf4": {
+                    "balance": "0x31",
+                    "nonce": "0x32"
+                },
+                "0000000000000000000000000000000000000001": {
+                    "balance": "0x41"
+                },
+                "0000000000000000000000000000000000000002": {
+                    "balance": "0x51"
+                },
+                "0000000000000000000000000000000000000003": {
+                    "balance": "0x61"
+                },
+                "0000000000000000000000000000000000000004": {
+                    "balance": "0x71"
+                }
             },
-
-            "e6716f9544a56c530d868e4bfbacb172315bdead": {
-
-            "balance": "0x11",
-
-            "code": "0x12"
-
-            },
-
-            "b9c015918bdaba24b4ff057a92a3873d6eb201be": {
-
-            "balance": "0x21",
-
-            "storage": {
-
-                "0x0000000000000000000000000000000000000000000000000000000000000001": "0x22"
-
+            "config": {
+                "ethash": {},
+                "chainId": 10,
+                "homesteadBlock": 0,
+                "eip150Block": 0,
+                "eip155Block": 0,
+                "eip158Block": 0,
+                "byzantiumBlock": 0,
+                "constantinopleBlock": 0,
+                "petersburgBlock": 0,
+                "istanbulBlock": 0
             }
-
-            },
-
-            "1a26338f0d905e295fccb71fa9ea849ffa12aaf4": {
-
-            "balance": "0x31",
-
-            "nonce": "0x32"
-
-            },
-
-            "0000000000000000000000000000000000000001": {
-
-            "balance": "0x41"
-
-            },
-
-            "0000000000000000000000000000000000000002": {
-
-            "balance": "0x51"
-
-            },
-
-            "0000000000000000000000000000000000000003": {
-
-            "balance": "0x61"
-
-            },
-
-            "0000000000000000000000000000000000000004": {
-
-            "balance": "0x71"
-
-            }
-
-        },
-
-        "config": {
-            "ethash": {},
-            "chainId": 10,
-            "homesteadBlock": 0,
-            "eip150Block": 0,
-            "eip155Block": 0,
-            "eip158Block": 0,
-            "byzantiumBlock": 0,
-            "constantinopleBlock": 0,
-            "petersburgBlock": 0,
-            "istanbulBlock": 0
-        }
         }
         "#;
         let genesis = serde_json::from_str::<AllGenesisFormats>(&hive_json).unwrap();
@@ -1133,10 +1094,16 @@ mod tests {
             Hardfork::Homestead,
             Hardfork::Istanbul,
             Hardfork::Petersburg,
-            Hardfork::Constantinople
+            Hardfork::Constantinople,
         ];
         for ref fork in hard_forks {
             assert_eq!(chainspec.hardforks.get(fork).unwrap(), &ForkCondition::Block(0));
         }
+
+        let expected_hash: H256 =
+            hex_literal::hex!("5ae31c6522bd5856129f66be3d582b842e4e9faaa87f21cce547128339a9db3c")
+                .into();
+        let hash = chainspec.genesis_header().hash_slow();
+        assert_eq!(hash, expected_hash);
     }
 }
