@@ -19,6 +19,8 @@ pub enum Hook {
     Block(u64),
     /// Hook on a specific transaction hash.
     Transaction(TxHash),
+    /// Hooks on every transaction in a block.
+    All,
 }
 
 #[derive(Default)]
@@ -51,6 +53,7 @@ impl InspectorStack {
             Hook::None => false,
             Hook::Block(block) => env.block.number.to::<u64>() == block,
             Hook::Transaction(hash) => hash == tx_hash,
+            Hook::All => true,
         }
     }
 }
