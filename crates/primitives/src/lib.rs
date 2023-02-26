@@ -63,6 +63,8 @@ pub use transaction::{
     Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
     TxEip2930, TxLegacy, TxType,
 };
+#[cfg(feature = "optimism")]
+pub use transaction::{TxDeposit, DEPOSIT_TX_TYPE, DEPOSIT_VERSION};
 pub use withdrawal::Withdrawal;
 
 /// A block hash.

@@ -12,6 +12,9 @@ pub enum TxType {
     EIP2930 = 1_isize,
     /// Transaction with Priority fee
     EIP1559 = 2_isize,
+    #[cfg(feature = "optimism")]
+    /// OP Deposit transaction.
+    DEPOSIT = 126_isize,
 }
 
 impl From<TxType> for u8 {
@@ -20,6 +23,8 @@ impl From<TxType> for u8 {
             TxType::Legacy => 0,
             TxType::EIP2930 => 1,
             TxType::EIP1559 => 2,
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => 126,
         }
     }
 }
@@ -30,6 +35,8 @@ impl Compact for TxType {
             TxType::Legacy => 0,
             TxType::EIP2930 => 1,
             TxType::EIP1559 => 2,
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => 126,
         }
     }
 
@@ -38,7 +45,10 @@ impl Compact for TxType {
             match identifier {
                 0 => TxType::Legacy,
                 1 => TxType::EIP2930,
-                _ => TxType::EIP1559,
+                2 => TxType::EIP1559,
+                #[cfg(feature = "optimism")]
+                126 => TxType::DEPOSIT,
+                _ => panic!("unknown transaction type {identifier}"),
             },
             buf,
         )

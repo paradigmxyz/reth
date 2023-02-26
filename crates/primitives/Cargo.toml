@@ -85,6 +85,7 @@ pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterio
 
 [features]
 default = []
+optimism = []
 arbitrary = [
     "revm-primitives/arbitrary",
     "dep:arbitrary",
