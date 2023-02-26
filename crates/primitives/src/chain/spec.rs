@@ -40,6 +40,8 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
             },
         ),
     ]),
+    #[cfg(feature = "optimism")]
+    optimism: None,
 });
 
 /// The Goerli spec
@@ -60,6 +62,8 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
             ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
         ),
     ]),
+    #[cfg(feature = "optimism")]
+    optimism: None,
 });
 
 /// The Sepolia spec
@@ -92,6 +96,8 @@ pub static SEPOLIA: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         ),
         (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
     ]),
+    #[cfg(feature = "optimism")]
+    optimism: None,
 });
 
 /// An Ethereum chain specification.
@@ -118,6 +124,20 @@ pub struct ChainSpec {
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+
+    #[cfg(feature = "optimism")]
+    /// Optimism configuration
+    pub optimism: Option<OptimismConfig>,
+}
+
+#[cfg(feature = "optimism")]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+/// Optimism configuration.
+pub struct OptimismConfig {
+    /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
+    pub eip_1559_elasticity: u64,
+    /// Base fee max change denominator as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
+    pub eip_1559_denominator: u64,
 }
 
 impl ChainSpec {
@@ -293,6 +313,8 @@ impl From<EthersGenesis> for ChainSpec {
             genesis: genesis_block,
             genesis_hash: None,
             hardforks,
+            #[cfg(feature = "optimism")]
+            optimism: None,
         }
     }
 }
@@ -334,6 +356,8 @@ pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
     hardforks: BTreeMap<Hardfork, ForkCondition>,
+    #[cfg(feature = "optimism")]
+    optimism: Option<OptimismConfig>,
 }
 
 impl ChainSpecBuilder {
@@ -343,6 +367,8 @@ impl ChainSpecBuilder {
             chain: Some(MAINNET.chain),
             genesis: Some(MAINNET.genesis.clone()),
             hardforks: MAINNET.hardforks.clone(),
+            #[cfg(feature = "optimism")]
+            optimism: None,
         }
     }
 
@@ -443,6 +469,20 @@ impl ChainSpecBuilder {
         self
     }
 
+    #[cfg(feature = "optimism")]
+    /// Enable Bedrock at genesis
+    pub fn bedrock_activated(mut self) -> Self {
+        self.hardforks.insert(Hardfork::Bedrock, ForkCondition::Block(0));
+        self
+    }
+
+    #[cfg(feature = "optimism")]
+    /// Enable Bedrock at genesis
+    pub fn regolith_activated(mut self) -> Self {
+        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -455,6 +495,8 @@ impl ChainSpecBuilder {
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
             hardforks: self.hardforks,
+            #[cfg(feature = "optimism")]
+            optimism: self.optimism,
         }
     }
 }
@@ -465,6 +507,8 @@ impl From<&ChainSpec> for ChainSpecBuilder {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
+            #[cfg(feature = "optimism")]
+            optimism: value.optimism.clone(),
         }
     }
 }
