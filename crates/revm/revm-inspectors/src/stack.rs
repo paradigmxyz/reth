@@ -1,7 +1,7 @@
-use reth_primitives::TxHash;
+use reth_primitives::{bytes::Bytes, Address, TxHash, H256};
 use revm::{
     inspectors::CustomPrintTracer,
-    interpreter::{InstructionResult, Interpreter},
+    interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
     primitives::Env,
     Database, EVMData, Inspector,
 };
@@ -102,5 +102,139 @@ where
         });
 
         InstructionResult::Continue
+    }
+
+    fn step(
+        &mut self,
+        interpreter: &mut Interpreter,
+        data: &mut EVMData<'_, DB>,
+        is_static: bool,
+    ) -> InstructionResult {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            let status = inspector.step(interpreter, data, is_static);
+
+            // Allow inspectors to exit early
+            if status != InstructionResult::Continue {
+                return status
+            }
+        });
+
+        InstructionResult::Continue
+    }
+
+    fn log(
+        &mut self,
+        evm_data: &mut EVMData<'_, DB>,
+        address: &Address,
+        topics: &[H256],
+        data: &Bytes,
+    ) {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            inspector.log(evm_data, address, topics, data);
+        });
+    }
+
+    fn step_end(
+        &mut self,
+        interpreter: &mut Interpreter,
+        data: &mut EVMData<'_, DB>,
+        is_static: bool,
+        eval: InstructionResult,
+    ) -> InstructionResult {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            let status = inspector.step_end(interpreter, data, is_static, eval);
+
+            // Allow inspectors to exit early
+            if status != InstructionResult::Continue {
+                return status
+            }
+        });
+
+        InstructionResult::Continue
+    }
+
+    fn call(
+        &mut self,
+        data: &mut EVMData<'_, DB>,
+        inputs: &mut CallInputs,
+        is_static: bool,
+    ) -> (InstructionResult, Gas, Bytes) {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            let (status, gas, retdata) = inspector.call(data, inputs, is_static);
+
+            // Allow inspectors to exit early
+            if status != InstructionResult::Continue {
+                return (status, gas, retdata)
+            }
+        });
+
+        (InstructionResult::Continue, Gas::new(inputs.gas_limit), Bytes::new())
+    }
+
+    fn call_end(
+        &mut self,
+        data: &mut EVMData<'_, DB>,
+        inputs: &CallInputs,
+        remaining_gas: Gas,
+        ret: InstructionResult,
+        out: Bytes,
+        is_static: bool,
+    ) -> (InstructionResult, Gas, Bytes) {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            let (new_ret, new_gas, new_out) =
+                inspector.call_end(data, inputs, remaining_gas, ret, out.clone(), is_static);
+
+            // If the inspector returns a different ret or a revert with a non-empty message,
+            // we assume it wants to tell us something
+            if new_ret != ret || (new_ret == InstructionResult::Revert && new_out != out) {
+                return (new_ret, new_gas, new_out)
+            }
+        });
+
+        (ret, remaining_gas, out)
+    }
+
+    fn create(
+        &mut self,
+        data: &mut EVMData<'_, DB>,
+        inputs: &mut CreateInputs,
+    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            let (status, addr, gas, retdata) = inspector.create(data, inputs);
+
+            // Allow inspectors to exit early
+            if status != InstructionResult::Continue {
+                return (status, addr, gas, retdata)
+            }
+        });
+
+        (InstructionResult::Continue, None, Gas::new(inputs.gas_limit), Bytes::new())
+    }
+
+    fn create_end(
+        &mut self,
+        data: &mut EVMData<'_, DB>,
+        inputs: &CreateInputs,
+        ret: InstructionResult,
+        address: Option<Address>,
+        remaining_gas: Gas,
+        out: Bytes,
+    ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            let (new_ret, new_address, new_gas, new_retdata) =
+                inspector.create_end(data, inputs, ret, address, remaining_gas, out.clone());
+
+            if new_ret != ret {
+                return (new_ret, new_address, new_gas, new_retdata)
+            }
+        });
+
+        (ret, address, remaining_gas, out)
+    }
+
+    fn selfdestruct(&mut self) {
+        call_inspectors!(inspector, [&mut self.custom_print_tracer], {
+            Inspector::<DB>::selfdestruct(inspector);
+        });
     }
 }
