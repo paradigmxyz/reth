@@ -63,6 +63,8 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             11052984,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        #[cfg(feature = "optimism")]
+        optimism: None,
         ..Default::default()
     }
     .into()
@@ -104,6 +106,8 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             4367322,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        #[cfg(feature = "optimism")]
+        optimism: None,
         ..Default::default()
     }
     .into()
@@ -149,6 +153,8 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             1273020,
             H256(hex!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5")),
         )),
+        #[cfg(feature = "optimism")]
+        optimism: None,
         ..Default::default()
     }
     .into()
@@ -188,6 +194,8 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
         deposit_contract: None, // TODO: do we even have?
+        #[cfg(feature = "optimism")]
+        optimism: None,
         ..Default::default()
     }
     .into()
@@ -246,13 +254,16 @@ pub struct ChainSpec {
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
-
     /// The deposit contract deployed for PoS.
     #[serde(skip, default)]
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParams,
+
+    #[cfg(feature = "optimism")]
+    /// Optimism configuration
+    pub optimism: Option<OptimismConfig>,
 }
 
 impl Default for ChainSpec {
@@ -268,6 +279,16 @@ impl Default for ChainSpec {
             base_fee_params: BaseFeeParams::ethereum(),
         }
     }
+}
+
+#[cfg(feature = "optimism")]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+/// Optimism configuration.
+pub struct OptimismConfig {
+    /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
+    pub eip_1559_elasticity: u64,
+    /// Base fee max change denominator as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
+    pub eip_1559_denominator: u64,
 }
 
 impl ChainSpec {
@@ -407,8 +428,8 @@ impl ChainSpec {
         for (_, cond) in self.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     if block != current_applied {
@@ -418,7 +439,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -435,7 +456,7 @@ impl ChainSpec {
                     // can safely return here because we have already handled all block forks and
                     // have handled all active timestamp forks, and set the next value to the
                     // timestamp that is known but not active yet
-                    return ForkId { hash: forkhash, next: timestamp }
+                    return ForkId { hash: forkhash, next: timestamp };
                 }
             }
         }
@@ -501,6 +522,8 @@ impl From<Genesis> for ChainSpec {
             hardforks,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
+            #[cfg(feature = "optimism")]
+            optimism: None,
             ..Default::default()
         }
     }
@@ -584,6 +607,8 @@ pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
     hardforks: BTreeMap<Hardfork, ForkCondition>,
+    #[cfg(feature = "optimism")]
+    optimism: Option<OptimismConfig>,
 }
 
 impl ChainSpecBuilder {
@@ -593,6 +618,8 @@ impl ChainSpecBuilder {
             chain: Some(MAINNET.chain),
             genesis: Some(MAINNET.genesis.clone()),
             hardforks: MAINNET.hardforks.clone(),
+            #[cfg(feature = "optimism")]
+            optimism: None,
         }
     }
 
@@ -710,6 +737,20 @@ impl ChainSpecBuilder {
         self
     }
 
+    #[cfg(feature = "optimism")]
+    /// Enable Bedrock at genesis
+    pub fn bedrock_activated(mut self) -> Self {
+        self.hardforks.insert(Hardfork::Bedrock, ForkCondition::Block(0));
+        self
+    }
+
+    #[cfg(feature = "optimism")]
+    /// Enable Bedrock at genesis
+    pub fn regolith_activated(mut self) -> Self {
+        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`ChainSpec`].
     ///
     /// # Panics
@@ -725,6 +766,8 @@ impl ChainSpecBuilder {
             hardforks: self.hardforks,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
+            #[cfg(feature = "optimism")]
+            optimism: self.optimism,
             ..Default::default()
         }
     }
@@ -736,6 +779,8 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
             hardforks: value.hardforks.clone(),
+            #[cfg(feature = "optimism")]
+            optimism: value.optimism.clone(),
         }
     }
 }
@@ -829,9 +874,9 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
+        self.active_at_block(head.number)
+            || self.active_at_timestamp(head.timestamp)
+            || self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 
     /// Get the total terminal difficulty for this fork condition.
