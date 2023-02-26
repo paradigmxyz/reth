@@ -11,7 +11,7 @@ use reth_db::{
 };
 use reth_executor::{execution_result::AccountChangeSet, executor::Executor};
 use reth_interfaces::provider::ProviderError;
-use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, MAINNET, U256};
+use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, U256};
 use reth_provider::{LatestStateProviderRef, StateProvider, Transaction};
 use reth_revm::database::{State, SubState};
 use tracing::*;

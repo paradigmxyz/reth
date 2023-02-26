@@ -305,7 +305,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         let total_difficulty = parent_td + block.header.difficulty;
 
         let mut db = SubState::new(State::new(&state_provider));
-        let mut executor = reth_executor::executor::Executor::new(&self.chain_spec, &mut db);
+        // TODO: Replace with ARC
+        let mut executor = reth_executor::executor::Executor::new(self.chain_spec.clone(), &mut db);
         match executor.execute_and_verify_receipt(&block.unseal(), total_difficulty, None) {
             Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash)),
             Err(err) => Ok(PayloadStatus::new(
