@@ -28,9 +28,22 @@ pub struct Executor<'a, DB>
 where
     DB: StateProvider,
 {
-    chain_spec: &'a ChainSpec,
+    /// The configured chain-spec
+    pub chain_spec: &'a ChainSpec,
     evm: EVM<&'a mut SubState<DB>>,
     stack: InspectorStack,
+}
+
+impl<'a, DB> From<&'a ChainSpec> for Executor<'a, DB>
+where
+    DB: StateProvider,
+{
+    /// Instantiates a new executor from the chainspec. Must call
+    /// `with_db` to set the database before executing.
+    fn from(chain_spec: &'a ChainSpec) -> Self {
+        let evm = EVM::new();
+        Executor { chain_spec, evm, use_printer_tracer: false }
+    }
 }
 
 impl<'a, DB> Executor<'a, DB>
@@ -50,8 +63,14 @@ where
         self
     }
 
-    fn db(&mut self) -> &mut SubState<DB> {
+    /// Gives a reference to the database
+    pub fn db(&mut self) -> &mut SubState<DB> {
         self.evm.db().expect("db to not be moved")
+    }
+
+    /// Overrides the database
+    pub fn with_db(&mut self, db: &'a mut SubState<DB>) {
+        self.evm.database(db);
     }
 
     fn recover_senders(
