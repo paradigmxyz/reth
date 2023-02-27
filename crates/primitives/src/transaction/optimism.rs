@@ -43,7 +43,7 @@ impl TxDeposit {
         len += self.source_hash.length();
         len += self.from.length();
         len += self.to.length();
-        len += self.mint.map(|mint| mint.length()).unwrap_or(1);
+        len += self.mint.map_or(1, |mint| mint.length());
         len += self.value.length();
         len += self.input.0.length();
         len += self.gas_limit.length();
