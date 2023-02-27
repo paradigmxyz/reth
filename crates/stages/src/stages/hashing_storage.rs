@@ -174,7 +174,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                             })
                             .collect::<Result<Vec<Option<_>>, _>>()?
                             .into_iter()
-                            .filter_map(|v| v)
+                            .flatten()
                             .collect::<BTreeMap<_, _>>(),
                     );
                     Ok::<_, reth_db::Error>(res)
