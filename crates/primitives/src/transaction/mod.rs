@@ -6,6 +6,7 @@ use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
+use revm_primitives::U256;
 pub use signature::Signature;
 pub use tx_type::TxType;
 
@@ -254,7 +255,8 @@ impl Transaction {
             Transaction::Eip2930(TxEip2930 { nonce, .. }) => *nonce,
             Transaction::Eip1559(TxEip1559 { nonce, .. }) => *nonce,
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => todo!(), // TODO:
+            // Deposit transactions don't have a nonce, so they default to zero.
+            Transaction::Deposit(_) => 0,
         }
     }
 
@@ -304,6 +306,36 @@ impl Transaction {
             Transaction::Eip1559(TxEip1559 { input, .. }) => input,
             #[cfg(feature = "optimism")]
             Transaction::Deposit(TxDeposit { input, .. }) => input,
+        }
+    }
+
+    #[cfg(feature = "optimism")]
+    /// Returns the source hash of the transaction, which uniquely identifies its source.
+    /// If the transaction is not a deposit transaction, this will always return `H256::zero()`.
+    pub fn source_hash(&self) -> H256 {
+        match self {
+            Transaction::Deposit(TxDeposit { source_hash, .. }) => *source_hash,
+            _ => H256::zero(),
+        }
+    }
+
+    #[cfg(feature = "optimism")]
+    /// Returns the amount of ETH locked up on L1 that will be minted on L2. If the transaction
+    /// is not a deposit transaction, this will always return `None`.
+    pub fn mint(&self) -> Option<u128> {
+        match self {
+            Transaction::Deposit(TxDeposit { mint, .. }) => *mint,
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "optimism")]
+    /// Returns whether or not the transaction is a system transaction. If the transaction
+    /// is not a deposit transaction, this will always return `false`.
+    pub fn is_system_transaction(&self) -> bool {
+        match self {
+            Transaction::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
+            _ => false,
         }
     }
 
@@ -667,7 +699,16 @@ impl TransactionSigned {
                 let header = Header { list: true, payload_length };
                 header.encode(out);
                 self.transaction.encode_fields(out);
-                self.signature.encode(out);
+                // Deposit transactions do not have a signature. If the signature's values are not
+                // zero, then the transaction is invalid.
+                if self.signature().v(self.chain_id()) != 0 ||
+                    self.signature().r != U256::ZERO ||
+                    self.signature().s != U256::ZERO
+                {
+                    // TODO: Ensure that this transaction may never have a non-zero signature
+                    // higher up - we shouldn't be panicking here.
+                    panic!("Deposit transactions must have a zero signature");
+                }
             }
             _ => {
                 let payload_length = self.transaction.fields_len() + self.signature.payload_len();
@@ -771,6 +812,8 @@ impl TransactionSigned {
         data.advance(1);
 
         #[cfg(feature = "optimism")]
+        // If the transaction is a deposit, we need to first ensure that the version
+        // byte is correct.
         if tx_type == DEPOSIT_TX_TYPE {
             let version = *data.first().ok_or(DecodeError::InputTooShort)?;
             if version != DEPOSIT_VERSION {
@@ -788,6 +831,8 @@ impl TransactionSigned {
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
         #[cfg(feature = "optimism")]
+        // If the transaction is a deposit, we need to add one to the length to account for the
+        // version byte.
         let tx_length = if tx_type == DEPOSIT_TX_TYPE { tx_length + 1 } else { tx_length };
 
         // decode common fields
