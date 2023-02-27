@@ -62,7 +62,8 @@ impl GenesisAccount {
         // rather than rlp-encoding the storage, we just return the length of a single hash
         // hashes are a fixed size, so it is safe to use the empty root for this
         len += EMPTY_ROOT.length();
-        len += self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).length();
+        // we are encoding a hash, so let's just use the length of the empty hash for the code hash
+        len += KECCAK_EMPTY.length();
         len
     }
 }
@@ -83,6 +84,9 @@ impl Encodable for GenesisAccount {
         self.storage
             .as_ref()
             .map_or(EMPTY_ROOT, |storage| {
+                if storage.is_empty() {
+                    return EMPTY_ROOT;
+                }
                 let storage_values =
                     storage.iter().filter(|(_k, &v)| v != KECCAK_EMPTY).map(|(&k, v)| {
                         let mut value_rlp = BytesMut::new();
@@ -92,7 +96,14 @@ impl Encodable for GenesisAccount {
                 sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
             })
             .encode(out);
-        self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).encode(out);
+        match self.code {
+            Some(ref code) => {
+                let mut code_rlp = BytesMut::new();
+                code.encode(&mut code_rlp);
+                keccak256(&code_rlp).encode(out);
+            }
+            None => KECCAK_EMPTY.encode(out),
+        }
     }
 }
 
