@@ -7,7 +7,8 @@ repository = "https://github.com/paradigmxyz/reth"
 description = "core reth specific revm utilities"
 
 [dependencies]
-# reth 
 reth-primitives = { path = "../../primitives" }
-
 revm = { version = "3.0.0" }
+
+[features]
+optimism = []

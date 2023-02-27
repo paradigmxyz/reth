@@ -353,6 +353,8 @@ impl PoolTransaction for PooledTransaction {
     /// This will return `None` for non-EIP1559 transactions
     fn max_fee_per_gas(&self) -> Option<u128> {
         match &self.transaction.transaction {
+            #[cfg(feature = "optimism")]
+            Transaction::Optimism(_) => None,
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_fee_per_gas),

@@ -6,6 +6,7 @@ use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
+#[cfg(feature = "optimism")]
 use revm_primitives::U256;
 pub use signature::Signature;
 pub use tx_type::TxType;
@@ -440,17 +441,6 @@ impl Transaction {
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
     pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(TxDeposit { to, mint, value, gas_limit, input, .. }) => {
-                tx_env.gas_limit = *gas_limit;
-                tx_env.gas_price = U256::from(*mint);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = TransactTo::Call(*to);
-                tx_env.value = U256::from(*value);
-                tx_env.data = input.0.clone();
-                tx_env.chain_id = None;
-                tx_env.nonce = None;
-            }
             Transaction::Legacy(TxLegacy {
                 chain_id: _,
                 nonce,
@@ -643,7 +633,7 @@ impl TransactionSigned {
     pub fn recover_signer(&self) -> Option<Address> {
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from.clone())
+            return Some(from)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
