@@ -12,6 +12,11 @@ use reth_primitives::{
 use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
 use std::collections::{hash_map::Entry, HashMap};
 
+use reth_primitives::constants;
+
+#[cfg(feature = "optimism")]
+use reth_primitives::TxDeposit;
+
 /// Validate header standalone
 pub fn validate_header_standalone(
     header: &SealedHeader,
@@ -65,6 +70,11 @@ pub fn validate_transaction_regarding_header(
     base_fee: Option<u64>,
 ) -> Result<(), ConsensusError> {
     let chain_id = match transaction {
+        #[cfg(feature = "optimism")]
+        Transaction::Deposit(TxDeposit { .. }) => {
+            // TODO: get the chain id
+            None
+        }
         Transaction::Legacy(TxLegacy { chain_id, .. }) => {
             // EIP-155: Simple replay attack protection: https://eips.ethereum.org/EIPS/eip-155
             if chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(at_block_number) &&
