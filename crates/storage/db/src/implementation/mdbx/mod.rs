@@ -279,6 +279,7 @@ mod tests {
         assert_eq!(walker.next(), None);
     }
 
+    #[allow(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {
         let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
