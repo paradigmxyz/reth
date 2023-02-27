@@ -656,7 +656,7 @@ mod tests {
         );
 
         // spec at berlin fork
-        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
         let mut db = SubState::new(State::new(db));
 
@@ -781,10 +781,12 @@ mod tests {
             beneficiary_balance += i;
         }
 
-        let chain_spec = ChainSpecBuilder::from(&*MAINNET)
-            .homestead_activated()
-            .with_fork(Hardfork::Dao, ForkCondition::Block(1))
-            .build();
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .homestead_activated()
+                .with_fork(Hardfork::Dao, ForkCondition::Block(1))
+                .build(),
+        );
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
@@ -874,7 +876,7 @@ mod tests {
         );
 
         // spec at berlin fork
-        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
         let mut db = SubState::new(State::new(db));
 
@@ -923,7 +925,7 @@ mod tests {
             Address::from_str("c94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
 
         // spec at shanghai fork
-        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
         let mut db = SubState::new(State::new(StateProviderTest::default()));
 

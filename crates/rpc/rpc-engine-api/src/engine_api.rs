@@ -440,7 +440,7 @@ mod tests {
     };
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
-        let chain_spec = MAINNET.clone();
+        let chain_spec = Arc::new(MAINNET.clone());
         let client = Arc::new(MockEthProvider::default());
         let (msg_tx, msg_rx) = unbounded_channel();
         let (forkchoice_state_tx, forkchoice_state_rx) = watch::channel(ForkchoiceState::default());
@@ -455,7 +455,7 @@ mod tests {
     }
 
     struct EngineApiTestHandle {
-        chain_spec: ChainSpec,
+        chain_spec: Arc<ChainSpec>,
         client: Arc<MockEthProvider>,
         msg_tx: UnboundedSender<EngineApiMessage>,
         forkchoice_state_rx: WatchReceiver<ForkchoiceState>,

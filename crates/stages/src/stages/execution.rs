@@ -406,20 +406,18 @@ impl<State: StateProvider, DB: Database> Stage<DB> for ExecutionStage<'_, State>
 
 #[cfg(test)]
 mod tests {
-    use std::ops::{Deref, DerefMut};
-
-    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
-
     use super::*;
+    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
     use reth_db::{
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, U256,
+        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, MAINNET, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
+    use std::ops::{Deref, DerefMut};
 
     #[tokio::test]
     async fn sanity_execution_of_block() {
