@@ -87,23 +87,17 @@ impl Encodable for GenesisAccount {
                 if storage.is_empty() {
                     return EMPTY_ROOT;
                 }
+                println!("{storage:#?}");
                 let storage_values =
                     storage.iter().filter(|(_k, &v)| v != KECCAK_EMPTY).map(|(&k, v)| {
                         let mut value_rlp = BytesMut::new();
                         v.encode(&mut value_rlp);
-                        (k, value_rlp.freeze())
+                        (k, v)
                     });
                 sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
             })
             .encode(out);
-        match self.code {
-            Some(ref code) => {
-                let mut code_rlp = BytesMut::new();
-                code.encode(&mut code_rlp);
-                keccak256(&code_rlp).encode(out);
-            }
-            None => KECCAK_EMPTY.encode(out),
-        }
+        self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).encode(out);
     }
 }
 

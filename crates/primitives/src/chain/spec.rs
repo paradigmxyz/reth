@@ -1092,6 +1092,7 @@ mod tests {
         "#;
         let genesis = serde_json::from_str::<AllGenesisFormats>(&hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
+        println!("{chainspec:#?}");
         assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(Chain::Named(EtherType::Chain::Optimism), chainspec.chain);
         let expected_state_root: H256 = hex_literal::hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
