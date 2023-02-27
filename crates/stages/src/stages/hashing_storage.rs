@@ -160,21 +160,26 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 // Assumption we are okay with is that plain state represent
                 // `previous_stage_progress` state.
                 .map(|(address, storage)| {
-                    (
+                    let res = (
                         keccak256(address),
                         storage
                             .into_iter()
-                            .filter_map(|key| {
-                                plain_storage
-                                    .seek_by_key_subkey(address, key)
-                                    .ok()?
-                                    .filter(|v| v.key == key)
-                                    .map(|ret| (keccak256(key), ret.value))
+                            .map(|key| {
+                                Ok::<Option<_>, reth_db::Error>(
+                                    plain_storage
+                                        .seek_by_key_subkey(address, key)?
+                                        .filter(|v| v.key == key)
+                                        .map(|ret| (keccak256(key), ret.value)),
+                                )
                             })
+                            .collect::<Result<Vec<Option<_>>, _>>()?
+                            .into_iter()
+                            .filter_map(|v| v)
                             .collect::<BTreeMap<_, _>>(),
-                    )
+                    );
+                    Ok::<_, reth_db::Error>(res)
                 })
-                .collect::<BTreeMap<_, _>>()
+                .collect::<Result<BTreeMap<_, _>, _>>()?
                 .into_iter()
                 // Hash the address and key and apply them to HashedStorage (if Storage is None
                 // just remove it);
