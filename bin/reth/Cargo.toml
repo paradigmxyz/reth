@@ -17,8 +17,6 @@ reth-stages = { path = "../../crates/stages"}
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../crates/transaction-pool", features = ["test-utils"] }
 reth-consensus = { path = "../../crates/consensus" }
-reth-executor = { path = "../../crates/executor" }
-reth-eth-wire = { path = "../../crates/net/eth-wire" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
@@ -36,7 +34,6 @@ tracing = "0.1"
 
 # io
 fdlimit = "0.2.1"
-walkdir = "2.3"
 serde = "1.0"
 serde_json = "1.0"
 shellexpand = "3.0.0"
@@ -44,7 +41,6 @@ dirs-next = "2.0.0"
 confy = "0.5"
 
 # rpc/metrics
-metrics = "0.20.1"
 metrics-exporter-prometheus = { version = "0.11.0", features = ["http-listener"] }
 metrics-util = "0.14.0"
 
@@ -54,9 +50,7 @@ proptest = "1.0"
 # misc
 eyre = "0.6.8"
 clap = { version = "4.0", features = ["derive", "cargo"] }
-thiserror = "1.0"
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
-tokio-stream = "0.1"
 futures = "0.3.25"
 tempfile = { version = "3.3.0" }
 backon = "0.4"
