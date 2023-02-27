@@ -7,7 +7,7 @@ use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
 use reth_provider::Transaction;
 use reth_stages::{
-    stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
+    stages::{AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage},
     Stage, StageId, UnwindInput,
 };
 use std::ops::DerefMut;
@@ -73,15 +73,27 @@ async fn unwind_and_copy<DB: Database>(
 
     MerkleStage::default_unwind().unwind(&mut unwind_tx, unwind).await?;
 
+    // Bring Plainstate to TO (hashing stage execution requires it)
+    ExecutionStage { commit_threshold: u64::MAX, ..Default::default() }
+        .unwind(
+            &mut unwind_tx,
+            UnwindInput { unwind_to: to, stage_progress: tip_block_number, bad_block: None },
+        )
+        .await?;
+
     // Bring hashes to TO
-    AccountHashingStage::default().execute(&mut unwind_tx, execute_input).await.unwrap();
-    StorageHashingStage::default().execute(&mut unwind_tx, execute_input).await.unwrap();
+    AccountHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
+        .execute(&mut unwind_tx, execute_input)
+        .await
+        .unwrap();
+    StorageHashingStage { clean_threshold: u64::MAX, commit_threshold: u64::MAX }
+        .execute(&mut unwind_tx, execute_input)
+        .await
+        .unwrap();
 
     let unwind_inner_tx = unwind_tx.deref_mut();
 
-    // TODO optimize we can actually just get the entries we need for both these tables
-    output_db.update(|tx| tx.import_table::<tables::PlainAccountState, _>(unwind_inner_tx))??;
-    output_db.update(|tx| tx.import_dupsort::<tables::PlainStorageState, _>(unwind_inner_tx))??;
+    // TODO optimize we can actually just get the entries we need
     output_db.update(|tx| tx.import_dupsort::<tables::StorageChangeSet, _>(unwind_inner_tx))??;
 
     output_db.update(|tx| tx.import_table::<tables::HashedAccount, _>(unwind_inner_tx))??;
