@@ -13,3 +13,8 @@ description = "core reth specific revm utilities"
 reth-primitives.workspace = true
 
 revm.workspace = true
+
+
+[features]
+optimism = []
+

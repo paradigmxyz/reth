@@ -22,6 +22,9 @@ pub(crate) type MockTxPool = TxPool<MockOrdering>;
 
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
+#[cfg(feature = "optimism")]
+use reth_primitives::TxDeposit;
+
 /// Create an empty `TxPool`
 pub(crate) fn mock_tx_pool() -> MockTxPool {
     MockTxPool::new(Default::default(), Default::default())
@@ -98,6 +101,17 @@ pub enum MockTransaction {
         gas_limit: u64,
         to: TransactionKind,
         value: U256,
+    },
+    #[cfg(feature = "optimism")]
+    DepositTx {
+        source_hash: H256,
+        from: Address,
+        to: TransactionKind,
+        mint: Option<u128>,
+        value: u128,
+        gas_limit: u64,
+        is_system_transaction: bool,
+        input: Bytes,
     },
 }
 
@@ -393,6 +407,26 @@ impl FromRecoveredTransaction for MockTransaction {
         let transaction = tx.into_signed();
         let hash = transaction.hash();
         match transaction.transaction {
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(TxDeposit {
+                source_hash,
+                from,
+                to,
+                mint,
+                value,
+                gas_limit,
+                is_system_transaction,
+                input,
+            }) => MockTransaction::DepositTx {
+                source_hash,
+                from,
+                to,
+                mint,
+                value,
+                gas_limit,
+                is_system_transaction,
+                input,
+            },
             Transaction::Legacy(TxLegacy {
                 chain_id,
                 nonce,
