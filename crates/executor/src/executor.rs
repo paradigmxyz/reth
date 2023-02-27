@@ -72,7 +72,13 @@ where
 
     /// Initializes the config and block env.
     fn init_env(&mut self, header: &Header, total_difficulty: U256) {
-        fill_cfg_and_block_env(&mut self.evm.env, self.chain_spec, header, total_difficulty);
+        fill_cfg_and_block_env(
+            &mut self.evm.env.cfg,
+            &mut self.evm.env.block,
+            self.chain_spec,
+            header,
+            total_difficulty,
+        );
     }
 
     /// Commit change to database and return change diff that is used to update state and create
