@@ -37,8 +37,8 @@ pub enum TxType {
     EIP1559 = 2_isize,
     /// Shard Blob Transactions - EIP-4844
     EIP4844 = 3_isize,
-    #[cfg(feature = "optimism")]
     /// OP Deposit transaction.
+    #[cfg(feature = "optimism")]
     DEPOSIT = 126_isize,
 }
 

@@ -41,11 +41,11 @@ pub enum Hardfork {
     Shanghai,
     /// Cancun.
     Cancun,
-    #[cfg(feature = "optimism")]
     /// Bedrock.
-    Bedrock,
     #[cfg(feature = "optimism")]
+    Bedrock,
     /// Regolith
+    #[cfg(feature = "optimism")]
     Regolith,
 }
 

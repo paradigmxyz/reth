@@ -126,19 +126,19 @@ pub struct PayloadAttributes {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
 
-    #[cfg(feature = "optimism")]
     /// Transactions is a field for rollups: the transactions list is forced into the block
+    #[cfg(feature = "optimism")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transactions: Option<Vec<Bytes>>,
 
-    #[cfg(feature = "optimism")]
     /// If true, the no transactions are taken out of the tx-pool, only transactions from the above
     /// Transactions list will be included.
+    #[cfg(feature = "optimism")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_tx_pool: Option<bool>,
 
-    #[cfg(feature = "optimism")]
     /// If set, this sets the exact gas limit the block produced with.
+    #[cfg(feature = "optimism")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gas_limit: Option<u64>,
 }
