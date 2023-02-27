@@ -73,6 +73,6 @@ impl<DB: StateProvider> DatabaseRef for State<DB> {
     }
 
     fn block_hash(&self, number: U256) -> Result<H256, Self::Error> {
-        Ok(self.0.block_hash(number)?.unwrap_or_default())
+        Ok(self.0.block_hash(number.try_into().unwrap())?.unwrap_or_default())
     }
 }

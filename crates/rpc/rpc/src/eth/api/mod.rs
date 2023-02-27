@@ -10,7 +10,7 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, TransactionSigned, H256, U64,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
 use crate::eth::error::EthResult;
@@ -145,9 +145,10 @@ where
     }
 
     /// Helper function to execute a closure with the database at a specific block.
-    pub(crate) fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    pub(crate) fn with_state_at<F, T, S>(&self, _at: BlockId, _f: F) -> EthResult<T>
     where
-        F: FnOnce(ChainState<'_>) -> T,
+        S: StateProvider,
+        F: FnOnce(ChainState<'_, S>) -> T,
     {
         unimplemented!()
     }
