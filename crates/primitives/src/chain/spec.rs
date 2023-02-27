@@ -1,7 +1,7 @@
 use crate::{
     constants::EIP1559_INITIAL_BASE_FEE, forkid::ForkFilterKey, header::Head,
-    proofs::genesis_state_root, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
-    GenesisAccount, Hardfork, Header, H160, H256, U256,
+    proofs::{genesis_state_root, EMPTY_ROOT}, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
+    GenesisAccount, Hardfork, Header, H160, H256, U256, EMPTY_OMMER_ROOT,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
@@ -142,7 +142,7 @@ impl ChainSpec {
             None
         };
 
-        Header {
+        let header = Header {
             gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce,
@@ -152,8 +152,13 @@ impl ChainSpec {
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
             base_fee_per_gas,
+            transactions_root: EMPTY_ROOT,
+            receipts_root: EMPTY_ROOT,
+            ommers_hash: EMPTY_OMMER_ROOT,
             ..Default::default()
-        }
+        };
+        println!("genesis header: {:?}", header);
+        header
     }
 
     /// Get the hash of the genesis block.
@@ -1089,6 +1094,8 @@ mod tests {
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(Chain::Named(EtherType::Chain::Optimism), chainspec.chain);
+        let expected_state_root: H256 = hex_literal::hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
+        assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
         let hard_forks = vec![
             Hardfork::Byzantium,
             Hardfork::Homestead,
