@@ -408,6 +408,17 @@ impl Transaction {
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.
     pub(crate) fn encode_fields(&self, out: &mut dyn bytes::BufMut) {
         match self {
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(TxDeposit { to, mint, value, gas_limit, input, .. }) => {
+                tx_env.gas_limit = *gas_limit;
+                tx_env.gas_price = U256::from(*mint);
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = TransactTo::Call(*to);
+                tx_env.value = U256::from(*value);
+                tx_env.data = input.0.clone();
+                tx_env.chain_id = None;
+                tx_env.nonce = None;
+            }
             Transaction::Legacy(TxLegacy {
                 chain_id: _,
                 nonce,
