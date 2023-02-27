@@ -102,10 +102,14 @@ impl Transaction {
             TxType::Legacy => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
             TxType::EIP2930 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
             TxType::EIP1559 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => (None, None),
         };
 
         let chain_id = signed_tx.chain_id().map(U64::from);
         let access_list = match &signed_tx.transaction {
+            #[cfg(feature = "optimism")]
+            PrimitiveTransaction::Deposit(_) => None,
             PrimitiveTransaction::Legacy(_) => None,
             PrimitiveTransaction::Eip2930(tx) => Some(
                 tx.access_list
