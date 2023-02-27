@@ -111,22 +111,16 @@ impl Transaction {
 
         let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
             TxType::Legacy => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
-            TxType::EIP2930 => (Some(U128::from(signed_tx.max_fee_per_gas())), None),
-            TxType::EIP1559 => {
-                // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
-                // baseFee`
-                let gas_price = base_fee
-                    .and_then(|base_fee| {
-                        signed_tx.effective_tip_per_gas(base_fee).map(|tip| tip + base_fee as u128)
-                    })
-                    .unwrap_or_else(|| signed_tx.max_fee_per_gas());
-
-                (Some(U128::from(gas_price)), Some(U128::from(signed_tx.max_fee_per_gas())))
-            }
+            TxType::EIP2930 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
+            TxType::EIP1559 => (None, Some(U128::from(signed_tx.max_fee_per_gas()))),
+            #[cfg(feature = "optimism")]
+            TxType::DEPOSIT => (None, None),
         };
 
         let chain_id = signed_tx.chain_id().map(U64::from);
         let access_list = match &signed_tx.transaction {
+            #[cfg(feature = "optimism")]
+            PrimitiveTransaction::Deposit(_) => None,
             PrimitiveTransaction::Legacy(_) => None,
             PrimitiveTransaction::Eip2930(tx) => Some(
                 tx.access_list

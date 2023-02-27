@@ -140,7 +140,7 @@ pub struct PayloadAttributes {
     #[cfg(feature = "optimism")]
     /// If set, this sets the exact gas limit the block produced with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gas_limit: Option,
+    pub gas_limit: Option<u64>,
 }
 
 /// This structure contains the result of processing a payload

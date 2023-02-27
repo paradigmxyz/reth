@@ -23,7 +23,13 @@ pub(crate) type MockTxPool = TxPool<MockOrdering>;
 pub type MockValidTx = ValidPoolTransaction<MockTransaction>;
 
 #[cfg(feature = "optimism")]
+use reth_primitives::DEPOSIT_TX_TYPE;
+
+#[cfg(feature = "optimism")]
 use reth_primitives::TxDeposit;
+
+#[cfg(feature = "optimism")]
+use reth_primitives::Bytes;
 
 /// Create an empty `TxPool`
 pub(crate) fn mock_tx_pool() -> MockTxPool {
@@ -35,6 +41,10 @@ macro_rules! set_value {
     ($this:ident => $field:ident) => {
         let new_value = $field;
         match $this {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { ref mut $field, .. } => {
+                *$field = new_value;
+            }
             MockTransaction::Legacy { ref mut $field, .. } => {
                 *$field = new_value;
             }
@@ -49,6 +59,8 @@ macro_rules! set_value {
 macro_rules! get_value {
     ($this:ident => $field:ident) => {
         match $this {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { $field, .. } => $field,
             MockTransaction::Legacy { $field, .. } => $field,
             MockTransaction::Eip1559 { $field, .. } => $field,
         }
@@ -104,14 +116,15 @@ pub enum MockTransaction {
     },
     #[cfg(feature = "optimism")]
     DepositTx {
-        source_hash: H256,
-        from: Address,
+        hash: H256,
+        sender: Address,
+        nonce: u64,
         to: TransactionKind,
         mint: Option<u128>,
-        value: u128,
         gas_limit: u64,
         is_system_transaction: bool,
         input: Bytes,
+        value: U256,
     },
 }
 
@@ -199,6 +212,8 @@ impl MockTransaction {
 
     pub fn set_gas_price(&mut self, val: u128) -> &mut Self {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => {}
             MockTransaction::Legacy { gas_price, .. } => {
                 *gas_price = val;
             }
@@ -212,6 +227,8 @@ impl MockTransaction {
 
     pub fn with_gas_price(mut self, val: u128) -> Self {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => {}
             MockTransaction::Legacy { ref mut gas_price, .. } => {
                 *gas_price = val;
             }
@@ -229,6 +246,8 @@ impl MockTransaction {
 
     pub fn get_gas_price(&self) -> u128 {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => 0,
             MockTransaction::Legacy { gas_price, .. } => *gas_price,
             MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
@@ -313,6 +332,8 @@ impl MockTransaction {
 impl PoolTransaction for MockTransaction {
     fn hash(&self) -> &TxHash {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { hash, .. } => hash,
             MockTransaction::Legacy { hash, .. } => hash,
             MockTransaction::Eip1559 { hash, .. } => hash,
         }
@@ -320,6 +341,8 @@ impl PoolTransaction for MockTransaction {
 
     fn sender(&self) -> Address {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { sender, .. } => *sender,
             MockTransaction::Legacy { sender, .. } => *sender,
             MockTransaction::Eip1559 { sender, .. } => *sender,
         }
@@ -327,6 +350,8 @@ impl PoolTransaction for MockTransaction {
 
     fn nonce(&self) -> u64 {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { nonce, .. } => *nonce,
             MockTransaction::Legacy { nonce, .. } => *nonce,
             MockTransaction::Eip1559 { nonce, .. } => *nonce,
         }
@@ -334,6 +359,8 @@ impl PoolTransaction for MockTransaction {
 
     fn cost(&self) -> U256 {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => U256::from(0),
             MockTransaction::Legacy { gas_price, value, gas_limit, .. } => {
                 U256::from(*gas_limit) * U256::from(*gas_price) + *value
             }
@@ -360,13 +387,17 @@ impl PoolTransaction for MockTransaction {
 
     fn max_fee_per_gas(&self) -> u128 {
         match self {
-            MockTransaction::Legacy { gas_price, .. } => *gas_price,
-            MockTransaction::Eip1559 { max_fee_per_gas, .. } => *max_fee_per_gas,
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => None,
+            MockTransaction::Legacy { .. } => None,
+            MockTransaction::Eip1559 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
         }
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => None,
             MockTransaction::Legacy { .. } => None,
             MockTransaction::Eip1559 { max_priority_fee_per_gas, .. } => {
                 Some(*max_priority_fee_per_gas)
@@ -376,6 +407,8 @@ impl PoolTransaction for MockTransaction {
 
     fn kind(&self) -> &TransactionKind {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { to, .. } => to,
             MockTransaction::Legacy { to, .. } => to,
             MockTransaction::Eip1559 { to, .. } => to,
         }
@@ -387,6 +420,8 @@ impl PoolTransaction for MockTransaction {
 
     fn tx_type(&self) -> u8 {
         match self {
+            #[cfg(feature = "optimism")]
+            MockTransaction::DepositTx { .. } => DEPOSIT_TX_TYPE,
             MockTransaction::Legacy { .. } => TxType::Legacy.into(),
             MockTransaction::Eip1559 { .. } => TxType::EIP1559.into(),
         }
@@ -418,11 +453,12 @@ impl FromRecoveredTransaction for MockTransaction {
                 is_system_transaction,
                 input,
             }) => MockTransaction::DepositTx {
-                source_hash,
-                from,
+                nonce: 0u64,
+                hash: source_hash,
+                sender: from,
                 to,
                 mint,
-                value,
+                value: U256::from(value),
                 gas_limit,
                 is_system_transaction,
                 input,
