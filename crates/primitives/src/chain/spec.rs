@@ -125,14 +125,14 @@ pub struct ChainSpec {
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
 
-    #[cfg(feature = "optimism")]
     /// Optimism configuration
+    #[cfg(feature = "optimism")]
     pub optimism: Option<OptimismConfig>,
 }
 
+/// Optimism configuration.
 #[cfg(feature = "optimism")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
-/// Optimism configuration.
 pub struct OptimismConfig {
     /// Elasticity multiplier as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
     pub eip_1559_elasticity: u64,
@@ -469,15 +469,15 @@ impl ChainSpecBuilder {
         self
     }
 
-    #[cfg(feature = "optimism")]
     /// Enable Bedrock at genesis
+    #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
         self.hardforks.insert(Hardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
-    #[cfg(feature = "optimism")]
     /// Enable Bedrock at genesis
+    #[cfg(feature = "optimism")]
     pub fn regolith_activated(mut self) -> Self {
         self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(0));
         self

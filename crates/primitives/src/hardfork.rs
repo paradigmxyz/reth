@@ -39,11 +39,11 @@ pub enum Hardfork {
     Paris,
     /// Shanghai.
     Shanghai,
-    #[cfg(feature = "optimism")]
     /// Bedrock.
-    Bedrock,
     #[cfg(feature = "optimism")]
+    Bedrock,
     /// Regolith
+    #[cfg(feature = "optimism")]
     Regolith,
 }
 
