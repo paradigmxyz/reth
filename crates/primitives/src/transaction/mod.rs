@@ -335,8 +335,8 @@ pub enum Transaction {
     /// transaction, incentivizing miners to include transactions with higher priority fees per
     /// gas.
     Eip1559(TxEip1559),
-    #[cfg(feature = "optimism")]
     /// Deposit transaction.
+    #[cfg(feature = "optimism")]
     Deposit(TxDeposit),
 }
 
@@ -539,8 +539,8 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { nonce, .. }) => *nonce,
             Transaction::Eip2930(TxEip2930 { nonce, .. }) => *nonce,
             Transaction::Eip1559(TxEip1559 { nonce, .. }) => *nonce,
-            #[cfg(feature = "optimism")]
             // Deposit transactions don't have a nonce, so they default to zero.
+            #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => 0,
         }
     }
@@ -564,9 +564,9 @@ impl Transaction {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
             Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
             Transaction::Eip1559(TxEip1559 { max_fee_per_gas, .. }) => *max_fee_per_gas,
-            #[cfg(feature = "optimism")]
             // Deposit transactions buy their L2 gas on L1 and, as such, the L2 gas is not
             // refundable.
+            #[cfg(feature = "optimism")]
             Transaction::Deposit(_) => 0,
         }
     }
@@ -672,9 +672,9 @@ impl Transaction {
         }
     }
 
-    #[cfg(feature = "optimism")]
     /// Returns the source hash of the transaction, which uniquely identifies its source.
     /// If the transaction is not a deposit transaction, this will always return `H256::zero()`.
+    #[cfg(feature = "optimism")]
     pub fn source_hash(&self) -> H256 {
         match self {
             Transaction::Deposit(TxDeposit { source_hash, .. }) => *source_hash,
@@ -682,9 +682,9 @@ impl Transaction {
         }
     }
 
-    #[cfg(feature = "optimism")]
     /// Returns the amount of ETH locked up on L1 that will be minted on L2. If the transaction
     /// is not a deposit transaction, this will always return `None`.
+    #[cfg(feature = "optimism")]
     pub fn mint(&self) -> Option<u128> {
         match self {
             Transaction::Deposit(TxDeposit { mint, .. }) => *mint,
@@ -692,9 +692,9 @@ impl Transaction {
         }
     }
 
-    #[cfg(feature = "optimism")]
     /// Returns whether or not the transaction is a system transaction. If the transaction
     /// is not a deposit transaction, this will always return `false`.
+    #[cfg(feature = "optimism")]
     pub fn is_system_transaction(&self) -> bool {
         match self {
             Transaction::Deposit(TxDeposit { is_system_transaction, .. }) => *is_system_transaction,
@@ -1386,9 +1386,9 @@ impl TransactionSigned {
         let tx_type = *data.first().ok_or(DecodeError::InputTooShort)?;
         data.advance(1);
 
-        #[cfg(feature = "optimism")]
         // If the transaction is a deposit, we need to first ensure that the version
         // byte is correct.
+        #[cfg(feature = "optimism")]
         if tx_type == DEPOSIT_TX_TYPE {
             let version = *data.first().ok_or(DecodeError::InputTooShort)?;
             if version != DEPOSIT_VERSION {
@@ -1405,9 +1405,9 @@ impl TransactionSigned {
 
         // length of tx encoding = tx type byte (size = 1) + length of header + payload length
         let tx_length = 1 + header.length() + header.payload_length;
-        #[cfg(feature = "optimism")]
         // If the transaction is a deposit, we need to add one to the length to account for the
         // version byte.
+        #[cfg(feature = "optimism")]
         let tx_length = if tx_type == DEPOSIT_TX_TYPE { tx_length + 1 } else { tx_length };
 
         // decode common fields

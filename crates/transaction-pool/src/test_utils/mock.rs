@@ -360,7 +360,7 @@ impl PoolTransaction for MockTransaction {
     fn cost(&self) -> U256 {
         match self {
             #[cfg(feature = "optimism")]
-            MockTransaction::DepositTx { .. } => U256::from(0),
+            MockTransaction::DepositTx { .. } => U256::ZERO,
             MockTransaction::Legacy { gas_price, value, gas_limit, .. } => {
                 U256::from(*gas_limit) * U256::from(*gas_price) + *value
             }

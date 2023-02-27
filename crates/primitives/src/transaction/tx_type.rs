@@ -23,8 +23,8 @@ pub enum TxType {
     EIP2930 = 1_isize,
     /// Transaction with Priority fee
     EIP1559 = 2_isize,
-    #[cfg(feature = "optimism")]
     /// OP Deposit transaction.
+    #[cfg(feature = "optimism")]
     DEPOSIT = 126_isize,
 }
 
