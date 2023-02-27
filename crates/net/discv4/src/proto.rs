@@ -1,9 +1,11 @@
 #![allow(missing_docs)]
 
 use crate::{error::DecodePacketError, PeerId, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use enr::Enr;
-use reth_primitives::{keccak256, ForkId, NodeRecord, H256};
+use reth_primitives::{
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    keccak256, ForkId, NodeRecord, H256,
+};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use reth_rlp_derive::{RlpDecodable, RlpEncodable};
 use secp256k1::{
@@ -420,7 +422,6 @@ mod tests {
         test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
         SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
-    use bytes::BytesMut;
     use rand::{thread_rng, Rng, RngCore};
 
     #[test]

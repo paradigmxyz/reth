@@ -1,8 +1,8 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as RethHeader, Withdrawal, H256, H64,
-    U256,
+    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, Withdrawal, H256,
+    H64, U256,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -16,6 +16,28 @@ pub enum BlockTransactions {
     Hashes(Vec<H256>),
     /// Full transactions
     Full(Vec<Transaction>),
+}
+
+/// Determines how the `transactions` field of [Block] should be filled.
+///
+/// This essentially represents the `full:bool` argument in RPC calls that determine whether the
+/// response should include full transaction objects or just the hashes.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum BlockTransactionsKind {
+    /// Only include hashes: [BlockTransactions::Hashes]
+    Hashes,
+    /// Include full transaction objects: [BlockTransactions::Full]
+    Full,
+}
+
+impl From<bool> for BlockTransactionsKind {
+    fn from(is_full: bool) -> Self {
+        if is_full {
+            BlockTransactionsKind::Full
+        } else {
+            BlockTransactionsKind::Hashes
+        }
+    }
 }
 
 /// Error that can occur when converting other types to blocks
@@ -49,79 +71,99 @@ pub struct Block {
 }
 
 impl Block {
-    /// Create a new block response from a [primitive block](reth_primitives::Block), using the
+    /// Converts the given primitive block into a [Block] response with the given
+    /// [BlockTransactionsKind]
+    ///
+    /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
+    pub fn from_block(
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+        kind: BlockTransactionsKind,
+        block_hash: Option<H256>,
+    ) -> Result<Self, BlockError> {
+        match kind {
+            BlockTransactionsKind::Hashes => {
+                Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
+            }
+            BlockTransactionsKind::Full => {
+                Self::from_block_full(block, total_difficulty, block_hash)
+            }
+        }
+    }
+
+    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
     /// total difficulty to populate its field in the rpc response.
+    ///
+    /// This will populate the `transactions` field with only the hashes of the transactions in the
+    /// block: [BlockTransactions::Hashes]
+    pub fn from_block_with_tx_hashes(
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+        block_hash: Option<H256>,
+    ) -> Self {
+        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
+        let transactions = block.body.iter().map(|tx| tx.hash).collect();
+
+        Self::from_block_with_transactions(
+            block_hash,
+            block,
+            total_difficulty,
+            BlockTransactions::Hashes(transactions),
+        )
+    }
+
+    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
+    /// total difficulty to populate its field in the rpc response.
+    ///
+    /// This will populate the `transactions` field with the _full_ [Transaction] objects:
+    /// [BlockTransactions::Full]
     pub fn from_block_full(
         block: PrimitiveBlock,
         total_difficulty: U256,
+        block_hash: Option<H256>,
     ) -> Result<Self, BlockError> {
-        let block_hash = block.header.hash_slow();
-        let header_length = block.header.length();
-        let block_length = block.length();
-        let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
-
-        let RethHeader {
-            parent_hash,
-            ommers_hash,
-            beneficiary,
-            state_root,
-            transactions_root,
-            receipts_root,
-            logs_bloom,
-            difficulty,
-            number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            mix_hash,
-            nonce,
-            base_fee_per_gas,
-            extra_data,
-            withdrawals_root,
-        } = block.header;
-
-        let header = Header {
-            hash: Some(block_hash),
-            parent_hash,
-            uncles_hash: ommers_hash,
-            author: beneficiary,
-            miner: beneficiary,
-            state_root,
-            transactions_root,
-            receipts_root,
-            withdrawals_root,
-            number: Some(U256::from(number)),
-            gas_used: U256::from(gas_used),
-            gas_limit: U256::from(gas_limit),
-            extra_data,
-            logs_bloom,
-            timestamp: U256::from(timestamp),
-            difficulty,
-            mix_hash,
-            nonce: Some(nonce.to_be_bytes().into()),
-            size: Some(U256::from(header_length)),
-        };
-
+        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
+        let block_number = block.number;
         let mut transactions = Vec::with_capacity(block.body.len());
         for (idx, tx) in block.body.iter().enumerate() {
             let signed_tx = tx.clone().into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
             transactions.push(Transaction::from_recovered_with_block_context(
                 signed_tx,
                 block_hash,
-                number,
+                block_number,
                 U256::from(idx),
             ))
         }
 
-        Ok(Self {
+        Ok(Self::from_block_with_transactions(
+            block_hash,
+            block,
+            total_difficulty,
+            BlockTransactions::Full(transactions),
+        ))
+    }
+
+    fn from_block_with_transactions(
+        block_hash: H256,
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+        transactions: BlockTransactions,
+    ) -> Self {
+        let block_length = block.length();
+        let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
+        let base_fee_per_gas = block.header.base_fee_per_gas;
+
+        let header = Header::from_primitive_with_hash(block.header, block_hash);
+
+        Self {
             header,
             uncles,
-            transactions: BlockTransactions::Full(transactions),
+            transactions,
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
             total_difficulty,
             size: Some(U256::from(block_length)),
             withdrawals: block.withdrawals,
-        })
+        }
     }
 }
 
@@ -170,11 +212,76 @@ pub struct Header {
     pub size: Option<U256>,
 }
 
+// === impl Header ===
+
+impl Header {
+    /// Converts the primitive header type to this RPC type
+    ///
+    /// CAUTION: this takes the header's hash as is and does _not_ calculate the hash.
+    pub fn from_primitive_with_hash(primitive_header: PrimitiveHeader, block_hash: H256) -> Self {
+        let header_length = primitive_header.length();
+
+        let PrimitiveHeader {
+            parent_hash,
+            ommers_hash,
+            beneficiary,
+            state_root,
+            transactions_root,
+            receipts_root,
+            logs_bloom,
+            difficulty,
+            number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            mix_hash,
+            nonce,
+            base_fee_per_gas: _,
+            extra_data,
+            withdrawals_root,
+        } = primitive_header;
+
+        Header {
+            hash: Some(block_hash),
+            parent_hash,
+            uncles_hash: ommers_hash,
+            author: beneficiary,
+            miner: beneficiary,
+            state_root,
+            transactions_root,
+            receipts_root,
+            withdrawals_root,
+            number: Some(U256::from(number)),
+            gas_used: U256::from(gas_used),
+            gas_limit: U256::from(gas_limit),
+            extra_data,
+            logs_bloom,
+            timestamp: U256::from(timestamp),
+            difficulty,
+            mix_hash,
+            nonce: Some(nonce.to_be_bytes().into()),
+            size: Some(U256::from(header_length)),
+        }
+    }
+}
+
 /// A Block representation that allows to include additional fields
 pub type RichBlock = Rich<Block>;
 
+impl From<Block> for RichBlock {
+    fn from(block: Block) -> Self {
+        Rich { inner: block, extra_info: Default::default() }
+    }
+}
+
 /// Header representation with additional info.
 pub type RichHeader = Rich<Header>;
+
+impl From<Header> for RichHeader {
+    fn from(header: Header) -> Self {
+        Rich { inner: header, extra_info: Default::default() }
+    }
+}
 
 /// Value representation with additional info
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -213,5 +320,19 @@ impl<T: Serialize> Serialize for Rich<T> {
         } else {
             Err(S::Error::custom("Unserializable structures: expected objects"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_full_conversion() {
+        let full = true;
+        assert_eq!(BlockTransactionsKind::Full, full.into());
+
+        let full = false;
+        assert_eq!(BlockTransactionsKind::Hashes, full.into());
     }
 }

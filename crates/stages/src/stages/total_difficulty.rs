@@ -8,7 +8,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{consensus::Error, provider::Error as ProviderError};
+use reth_interfaces::{consensus::Error, provider::ProviderError};
 use reth_primitives::{ChainSpec, Hardfork, EMPTY_OMMER_ROOT, MAINNET, U256};
 use reth_provider::Transaction;
 use tracing::*;

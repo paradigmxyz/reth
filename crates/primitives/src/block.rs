@@ -1,4 +1,5 @@
 use crate::{Header, SealedHeader, TransactionSigned, Withdrawal, H256};
+use ethers_core::types::BlockNumber;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -155,14 +156,26 @@ impl Decodable for BlockHashOrNumber {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// A Block Identifier
 /// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md>
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BlockId {
     /// A block hash and an optional bool that defines if it's canonical
     Hash(BlockHash),
     /// A block number
     Number(BlockNumberOrTag),
+}
+
+// === impl BlockId ===
+
+impl BlockId {
+    /// Returns the block hash if it is [BlockId::Hash]
+    pub fn as_block_hash(&self) -> Option<H256> {
+        match self {
+            BlockId::Hash(hash) => Some(hash.block_hash),
+            BlockId::Number(_) => None,
+        }
+    }
 }
 
 impl From<u64> for BlockId {
@@ -361,9 +374,22 @@ impl BlockNumberOrTag {
     }
 }
 
-impl<T: Into<u64>> From<T> for BlockNumberOrTag {
-    fn from(num: T) -> Self {
-        BlockNumberOrTag::Number(num.into())
+impl From<u64> for BlockNumberOrTag {
+    fn from(num: u64) -> Self {
+        BlockNumberOrTag::Number(num)
+    }
+}
+
+impl From<ethers_core::types::BlockNumber> for BlockNumberOrTag {
+    fn from(value: BlockNumber) -> Self {
+        match value {
+            BlockNumber::Latest => BlockNumberOrTag::Latest,
+            BlockNumber::Finalized => BlockNumberOrTag::Finalized,
+            BlockNumber::Safe => BlockNumberOrTag::Safe,
+            BlockNumber::Earliest => BlockNumberOrTag::Earliest,
+            BlockNumber::Pending => BlockNumberOrTag::Pending,
+            BlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
+        }
     }
 }
 
@@ -439,11 +465,31 @@ pub struct BlockHash {
     /// Whether the block must be a canonical block
     pub require_canonical: Option<bool>,
 }
+
 impl BlockHash {
     pub fn from_hash(block_hash: H256, require_canonical: Option<bool>) -> Self {
         BlockHash { block_hash, require_canonical }
     }
 }
+
+impl From<H256> for BlockHash {
+    fn from(value: H256) -> Self {
+        Self::from_hash(value, None)
+    }
+}
+
+impl From<BlockHash> for H256 {
+    fn from(value: BlockHash) -> Self {
+        value.block_hash
+    }
+}
+
+impl AsRef<H256> for BlockHash {
+    fn as_ref(&self) -> &H256 {
+        &self.block_hash
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{BlockId, BlockNumberOrTag::*, *};
@@ -501,7 +547,7 @@ mod test {
     /// Serde tests
     #[test]
     fn serde_blockid_tags() {
-        let block_ids = [Latest, Finalized, Safe, Pending].map(|id| BlockId::from(id));
+        let block_ids = [Latest, Finalized, Safe, Pending].map(BlockId::from);
         for block_id in &block_ids {
             let serialized = serde_json::to_string(&block_id).unwrap();
             let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
@@ -539,7 +585,7 @@ mod test {
         let hash =
             H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
-        assert_eq!(BlockId::from(hash.clone()), block_id);
+        assert_eq!(BlockId::from(hash), block_id);
         let serialized = serde_json::to_string(&BlockId::from(hash)).unwrap();
         assert_eq!("{\"blockHash\":\"0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3\"}", serialized)
     }

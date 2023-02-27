@@ -1,15 +1,15 @@
 //! P2P Debugging tool
-use crate::dirs::{ConfigPath, PlatformPath};
-use backon::{ConstantBackoff, Retryable};
+use crate::{
+    args::DiscoveryArgs,
+    dirs::{ConfigPath, PlatformPath},
+    utils::get_single_header,
+};
+use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
 use reth_discv4::NatResolver;
-use reth_interfaces::p2p::{
-    bodies::client::BodiesClient,
-    headers::client::{HeadersClient, HeadersRequest},
-};
-use reth_network::FetchClient;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord, SealedHeader};
+use reth_interfaces::p2p::bodies::client::BodiesClient;
+use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ShareableDatabase;
 use reth_staged_sync::{
     utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
@@ -42,8 +42,8 @@ pub struct Command {
     chain: ChainSpec,
 
     /// Disable the discovery service.
-    #[arg(short, long)]
-    disable_discovery: bool,
+    #[command(flatten)]
+    pub discovery: DiscoveryArgs,
 
     /// Target trusted peer
     #[arg(long)]
@@ -98,22 +98,24 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
-        let network = config
-            .network_config(self.nat, None)
-            .set_discovery(self.disable_discovery)
-            .chain_spec(self.chain.clone())
-            .build(Arc::new(ShareableDatabase::new(noop_db)))
+        let mut network_config_builder =
+            config.network_config(self.nat, None).chain_spec(self.chain.clone());
+
+        network_config_builder = self.discovery.apply_to_builder(network_config_builder);
+
+        let network = network_config_builder
+            .build(Arc::new(ShareableDatabase::new(noop_db, self.chain.clone())))
             .start_network()
             .await?;
 
         let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);
-        let backoff = ConstantBackoff::default().with_max_times(retries);
+        let backoff = ConstantBuilder::default().with_max_times(retries);
 
         match self.command {
             Subcommands::Header { id } => {
-                let header = (move || self.get_single_header(fetch_client.clone(), id))
-                    .retry(backoff)
+                let header = (move || get_single_header(fetch_client.clone(), id))
+                    .retry(&backoff)
                     .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                     .await?;
                 println!("Successfully downloaded header: {header:?}");
@@ -125,12 +127,9 @@ impl Command {
                         println!("Block number provided. Downloading header first...");
                         let client = fetch_client.clone();
                         let header = (move || {
-                            self.get_single_header(
-                                client.clone(),
-                                BlockHashOrNumber::Number(number),
-                            )
+                            get_single_header(client.clone(), BlockHashOrNumber::Number(number))
                         })
-                        .retry(backoff.clone())
+                        .retry(&backoff)
                         .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                         .await?;
                         header.hash()
@@ -140,7 +139,7 @@ impl Command {
                     let client = fetch_client.clone();
                     async move { client.get_block_bodies(vec![hash]).await }
                 })
-                .retry(backoff)
+                .retry(&backoff)
                 .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))
                 .await?
                 .split();
@@ -156,44 +155,5 @@ impl Command {
         }
 
         Ok(())
-    }
-
-    /// Get a single header from network
-    pub async fn get_single_header(
-        &self,
-        client: FetchClient,
-        id: BlockHashOrNumber,
-    ) -> eyre::Result<SealedHeader> {
-        let request = HeadersRequest {
-            direction: reth_primitives::HeadersDirection::Rising,
-            limit: 1,
-            start: id,
-        };
-
-        let (_, response) = client.get_headers(request).await?.split();
-
-        if response.len() != 1 {
-            eyre::bail!(
-                "Invalid number of headers received. Expected: 1. Received: {}",
-                response.len()
-            )
-        }
-
-        let header = response.into_iter().next().unwrap().seal();
-
-        let valid = match id {
-            BlockHashOrNumber::Hash(hash) => header.hash() == hash,
-            BlockHashOrNumber::Number(number) => header.number == number,
-        };
-
-        if !valid {
-            eyre::bail!(
-                "Received invalid header. Received: {:?}. Expected: {:?}",
-                header.num_hash(),
-                id
-            );
-        }
-
-        Ok(header)
     }
 }

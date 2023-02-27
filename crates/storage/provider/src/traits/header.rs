@@ -4,7 +4,7 @@ use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Header, U256};
 use std::ops::RangeBounds;
 
 /// Client trait for fetching `Header` related data.
-#[auto_impl(&)]
+#[auto_impl(&, Arc)]
 pub trait HeaderProvider: Send + Sync {
     /// Check if block is known
     fn is_known(&self, block_hash: &BlockHash) -> Result<bool> {
@@ -28,6 +28,9 @@ pub trait HeaderProvider: Send + Sync {
     /// Get total difficulty by block hash.
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>>;
 
-    /// Get headers in range of block hashes or numbers
+    /// Get total difficulty by block number.
+    fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>>;
+
+    /// Get headers in range of block numbers
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> Result<Vec<Header>>;
 }

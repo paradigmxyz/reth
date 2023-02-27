@@ -1,10 +1,15 @@
 //! Disconnect
 
-use bytes::Buf;
+use bytes::Bytes;
+use futures::{Sink, SinkExt};
 use reth_codecs::derive_arbitrary;
+use reth_ecies::stream::ECIESStream;
+use reth_primitives::bytes::{Buf, BufMut};
 use reth_rlp::{Decodable, DecodeError, Encodable, Header};
 use std::fmt::Display;
 use thiserror::Error;
+use tokio::io::AsyncWrite;
+use tokio_util::codec::{Encoder, Framed};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -104,7 +109,7 @@ impl TryFrom<u8> for DisconnectReason {
 /// The [`Encodable`](reth_rlp::Encodable) implementation for [`DisconnectReason`] encodes the
 /// disconnect reason in a single-element RLP list.
 impl Encodable for DisconnectReason {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
+    fn encode(&self, out: &mut dyn BufMut) {
         vec![*self as u8].encode(out);
     }
     fn length(&self) -> usize {
@@ -143,9 +148,49 @@ impl Decodable for DisconnectReason {
     }
 }
 
+/// This trait is meant to allow higher level protocols like `eth` to disconnect from a peer, using
+/// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
+/// underlying stream supports it.
+#[async_trait::async_trait]
+pub trait CanDisconnect<T>: Sink<T> + Unpin + Sized {
+    /// Disconnects from the underlying stream, using a [`DisconnectReason`] as disconnect
+    /// information if the stream implements a protocol that can carry the additional disconnect
+    /// metadata.
+    async fn disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Result<(), <Self as Sink<T>>::Error>;
+}
+
+// basic impls for things like Framed<TcpStream, etc>
+#[async_trait::async_trait]
+impl<T, I, U> CanDisconnect<I> for Framed<T, U>
+where
+    T: AsyncWrite + Unpin + Send,
+    U: Encoder<I> + Send,
+{
+    async fn disconnect(
+        &mut self,
+        _reason: DisconnectReason,
+    ) -> Result<(), <Self as Sink<I>>::Error> {
+        self.close().await
+    }
+}
+
+#[async_trait::async_trait]
+impl<S> CanDisconnect<Bytes> for ECIESStream<S>
+where
+    S: AsyncWrite + Unpin + Send,
+{
+    async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), std::io::Error> {
+        self.close().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{p2pstream::P2PMessage, DisconnectReason};
+    use reth_primitives::hex;
     use reth_rlp::{Decodable, Encodable};
 
     fn all_reasons() -> Vec<DisconnectReason> {

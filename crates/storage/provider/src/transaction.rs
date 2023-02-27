@@ -7,7 +7,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{db::Error as DbError, provider::Error as ProviderError};
+use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{BlockHash, BlockNumber, Header, TransitionId, TxNumber, U256};
 use std::{
     fmt::Debug,

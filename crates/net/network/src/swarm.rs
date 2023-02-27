@@ -9,7 +9,7 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     errors::EthStreamError,
-    DisconnectReason, Status,
+    DisconnectReason, EthVersion, Status,
 };
 use reth_primitives::PeerId;
 use reth_provider::BlockProvider;
@@ -126,6 +126,7 @@ where
                 peer_id,
                 remote_addr,
                 capabilities,
+                version,
                 status,
                 messages,
                 direction,
@@ -142,6 +143,7 @@ where
                     peer_id,
                     remote_addr,
                     capabilities,
+                    version,
                     messages,
                     status,
                     direction,
@@ -286,7 +288,7 @@ where
 
 impl<C> Stream for Swarm<C>
 where
-    C: BlockProvider,
+    C: BlockProvider + Unpin,
 {
     type Item = SwarmEvent;
 
@@ -389,6 +391,8 @@ pub(crate) enum SwarmEvent {
         peer_id: PeerId,
         remote_addr: SocketAddr,
         capabilities: Arc<Capabilities>,
+        /// negotiated eth version
+        version: EthVersion,
         messages: PeerRequestSender,
         status: Status,
         direction: Direction,

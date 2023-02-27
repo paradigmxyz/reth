@@ -8,7 +8,6 @@ use reth_network::{
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::test_utils::NoopProvider;
-use std::sync::Arc;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_highest_version() {
@@ -34,7 +33,7 @@ async fn test_session_established_with_highest_version() {
             }
             NetworkEvent::SessionEstablished { peer_id, status, .. } => {
                 assert_eq!(handle1.peer_id(), &peer_id);
-                assert_eq!(status.version, EthVersion::Eth67 as u8);
+                assert_eq!(status.version, EthVersion::Eth68 as u8);
             }
             ev => {
                 panic!("unexpected event {ev:?}")
@@ -51,7 +50,7 @@ async fn test_session_established_with_different_capability() {
     let mut net = Testnet::create(1).await;
 
     let capabilities = vec![Capability::new("eth".into(), EthVersion::Eth66 as usize)];
-    let p1 = PeerConfig::with_capabilities(Arc::new(NoopProvider::default()), capabilities);
+    let p1 = PeerConfig::with_capabilities(NoopProvider::default(), capabilities);
     net.add_peer_with_config(p1).await.unwrap();
 
     net.for_each(|peer| assert_eq!(0, peer.num_peers()));
@@ -75,8 +74,8 @@ async fn test_session_established_with_different_capability() {
                 assert_eq!(handle1.peer_id(), &peer_id);
                 assert_eq!(status.version, EthVersion::Eth66 as u8);
             }
-            _ => {
-                panic!("unexpected event")
+            ev => {
+                panic!("unexpected event: {ev:?}")
             }
         }
     }

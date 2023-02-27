@@ -6,7 +6,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 pub type NewBlockNotifications = UnboundedReceiver<NewBlockNotification>;
 
 /// A type that allows to register chain related event subscriptions.
-pub trait ChainEventSubscriptions {
+pub trait ChainEventSubscriptions: Send + Sync {
     /// Get notified when a new block was imported.
     fn subscribe_new_blocks(&self) -> NewBlockNotifications;
 }

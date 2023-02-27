@@ -2,10 +2,24 @@
 
 #![allow(missing_docs)]
 
-use bytes::BytesMut;
-use reth_primitives::{Address, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64};
+use reth_primitives::{
+    Address, Block, Bloom, Bytes, SealedBlock, Withdrawal, H256, H64, U256, U64,
+};
 use reth_rlp::Encodable;
 use serde::{Deserialize, Serialize};
+
+/// The list of supported Engine capabilities
+pub const CAPABILITIES: [&str; 9] = [
+    "engine_forkchoiceUpdatedV1",
+    "engine_forkchoiceUpdatedV2",
+    "engine_exchangeTransitionConfigurationV1",
+    "engine_getPayloadV1",
+    "engine_getPayloadV2",
+    "engine_newPayloadV1",
+    "engine_newPayloadV2",
+    "engine_getPayloadBodiesByHashV1",
+    "engine_getPayloadBodiesByRangeV1",
+];
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
 ///
@@ -39,9 +53,9 @@ impl From<SealedBlock> for ExecutionPayload {
             .body
             .iter()
             .map(|tx| {
-                let mut encoded = BytesMut::new();
+                let mut encoded = Vec::new();
                 tx.encode(&mut encoded);
-                encoded.freeze().into()
+                encoded.into()
             })
             .collect();
         ExecutionPayload {
@@ -64,6 +78,32 @@ impl From<SealedBlock> for ExecutionPayload {
     }
 }
 
+/// This structure contains a body of an execution payload.
+///
+/// See also: <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#executionpayloadbodyv1>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPayloadBody {
+    pub transactions: Vec<Bytes>,
+    pub withdrawals: Vec<Withdrawal>,
+}
+
+impl From<Block> for ExecutionPayloadBody {
+    fn from(value: Block) -> Self {
+        let transactions = value.body.into_iter().map(|tx| {
+            let mut out = Vec::new();
+            tx.encode(&mut out);
+            out.into()
+        });
+        ExecutionPayloadBody {
+            transactions: transactions.collect(),
+            withdrawals: value.withdrawals.unwrap_or_default(),
+        }
+    }
+}
+
+/// The execution payload body response that allows for `null` values.
+pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
+
 /// This structure encapsulates the fork choice state
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,7 +122,7 @@ pub struct PayloadAttributes {
     pub prev_randao: H256,
     pub suggested_fee_recipient: Address,
     /// Array of [`Withdrawal`] enabled with V2
-    /// See <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#executionpayloadv2>
+    /// See <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#payloadattributesv2>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
@@ -159,5 +199,32 @@ impl ForkchoiceUpdated {
     pub fn with_payload_id(mut self, id: H64) -> Self {
         self.payload_id = Some(id);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_interfaces::test_utils::generators::random_block_range;
+    use reth_primitives::{TransactionSigned, H256};
+    use reth_rlp::Decodable;
+
+    #[test]
+    fn payload_body_roundtrip() {
+        for block in random_block_range(0..100, H256::default(), 0..2) {
+            let unsealed = block.clone().unseal();
+            let payload_body: ExecutionPayloadBody = unsealed.into();
+
+            assert_eq!(
+                Ok(block.body),
+                payload_body
+                    .transactions
+                    .iter()
+                    .map(|x| TransactionSigned::decode(&mut &x[..]))
+                    .collect::<Result<Vec<_>, _>>(),
+            );
+
+            assert_eq!(block.withdrawals.unwrap_or_default(), payload_body.withdrawals);
+        }
     }
 }

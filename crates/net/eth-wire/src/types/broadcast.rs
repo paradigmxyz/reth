@@ -1,4 +1,5 @@
 //! Types for broadcasting new data.
+use crate::{EthMessage, EthVersion};
 use reth_codecs::derive_arbitrary;
 use reth_primitives::{Block, TransactionSigned, H256, U128};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
@@ -99,22 +100,108 @@ pub struct SharedTransactions(
     pub Vec<Arc<TransactionSigned>>,
 );
 
+/// A wrapper type for all different new pooled transaction types
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NewPooledTransactionHashes {
+    /// A list of transaction hashes valid for [66-68)
+    Eth66(NewPooledTransactionHashes66),
+    /// A list of transaction hashes valid from [68..]
+    ///
+    /// Note: it is assumed that the payload is valid (all vectors have the same length)
+    Eth68(NewPooledTransactionHashes68),
+}
+
+// === impl NewPooledTransactionHashes ===
+
+impl NewPooledTransactionHashes {
+    /// Returns `true` if the payload is valid for the given version
+    pub fn is_valid_for_version(&self, version: EthVersion) -> bool {
+        match self {
+            NewPooledTransactionHashes::Eth66(_) => {
+                matches!(version, EthVersion::Eth67 | EthVersion::Eth66)
+            }
+            NewPooledTransactionHashes::Eth68(_) => {
+                matches!(version, EthVersion::Eth68)
+            }
+        }
+    }
+
+    /// Returns an iterator over all transaction hashes.
+    pub fn iter_hashes(&self) -> impl Iterator<Item = &H256> + '_ {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.0.iter(),
+            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.iter(),
+        }
+    }
+
+    /// Consumes the type and returns all hashes
+    pub fn into_hashes(self) -> Vec<H256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.0,
+            NewPooledTransactionHashes::Eth68(msg) => msg.hashes,
+        }
+    }
+
+    /// Returns an iterator over all transaction hashes.
+    pub fn into_iter_hashes(self) -> impl Iterator<Item = H256> {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.0.into_iter(),
+            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.into_iter(),
+        }
+    }
+}
+
+impl From<NewPooledTransactionHashes> for EthMessage {
+    fn from(value: NewPooledTransactionHashes) -> Self {
+        match value {
+            NewPooledTransactionHashes::Eth66(msg) => EthMessage::NewPooledTransactionHashes66(msg),
+            NewPooledTransactionHashes::Eth68(msg) => EthMessage::NewPooledTransactionHashes68(msg),
+        }
+    }
+}
+
+impl From<NewPooledTransactionHashes66> for NewPooledTransactionHashes {
+    fn from(hashes: NewPooledTransactionHashes66) -> Self {
+        Self::Eth66(hashes)
+    }
+}
+
+impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
+    fn from(hashes: NewPooledTransactionHashes68) -> Self {
+        Self::Eth68(hashes)
+    }
+}
+
 /// This informs peers of transaction hashes for transactions that have appeared on the network,
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NewPooledTransactionHashes(
+pub struct NewPooledTransactionHashes66(
     /// Transaction hashes for new transactions that have appeared on the network.
     /// Clients should request the transactions with the given hashes using a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) message.
     pub Vec<H256>,
 );
 
-impl From<Vec<H256>> for NewPooledTransactionHashes {
+impl From<Vec<H256>> for NewPooledTransactionHashes66 {
     fn from(v: Vec<H256>) -> Self {
-        NewPooledTransactionHashes(v)
+        NewPooledTransactionHashes66(v)
     }
+}
+
+/// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
+/// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
+#[derive_arbitrary(rlp)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NewPooledTransactionHashes68 {
+    /// Transaction types for new transactions that have appeared on the network.
+    pub types: Vec<u8>,
+    /// Transaction sizes for new transactions that have appeared on the network.
+    pub sizes: Vec<usize>,
+    /// Transaction hashes for new transactions that have appeared on the network.
+    pub hashes: Vec<H256>,
 }
 
 #[cfg(test)]

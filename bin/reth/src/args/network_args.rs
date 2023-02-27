@@ -14,8 +14,8 @@ use std::path::PathBuf;
 #[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
     /// Disable the discovery service.
-    #[arg(short, long)]
-    pub disable_discovery: bool,
+    #[command(flatten)]
+    pub discovery: DiscoveryArgs,
 
     /// Target trusted peer enodes
     /// --trusted-peers enode://abcd@192.168.0.1:30303
@@ -52,11 +52,12 @@ impl NetworkArgs {
     /// values in this option struct.
     pub fn network_config(&self, config: &Config, chain_spec: ChainSpec) -> NetworkConfigBuilder {
         let peers_file = (!self.no_persist_peers).then_some(&self.peers_file);
-        config
+        let network_config_builder = config
             .network_config(self.nat, peers_file.map(|f| f.as_ref().to_path_buf()))
             .boot_nodes(self.bootnodes.clone().unwrap_or_else(mainnet_nodes))
-            .chain_spec(chain_spec)
-            .set_discovery(self.disable_discovery)
+            .chain_spec(chain_spec);
+
+        self.discovery.apply_to_builder(network_config_builder)
     }
 }
 
@@ -69,5 +70,38 @@ impl NetworkArgs {
             return None
         }
         Some(self.peers_file.clone().into())
+    }
+}
+
+/// Arguments to setup discovery
+#[derive(Debug, Args)]
+pub struct DiscoveryArgs {
+    /// Disable the discovery service.
+    #[arg(short, long)]
+    disable_discovery: bool,
+
+    /// Disable the DNS discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    disable_dns_discovery: bool,
+
+    /// Disable Discv4 discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    disable_discv4_discovery: bool,
+}
+
+impl DiscoveryArgs {
+    /// Apply the discovery settings to the given [NetworkConfigBuilder]
+    pub fn apply_to_builder(
+        &self,
+        mut network_config_builder: NetworkConfigBuilder,
+    ) -> NetworkConfigBuilder {
+        if self.disable_discovery || self.disable_dns_discovery {
+            network_config_builder = network_config_builder.disable_dns_discovery();
+        }
+
+        if self.disable_discovery || self.disable_discv4_discovery {
+            network_config_builder = network_config_builder.disable_discv4_discovery();
+        }
+        network_config_builder
     }
 }

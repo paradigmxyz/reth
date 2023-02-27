@@ -8,13 +8,14 @@ use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
-    rpc::{BlockId, BlockNumber},
-    Address, ChainInfo, TransactionSigned, H256, U64,
+    Address, BlockId, BlockNumberOrTag, ChainInfo, TransactionSigned, H256, U64,
 };
 use reth_provider::{BlockProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
+use crate::eth::error::EthResult;
 use reth_interfaces::events::NewBlockNotifications;
+use reth_provider::providers::ChainState;
 use reth_rpc_types::{FeeHistoryCache, FeeHistoryCacheItem};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -22,6 +23,7 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 mod block;
+mod call;
 mod server;
 mod state;
 mod transactions;
@@ -138,8 +140,16 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + 'static,
 {
-    fn convert_block_number(&self, num: BlockNumber) -> Result<Option<u64>> {
+    fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
+    }
+
+    /// Helper function to execute a closure with the database at a specific block.
+    pub(crate) fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    where
+        F: FnOnce(ChainState<'_>) -> T,
+    {
+        unimplemented!()
     }
 
     /// Returns the state at the given [BlockId] enum or the latest.
@@ -160,17 +170,17 @@ where
         block_id: BlockId,
     ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
         match block_id {
-            BlockId::Hash(hash) => self.state_at_hash(H256(hash.0)).map(Some),
+            BlockId::Hash(hash) => self.state_at_hash(hash.into()).map(Some),
             BlockId::Number(num) => self.state_at_block_number(num),
         }
     }
 
-    /// Returns the state at the given [BlockNumber] enum
+    /// Returns the state at the given [BlockNumberOrTag] enum
     ///
     /// Returns `None` if no state available.
     pub(crate) fn state_at_block_number(
         &self,
-        num: BlockNumber,
+        num: BlockNumberOrTag,
     ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
         if let Some(number) = self.convert_block_number(num)? {
             self.state_at_number(number).map(Some)
@@ -199,7 +209,7 @@ where
     pub(crate) fn latest_state(
         &self,
     ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
-        self.state_at_block_number(BlockNumber::Latest)
+        self.state_at_block_number(BlockNumberOrTag::Latest)
     }
 }
 
@@ -232,8 +242,8 @@ where
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
     }
 
-    async fn transaction_by_hash(&self, _hash: H256) -> Result<Option<TransactionSigned>> {
-        todo!()
+    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<TransactionSigned>> {
+        self.client().transaction_by_hash(hash)
     }
 }
 

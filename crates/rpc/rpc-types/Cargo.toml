@@ -23,6 +23,8 @@ tokio = { version = "1", features = ["sync"] }
 # misc
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-bytes = "1.2"
 jsonrpsee-types = { version = "0.16" }
 lru = "0.9"
+
+[dev-dependencies]
+reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

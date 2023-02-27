@@ -15,8 +15,8 @@ All binaries are stored in [`bin`](../../bin).
 These crates define primitive types or algorithms such as RLP.
 
 - [`primitives`](../../crates/primitives): Commonly used types in Reth.
-- [`common/rlp`](../../crates/common/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
-- [`common/rlp-derive`](../../crates/common/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
+- [`rlp`](../../crates/rlp): An implementation of RLP, forked from an earlier Apache-licensed version of [`fastrlp`][fastrlp]
+- [`rlp/rlp-derive`](../../crates/rlp/rlp-derive): Forked from an earlier Apache licenced version of the [`fastrlp-derive`][fastrlp-derive] crate, before it changed licence to GPL.
 
 ### Storage
 
@@ -77,7 +77,6 @@ Small utility crates.
 - [`interfaces`](../../crates/interfaces): Traits containing common abstractions across the components used in the system. For ease of unit testing, each crate importing the interface is recommended to create mock/in-memory implementations of each trait.
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
 - [`crate-template`](../../crate-template): Template crate to use when instantiating new crates under `crates/`.
-- [`examples`](../../examples): Example usage of the reth stack as a library.
 
 [fastrlp]: https://crates.io/crates/fastrlp
 [fastrlp-derive]: https://crates.io/crates/fastrlp-derive

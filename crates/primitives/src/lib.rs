@@ -16,6 +16,7 @@ pub mod bloom;
 mod chain;
 pub mod constants;
 mod error;
+pub mod filter;
 mod forkid;
 mod genesis;
 mod hardfork;
@@ -92,6 +93,7 @@ pub use revm_primitives::{ruint::aliases::U128, B160 as H160, B256 as H256, U256
 
 #[doc(hidden)]
 mod __reexport {
+    pub use bytes;
     pub use hex;
     pub use hex_literal;
     pub use tiny_keccak;

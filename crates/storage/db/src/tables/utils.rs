@@ -3,7 +3,7 @@ use crate::{
     table::{Decode, Decompress, Table},
     Error,
 };
-use bytes::Bytes;
+use reth_primitives::bytes::Bytes;
 use std::borrow::Cow;
 
 #[macro_export]

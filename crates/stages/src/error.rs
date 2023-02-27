@@ -1,7 +1,6 @@
 use crate::pipeline::PipelineEvent;
 use reth_interfaces::{
-    consensus, db::Error as DbError, executor, p2p::error::DownloadError,
-    provider::Error as ProviderError,
+    consensus, db::Error as DbError, executor, p2p::error::DownloadError, provider::ProviderError,
 };
 use reth_primitives::BlockNumber;
 use reth_provider::TransactionError;
@@ -71,6 +70,7 @@ impl StageError {
                 StageError::Download(_) |
                 StageError::DatabaseIntegrity(_) |
                 StageError::StageProgress(_) |
+                StageError::ExecutionError { .. } |
                 StageError::ChannelClosed |
                 StageError::Fatal(_)
         )

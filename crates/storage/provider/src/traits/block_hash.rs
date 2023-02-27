@@ -4,7 +4,7 @@ use reth_primitives::{BlockNumber, H256};
 use std::ops::RangeBounds;
 
 /// Client trait for fetching block hashes by number.
-#[auto_impl(&)]
+#[auto_impl(&, Arc)]
 pub trait BlockHashProvider: Send + Sync {
     /// Get the hash of the block with the given number. Returns `None` if no block with this number
     /// exists.

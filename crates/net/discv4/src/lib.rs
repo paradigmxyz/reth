@@ -21,7 +21,6 @@ use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
-use bytes::{Bytes, BytesMut};
 use discv5::{
     kbucket,
     kbucket::{
@@ -32,7 +31,10 @@ use discv5::{
 };
 use enr::{Enr, EnrBuilder};
 use proto::{EnrRequest, EnrResponse};
-use reth_primitives::{ForkId, PeerId, H256};
+use reth_primitives::{
+    bytes::{Bytes, BytesMut},
+    ForkId, PeerId, H256,
+};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
@@ -351,8 +353,6 @@ pub struct Discv4Service {
     _tasks: JoinSet<()>,
     /// The routing table.
     kbuckets: KBucketsTable<NodeKey, NodeEntry>,
-    /// Whether to respect timestamps
-    check_timestamps: bool,
     /// Receiver for incoming messages
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
@@ -472,7 +472,6 @@ impl Discv4Service {
             pending_pings: Default::default(),
             pending_find_nodes: Default::default(),
             pending_enr_requests: Default::default(),
-            check_timestamps: false,
             commands_rx,
             update_listeners: Vec::with_capacity(1),
             lookup_interval: self_lookup_interval,
@@ -487,8 +486,7 @@ impl Discv4Service {
 
     /// Returns true if there's a lookup in progress
     fn is_lookup_in_progress(&self) -> bool {
-        !self.pending_find_nodes.is_empty() ||
-            self.pending_pings.values().any(|ping| ping.reason.is_find_node())
+        !self.pending_find_nodes.is_empty()
     }
 
     /// Returns the current enr sequence
@@ -768,7 +766,7 @@ impl Discv4Service {
                 entry.value_mut().update_with_enr(last_enr_seq);
                 if !old_status.is_connected() {
                     let _ = entry.update(ConnectionState::Connected, Some(old_status.direction));
-                    trace!(target : "discv4",  ?record, "added after successful endpoint proof");
+                    debug!(target : "discv4",  ?record, "added after successful endpoint proof");
                     self.notify(DiscoveryUpdate::Added(record));
 
                     if has_enr_seq {
@@ -782,7 +780,7 @@ impl Discv4Service {
                 if !status.is_connected() {
                     status.state = ConnectionState::Connected;
                     let _ = entry.update(status);
-                    trace!(target : "discv4",  ?record, "added after successful endpoint proof");
+                    debug!(target : "discv4",  ?record, "added after successful endpoint proof");
                     self.notify(DiscoveryUpdate::Added(record));
 
                     if has_enr_seq {
@@ -806,22 +804,31 @@ impl Discv4Service {
 
     /// If the node's not in the table yet, this will add it to the table and start the endpoint
     /// proof by sending a ping to the node.
-    pub fn add_node(&mut self, record: NodeRecord) {
+    ///
+    /// Returns `true` if the record was added successfully, and `false` if the node is either
+    /// already in the table or the record's bucket is full.
+    pub fn add_node(&mut self, record: NodeRecord) -> bool {
         let key = kad_key(record.id);
         match self.kbuckets.entry(&key) {
             kbucket::Entry::Absent(entry) => {
                 let node = NodeEntry::new(record);
-                let _ = entry.insert(
+                match entry.insert(
                     node,
                     NodeStatus {
                         direction: ConnectionDirection::Outgoing,
                         state: ConnectionState::Disconnected,
                     },
-                );
+                ) {
+                    BucketInsertResult::Inserted | BucketInsertResult::Pending { .. } => {
+                        debug!(target : "discv4",  ?record, "inserted new record");
+                    }
+                    _ => return false,
+                }
             }
-            _ => return,
+            _ => return false,
         }
         self.try_ping(record, PingReason::Initial);
+        true
     }
 
     /// Encodes the packet, sends it and returns the hash.
@@ -883,7 +890,16 @@ impl Discv4Service {
                         // mark as new insert if insert was successful
                         is_new_insert = true;
                     }
-                    _ => {
+                    BucketInsertResult::Full => {
+                        // we received a ping but the corresponding bucket for the peer is already
+                        // full, we can't add any additional peers to that bucket, but we still want
+                        // to emit an event that we discovered the node
+                        debug!(target : "discv4",  ?record, "discovered new record but bucket is full");
+                        self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record))
+                    }
+                    BucketInsertResult::FailedFilter |
+                    BucketInsertResult::TooManyIncoming |
+                    BucketInsertResult::NodeExists => {
                         // insert unsuccessful but we still want to send the pong
                     }
                 }
@@ -895,14 +911,14 @@ impl Discv4Service {
 
         // send the pong first, but the PONG and optionally PING don't need to be send in a
         // particular order
-        let msg = Message::Pong(Pong {
+        let pong = Message::Pong(Pong {
             // we use the actual address of the peer
             to: record.into(),
             echo: hash,
             expire: ping.expire,
             enr_sq: self.enr_seq(),
         });
-        self.send_packet(msg, remote_addr);
+        self.send_packet(pong, remote_addr);
 
         // if node was absent also send a ping to establish the endpoint proof from our end
         if is_new_insert {
@@ -1011,11 +1027,6 @@ impl Discv4Service {
             PingReason::RePing => {
                 self.update_on_reping(node, pong.enr_sq);
             }
-            PingReason::FindNode(target) => {
-                // Received a pong for a discovery request
-                self.update_on_pong(node, pong.enr_sq);
-                self.respond_closest(target, remote_addr);
-            }
             PingReason::Lookup(node, ctx) => {
                 self.update_on_pong(node, pong.enr_sq);
                 self.find_node(&node, ctx);
@@ -1023,7 +1034,7 @@ impl Discv4Service {
         }
     }
 
-    /// Handler for incoming `FindNode` message
+    /// Handler for an incoming `FindNode` message
     fn on_find_node(&mut self, msg: FindNode, remote_addr: SocketAddr, node_id: PeerId) {
         if self.is_expired(msg.expire) {
             // ping's expiration timestamp is in the past
@@ -1043,27 +1054,11 @@ impl Discv4Service {
                     self.respond_closest(msg.id, remote_addr)
                 }
             }
-            kbucket::Entry::Absent(entry) => {
-                // try to ping again
-                let node = NodeRecord {
-                    address: remote_addr.ip(),
-                    tcp_port: remote_addr.port(),
-                    udp_port: remote_addr.port(),
-                    id: node_id,
-                }
-                .into_ipv4_mapped();
-                let val = NodeEntry::new(node);
-                let _ = entry.insert(
-                    val,
-                    NodeStatus {
-                        direction: ConnectionDirection::Outgoing,
-                        state: ConnectionState::Disconnected,
-                    },
-                );
-
-                self.try_ping(node, PingReason::FindNode(msg.id))
+            kbucket::Entry::Absent(_) => {
+                // no existing endpoint proof
+                // > To guard against traffic amplification attacks, Neighbors replies should only be sent if the sender of FindNode has been verified by the endpoint proof procedure.
             }
-            _ => (),
+            kbucket::Entry::SelfEntry => {}
         }
     }
 
@@ -1199,6 +1194,10 @@ impl Discv4Service {
                             // only ping if the node was added to the table
                             self.try_ping(closest, PingReason::Lookup(closest, ctx.clone()))
                         }
+                        BucketInsertResult::Full => {
+                            // new node but the node's bucket is already full
+                            self.notify(DiscoveryUpdate::DiscoveredAtCapacity(closest))
+                        }
                         _ => {}
                     }
                 }
@@ -1254,12 +1253,16 @@ impl Discv4Service {
         self.pending_find_nodes.retain(|node_id, find_node_request| {
             if now.duration_since(find_node_request.sent_at) > self.config.request_timeout {
                 if !find_node_request.answered {
+                    // node actually responded but with fewer entries than expected, but we don't
+                    // treat this as an hard error since it responded.
                     failed_neighbours.push(*node_id);
                 }
                 return false
             }
             true
         });
+
+        debug!(target: "discv4", num=%failed_neighbours.len(), "processing failed neighbours");
 
         for node_id in failed_neighbours {
             let key = kad_key(node_id);
@@ -1275,7 +1278,16 @@ impl Discv4Service {
                 _ => continue,
             };
 
+            // if the node failed to respond anything useful multiple times, remove the node from
+            // the table, but only if there are enough other nodes in the bucket (bucket must be at
+            // least half full)
             if failures > (self.config.max_find_node_failures as usize) {
+                if let Some(bucket) = self.kbuckets.get_bucket(&key) {
+                    if bucket.num_entries() < MAX_NODES_PER_BUCKET / 2 {
+                        // skip half empty bucket
+                        continue
+                    }
+                }
                 self.remove_node(node_id);
             }
         }
@@ -1305,9 +1317,20 @@ impl Discv4Service {
     }
 
     /// Validate that given timestamp is not expired.
-    fn ensure_not_expired(&self, expiration: u64) -> Result<(), ()> {
+    ///
+    /// Note: this accepts the timestamp as u64 because this is used by the wire protocol, but the
+    /// UNIX timestamp (number of non-leap seconds since January 1, 1970 0:00:00 UTC) is supposed to
+    /// be an i64.
+    ///
+    /// Returns an error if:
+    ///  - invalid UNIX timestamp (larger than i64::MAX)
+    ///  - timestamp is expired (lower than current local UNIX timestamp)
+    fn ensure_not_expired(&self, timestamp: u64) -> Result<(), ()> {
+        // ensure the timestamp is a valid UNIX timestamp
+        let _ = i64::try_from(timestamp).map_err(|_| ())?;
+
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        if self.check_timestamps && expiration < now {
+        if self.config.enforce_expiration_timestamps && timestamp < now {
             debug!(target: "discv4", "Expired packet");
             return Err(())
         }
@@ -1363,11 +1386,6 @@ impl Discv4Service {
             {
                 let target = self.lookup_rotator.next(&self.local_node_record.id);
                 self.lookup_with(target, None);
-            }
-
-            // evict expired nodes
-            if self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
-                self.evict_expired_requests(Instant::now())
             }
 
             // re-ping some peers
@@ -1481,6 +1499,11 @@ impl Discv4Service {
 
             // try resending buffered pings
             self.ping_buffered();
+
+            // evict expired nodes
+            if self.evict_expired_requests_interval.poll_tick(cx).is_ready() {
+                self.evict_expired_requests(Instant::now())
+            }
 
             if self.queued_events.is_empty() {
                 return Poll::Pending
@@ -1860,31 +1883,19 @@ enum PingReason {
     Initial,
     /// Re-ping a peer..
     RePing,
-    /// Ping issued to adhere to endpoint proof procedure
-    ///
-    /// Once the expected PONG is received, the endpoint proof is complete and the find node can be
-    /// answered.
-    FindNode(PeerId),
     /// Part of a lookup to ensure endpoint is proven.
     Lookup(NodeRecord, LookupContext),
-}
-
-// === impl PingReason ===
-
-impl PingReason {
-    /// Whether this ping was created in order to issue a find node
-    fn is_find_node(&self) -> bool {
-        matches!(self, PingReason::FindNode(_))
-    }
 }
 
 /// Represents node related updates state changes in the underlying node table
 #[derive(Debug, Clone)]
 pub enum DiscoveryUpdate {
-    /// Received a [`ForkId`] via EIP-868 for the given [`NodeRecord`].
-    EnrForkId(NodeRecord, ForkId),
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
+    /// A new node was discovered but _not_ added to the table because it is currently full.
+    DiscoveredAtCapacity(NodeRecord),
+    /// Received a [`ForkId`] via EIP-868 for the given [`NodeRecord`].
+    EnrForkId(NodeRecord, ForkId),
     /// Node that was removed from the table
     Removed(PeerId),
     /// A series of updates
@@ -1927,11 +1938,14 @@ mod tests {
 
         let local_addr = service.local_addr();
 
-        for idx in 0..MAX_NODES_PING {
+        let mut num_inserted = 0;
+        for _ in 0..MAX_NODES_PING {
             let node = NodeRecord::new(local_addr, PeerId::random());
-            service.add_node(node);
-            assert!(service.pending_pings.contains_key(&node.id));
-            assert_eq!(service.pending_pings.len(), idx + 1);
+            if service.add_node(node) {
+                num_inserted += 1;
+                assert!(service.pending_pings.contains_key(&node.id));
+                assert_eq!(service.pending_pings.len(), num_inserted);
+            }
         }
     }
 
@@ -1985,7 +1999,7 @@ mod tests {
         let ping = Ping {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
-            expire: 0,
+            expire: service.ping_expiration(),
             enr_sq: Some(rng.gen()),
         };
 
@@ -1999,6 +2013,34 @@ mod tests {
                 assert!(node_addr.is_ipv4());
                 assert_eq!(node_addr, IpAddr::from(v4));
             }
+            _ => unreachable!(),
+        };
+    }
+
+    #[tokio::test]
+    async fn test_respect_ping_expiration() {
+        reth_tracing::init_test_tracing();
+        let mut rng = thread_rng();
+        let config = Discv4Config::builder().build();
+        let (_discv4, mut service) = create_discv4_with_config(config).await;
+
+        let v4: Ipv4Addr = "0.0.0.0".parse().unwrap();
+        let v6 = v4.to_ipv6_mapped();
+        let addr: SocketAddr = (v6, 30303).into();
+
+        let ping = Ping {
+            from: rng_endpoint(&mut rng),
+            to: rng_endpoint(&mut rng),
+            expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
+            enr_sq: Some(rng.gen()),
+        };
+
+        let id = PeerId::random();
+        service.on_ping(ping, addr, id, H256::random());
+
+        let key = kad_key(id);
+        match service.kbuckets.entry(&key) {
+            kbucket::Entry::Absent(_) => {}
             _ => unreachable!(),
         };
     }

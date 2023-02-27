@@ -33,7 +33,6 @@ tokio = { version = "1", features = ["io-util", "net", "time"] }
 tokio-stream = "0.1"
 
 # misc
-bytes = "1.2"
 tracing = "0.1"
 thiserror = "1.0"
 hex = "0.4"

@@ -1,12 +1,13 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockProvider, HeaderProvider, StateProvider,
-    StateProviderFactory,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    rpc::BlockId, Account, Address, Block, BlockHash, BlockNumber, Bytes, ChainInfo, Header,
-    StorageKey, StorageValue, H256, U256,
+    Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytes, ChainInfo, Header, StorageKey,
+    StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
+use revm_primitives::{BlockEnv, CfgEnv, Env};
 use std::ops::RangeBounds;
 
 /// Supports various api interfaces for testing purposes.
@@ -25,22 +26,44 @@ impl BlockHashProvider for NoopProvider {
     }
 }
 
-impl BlockProvider for NoopProvider {
+impl BlockIdProvider for NoopProvider {
     fn chain_info(&self) -> Result<ChainInfo> {
-        Ok(ChainInfo {
-            best_hash: Default::default(),
-            best_number: 0,
-            last_finalized: None,
-            safe_finalized: None,
-        })
-    }
-
-    fn block(&self, _id: BlockId) -> Result<Option<Block>> {
-        Ok(None)
+        Ok(ChainInfo::default())
     }
 
     fn block_number(&self, _hash: H256) -> Result<Option<BlockNumber>> {
         Ok(None)
+    }
+}
+
+impl BlockProvider for NoopProvider {
+    fn block(&self, _id: BlockId) -> Result<Option<Block>> {
+        Ok(None)
+    }
+
+    fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+        Ok(None)
+    }
+}
+
+impl TransactionsProvider for NoopProvider {
+    fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
+        Ok(None)
+    }
+
+    fn transaction_by_hash(&self, _hash: TxHash) -> Result<Option<TransactionSigned>> {
+        Ok(None)
+    }
+
+    fn transactions_by_block(&self, _block_id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
+        Ok(None)
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Vec<Vec<TransactionSigned>>> {
+        Ok(Vec::default())
     }
 }
 
@@ -54,6 +77,10 @@ impl HeaderProvider for NoopProvider {
     }
 
     fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>> {
+        Ok(None)
+    }
+
+    fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>> {
         Ok(None)
     }
 
@@ -75,6 +102,36 @@ impl StateProvider for NoopProvider {
 
     fn bytecode_by_hash(&self, _code_hash: H256) -> Result<Option<Bytes>> {
         Ok(None)
+    }
+}
+
+impl EvmEnvProvider for NoopProvider {
+    fn fill_env_at(&self, _env: &mut Env, _at: BlockId) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_env_with_header(&self, _env: &mut Env, _header: &Header) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockId) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_block_env_with_header(
+        &self,
+        _block_env: &mut BlockEnv,
+        _header: &Header,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockId) -> Result<()> {
+        Ok(())
+    }
+
+    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> Result<()> {
+        Ok(())
     }
 }
 

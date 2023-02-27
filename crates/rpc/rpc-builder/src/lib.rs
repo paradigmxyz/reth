@@ -51,15 +51,17 @@
 //! }
 //! ```
 
-pub use jsonrpsee::server::ServerBuilder;
+use hyper::{http::HeaderValue, Method};
 use jsonrpsee::{
-    core::{server::rpc_module::Methods, Error as RpcError},
+    core::{
+        server::{host_filtering::AllowHosts, rpc_module::Methods},
+        Error as RpcError,
+    },
     server::{Server, ServerHandle},
     RpcModule,
 };
 use reth_interfaces::events::ChainEventSubscriptions;
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{AdminApi, DebugApi, EthApi, NetApi, TraceApi, Web3Api};
@@ -73,20 +75,21 @@ use std::{
     str::FromStr,
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::CorsLayer;
 
-/// The default port for the http server
-pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
-/// The default port for the ws server
-pub const DEFAULT_WS_RPC_PORT: u16 = 8546;
+/// Auth server utilities.
+pub mod auth;
 
-/// The default IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
+/// Common RPC constants.
+pub mod constants;
+use constants::*;
 
-/// The default IPC endpoint
-#[cfg(not(windows))]
-pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
+/// Cors utilities.
+mod cors;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Client, Pool, Network>(
@@ -501,10 +504,12 @@ where
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder>,
-    /// Configs for WS server
-    ws_server_config: Option<ServerBuilder>,
+    /// Cors Domains
+    http_cors_domains: Option<String>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
+    /// Configs for WS server
+    ws_server_config: Option<ServerBuilder>,
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
@@ -530,10 +535,14 @@ impl RpcServerConfig {
     pub fn ipc(config: IpcServerBuilder) -> Self {
         Self::default().with_ipc(config)
     }
-
     /// Configures the http server
     pub fn with_http(mut self, config: ServerBuilder) -> Self {
         self.http_server_config = Some(config.http_only());
+        self
+    }
+    /// Configure the corsdomains
+    pub fn with_cors(mut self, cors_domain: String) -> Self {
+        self.http_cors_domains = Some(cors_domain);
         self
     }
 
@@ -573,6 +582,21 @@ impl RpcServerConfig {
         self
     }
 
+    /// Returns the [SocketAddr] of the http server
+    pub fn http_address(&self) -> Option<SocketAddr> {
+        self.http_addr
+    }
+
+    /// Returns the [SocketAddr] of the ws server
+    pub fn ws_address(&self) -> Option<SocketAddr> {
+        self.ws_addr
+    }
+
+    /// Returns the [Endpoint] of the ipc server
+    pub fn ipc_endpoint(&self) -> Option<&Endpoint> {
+        self.ipc_endpoint.as_ref()
+    }
+
     /// Convenience function to do [RpcServerConfig::build] and [RpcServer::start] in one step
     pub async fn start(
         self,
@@ -595,9 +619,18 @@ impl RpcServerConfig {
         )));
 
         if let Some(builder) = self.http_server_config {
-            let http_server = builder.build(http_socket_addr).await?;
-            server.http_local_addr = http_server.local_addr().ok();
-            server.http = Some(http_server);
+            if let Some(cors) = self.http_cors_domains.as_deref().map(cors::create_cors_layer) {
+                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
+                let middleware = tower::ServiceBuilder::new().layer(cors);
+                let http_server =
+                    builder.set_middleware(middleware).build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::WithCors(http_server));
+            } else {
+                let http_server = builder.build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::Plain(http_server));
+            }
         }
 
         let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
@@ -648,17 +681,17 @@ pub struct TransportRpcModuleConfig {
 
 impl TransportRpcModuleConfig {
     /// Creates a new config with only http set
-    pub fn http(http: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_http(http: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_http(http)
     }
 
     /// Creates a new config with only ws set
-    pub fn ws(ws: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_ws(ws: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ws(ws)
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(ipc: impl Into<RpcModuleSelection>) -> Self {
+    pub fn set_ipc(ipc: impl Into<RpcModuleSelection>) -> Self {
         Self::default().with_ipc(ipc)
     }
 
@@ -683,6 +716,21 @@ impl TransportRpcModuleConfig {
     /// Returns true if no transports are configured
     pub fn is_empty(&self) -> bool {
         self.http.is_none() && self.ws.is_none() && self.ipc.is_none()
+    }
+
+    /// Returns the [RpcModuleSelection] for the http transport
+    pub fn http(&self) -> Option<&RpcModuleSelection> {
+        self.http.as_ref()
+    }
+
+    /// Returns the [RpcModuleSelection] for the ws transport
+    pub fn ws(&self) -> Option<&RpcModuleSelection> {
+        self.ws.as_ref()
+    }
+
+    /// Returns the [RpcModuleSelection] for the ipc transport
+    pub fn ipc(&self) -> Option<&RpcModuleSelection> {
+        self.ipc.as_ref()
     }
 }
 
@@ -713,11 +761,18 @@ pub struct RpcServer {
     /// The address of the ws server
     ws_local_addr: Option<SocketAddr>,
     /// http server
-    http: Option<Server>,
+    http: Option<HttpServer>,
     /// ws server
     ws: Option<Server>,
     /// ipc server
     ipc: Option<IpcServer>,
+}
+/// Http Servers Enum
+pub enum HttpServer {
+    /// Http server
+    Plain(Server),
+    /// Http server with cors
+    WithCors(Server<Stack<CorsLayer, Identity>>),
 }
 
 // === impl RpcServer ===
@@ -758,7 +813,14 @@ impl RpcServer {
         if let Some((server, module)) =
             self.http.and_then(|server| http.map(|module| (server, module)))
         {
-            handle.http = Some(server.start(module)?);
+            match server {
+                HttpServer::Plain(server) => {
+                    handle.http = Some(server.start(module)?);
+                }
+                HttpServer::WithCors(server) => {
+                    handle.http = Some(server.start(module)?);
+                }
+            }
         }
 
         if let Some((server, module)) = self.ws.and_then(|server| ws.map(|module| (server, module)))

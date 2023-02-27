@@ -36,7 +36,7 @@ pub fn random_header(number: u64, parent: Option<H256>) -> SealedHeader {
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    header.seal()
+    header.seal_slow()
 }
 
 /// Generates a random legacy [Transaction].
@@ -133,9 +133,9 @@ pub fn random_block(
             base_fee_per_gas: Some(rng.gen()),
             ..Default::default()
         }
-        .seal(),
+        .seal_slow(),
         body: transactions,
-        ommers: ommers.into_iter().map(|ommer| ommer.seal()).collect(),
+        ommers: ommers.into_iter().map(Header::seal_slow).collect(),
         withdrawals: None,
     }
 }
@@ -175,7 +175,7 @@ pub fn random_eoa_account() -> (Address, Account) {
 }
 
 /// Generate random Externaly Owned Accounts
-pub fn random_eoa_account_range(acc_range: &mut std::ops::Range<u64>) -> Vec<(Address, Account)> {
+pub fn random_eoa_account_range(acc_range: std::ops::Range<u64>) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         accounts.push(random_eoa_account())

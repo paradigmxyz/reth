@@ -29,3 +29,16 @@ pub fn genesis_value_parser(s: &str) -> Result<ChainSpec, eyre::Error> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_chain_spec() {
+        for chain in ["mainnet", "sepolia", "goerli"] {
+            chain_spec_value_parser(chain).unwrap();
+            genesis_value_parser(chain).unwrap();
+        }
+    }
+}

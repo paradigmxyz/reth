@@ -1,8 +1,8 @@
 //! All capability related types
 
 use crate::{version::ParseVersionError, EthMessage, EthVersion};
-use bytes::{BufMut, Bytes};
 use reth_codecs::add_arbitrary_tests;
+use reth_primitives::bytes::{BufMut, Bytes};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use smol_str::SmolStr;
 
@@ -64,6 +64,12 @@ impl Capability {
     pub fn is_eth_v67(&self) -> bool {
         self.name == "eth" && self.version == 67
     }
+
+    /// Whether this is eth v68.
+    #[inline]
+    pub fn is_eth_v68(&self) -> bool {
+        self.name == "eth" && self.version == 68
+    }
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -97,6 +103,7 @@ pub struct Capabilities {
     inner: Vec<Capability>,
     eth_66: bool,
     eth_67: bool,
+    eth_68: bool,
 }
 
 impl Capabilities {
@@ -115,7 +122,7 @@ impl Capabilities {
     /// Whether the peer supports `eth` sub-protocol.
     #[inline]
     pub fn supports_eth(&self) -> bool {
-        self.eth_67 || self.eth_66
+        self.eth_68 || self.eth_67 || self.eth_66
     }
 
     /// Whether this peer supports eth v66 protocol.
@@ -129,6 +136,12 @@ impl Capabilities {
     pub fn supports_eth_v67(&self) -> bool {
         self.eth_67
     }
+
+    /// Whether this peer supports eth v68 protocol.
+    #[inline]
+    pub fn supports_eth_v68(&self) -> bool {
+        self.eth_68
+    }
 }
 
 impl From<Vec<Capability>> for Capabilities {
@@ -136,6 +149,7 @@ impl From<Vec<Capability>> for Capabilities {
         Self {
             eth_66: value.iter().any(Capability::is_eth_v66),
             eth_67: value.iter().any(Capability::is_eth_v67),
+            eth_68: value.iter().any(Capability::is_eth_v68),
             inner: value,
         }
     }
@@ -154,6 +168,7 @@ impl Decodable for Capabilities {
         Ok(Self {
             eth_66: inner.iter().any(Capability::is_eth_v66),
             eth_67: inner.iter().any(Capability::is_eth_v67),
+            eth_68: inner.iter().any(Capability::is_eth_v68),
             inner,
         })
     }
@@ -228,6 +243,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn from_eth_68() {
+        let capability = SharedCapability::new("eth", 68, 0).unwrap();
+
+        assert_eq!(capability.name(), "eth");
+        assert_eq!(capability.version(), 68);
+        assert_eq!(capability, SharedCapability::Eth { version: EthVersion::Eth68, offset: 0 });
+    }
+
+    #[test]
     fn from_eth_67() {
         let capability = SharedCapability::new("eth", 67, 0).unwrap();
 
@@ -243,5 +267,20 @@ mod tests {
         assert_eq!(capability.name(), "eth");
         assert_eq!(capability.version(), 66);
         assert_eq!(capability, SharedCapability::Eth { version: EthVersion::Eth66, offset: 0 });
+    }
+
+    #[test]
+    fn capabilities_supports_eth() {
+        let capabilities: Capabilities = vec![
+            Capability::new("eth".into(), 66),
+            Capability::new("eth".into(), 67),
+            Capability::new("eth".into(), 68),
+        ]
+        .into();
+
+        assert!(capabilities.supports_eth());
+        assert!(capabilities.supports_eth_v66());
+        assert!(capabilities.supports_eth_v67());
+        assert!(capabilities.supports_eth_v68());
     }
 }

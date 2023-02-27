@@ -16,7 +16,6 @@ async-trait = "0.1.57"
 thiserror = "1.0.37"
 auto_impl = "1.0"
 tokio = { version = "1.21.2", features = ["sync"] }
-bytes = "1.2"
 
 # TODO(onbjerg): We only need this for [BlockBody]
 reth-eth-wire = { path = "../net/eth-wire" }

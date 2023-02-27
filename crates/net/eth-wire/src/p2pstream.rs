@@ -1,15 +1,19 @@
 #![allow(dead_code, unreachable_pub, missing_docs, unused_variables)]
 use crate::{
     capability::{Capability, SharedCapability},
+    disconnect::CanDisconnect,
     errors::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage,
 };
-use bytes::{Buf, Bytes, BytesMut};
 use futures::{Sink, SinkExt, StreamExt};
 use metrics::counter;
 use pin_project::pin_project;
 use reth_codecs::derive_arbitrary;
+use reth_primitives::{
+    bytes::{Buf, BufMut, Bytes, BytesMut},
+    hex,
+};
 use reth_rlp::{Decodable, DecodeError, Encodable, EMPTY_LIST_CODE};
 use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
@@ -66,25 +70,6 @@ impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
     pub fn new(inner: S) -> Self {
         Self { inner }
-    }
-}
-
-impl<S> UnauthedP2PStream<S>
-where
-    S: Sink<Bytes, Error = io::Error> + Unpin,
-{
-    /// Send a disconnect message during the handshake. This is sent without snappy compression.
-    pub async fn send_disconnect(
-        &mut self,
-        reason: DisconnectReason,
-    ) -> Result<(), P2PStreamError> {
-        let mut buf = BytesMut::new();
-        P2PMessage::Disconnect(reason).encode(&mut buf);
-        tracing::trace!(
-            %reason,
-            "Sending disconnect message during the handshake",
-        );
-        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
     }
 }
 
@@ -174,6 +159,35 @@ where
         let stream = P2PStream::new(self.inner, shared_capability);
 
         Ok((stream, their_hello))
+    }
+}
+
+impl<S> UnauthedP2PStream<S>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin,
+{
+    /// Send a disconnect message during the handshake. This is sent without snappy compression.
+    pub async fn send_disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Result<(), P2PStreamError> {
+        let mut buf = BytesMut::new();
+        P2PMessage::Disconnect(reason).encode(&mut buf);
+        tracing::trace!(
+            %reason,
+            "Sending disconnect message during the handshake",
+        );
+        self.inner.send(buf.freeze()).await.map_err(P2PStreamError::Io)
+    }
+}
+
+#[async_trait::async_trait]
+impl<S> CanDisconnect<Bytes> for P2PStream<S>
+where
+    S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
+{
+    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
+        self.disconnect(reason).await
     }
 }
 
@@ -281,13 +295,13 @@ impl<S> P2PStream<S> {
 
 impl<S> P2PStream<S>
 where
-    S: Sink<Bytes, Error = io::Error> + Unpin,
+    S: Sink<Bytes, Error = io::Error> + Unpin + Send,
 {
     /// Disconnects the connection by sending a disconnect message.
     ///
     /// This future resolves once the disconnect message has been sent and the stream has been
     /// closed.
-    pub async fn disconnect(mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
+    pub async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
         self.start_disconnect(reason)?;
         self.close().await
     }
@@ -651,7 +665,7 @@ impl P2PMessage {
 /// for all variants except the [`P2PMessage::Hello`] variant, because the hello message is never
 /// compressed in the `p2p` subprotocol.
 impl Encodable for P2PMessage {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
+    fn encode(&self, out: &mut dyn BufMut) {
         (self.message_id() as u8).encode(out);
         match self {
             P2PMessage::Hello(msg) => msg.encode(out),
@@ -761,7 +775,7 @@ pub enum ProtocolVersion {
 }
 
 impl Encodable for ProtocolVersion {
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
+    fn encode(&self, out: &mut dyn BufMut) {
         (*self as u8).encode(out)
     }
     fn length(&self) -> usize {
@@ -818,7 +832,7 @@ mod tests {
 
             let (server_hello, _) = eth_hello();
 
-            let (p2p_stream, _) =
+            let (mut p2p_stream, _) =
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
             p2p_stream.disconnect(expected_disconnect).await.unwrap();
@@ -903,16 +917,15 @@ mod tests {
 
             let unauthed_stream = UnauthedP2PStream::new(stream);
             match unauthed_stream.handshake(server_hello.clone()).await {
-                Ok((_, hello)) => panic!(
-                    "expected handshake to fail, instead got a successful Hello: {:?}",
-                    hello
-                ),
+                Ok((_, hello)) => {
+                    panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
+                }
                 Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
                     assert_eq!(expected, server_hello.protocol_version as u8);
                     assert_ne!(expected, got);
                 }
                 Err(other_err) => {
-                    panic!("expected mismatched protocol version error, got {:?}", other_err)
+                    panic!("expected mismatched protocol version error, got {other_err:?}")
                 }
             }
         });
@@ -928,14 +941,14 @@ mod tests {
         let unauthed_stream = UnauthedP2PStream::new(sink);
         match unauthed_stream.handshake(client_hello.clone()).await {
             Ok((_, hello)) => {
-                panic!("expected handshake to fail, instead got a successful Hello: {:?}", hello)
+                panic!("expected handshake to fail, instead got a successful Hello: {hello:?}")
             }
             Err(P2PStreamError::MismatchedProtocolVersion { expected, got }) => {
                 assert_eq!(expected, client_hello.protocol_version as u8);
                 assert_ne!(expected, got);
             }
             Err(other_err) => {
-                panic!("expected mismatched protocol version error, got {:?}", other_err)
+                panic!("expected mismatched protocol version error, got {other_err:?}")
             }
         }
 
@@ -946,7 +959,7 @@ mod tests {
     #[test]
     fn test_peer_lower_capability_version() {
         let local_capabilities: Vec<Capability> =
-            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into()];
+            vec![EthVersion::Eth66.into(), EthVersion::Eth67.into(), EthVersion::Eth68.into()];
         let peer_capabilities: Vec<Capability> = vec![EthVersion::Eth66.into()];
 
         let shared_capability =

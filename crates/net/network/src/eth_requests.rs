@@ -7,14 +7,13 @@ use reth_eth_wire::{
     GetReceipts, NodeData, Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{rpc, BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, PeerId};
 use reth_provider::{BlockProvider, HeaderProvider};
 use std::{
     borrow::Borrow,
     future::Future,
     hash::Hash,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
@@ -49,7 +48,7 @@ const APPROX_HEADER_SIZE: usize = 500;
 #[must_use = "Manager does nothing unless polled."]
 pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
-    client: Arc<C>,
+    client: C,
     /// Used for reporting peers.
     #[allow(unused)]
     // TODO use to report spammers
@@ -62,7 +61,7 @@ pub struct EthRequestHandler<C> {
 impl<C> EthRequestHandler<C> {
     /// Create a new instance
     pub fn new(
-        client: Arc<C>,
+        client: C,
         peers: PeersHandle,
         incoming: UnboundedReceiver<IncomingEthRequest>,
     ) -> Self {
@@ -161,9 +160,7 @@ where
         let mut total_bytes = APPROX_BODY_SIZE;
 
         for hash in request.0 {
-            if let Some(block) =
-                self.client.block(rpc::BlockId::Hash(rpc::H256(hash.0))).unwrap_or_default()
-            {
+            if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = BlockBody {
                     transactions: block.body,
                     ommers: block.ommers,
@@ -195,7 +192,7 @@ where
 /// This should be spawned or used as part of `tokio::select!`.
 impl<C> Future for EthRequestHandler<C>
 where
-    C: BlockProvider + HeaderProvider,
+    C: BlockProvider + HeaderProvider + Unpin,
 {
     type Output = ();
 
