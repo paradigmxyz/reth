@@ -7,7 +7,7 @@ use reth_primitives::{
     BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
     H64, U256,
 };
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_revm::database::{State, SubState};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
@@ -45,7 +45,9 @@ pub struct EngineApi<Client> {
     // remote_store: HashMap<H64, ExecutionPayload>,
 }
 
-impl<Client: HeaderProvider + BlockProvider + StateProviderFactory> EngineApi<Client> {
+impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider>
+    EngineApi<Client>
+{
     /// Create new instance of [EngineApi].
     pub fn new(
         client: Client,
@@ -409,7 +411,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory> EngineApi<Cl
 
 impl<Client> Future for EngineApi<Client>
 where
-    Client: HeaderProvider + BlockProvider + StateProviderFactory + Unpin,
+    Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider + Unpin,
 {
     type Output = ();
 

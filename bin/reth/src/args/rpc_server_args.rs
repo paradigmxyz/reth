@@ -4,7 +4,7 @@ use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
     constants, IpcServerBuilder, RethRpcModule, RpcModuleSelection, RpcServerConfig,
@@ -110,7 +110,12 @@ impl RpcServerArgs {
         network: Network,
     ) -> Result<RpcServerHandle, RpcError>
     where
-        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Client: BlockProvider
+            + HeaderProvider
+            + StateProviderFactory
+            + EvmEnvProvider
+            + Clone
+            + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
     {
@@ -133,7 +138,12 @@ impl RpcServerArgs {
         handle: EngineApiHandle,
     ) -> Result<ServerHandle, RpcError>
     where
-        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Client: BlockProvider
+            + HeaderProvider
+            + StateProviderFactory
+            + EvmEnvProvider
+            + Clone
+            + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
     {
@@ -173,7 +183,7 @@ impl RpcServerArgs {
             config = config
                 .with_http_address(socket_address)
                 .with_http(ServerBuilder::new())
-                .with_cors(self.http_corsdomain.clone().unwrap_or("".to_string()));
+                .with_cors(self.http_corsdomain.clone().unwrap_or_default());
         }
 
         if self.ws {

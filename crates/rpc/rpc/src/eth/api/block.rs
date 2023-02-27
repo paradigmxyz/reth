@@ -5,12 +5,12 @@ use crate::{
     EthApi,
 };
 use reth_primitives::BlockId;
-use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Block, RichBlock};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     /// Returns the uncle headers of the given block
     ///
@@ -49,11 +49,9 @@ where
             let block_hash = self
                 .client()
                 .block_hash_for_id(block_id)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-            let total_difficulty = self
-                .client()
-                .header_td(&block_hash)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                .ok_or(EthApiError::UnknownBlockNumber)?;
+            let total_difficulty =
+                self.client().header_td(&block_hash)?.ok_or(EthApiError::UnknownBlockNumber)?;
             let block = Block::from_block(block, total_difficulty, full.into(), Some(block_hash))?;
             Ok(Some(block.into()))
         } else {

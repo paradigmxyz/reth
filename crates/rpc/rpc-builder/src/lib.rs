@@ -26,12 +26,12 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+//! use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory, EvmEnvProvider};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Client, Pool, Network>(client: Client, pool: Pool, network: Network)
 //! where
-//!     Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+//!     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //! {
@@ -63,7 +63,7 @@ use jsonrpsee::{
 use reth_interfaces::events::ChainEventSubscriptions;
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{AdminApi, DebugApi, EthApi, NetApi, TraceApi, Web3Api};
 use reth_rpc_api::servers::*;
 use reth_transaction_pool::TransactionPool;
@@ -100,7 +100,8 @@ pub async fn launch<Client, Pool, Network>(
     server_config: impl Into<RpcServerConfig>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -136,7 +137,7 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
     /// Configure the client instance.
     pub fn with_client<C>(self, client: C) -> RpcModuleBuilder<C, Pool, Network>
     where
-        C: BlockProvider + StateProviderFactory + 'static,
+        C: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     {
         let Self { pool, network, .. } = self;
         RpcModuleBuilder { client, network, pool }
@@ -163,7 +164,8 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
 
 impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -264,7 +266,12 @@ impl RpcModuleSelection {
         network: Network,
     ) -> RpcModule<()>
     where
-        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Client: BlockProvider
+            + HeaderProvider
+            + StateProviderFactory
+            + EvmEnvProvider
+            + Clone
+            + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
     {
@@ -403,7 +410,8 @@ where
 
 impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {

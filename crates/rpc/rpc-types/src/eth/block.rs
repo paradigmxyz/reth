@@ -61,7 +61,7 @@ pub struct Block {
     pub uncles: Vec<H256>,
     /// Transactions
     pub transactions: BlockTransactions,
-    /// Size in bytes
+    /// Integer the size of this block in bytes.
     pub size: Option<U256>,
     /// Base Fee for post-EIP1559 blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,8 +208,6 @@ pub struct Header {
     pub mix_hash: H256,
     /// Nonce
     pub nonce: Option<H64>,
-    /// Size in bytes
-    pub size: Option<U256>,
 }
 
 // === impl Header ===
@@ -219,8 +217,6 @@ impl Header {
     ///
     /// CAUTION: this takes the header's hash as is and does _not_ calculate the hash.
     pub fn from_primitive_with_hash(primitive_header: PrimitiveHeader, block_hash: H256) -> Self {
-        let header_length = primitive_header.length();
-
         let PrimitiveHeader {
             parent_hash,
             ommers_hash,
@@ -260,7 +256,6 @@ impl Header {
             difficulty,
             mix_hash,
             nonce: Some(nonce.to_be_bytes().into()),
-            size: Some(U256::from(header_length)),
         }
     }
 }

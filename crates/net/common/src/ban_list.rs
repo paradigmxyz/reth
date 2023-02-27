@@ -2,6 +2,19 @@
 use reth_primitives::PeerId;
 use std::{collections::HashMap, net::IpAddr, time::Instant};
 
+/// Determines whether or not the IP is globally routable.
+/// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.
+pub fn is_global(ip: &IpAddr) -> bool {
+    if ip.is_unspecified() || ip.is_loopback() {
+        return false
+    }
+
+    match ip {
+        IpAddr::V4(ip) => !ip.is_private() && !ip.is_link_local(),
+        IpAddr::V6(_) => true,
+    }
+}
+
 /// Stores peers that should be taken out of circulation either indefinitely or until a certain
 /// timestamp
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -18,10 +31,10 @@ impl BanList {
         banned_peers: impl IntoIterator<Item = PeerId>,
         banned_ips: impl IntoIterator<Item = IpAddr>,
     ) -> Self {
-        Self {
-            banned_ips: banned_ips.into_iter().map(|ip| (ip, None)).collect(),
-            banned_peers: banned_peers.into_iter().map(|peer| (peer, None)).collect(),
-        }
+        Self::new_with_timeout(
+            banned_peers.into_iter().map(|peer| (peer, None)).collect(),
+            banned_ips.into_iter().map(|ip| (ip, None)).collect(),
+        )
     }
 
     /// Creates a new ban list that bans the given peers and ips with an optional timeout.
@@ -100,6 +113,8 @@ impl BanList {
     }
 
     /// Bans the IP until the timestamp.
+    ///
+    /// This does not ban non-global IPs.
     pub fn ban_ip_until(&mut self, ip: IpAddr, until: Instant) {
         self.ban_ip_with(ip, Some(until));
     }
@@ -110,6 +125,8 @@ impl BanList {
     }
 
     /// Bans the IP indefinitely.
+    ///
+    /// This does not ban non-global IPs.
     pub fn ban_ip(&mut self, ip: IpAddr) {
         self.ban_ip_with(ip, None);
     }
@@ -125,8 +142,12 @@ impl BanList {
     }
 
     /// Bans the ip indefinitely or until the given timeout.
+    ///
+    /// This does not ban non-global IPs.
     pub fn ban_ip_with(&mut self, ip: IpAddr, until: Option<Instant>) {
-        self.banned_ips.insert(ip, until);
+        if is_global(&ip) {
+            self.banned_ips.insert(ip, until);
+        }
     }
 }
 
@@ -146,11 +167,35 @@ mod tests {
 
     #[test]
     fn can_ban_unban_ip() {
-        let ip = IpAddr::from([0, 0, 0, 0]);
+        let ip = IpAddr::from([1, 1, 1, 1]);
         let mut banlist = BanList::default();
         banlist.ban_ip(ip);
         assert!(banlist.is_banned_ip(&ip));
         banlist.unban_ip(&ip);
+        assert!(!banlist.is_banned_ip(&ip));
+    }
+
+    #[test]
+    fn cannot_ban_non_global() {
+        let mut ip = IpAddr::from([0, 0, 0, 0]);
+        let mut banlist = BanList::default();
+        banlist.ban_ip(ip);
+        assert!(!banlist.is_banned_ip(&ip));
+
+        ip = IpAddr::from([10, 0, 0, 0]);
+        banlist.ban_ip(ip);
+        assert!(!banlist.is_banned_ip(&ip));
+
+        ip = IpAddr::from([127, 0, 0, 0]);
+        banlist.ban_ip(ip);
+        assert!(!banlist.is_banned_ip(&ip));
+
+        ip = IpAddr::from([172, 17, 0, 0]);
+        banlist.ban_ip(ip);
+        assert!(!banlist.is_banned_ip(&ip));
+
+        ip = IpAddr::from([172, 16, 0, 0]);
+        banlist.ban_ip(ip);
         assert!(!banlist.is_banned_ip(&ip));
     }
 }
