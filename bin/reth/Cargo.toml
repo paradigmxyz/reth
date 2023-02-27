@@ -49,7 +49,8 @@ proptest = "1.0"
 
 # misc
 eyre = "0.6.8"
-clap = { version = "4.0", features = ["derive", "cargo"] }
+# TODO: temp patch. tracked in https://github.com/paradigmxyz/reth/issues/1572
+clap = { git = "https://github.com/rkrasiuk/clap", branch = "rkrasiuk/fix-almost-swapped-lint", features = ["derive", "cargo"] } # { version = "4.0", features = ["derive", "cargo"] }
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
 futures = "0.3.25"
 tempfile = { version = "3.3.0" }
