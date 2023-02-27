@@ -147,7 +147,7 @@ where
                         crsr.append(k, v).expect("submit");
                     }
 
-                    tx.inner.commit().unwrap();
+                    tx.inner.commit().unwrap()
                 });
             },
         )
@@ -171,7 +171,7 @@ where
                         crsr.insert(k, v).expect("submit");
                     }
 
-                    tx.inner.commit().unwrap();
+                    tx.inner.commit().unwrap()
                 });
             },
         )
@@ -241,7 +241,7 @@ where
                         crsr.append_dup(k, v).expect("submit");
                     }
 
-                    tx.inner.commit().unwrap();
+                    tx.inner.commit().unwrap()
                 });
             },
         )

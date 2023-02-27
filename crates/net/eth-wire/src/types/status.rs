@@ -50,7 +50,7 @@ impl From<Genesis> for Status {
         let chainspec = ChainSpec::from(genesis);
 
         Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth68 as u8,
             chain: Chain::Id(chain),
             total_difficulty,
             blockhash: chainspec.genesis_hash(),
@@ -133,7 +133,7 @@ impl Default for Status {
     fn default() -> Self {
         let mainnet_genesis = MAINNET.genesis_hash();
         Status {
-            version: EthVersion::Eth67 as u8,
+            version: EthVersion::Eth68 as u8,
             chain: Chain::Named(ethers_core::types::Chain::Mainnet),
             total_difficulty: U256::from(17_179_869_184u64),
             blockhash: mainnet_genesis,
@@ -147,6 +147,7 @@ impl Default for Status {
 
 #[cfg(test)]
 mod tests {
+    use crate::types::{EthVersion, Status};
     use ethers_core::types::Chain as NamedChain;
     use hex_literal::hex;
     use rand::Rng;
@@ -155,8 +156,6 @@ mod tests {
     };
     use reth_rlp::{Decodable, Encodable};
     use std::str::FromStr;
-
-    use crate::types::{EthVersion, Status};
 
     #[test]
     fn encode_eth_status_message() {

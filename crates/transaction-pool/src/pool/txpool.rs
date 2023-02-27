@@ -512,6 +512,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.by_hash.keys().copied()
     }
 
+    /// Returns an iterator over all _unique_ hashes in the pool
+    pub(crate) fn transactions_iter(
+        &self,
+    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T>>> + '_ {
+        self.by_hash.values().cloned()
+    }
+
     /// Returns if the transaction for the given hash is already included in this pool
     pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
         self.by_hash.contains_key(tx_hash)

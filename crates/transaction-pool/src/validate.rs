@@ -94,6 +94,8 @@ pub struct ValidPoolTransaction<T: PoolTransaction> {
     pub timestamp: Instant,
     /// Where this transaction originated from.
     pub origin: TransactionOrigin,
+    /// The length of the rlp encoded transaction (cached)
+    pub encoded_length: usize,
 }
 
 // === impl ValidPoolTransaction ===
@@ -160,6 +162,7 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
             cost: self.cost,
             timestamp: self.timestamp,
             origin: self.origin,
+            encoded_length: self.encoded_length,
         }
     }
 }

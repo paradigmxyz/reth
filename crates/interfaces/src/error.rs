@@ -15,7 +15,7 @@ pub enum Error {
     Database(#[from] crate::db::Error),
 
     #[error(transparent)]
-    Provider(#[from] crate::provider::Error),
+    Provider(#[from] crate::provider::ProviderError),
 
     #[error(transparent)]
     Network(#[from] reth_network_api::NetworkError),

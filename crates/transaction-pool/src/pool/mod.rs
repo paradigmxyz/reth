@@ -172,9 +172,15 @@ where
     }
 
     /// Returns hashes of _all_ transactions in the pool.
-    pub(crate) fn pooled_transactions(&self) -> Vec<TxHash> {
+    pub(crate) fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
         let pool = self.pool.read();
         pool.all().hashes_iter().collect()
+    }
+
+    /// Returns _all_ transactions in the pool.
+    pub(crate) fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let pool = self.pool.read();
+        pool.all().transactions_iter().collect()
     }
 
     /// Updates the entire pool after a new block was executed.
@@ -196,6 +202,7 @@ where
             TransactionValidationOutcome::Valid { balance, state_nonce, transaction } => {
                 let sender_id = self.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
+                let encoded_length = transaction.encoded_length();
 
                 let tx = ValidPoolTransaction {
                     cost: transaction.cost(),
@@ -204,6 +211,7 @@ where
                     propagate: false,
                     timestamp: Instant::now(),
                     origin,
+                    encoded_length,
                 };
 
                 let added = self.pool.write().add_transaction(tx, balance, state_nonce)?;

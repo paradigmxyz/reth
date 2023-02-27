@@ -6,8 +6,10 @@ use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter,
     runner::CliContext,
+    utils::get_single_header,
 };
 use clap::{crate_version, Parser};
+use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
@@ -31,12 +33,12 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
 };
 use reth_network::{
-    error::NetworkError, NetworkConfig, NetworkEvent, NetworkHandle, NetworkManager,
+    error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockNumber, ChainSpec, Head, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
-
+use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -50,8 +52,11 @@ use reth_stages::{
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
-use tracing::{debug, info, trace, warn};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use tokio::sync::{mpsc::unbounded_channel, watch};
+use tracing::*;
+
+pub mod events;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -106,6 +111,10 @@ pub struct Command {
     #[arg(long = "debug.max-block", help_heading = "Debug")]
     max_block: Option<u64>,
 
+    /// Flag indicating whether the node should be terminated after the pipeline sync.
+    #[arg(long = "debug.terminate", help_heading = "Debug")]
+    terminate: bool,
+
     #[clap(flatten)]
     rpc: RpcServerArgs,
 }
@@ -125,6 +134,7 @@ impl Command {
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint()?;
@@ -133,7 +143,7 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let consensus = self.init_consensus()?;
+        let (consensus, forkchoice_state_tx) = self.init_consensus()?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
         self.init_trusted_nodes(&mut config);
@@ -144,19 +154,29 @@ impl Command {
         let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
-        // TODO: Use the resolved secret to spawn the Engine API server
-        // Look at `reth_rpc::AuthLayer` for integration hints
-        let _secret = self.rpc.jwt_secret();
+        let test_transaction_pool = reth_transaction_pool::test_utils::testing_pool();
+        info!(target: "reth::cli", "Test transaction pool initialized");
 
         let _rpc_server = self
             .rpc
-            .start_server(
-                ShareableDatabase::new(db.clone(), self.chain.clone()),
-                reth_transaction_pool::test_utils::testing_pool(),
-                network.clone(),
-            )
+            .start_rpc_server(shareable_db.clone(), test_transaction_pool.clone(), network.clone())
             .await?;
         info!(target: "reth::cli", "Started RPC server");
+
+        let engine_api_handle =
+            self.init_engine_api(Arc::clone(&db), forkchoice_state_tx, &ctx.task_executor);
+        info!(target: "reth::cli", "Engine API handler initialized");
+
+        let _auth_server = self
+            .rpc
+            .start_auth_server(
+                shareable_db,
+                test_transaction_pool,
+                network.clone(),
+                engine_api_handle,
+            )
+            .await?;
+        info!(target: "reth::cli", "Started Auth server");
 
         let (mut pipeline, events) = self
             .build_networked_pipeline(
@@ -168,7 +188,7 @@ impl Command {
             )
             .await?;
 
-        ctx.task_executor.spawn(handle_events(events));
+        ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
 
         // Run pipeline
         let (rx, tx) = tokio::sync::oneshot::channel();
@@ -180,8 +200,15 @@ impl Command {
 
         tx.await??;
 
-        info!(target: "reth::cli", "Finishing up");
-        Ok(())
+        info!(target: "reth::cli", "Pipeline has finished.");
+
+        if self.terminate {
+            Ok(())
+        } else {
+            // The pipeline has finished downloading blocks up to `--debug.tip` or
+            // `--debug.max-block`. Keep other node components alive for further usage.
+            futures::future::pending().await
+        }
     }
 
     async fn build_networked_pipeline(
@@ -193,9 +220,18 @@ impl Command {
         task_executor: &TaskExecutor,
     ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
     {
-        // building network downloaders using the fetch client
-        let fetch_client = Arc::new(network.fetch_client().await?);
+        let fetch_client = network.fetch_client().await?;
+        let max_block = if let Some(block) = self.max_block {
+            Some(block)
+        } else if let Some(tip) = self.tip {
+            Some(self.lookup_or_fetch_tip(db.clone(), fetch_client.clone(), tip).await?)
+        } else {
+            None
+        };
 
+        // TODO: remove Arc requirement from downloader builders.
+        // building network downloaders using the fetch client
+        let fetch_client = Arc::new(fetch_client);
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(fetch_client.clone(), consensus.clone())
             .into_task_with(task_executor);
@@ -205,7 +241,14 @@ impl Command {
             .into_task_with(task_executor);
 
         let mut pipeline = self
-            .build_pipeline(config, header_downloader, body_downloader, network.clone(), consensus)
+            .build_pipeline(
+                config,
+                header_downloader,
+                body_downloader,
+                network.clone(),
+                consensus,
+                max_block,
+            )
             .await?;
 
         let events = stream_select(
@@ -239,7 +282,7 @@ impl Command {
         }
     }
 
-    fn init_consensus(&self) -> eyre::Result<Arc<dyn Consensus>> {
+    fn init_consensus(&self) -> eyre::Result<(Arc<dyn Consensus>, watch::Sender<ForkchoiceState>)> {
         let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
 
         if let Some(tip) = self.tip {
@@ -256,7 +299,24 @@ impl Command {
             warn!(target: "reth::cli", warn_msg);
         }
 
-        Ok(consensus)
+        Ok((consensus, notifier))
+    }
+
+    fn init_engine_api(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        forkchoice_state_tx: watch::Sender<ForkchoiceState>,
+        task_executor: &TaskExecutor,
+    ) -> EngineApiHandle {
+        let (message_tx, message_rx) = unbounded_channel();
+        let engine_api = EngineApi::new(
+            ShareableDatabase::new(db, self.chain.clone()),
+            self.chain.clone(),
+            message_rx,
+            forkchoice_state_tx,
+        );
+        task_executor.spawn(engine_api);
+        message_tx
     }
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
@@ -287,7 +347,7 @@ impl Command {
         Ok(handle)
     }
 
-    fn fetch_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
+    fn lookup_head(&self, db: Arc<Env<WriteMap>>) -> Result<Head, reth_interfaces::db::Error> {
         db.view(|tx| {
             let head = FINISH.get_progress(tx)?.unwrap_or_default();
             let header = tx
@@ -310,13 +370,42 @@ impl Command {
         .map_err(Into::into)
     }
 
+    /// Attempt to look up the block number for the tip hash in the database.
+    /// If it doesn't exist, download the header and return the block number.
+    ///
+    /// NOTE: The download is attempted with infinite retries.
+    async fn lookup_or_fetch_tip(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        fetch_client: FetchClient,
+        tip: H256,
+    ) -> Result<u64, reth_interfaces::Error> {
+        if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {
+            info!(target: "reth::cli", ?tip, number, "Successfully looked up tip block number in the database");
+            return Ok(number)
+        }
+
+        info!(target: "reth::cli", ?tip, "Fetching tip block number from the network.");
+        loop {
+            match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
+                Ok(tip_header) => {
+                    info!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip block number");
+                    return Ok(tip_header.number)
+                }
+                Err(error) => {
+                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
+                }
+            }
+        }
+    }
+
     fn load_network_config(
         &self,
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
-        let head = self.fetch_head(Arc::clone(&db)).expect("the head block is missing");
+        let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
             .network_config(config, self.chain.clone())
@@ -332,6 +421,7 @@ impl Command {
         body_downloader: B,
         updater: U,
         consensus: &Arc<dyn Consensus>,
+        max_block: Option<u64>,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
     where
         H: HeaderDownloader + 'static,
@@ -342,7 +432,7 @@ impl Command {
 
         let mut builder = Pipeline::builder();
 
-        if let Some(max_block) = self.max_block {
+        if let Some(max_block) = max_block {
             debug!(target: "reth::cli", max_block, "Configuring builder to use max block");
             builder = builder.with_max_block(max_block)
         }
@@ -401,102 +491,15 @@ async fn run_network_until_shutdown<C>(
     }
 }
 
-/// The current high-level state of the node.
-#[derive(Default)]
-struct NodeState {
-    /// The number of connected peers.
-    connected_peers: usize,
-    /// The stage currently being executed.
-    current_stage: Option<StageId>,
-    /// The current checkpoint of the executing stage.
-    current_checkpoint: BlockNumber,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl NodeState {
-    async fn handle_pipeline_event(&mut self, event: PipelineEvent) {
-        match event {
-            PipelineEvent::Running { stage_id, stage_progress } => {
-                let notable = self.current_stage.is_none();
-                self.current_stage = Some(stage_id);
-                self.current_checkpoint = stage_progress.unwrap_or_default();
-
-                if notable {
-                    info!(target: "reth::cli", stage = %stage_id, from = stage_progress, "Executing stage");
-                }
-            }
-            PipelineEvent::Ran { stage_id, result } => {
-                let notable = result.stage_progress > self.current_checkpoint;
-                self.current_checkpoint = result.stage_progress;
-                if result.done {
-                    self.current_stage = None;
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage finished executing");
-                } else if notable {
-                    info!(target: "reth::cli", stage = %stage_id, checkpoint = result.stage_progress, "Stage committed progress");
-                }
-            }
-            _ => (),
-        }
-    }
-
-    async fn handle_network_event(&mut self, event: NetworkEvent) {
-        match event {
-            NetworkEvent::SessionEstablished { peer_id, status, .. } => {
-                self.connected_peers += 1;
-                info!(target: "reth::cli", connected_peers = self.connected_peers, peer_id = %peer_id, best_block = %status.blockhash, "Peer connected");
-            }
-            NetworkEvent::SessionClosed { peer_id, reason } => {
-                self.connected_peers -= 1;
-                let reason = reason.map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
-                warn!(target: "reth::cli", connected_peers = self.connected_peers, peer_id = %peer_id, %reason, "Peer disconnected.");
-            }
-            _ => (),
-        }
-    }
-}
-
-/// A node event.
-pub enum NodeEvent {
-    /// A network event.
-    Network(NetworkEvent),
-    /// A sync pipeline event.
-    Pipeline(PipelineEvent),
-}
-
-impl From<NetworkEvent> for NodeEvent {
-    fn from(evt: NetworkEvent) -> NodeEvent {
-        NodeEvent::Network(evt)
-    }
-}
-
-impl From<PipelineEvent> for NodeEvent {
-    fn from(evt: PipelineEvent) -> NodeEvent {
-        NodeEvent::Pipeline(evt)
-    }
-}
-
-/// Displays relevant information to the user from components of the node, and periodically
-/// displays the high-level status of the node.
-pub async fn handle_events(mut events: impl Stream<Item = NodeEvent> + Unpin) {
-    let mut state = NodeState::default();
-
-    let mut interval = tokio::time::interval(Duration::from_secs(30));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        tokio::select! {
-            Some(event) = events.next() => {
-                match event {
-                    NodeEvent::Network(event) => {
-                        state.handle_network_event(event).await;
-                    },
-                    NodeEvent::Pipeline(event) => {
-                        state.handle_pipeline_event(event).await;
-                    }
-                }
-            },
-            _ = interval.tick() => {
-                let stage = state.current_stage.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string());
-                info!(target: "reth::cli", connected_peers = state.connected_peers, %stage, checkpoint = state.current_checkpoint, "Status");
-            }
+    #[test]
+    fn parse_common_node_command_chain_args() {
+        for chain in ["mainnet", "sepolia", "goerli"] {
+            let args: Command = Command::parse_from(["reth", "--chain", chain]);
+            assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
     }
 }

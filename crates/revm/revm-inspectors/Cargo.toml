@@ -1,0 +1,15 @@
+[package]
+name = "reth-revm-inspectors"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+description = "revm inspector implementations used by reth"
+
+[dependencies]
+# reth 
+reth-primitives = { path = "../../primitives" }
+
+revm = { version = "3.0.0" }
+# remove from reth and reexport from revm
+hashbrown = "0.13"

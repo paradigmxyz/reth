@@ -1,6 +1,6 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
-    node::{handle_events, NodeEvent},
+    node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -69,7 +69,7 @@ pub struct ImportCommand {
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
     /// remaining stages are executed.
-    #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment)]
+    #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PlatformPath<ConfigPath>,
 }
 
@@ -109,7 +109,7 @@ impl ImportCommand {
         let (mut pipeline, events) =
             self.build_import_pipeline(config, db.clone(), &consensus, file_client).await?;
 
-        tokio::spawn(handle_events(events));
+        tokio::spawn(handle_events(None, events));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
@@ -171,5 +171,18 @@ impl ImportCommand {
 
     fn load_config(&self) -> eyre::Result<Config> {
         confy::load_path::<Config>(&self.config).wrap_err("Could not load config")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_common_import_command_chain_args() {
+        for chain in ["mainnet", "sepolia", "goerli"] {
+            let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
+            assert_eq!(args.chain.chain, chain.parse().unwrap());
+        }
     }
 }

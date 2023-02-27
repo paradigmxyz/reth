@@ -3,6 +3,7 @@ use reth_primitives::{
     Address, FromRecoveredTransaction, IntoRecoveredTransaction, PeerId, Transaction,
     TransactionKind, TransactionSignedEcRecovered, TxHash, H256, U256,
 };
+use reth_rlp::Encodable;
 use std::{collections::HashMap, fmt, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
 #[async_trait::async_trait]
+#[auto_impl::auto_impl(Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
@@ -70,12 +72,19 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Returns a new stream that yields new valid transactions added to the pool.
     fn transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>>;
 
-    /// Returns hashes of all transactions in the pool.
+    /// Returns the _hashes_ of all transactions in the pool.
     ///
     /// Note: This returns a `Vec` but should guarantee that all hashes are unique.
     ///
     /// Consumer: P2P
-    fn pooled_transactions(&self) -> Vec<TxHash>;
+    fn pooled_transaction_hashes(&self) -> Vec<TxHash>;
+
+    /// Returns the _full_ transaction objects all transactions in the pool.
+    ///
+    /// Note: This returns a `Vec` but should guarantee that all transactions are unique.
+    ///
+    /// Consumer: P2P
+    fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -280,6 +289,12 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize;
+
+    /// Returns the transaction type
+    fn tx_type(&self) -> u8;
+
+    /// Returns the length of the rlp encoded object
+    fn encoded_length(&self) -> usize;
 }
 
 /// The default [PoolTransaction] for the [Pool](crate::Pool).
@@ -364,6 +379,16 @@ impl PoolTransaction for PooledTransaction {
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize {
         self.transaction.transaction.input().len()
+    }
+
+    /// Returns the transaction type
+    fn tx_type(&self) -> u8 {
+        self.transaction.tx_type().into()
+    }
+
+    /// Returns the length of the rlp encoded object
+    fn encoded_length(&self) -> usize {
+        self.transaction.length()
     }
 }
 

@@ -26,12 +26,12 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+//! use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory, EvmEnvProvider};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Client, Pool, Network>(client: Client, pool: Pool, network: Network)
 //! where
-//!     Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+//!     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //! {
@@ -51,16 +51,18 @@
 //! }
 //! ```
 
-pub use jsonrpsee::server::ServerBuilder;
+use hyper::{http::HeaderValue, Method};
 use jsonrpsee::{
-    core::{server::rpc_module::Methods, Error as RpcError},
+    core::{
+        server::{host_filtering::AllowHosts, rpc_module::Methods},
+        Error as RpcError,
+    },
     server::{Server, ServerHandle},
     RpcModule,
 };
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{AdminApi, DebugApi, EthApi, NetApi, TraceApi, Web3Api};
 use reth_rpc_api::servers::*;
 use reth_transaction_pool::TransactionPool;
@@ -72,20 +74,21 @@ use std::{
     str::FromStr,
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
+use tower::layer::util::{Identity, Stack};
+use tower_http::cors::CorsLayer;
 
-/// The default port for the http server
-pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
-/// The default port for the ws server
-pub const DEFAULT_WS_RPC_PORT: u16 = 8546;
+/// Auth server utilities.
+pub mod auth;
 
-/// The default IPC endpoint
-#[cfg(windows)]
-pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
+/// Common RPC constants.
+pub mod constants;
+use constants::*;
 
-/// The default IPC endpoint
-#[cfg(not(windows))]
-pub const DEFAULT_IPC_ENDPOINT: &str = "/tmp/reth.ipc";
+/// Cors utilities.
+mod cors;
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Client, Pool, Network>(
@@ -96,7 +99,8 @@ pub async fn launch<Client, Pool, Network>(
     server_config: impl Into<RpcServerConfig>,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -132,7 +136,7 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
     /// Configure the client instance.
     pub fn with_client<C>(self, client: C) -> RpcModuleBuilder<C, Pool, Network>
     where
-        C: BlockProvider + StateProviderFactory + 'static,
+        C: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     {
         let Self { pool, network, .. } = self;
         RpcModuleBuilder { client, network, pool }
@@ -159,7 +163,8 @@ impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network> {
 
 impl<Client, Pool, Network> RpcModuleBuilder<Client, Pool, Network>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -260,7 +265,12 @@ impl RpcModuleSelection {
         network: Network,
     ) -> RpcModule<()>
     where
-        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Client: BlockProvider
+            + HeaderProvider
+            + StateProviderFactory
+            + EvmEnvProvider
+            + Clone
+            + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
     {
@@ -399,7 +409,8 @@ where
 
 impl<Client, Pool, Network> RethModuleRegistry<Client, Pool, Network>
 where
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+    Client:
+        BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
 {
@@ -500,10 +511,12 @@ where
 pub struct RpcServerConfig {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder>,
-    /// Configs for WS server
-    ws_server_config: Option<ServerBuilder>,
+    /// Cors Domains
+    http_cors_domains: Option<String>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
+    /// Configs for WS server
+    ws_server_config: Option<ServerBuilder>,
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
@@ -529,10 +542,14 @@ impl RpcServerConfig {
     pub fn ipc(config: IpcServerBuilder) -> Self {
         Self::default().with_ipc(config)
     }
-
     /// Configures the http server
     pub fn with_http(mut self, config: ServerBuilder) -> Self {
         self.http_server_config = Some(config.http_only());
+        self
+    }
+    /// Configure the corsdomains
+    pub fn with_cors(mut self, cors_domain: String) -> Self {
+        self.http_cors_domains = Some(cors_domain);
         self
     }
 
@@ -609,9 +626,18 @@ impl RpcServerConfig {
         )));
 
         if let Some(builder) = self.http_server_config {
-            let http_server = builder.build(http_socket_addr).await?;
-            server.http_local_addr = http_server.local_addr().ok();
-            server.http = Some(http_server);
+            if let Some(cors) = self.http_cors_domains.as_deref().map(cors::create_cors_layer) {
+                let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
+                let middleware = tower::ServiceBuilder::new().layer(cors);
+                let http_server =
+                    builder.set_middleware(middleware).build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::WithCors(http_server));
+            } else {
+                let http_server = builder.build(http_socket_addr).await?;
+                server.http_local_addr = http_server.local_addr().ok();
+                server.http = Some(HttpServer::Plain(http_server));
+            }
         }
 
         let ws_socket_addr = self.ws_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
@@ -742,11 +768,18 @@ pub struct RpcServer {
     /// The address of the ws server
     ws_local_addr: Option<SocketAddr>,
     /// http server
-    http: Option<Server>,
+    http: Option<HttpServer>,
     /// ws server
     ws: Option<Server>,
     /// ipc server
     ipc: Option<IpcServer>,
+}
+/// Http Servers Enum
+pub enum HttpServer {
+    /// Http server
+    Plain(Server),
+    /// Http server with cors
+    WithCors(Server<Stack<CorsLayer, Identity>>),
 }
 
 // === impl RpcServer ===
@@ -787,7 +820,14 @@ impl RpcServer {
         if let Some((server, module)) =
             self.http.and_then(|server| http.map(|module| (server, module)))
         {
-            handle.http = Some(server.start(module)?);
+            match server {
+                HttpServer::Plain(server) => {
+                    handle.http = Some(server.start(module)?);
+                }
+                HttpServer::WithCors(server) => {
+                    handle.http = Some(server.start(module)?);
+                }
+            }
         }
 
         if let Some((server, module)) = self.ws.and_then(|server| ws.map(|module| (server, module)))

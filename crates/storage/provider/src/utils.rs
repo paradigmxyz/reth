@@ -3,7 +3,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{provider::Error as ProviderError, Result};
+use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{SealedBlock, U256};
 
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.

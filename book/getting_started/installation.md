@@ -15,7 +15,7 @@ Then clone the repository and build the binary:
 ```console
 git clone https://github.com/paradigmxyz/reth
 cd reth
-cargo install --release --locked --path . --bin reth
+cargo install --locked --path bin/reth --bin reth
 ```
 
 The binary will now be in a platform specific folder, and should be accessible as `reth` via the command line.

@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::{rpc::BlockId, Bytes, H256};
+use reth_primitives::{BlockId, Bytes, H256};
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     CallRequest, Index,

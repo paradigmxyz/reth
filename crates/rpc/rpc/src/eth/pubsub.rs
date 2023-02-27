@@ -3,7 +3,7 @@
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
 use reth_interfaces::events::ChainEventSubscriptions;
 use reth_primitives::{rpc::FilteredParams, TxHash};
-use reth_provider::BlockProvider;
+use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
     pubsub::{Params, SubscriptionKind, SubscriptionResult as EthSubscriptionResult},
@@ -50,7 +50,7 @@ impl<Client, Pool, Events> EthPubSub<Client, Pool, Events> {
 
 impl<Client, Pool, Events> EthPubSubApiServer for EthPubSub<Client, Pool, Events>
 where
-    Client: BlockProvider + Clone + 'static,
+    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
 {
@@ -78,7 +78,7 @@ async fn handle_accepted<Client, Pool, Events>(
     kind: SubscriptionKind,
     params: Option<Params>,
 ) where
-    Client: BlockProvider + 'static,
+    Client: BlockProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + 'static,
 {
@@ -141,7 +141,7 @@ where
 
 impl<Client, Pool, Events> EthPubSubInner<Client, Pool, Events>
 where
-    Client: BlockProvider + 'static,
+    Client: BlockProvider + EvmEnvProvider + 'static,
     Events: ChainEventSubscriptions + 'static,
 {
     /// Returns a stream that yields all new RPC blocks.

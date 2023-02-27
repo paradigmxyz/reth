@@ -1,15 +1,14 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, HeaderProvider,
-    StateProvider, StateProviderFactory, TransactionsProvider,
+    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
+    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
-    keccak256,
-    rpc::{BlockId, BlockNumber},
-    Account, Address, Block, BlockHash, Bytes, ChainInfo, Header, StorageKey, StorageValue,
-    TransactionSigned, TxHash, H256, U256,
+    keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag, Bytes,
+    ChainInfo, Header, StorageKey, StorageValue, TransactionSigned, TxHash, H256, U256,
 };
+use revm_primitives::{BlockEnv, CfgEnv, Env};
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
 
 /// A mock implementation for Provider interfaces.
@@ -110,6 +109,15 @@ impl HeaderProvider for MockEthProvider {
         }))
     }
 
+    fn header_td_by_number(&self, number: BlockNumber) -> Result<Option<U256>> {
+        let lock = self.headers.lock();
+        let sum = lock
+            .values()
+            .filter(|h| h.number <= number)
+            .fold(U256::ZERO, |td, h| td + h.difficulty);
+        Ok(Some(sum))
+    }
+
     fn headers_range(
         &self,
         range: impl RangeBounds<reth_primitives::BlockNumber>,
@@ -191,14 +199,18 @@ impl BlockProvider for MockEthProvider {
     fn block(&self, id: BlockId) -> Result<Option<Block>> {
         let lock = self.blocks.lock();
         match id {
-            BlockId::Hash(hash) => Ok(lock.get(&H256(hash.0)).cloned()),
-            BlockId::Number(BlockNumber::Number(num)) => {
-                Ok(lock.values().find(|b| b.number == num.as_u64()).cloned())
+            BlockId::Hash(hash) => Ok(lock.get(hash.as_ref()).cloned()),
+            BlockId::Number(BlockNumberOrTag::Number(num)) => {
+                Ok(lock.values().find(|b| b.number == num).cloned())
             }
             _ => {
                 unreachable!("unused in network tests")
             }
         }
+    }
+
+    fn ommers(&self, _id: BlockId) -> Result<Option<Vec<Header>>> {
+        Ok(None)
     }
 }
 
@@ -209,6 +221,11 @@ impl AccountProvider for MockEthProvider {
 }
 
 impl StateProvider for MockEthProvider {
+    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
+        let lock = self.accounts.lock();
+        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
+    }
+
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
         let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
@@ -220,14 +237,59 @@ impl StateProvider for MockEthProvider {
             }
         }))
     }
+}
 
-    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
-        let lock = self.accounts.lock();
-        Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
+impl EvmEnvProvider for MockEthProvider {
+    fn fill_env_at(&self, _env: &mut Env, _at: BlockId) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn fill_env_with_header(&self, _env: &mut Env, _header: &Header) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn fill_block_env_at(&self, _block_env: &mut BlockEnv, _at: BlockId) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn fill_block_env_with_header(
+        &self,
+        _block_env: &mut BlockEnv,
+        _header: &Header,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn fill_cfg_env_at(&self, _cfg: &mut CfgEnv, _at: BlockId) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn fill_cfg_env_with_header(&self, _cfg: &mut CfgEnv, _header: &Header) -> Result<()> {
+        unimplemented!()
     }
 }
 
 impl StateProviderFactory for MockEthProvider {
+    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
+    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
+
+    fn latest(&self) -> Result<Self::LatestSP<'_>> {
+        Ok(self)
+    }
+
+    fn history_by_block_number(
+        &self,
+        _block: reth_primitives::BlockNumber,
+    ) -> Result<Self::HistorySP<'_>> {
+        todo!()
+    }
+
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+        todo!()
+    }
+}
+
+impl StateProviderFactory for Arc<MockEthProvider> {
     type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
     type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
 

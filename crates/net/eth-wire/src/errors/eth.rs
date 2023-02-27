@@ -1,5 +1,7 @@
 //! Error handling for (`EthStream`)[crate::EthStream]
-use crate::{errors::P2PStreamError, DisconnectReason};
+use crate::{
+    errors::P2PStreamError, version::ParseVersionError, DisconnectReason, EthMessageID, EthVersion,
+};
 use reth_primitives::{Chain, ValidationError, H256};
 use std::io;
 
@@ -10,9 +12,15 @@ pub enum EthStreamError {
     #[error(transparent)]
     P2PStreamError(#[from] P2PStreamError),
     #[error(transparent)]
+    ParseVersionError(#[from] ParseVersionError),
+    #[error(transparent)]
     EthHandshakeError(#[from] EthHandshakeError),
+    #[error("For {0:?} version, message id({1:?}) is invalid")]
+    EthInvalidMessageError(EthVersion, EthMessageID),
     #[error("message size ({0}) exceeds max length (10MB)")]
     MessageTooBig(usize),
+    #[error("TransactionHashes invalid len of fields: hashes_len={hashes_len} types_len={types_len} sizes_len={sizes_len}")]
+    TransactionHashesInvalidLenOfFields { hashes_len: usize, types_len: usize, sizes_len: usize },
 }
 
 // === impl EthStreamError ===
@@ -66,4 +74,6 @@ pub enum EthHandshakeError {
     MismatchedProtocolVersion { expected: u8, got: u8 },
     #[error("mismatched chain in Status message. expected: {expected:?}, got: {got:?}")]
     MismatchedChain { expected: Chain, got: Chain },
+    #[error("total difficulty bitlen is too large. maximum: {maximum:?}, got: {got:?}")]
+    TotalDifficultyBitLenTooLarge { maximum: usize, got: usize },
 }

@@ -18,6 +18,28 @@ pub enum BlockTransactions {
     Full(Vec<Transaction>),
 }
 
+/// Determines how the `transactions` field of [Block] should be filled.
+///
+/// This essentially represents the `full:bool` argument in RPC calls that determine whether the
+/// response should include full transaction objects or just the hashes.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum BlockTransactionsKind {
+    /// Only include hashes: [BlockTransactions::Hashes]
+    Hashes,
+    /// Include full transaction objects: [BlockTransactions::Full]
+    Full,
+}
+
+impl From<bool> for BlockTransactionsKind {
+    fn from(is_full: bool) -> Self {
+        if is_full {
+            BlockTransactionsKind::Full
+        } else {
+            BlockTransactionsKind::Hashes
+        }
+    }
+}
+
 /// Error that can occur when converting other types to blocks
 #[derive(Debug, thiserror::Error)]
 pub enum BlockError {
@@ -39,7 +61,7 @@ pub struct Block {
     pub uncles: Vec<H256>,
     /// Transactions
     pub transactions: BlockTransactions,
-    /// Size in bytes
+    /// Integer the size of this block in bytes.
     pub size: Option<U256>,
     /// Base Fee for post-EIP1559 blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,20 +71,59 @@ pub struct Block {
 }
 
 impl Block {
-    /// Create a new block response from a [primitive block](reth_primitives::Block), using the
+    /// Converts the given primitive block into a [Block] response with the given
+    /// [BlockTransactionsKind]
+    ///
+    /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
+    pub fn from_block(
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+        kind: BlockTransactionsKind,
+        block_hash: Option<H256>,
+    ) -> Result<Self, BlockError> {
+        match kind {
+            BlockTransactionsKind::Hashes => {
+                Ok(Self::from_block_with_tx_hashes(block, total_difficulty, block_hash))
+            }
+            BlockTransactionsKind::Full => {
+                Self::from_block_full(block, total_difficulty, block_hash)
+            }
+        }
+    }
+
+    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
     /// total difficulty to populate its field in the rpc response.
+    ///
+    /// This will populate the `transactions` field with only the hashes of the transactions in the
+    /// block: [BlockTransactions::Hashes]
+    pub fn from_block_with_tx_hashes(
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+        block_hash: Option<H256>,
+    ) -> Self {
+        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
+        let transactions = block.body.iter().map(|tx| tx.hash).collect();
+
+        Self::from_block_with_transactions(
+            block_hash,
+            block,
+            total_difficulty,
+            BlockTransactions::Hashes(transactions),
+        )
+    }
+
+    /// Create a new [Block] response from a [primitive block](reth_primitives::Block), using the
+    /// total difficulty to populate its field in the rpc response.
+    ///
+    /// This will populate the `transactions` field with the _full_ [Transaction] objects:
+    /// [BlockTransactions::Full]
     pub fn from_block_full(
         block: PrimitiveBlock,
         total_difficulty: U256,
+        block_hash: Option<H256>,
     ) -> Result<Self, BlockError> {
-        let block_hash = block.header.hash_slow();
-        let block_length = block.length();
+        let block_hash = block_hash.unwrap_or_else(|| block.header.hash_slow());
         let block_number = block.number;
-        let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
-        let base_fee_per_gas = block.header.base_fee_per_gas;
-
-        let header = Header::from_primitive_with_hash(block.header, block_hash);
-
         let mut transactions = Vec::with_capacity(block.body.len());
         for (idx, tx) in block.body.iter().enumerate() {
             let signed_tx = tx.clone().into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
@@ -74,15 +135,35 @@ impl Block {
             ))
         }
 
-        Ok(Self {
+        Ok(Self::from_block_with_transactions(
+            block_hash,
+            block,
+            total_difficulty,
+            BlockTransactions::Full(transactions),
+        ))
+    }
+
+    fn from_block_with_transactions(
+        block_hash: H256,
+        block: PrimitiveBlock,
+        total_difficulty: U256,
+        transactions: BlockTransactions,
+    ) -> Self {
+        let block_length = block.length();
+        let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
+        let base_fee_per_gas = block.header.base_fee_per_gas;
+
+        let header = Header::from_primitive_with_hash(block.header, block_hash);
+
+        Self {
             header,
             uncles,
-            transactions: BlockTransactions::Full(transactions),
+            transactions,
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
             total_difficulty,
             size: Some(U256::from(block_length)),
             withdrawals: block.withdrawals,
-        })
+        }
     }
 }
 
@@ -127,8 +208,6 @@ pub struct Header {
     pub mix_hash: H256,
     /// Nonce
     pub nonce: Option<H64>,
-    /// Size in bytes
-    pub size: Option<U256>,
 }
 
 // === impl Header ===
@@ -138,8 +217,6 @@ impl Header {
     ///
     /// CAUTION: this takes the header's hash as is and does _not_ calculate the hash.
     pub fn from_primitive_with_hash(primitive_header: PrimitiveHeader, block_hash: H256) -> Self {
-        let header_length = primitive_header.length();
-
         let PrimitiveHeader {
             parent_hash,
             ommers_hash,
@@ -179,7 +256,6 @@ impl Header {
             difficulty,
             mix_hash,
             nonce: Some(nonce.to_be_bytes().into()),
-            size: Some(U256::from(header_length)),
         }
     }
 }
@@ -239,5 +315,19 @@ impl<T: Serialize> Serialize for Rich<T> {
         } else {
             Err(S::Error::custom("Unserializable structures: expected objects"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_full_conversion() {
+        let full = true;
+        assert_eq!(BlockTransactionsKind::Full, full.into());
+
+        let full = false;
+        assert_eq!(BlockTransactionsKind::Hashes, full.into());
     }
 }
