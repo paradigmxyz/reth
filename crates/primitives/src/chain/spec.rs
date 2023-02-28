@@ -145,7 +145,7 @@ impl ChainSpec {
             None
         };
 
-        let header = Header {
+        Header {
             gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce,
@@ -155,12 +155,8 @@ impl ChainSpec {
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
             base_fee_per_gas,
-            transactions_root: EMPTY_ROOT,
-            receipts_root: EMPTY_ROOT,
-            ommers_hash: EMPTY_OMMER_ROOT,
             ..Default::default()
-        };
-        header
+        }
     }
 
     /// Get the hash of the genesis block.
