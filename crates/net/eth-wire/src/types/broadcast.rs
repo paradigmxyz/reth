@@ -200,6 +200,28 @@ impl From<Vec<H256>> for NewPooledTransactionHashes66 {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NewPooledTransactionHashes68 {
     /// Transaction types for new transactions that have appeared on the network.
+    ///
+    /// ## Note on RLP encoding and decoding
+    ///
+    /// In the [eth/68 spec](https://eips.ethereum.org/EIPS/eip-5793#specification) this is defined
+    /// the following way:
+    ///  * `[type_0: B_1, type_1: B_1, ...]`
+    ///
+    /// This would make it seem like the [`Encodable`](reth_rlp::Encodable) and
+    /// [`Decodable`](reth_rlp::Decodable) implementations should directly use a `Vec<u8>` for
+    /// encoding and decoding, because it looks like this field should be encoded as a _list_ of
+    /// bytes.
+    ///
+    /// However, [this is implemented in geth as a `[]byte`
+    /// type](https://github.com/ethereum/go-ethereum/blob/82d934b1dd80cdd8190803ea9f73ed2c345e2576/eth/protocols/eth/protocol.go#L308-L313),
+    /// which [ends up being encoded as a RLP
+    /// string](https://github.com/ethereum/go-ethereum/blob/82d934b1dd80cdd8190803ea9f73ed2c345e2576/rlp/encode_test.go#L171-L176),
+    /// **not** a RLP list.
+    ///
+    /// Because of this, we do not directly use the `Vec<u8>` when encoding and decoding, and
+    /// instead use the [`Encodable`](reth_rlp::Encodable) and [`Decodable`](reth_rlp::Decodable)
+    /// implementations for `&[u8]` instead, which encodes into a RLP string, and expects an RLP
+    /// string when decoding.
     pub types: Vec<u8>,
     /// Transaction sizes for new transactions that have appeared on the network.
     pub sizes: Vec<usize>,
