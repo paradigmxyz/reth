@@ -1,10 +1,7 @@
 use crate::{
-    constants::EIP1559_INITIAL_BASE_FEE,
-    forkid::ForkFilterKey,
-    header::Head,
-    proofs::genesis_state_root,
-    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
-    H160, H256, U256,
+    constants::EIP1559_INITIAL_BASE_FEE, forkid::ForkFilterKey, header::Head,
+    proofs::genesis_state_root, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
+    GenesisAccount, Hardfork, Header, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
