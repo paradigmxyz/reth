@@ -547,12 +547,19 @@ enum PooledTransactionsHashesBuilder {
 
 impl PooledTransactionsHashesBuilder {
     fn push(&mut self, tx: &PropagateTransaction) {
+        let soft_limit = 4096;
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(tx.hash()),
+            PooledTransactionsHashesBuilder::Eth66(msg) => {
+                if msg.0.len() <= soft_limit {
+                    msg.0.push(tx.hash());
+                }
+            },
             PooledTransactionsHashesBuilder::Eth68(msg) => {
-                msg.hashes.push(tx.hash());
-                msg.sizes.push(tx.length);
-                msg.types.push(tx.tx_type);
+                if msg.hashes.len() <= soft_limit {
+                    msg.hashes.push(tx.hash());
+                    msg.sizes.push(tx.length);
+                    msg.types.push(tx.tx_type);
+                }
             }
         }
     }
