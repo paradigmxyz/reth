@@ -78,12 +78,12 @@ where
 
     /// Overrides the database
     pub fn with_db<OtherDB: StateProvider>(
-        self,
+        &self,
         db: &'a mut SubState<OtherDB>,
     ) -> Executor<'a, OtherDB> {
         let mut evm = EVM::new();
         evm.database(db);
-        Executor { chain_spec: self.chain_spec.clone(), evm, stack: self.stack }
+        Executor { chain_spec: self.chain_spec.clone(), evm, stack: self.stack.clone() }
     }
 
     fn recover_senders(
@@ -661,7 +661,7 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
+        let mut executor = Executor::new(chain_spec, &mut db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
@@ -790,7 +790,7 @@ mod tests {
 
         let mut db = SubState::new(State::new(db));
         // execute chain and verify receipts
-        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
+        let mut executor = Executor::new(chain_spec, &mut db);
         let out = executor
             .execute_and_verify_receipt(
                 &Block { header, body: vec![], ommers: vec![], withdrawals: None },
@@ -881,7 +881,7 @@ mod tests {
         let mut db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
+        let mut executor = Executor::new(chain_spec, &mut db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
@@ -930,7 +930,7 @@ mod tests {
         let mut db = SubState::new(State::new(StateProviderTest::default()));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(Arc::new(chain_spec), &mut db);
+        let mut executor = Executor::new(chain_spec, &mut db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
         assert_eq!(out.tx_changesets.len(), 0, "No tx");
 
