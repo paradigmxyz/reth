@@ -56,6 +56,7 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
                 .tx
                 .cursor_dup_read::<tables::AccountChangeSet>()?
                 .seek_by_key_subkey(changeset_transition_id, address)?
+                .filter(|acc| acc.address == address)
                 .ok_or(ProviderError::AccountChangeset {
                     transition_id: changeset_transition_id,
                     address,
@@ -95,6 +96,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
                 .tx
                 .cursor_dup_read::<tables::StorageChangeSet>()?
                 .seek_by_key_subkey((changeset_transition_id, address).into(), storage_key)?
+                .filter(|entry| entry.key == storage_key)
                 .ok_or(ProviderError::StorageChangeset {
                     transition_id: changeset_transition_id,
                     address,
@@ -107,8 +109,9 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
             Ok(self
                 .tx
                 .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)
-                .map(|r| r.map(|entry| entry.value))?)
+                .seek_by_key_subkey(address, storage_key)?
+                .filter(|entry| entry.key == storage_key)
+                .map(|entry| entry.value))
         }
     }
 
