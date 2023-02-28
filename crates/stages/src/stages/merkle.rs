@@ -158,15 +158,20 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let root = loader
+        let block_root = loader
             .update_root(tx, current_root, from_transition..to_transition)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
-        if root != target_root {
-            return Err(StageError::Fatal(
-                format!("Expected root [{target_root}] does not match calculated one [{root}]")
-                    .into(),
-            ))
+        if block_root != target_root {
+            let unwind_to = input.unwind_to;
+            warn!(target: "sync::stages::merkle::unwind", ?unwind_to, got = ?block_root, expected = ?target_root, "Block's root state failed verification");
+            return Err(StageError::Validation {
+                block: unwind_to,
+                error: consensus::Error::BodyStateRootDiff {
+                    got: block_root,
+                    expected: target_root,
+                },
+            })
         }
 
         info!(target: "sync::stages::merkle::unwind", "Stage finished");
