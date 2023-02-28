@@ -50,6 +50,8 @@ thiserror = "1.0"
 hex = "0.4"
 rand = "0.8.5"
 tracing = "0.1"
+schnellru = "0.2"
+futures = "0.3.26"
 
 [dev-dependencies]
 jsonrpsee = { version = "0.16", features = ["client"]}
