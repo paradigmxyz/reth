@@ -79,7 +79,12 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::UnknownBlockNumber |
-            EthApiError::InvalidBlockRange => rpc_err(INVALID_PARAMS_CODE, value.to_string(), None),
+            EthApiError::InvalidBlockRange |
+            EthApiError::ConflictingRequestGasPrice { .. } |
+            EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
+            EthApiError::RequestLegacyGasPriceAndTipSet { .. } => {
+                rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
+            }
             EthApiError::InvalidTransaction(err) => err.into(),
             err => internal_rpc_err(err.to_string()),
         }
