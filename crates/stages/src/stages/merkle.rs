@@ -14,6 +14,9 @@ pub const MERKLE_EXECUTION: StageId = StageId("MerkleExecute");
 /// The [`StageId`] of the merkle hashing unwind stage.
 pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
 
+/// The [`StageId`] of the merkle hashing unwind and execution stage.
+pub const MERKLE_BOTH: StageId = StageId("MerkleBoth");
+
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
 /// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
@@ -72,7 +75,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             MerkleStage::Execution { .. } => MERKLE_EXECUTION,
             MerkleStage::Unwind => MERKLE_UNWIND,
             #[cfg(any(test, feature = "test-utils"))]
-            MerkleStage::Both { .. } => unreachable!(),
+            MerkleStage::Both { .. } => MERKLE_BOTH,
         }
     }
 
