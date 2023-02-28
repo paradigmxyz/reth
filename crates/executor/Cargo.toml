@@ -11,6 +11,7 @@ readme = "README.md"
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
 reth-revm = { path = "../revm" }
+reth-revm-inspectors = { path = "../revm/revm-inspectors" }
 reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
