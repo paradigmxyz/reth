@@ -233,7 +233,7 @@ where
 
         let Some(end_block) = self.inner.client.block_number_for_id(newest_block).to_rpc_result()? else { return Err(EthApiError::RequestedBlockBeyondHead(head_block).into())};
 
-        if end_block < block_count {
+        if end_block > head_block || end_block < block_count {
             return Err(EthApiError::RequestedBlockBeyondHead(head_block).into())
         }
 
@@ -402,7 +402,7 @@ mod tests {
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-    use std::collections::HashMap;
+    use std::{collections::HashMap, time::Duration};
 
     use crate::EthApi;
 
@@ -423,8 +423,12 @@ mod tests {
 
         let mut headers = HashMap::new();
 
+        let mock_provider = MockEthProvider::default();
+        let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
+
         let mut chain_event_subscriptions = TestChainEventSubscriptions::new();
-        eth_api.start_fee_history_cache(chain_event_subscriptions.subscribe_new_blocks());
+        let fee_history_cache_handle =
+            eth_api.start_fee_history_cache(chain_event_subscriptions.subscribe_new_blocks());
 
         let mut oldest_block = None;
         let mut gas_used_ratios = Vec::new();
@@ -445,6 +449,10 @@ mod tests {
                 ..Default::default()
             };
 
+            if i == 0 {
+                eth_api.client().add_header(hash, header.clone());
+            }
+
             headers.insert(hash, header.clone());
 
             chain_event_subscriptions.add_new_block(hash, header);
@@ -454,6 +462,11 @@ mod tests {
             base_fees_per_gas
                 .push(base_fee_per_gas.map(|fee| U256::try_from(fee).unwrap()).unwrap_or_default());
         }
+
+        // TODO: i don't like this bs, we need to clearly communicate channel closure instead
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        drop(chain_event_subscriptions);
+        fee_history_cache_handle.await.unwrap();
 
         // Success with all blocks cached
         let fee_history =
@@ -473,7 +486,7 @@ mod tests {
         let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
 
         // Requested block beyond head because `newest_block` is the latest mocked block,
-        // but we request `new
+        // but we request `newest_block + 1`
         let response = eth_api.fee_history(1.into(), (newest_block + 1).into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };

@@ -5,17 +5,20 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 #[derive(Default)]
+/// A test ChainEventSubscriptions
 pub struct TestChainEventSubscriptions {
     new_blocks_txs: Mutex<Vec<UnboundedSender<NewBlockNotification>>>,
 }
 
 impl TestChainEventSubscriptions {
+    /// Instantiates an empty [`TestChainEventSubscriptions`] with no new blocks queued
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Adds new block to the queue that can be consumed with [`TestChainEventSubscriptions::subscribe_new_blocks`]
     pub fn add_new_block(&mut self, hash: H256, header: Header) {
-        let header = Arc::new(header.clone());
+        let header = Arc::new(header);
         self.new_blocks_txs
             .lock()
             .as_mut()
