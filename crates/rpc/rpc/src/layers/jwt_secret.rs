@@ -58,6 +58,8 @@ impl JwtSecret {
     /// Returns an error if one of the following applies:
     /// - `hex` is not a valid hexadecimal string
     /// - `hex` argument length is less than `JWT_SECRET_LEN`
+    ///
+    /// This strips the leading `0x`, if any.
     pub fn from_hex<S: AsRef<str>>(hex: S) -> Result<Self, JwtError> {
         let hex: &str = hex.as_ref().trim().trim_start_matches("0x");
         if hex.len() != JWT_SECRET_LEN {
