@@ -4819,15 +4819,7 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0"
 dependencies = [
- "arbitrary",
- "async-trait",
- "auto_impl 1.0.1",
- "bytes",
- "futures",
- "heapless",
- "hex-literal",
- "modular-bitfield",
- "parity-scale-codec",
+ "auto_impl",
  "parking_lot 0.12.1",
  "reth-db",
  "reth-interfaces",
@@ -5111,7 +5103,7 @@ version = "0.1.0"
 dependencies = [
  "aquamarine",
  "async-trait",
- "auto_impl 1.0.1",
+ "auto_impl",
  "bitflags",
  "fnv",
  "futures-util",
