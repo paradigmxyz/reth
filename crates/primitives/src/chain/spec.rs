@@ -1,7 +1,10 @@
 use crate::{
-    constants::EIP1559_INITIAL_BASE_FEE, forkid::ForkFilterKey, header::Head,
-    proofs::{genesis_state_root, EMPTY_ROOT}, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
-    GenesisAccount, Hardfork, Header, H160, H256, U256, EMPTY_OMMER_ROOT,
+    constants::EIP1559_INITIAL_BASE_FEE,
+    forkid::ForkFilterKey,
+    header::Head,
+    proofs::{genesis_state_root, EMPTY_ROOT},
+    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
+    EMPTY_OMMER_ROOT, H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
@@ -157,7 +160,6 @@ impl ChainSpec {
             ommers_hash: EMPTY_OMMER_ROOT,
             ..Default::default()
         };
-        println!("genesis header: {:?}", header);
         header
     }
 
@@ -1090,12 +1092,13 @@ mod tests {
             }
         }
         "#;
-        let genesis = serde_json::from_str::<AllGenesisFormats>(&hive_json).unwrap();
+        let genesis = serde_json::from_str::<AllGenesisFormats>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
-        println!("{chainspec:#?}");
         assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(Chain::Named(EtherType::Chain::Optimism), chainspec.chain);
-        let expected_state_root: H256 = hex_literal::hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
+        let expected_state_root: H256 =
+            hex_literal::hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360")
+                .into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
         let hard_forks = vec![
             Hardfork::Byzantium,

@@ -6,9 +6,8 @@ use crate::{
     utils::serde_helpers::deserialize_stringified_u64,
     Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
-use bytes::BytesMut;
 use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
-use reth_rlp::{length_of_length, Encodable, Header as RlpHeader, encode_fixed_size};
+use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
 use serde::{Deserialize, Serialize};
 use triehash::sec_trie_root;
 
@@ -85,12 +84,11 @@ impl Encodable for GenesisAccount {
             .as_ref()
             .map_or(EMPTY_ROOT, |storage| {
                 if storage.is_empty() {
-                    return EMPTY_ROOT;
+                    return EMPTY_ROOT
                 }
-                println!("{storage:#?}");
                 let storage_values =
                     storage.iter().filter(|(_k, &v)| v != KECCAK_EMPTY).map(|(&k, v)| {
-                        let value = U256::from_be_bytes(*v);
+                        let value = U256::from_be_bytes(**v);
                         (k, encode_fixed_size(&value))
                     });
                 sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
