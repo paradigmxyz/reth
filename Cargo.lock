@@ -757,8 +757,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.1.6"
-source = "git+https://github.com/rkrasiuk/clap?branch=rkrasiuk/fix-almost-swapped-lint#c1caf462ce40fc541066dfb2a9cccb586777a757"
+version = "4.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3061d6db6d8fcbbd4b05e057f2acace52e64e96b498c08c2d7a4e65addd340"
 dependencies = [
  "bitflags",
  "clap_derive",
@@ -771,8 +772,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.1.0"
-source = "git+https://github.com/rkrasiuk/clap?branch=rkrasiuk/fix-almost-swapped-lint#c1caf462ce40fc541066dfb2a9cccb586777a757"
+version = "4.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34d122164198950ba84a918270a3bb3f7ededd25e15f7451673d986f55bd2667"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -793,7 +795,8 @@ dependencies = [
 [[package]]
 name = "clap_lex"
 version = "0.3.2"
-source = "git+https://github.com/rkrasiuk/clap?branch=rkrasiuk/fix-almost-swapped-lint#c1caf462ce40fc541066dfb2a9cccb586777a757"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "350b9cf31731f9957399229e9b2adc51eeabdfbe9d71d9a0552275fd12710d09"
 dependencies = [
  "os_str_bytes",
 ]
@@ -4344,7 +4347,7 @@ name = "reth"
 version = "0.1.0"
 dependencies = [
  "backon",
- "clap 4.1.6",
+ "clap 4.1.7",
  "comfy-table",
  "confy",
  "crossterm",
