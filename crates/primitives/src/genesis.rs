@@ -8,7 +8,7 @@ use crate::{
 };
 use bytes::BytesMut;
 use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
-use reth_rlp::{length_of_length, Encodable, Header as RlpHeader};
+use reth_rlp::{length_of_length, Encodable, Header as RlpHeader, encode_fixed_size};
 use serde::{Deserialize, Serialize};
 use triehash::sec_trie_root;
 
@@ -90,9 +90,8 @@ impl Encodable for GenesisAccount {
                 println!("{storage:#?}");
                 let storage_values =
                     storage.iter().filter(|(_k, &v)| v != KECCAK_EMPTY).map(|(&k, v)| {
-                        let mut value_rlp = BytesMut::new();
-                        v.encode(&mut value_rlp);
-                        (k, v)
+                        let value = U256::from_be_bytes(*v);
+                        (k, encode_fixed_size(&value))
                     });
                 sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
             })
