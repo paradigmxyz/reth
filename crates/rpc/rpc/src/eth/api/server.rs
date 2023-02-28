@@ -101,10 +101,10 @@ where
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
     async fn uncle_by_block_hash_and_index(
         &self,
-        _hash: H256,
-        _index: Index,
+        hash: H256,
+        index: Index,
     ) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::ommer_by_block_and_index(self, hash, index).await?.map(|uncle| uncle.into()))
     }
 
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
