@@ -41,7 +41,7 @@ where
 
     /// Handler for: `eth_coinbase`
     async fn author(&self) -> Result<Address> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(self.pool().status().coinbase)
     }
 
     /// Handler for: `eth_accounts`

@@ -89,14 +89,12 @@ pub use crate::{
     validate::{TransactionValidationOutcome, TransactionValidator},
 };
 use crate::{
-    error::PoolResult,
-    pool::PoolInner,
-    traits::{NewTransactionEvent, PoolSize},
-    validate::ValidPoolTransaction,
+    error::PoolResult, pool::PoolInner, traits::NewTransactionEvent, validate::ValidPoolTransaction,
 };
-use reth_primitives::{TxHash, U256};
+use reth_primitives::{Address, TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
+use traits::PoolStatus;
 
 mod config;
 pub mod error;
@@ -190,8 +188,8 @@ where
 {
     type Transaction = T::Transaction;
 
-    fn status(&self) -> PoolSize {
-        self.pool.size()
+    fn status(&self) -> PoolStatus {
+        PoolStatus { size: self.pool.size(), coinbase: Address::zero() }
     }
 
     fn on_new_block(&self, event: OnNewBlockEvent) {

@@ -25,7 +25,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     type Transaction: PoolTransaction;
 
     /// Returns stats about the pool.
-    fn status(&self) -> PoolSize;
+    fn status(&self) -> PoolStatus;
 
     /// Event listener for when a new block was mined.
     ///
@@ -424,6 +424,15 @@ impl IntoRecoveredTransaction for PooledTransaction {
 }
 
 /// Represents the current status of the pool.
+#[derive(Debug, Clone)]
+pub struct PoolStatus {
+    /// Address of the pool owner.
+    pub coinbase: Address,
+    /// Stats about the size of the pool.
+    pub size: PoolSize,
+}
+
+/// Stats about the size of the pool.
 #[derive(Debug, Clone)]
 pub struct PoolSize {
     /// Number of transactions in the _pending_ sub-pool.
