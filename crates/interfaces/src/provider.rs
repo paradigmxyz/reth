@@ -71,4 +71,7 @@ pub enum ProviderError {
     /// Thrown when required header related data was not found but was required.
     #[error("requested data not found")]
     HeaderNotFound,
+    /// Thrown when the cache service task dropped
+    #[error("cache service task stopped")]
+    CacheServiceUnavailable,
 }

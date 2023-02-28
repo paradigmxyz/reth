@@ -4913,6 +4913,7 @@ name = "reth-rpc"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
  "hex",
  "http",
  "http-body",
@@ -4933,6 +4934,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "schnellru",
  "secp256k1 0.26.0",
  "serde",
  "serde_json",
@@ -5434,6 +5436,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "713cfb06c7059f3588fb8044c0fad1d09e3c01d225e25b9220dbfdcf16dbb1b3"
 dependencies = [
  "windows-sys 0.42.0",
+]
+
+[[package]]
+name = "schnellru"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "772575a524feeb803e5b0fcbc6dd9f367e579488197c94c6e4023aad2305774d"
+dependencies = [
+ "ahash 0.8.3",
+ "cfg-if",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]

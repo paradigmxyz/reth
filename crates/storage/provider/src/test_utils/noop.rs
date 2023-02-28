@@ -7,7 +7,7 @@ use reth_primitives::{
     Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytes, ChainInfo, Header, StorageKey,
     StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
-use revm_primitives::{BlockEnv, CfgEnv, Env};
+use revm_primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
 
 /// Supports various api interfaces for testing purposes.
@@ -102,11 +102,21 @@ impl StateProvider for NoopProvider {
 }
 
 impl EvmEnvProvider for NoopProvider {
-    fn fill_env_at(&self, _env: &mut Env, _at: BlockId) -> Result<()> {
+    fn fill_env_at(
+        &self,
+        _cfg: &mut CfgEnv,
+        _block_env: &mut BlockEnv,
+        _at: BlockId,
+    ) -> Result<()> {
         Ok(())
     }
 
-    fn fill_env_with_header(&self, _env: &mut Env, _header: &Header) -> Result<()> {
+    fn fill_env_with_header(
+        &self,
+        _cfg: &mut CfgEnv,
+        _block_env: &mut BlockEnv,
+        _header: &Header,
+    ) -> Result<()> {
         Ok(())
     }
 
