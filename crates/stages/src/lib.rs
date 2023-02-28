@@ -56,6 +56,11 @@ mod stage;
 mod trie;
 mod util;
 
+/// The real database type we use in Reth using MDBX.
+pub type DefaultDB<'a> = LatestStateProviderRef<'a, 'a, Tx<'a, RW, WriteMap>>;
+use reth_db::mdbx::{tx::Tx, WriteMap, RW};
+use reth_provider::LatestStateProviderRef;
+
 #[allow(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
