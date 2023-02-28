@@ -211,13 +211,13 @@ impl Encodable for NewPooledTransactionHashes68 {
     fn length(&self) -> usize {
         #[derive(RlpEncodable)]
         struct EncodableNewPooledTransactionHashes68<'a> {
-            types: Bytes,
+            types: &'a [u8],
             sizes: &'a Vec<usize>,
             hashes: &'a Vec<H256>,
         }
 
         let encodable = EncodableNewPooledTransactionHashes68 {
-            types: Bytes::from(self.types.clone()),
+            types: &self.types[..],
             sizes: &self.sizes,
             hashes: &self.hashes,
         };
@@ -227,13 +227,13 @@ impl Encodable for NewPooledTransactionHashes68 {
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         #[derive(RlpEncodable)]
         struct EncodableNewPooledTransactionHashes68<'a> {
-            types: Bytes,
+            types: &'a [u8],
             sizes: &'a Vec<usize>,
             hashes: &'a Vec<H256>,
         }
 
         let encodable = EncodableNewPooledTransactionHashes68 {
-            types: Bytes::from(self.types.clone()),
+            types: &self.types[..],
             sizes: &self.sizes,
             hashes: &self.hashes,
         };
