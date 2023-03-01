@@ -9,9 +9,9 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_executor::{execution_result::AccountChangeSet, executor::Executor};
+use reth_executor::executor::Executor;
 use reth_interfaces::provider::ProviderError;
-use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, U256};
+use reth_primitives::{Address, Block, ChainSpec, U256};
 use reth_provider::{LatestStateProviderRef, StateProvider, Transaction};
 use reth_revm::database::{State, SubState};
 use tracing::*;
@@ -119,7 +119,7 @@ impl<'a, S: StateProvider> ExecutionStage<'a, S> {
         let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
         // Fetch transactions, execute them and generate results
-        let mut block_change_patches = Vec::with_capacity(block_batch.len());
+        let mut changesets = Vec::with_capacity(block_batch.len());
         for (header, td, body, ommers, withdrawals) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
@@ -162,117 +162,11 @@ impl<'a, S: StateProvider> ExecutionStage<'a, S> {
                     Some(signers),
                 )
                 .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
-            block_change_patches.push((changeset, block_number));
+            changesets.push(changeset);
         }
 
-        // Get last tx count so that we can know amount of transaction in the block.
-        let mut current_transition_id = tx.get_block_transition(last_block)?;
-        info!(target: "sync::stages::execution", current_transition_id, blocks = block_change_patches.len(), "Inserting execution results");
-
-        // apply changes to plain database.
-        for (results, block_number) in block_change_patches.into_iter() {
-            let spurious_dragon_active = self
-                .executor
-                .chain_spec
-                .fork(Hardfork::SpuriousDragon)
-                .active_at_block(block_number);
-            // insert state change set
-            for result in results.tx_changesets.into_iter() {
-                for (address, account_change_set) in result.changeset.into_iter() {
-                    let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
-                    // apply account change to db. Updates AccountChangeSet and PlainAccountState
-                    // tables.
-                    trace!(target: "sync::stages::execution", ?address, current_transition_id, ?account, wipe_storage, "Applying account changeset");
-                    account.apply_to_db(
-                        &**tx,
-                        address,
-                        current_transition_id,
-                        spurious_dragon_active,
-                    )?;
-
-                    let storage_id = TransitionIdAddress((current_transition_id, address));
-
-                    // cast key to H256 and trace the change
-                    let storage = storage
-                        .into_iter()
-                        .map(|(key, (old_value,new_value))| {
-                            let hkey = H256(key.to_be_bytes());
-                            trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
-                            (hkey, old_value,new_value)
-                        })
-                        .collect::<Vec<_>>();
-
-                    let mut cursor_storage_changeset =
-                        tx.cursor_write::<tables::StorageChangeSet>()?;
-                    cursor_storage_changeset.seek_exact(storage_id)?;
-
-                    if wipe_storage {
-                        // iterate over storage and save them before entry is deleted.
-                        tx.cursor_read::<tables::PlainStorageState>()?
-                            .walk(Some(address))?
-                            .take_while(|res| {
-                                res.as_ref().map(|(k, _)| *k == address).unwrap_or_default()
-                            })
-                            .try_for_each(|entry| {
-                                let (_, old_value) = entry?;
-                                cursor_storage_changeset.append(storage_id, old_value)
-                            })?;
-
-                        // delete all entries
-                        tx.delete::<tables::PlainStorageState>(address, None)?;
-
-                        // insert storage changeset
-                        for (key, _, new_value) in storage {
-                            // old values are already cleared.
-                            if new_value != U256::ZERO {
-                                tx.put::<tables::PlainStorageState>(
-                                    address,
-                                    StorageEntry { key, value: new_value },
-                                )?;
-                            }
-                        }
-                    } else {
-                        // insert storage changeset
-                        for (key, old_value, new_value) in storage {
-                            let old_entry = StorageEntry { key, value: old_value };
-                            let new_entry = StorageEntry { key, value: new_value };
-                            // insert into StorageChangeSet
-                            cursor_storage_changeset.append(storage_id, old_entry)?;
-
-                            // Always delete old value as duplicate table, put will not override it
-                            tx.delete::<tables::PlainStorageState>(address, Some(old_entry))?;
-                            if new_value != U256::ZERO {
-                                tx.put::<tables::PlainStorageState>(address, new_entry)?;
-                            }
-                        }
-                    }
-                }
-                // insert bytecode
-                for (hash, bytecode) in result.new_bytecodes.into_iter() {
-                    // make different types of bytecode. Checked and maybe even analyzed (needs to
-                    // be packed). Currently save only raw bytes.
-                    let bytecode = bytecode.bytes();
-                    trace!(target: "sync::stages::execution", ?hash, ?bytecode, len = bytecode.len(), "Inserting bytecode");
-                    tx.put::<tables::Bytecodes>(hash, bytecode[..bytecode.len()].to_vec())?;
-
-                    // NOTE: bytecode bytes are not inserted in change set and can be found in
-                    // separate table
-                }
-                current_transition_id += 1;
-            }
-
-            // If there are any post block changes, we will add account changesets to db.
-            for (address, changeset) in results.block_changesets.into_iter() {
-                trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
-                changeset.apply_to_db(
-                    &**tx,
-                    address,
-                    current_transition_id,
-                    spurious_dragon_active,
-                )?;
-            }
-            current_transition_id += 1;
-        }
+        // put execution results to database
+        tx.insert_execution_result(changesets, &self.executor.chain_spec, last_block)?;
 
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
@@ -413,7 +307,8 @@ mod tests {
         models::AccountBeforeTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, StorageEntry, H160,
+        H256, MAINNET, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
