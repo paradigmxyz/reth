@@ -8,7 +8,7 @@ use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag, Bytes,
     ChainInfo, Header, StorageKey, StorageValue, TransactionSigned, TxHash, H256, U256,
 };
-use revm_primitives::{BlockEnv, CfgEnv, Env};
+use revm_primitives::{BlockEnv, CfgEnv};
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
 
 /// A mock implementation for Provider interfaces.
@@ -240,11 +240,21 @@ impl StateProvider for MockEthProvider {
 }
 
 impl EvmEnvProvider for MockEthProvider {
-    fn fill_env_at(&self, _env: &mut Env, _at: BlockId) -> Result<()> {
+    fn fill_env_at(
+        &self,
+        _cfg: &mut CfgEnv,
+        _block_env: &mut BlockEnv,
+        _at: BlockId,
+    ) -> Result<()> {
         unimplemented!()
     }
 
-    fn fill_env_with_header(&self, _env: &mut Env, _header: &Header) -> Result<()> {
+    fn fill_env_with_header(
+        &self,
+        _cfg: &mut CfgEnv,
+        _block_env: &mut BlockEnv,
+        _header: &Header,
+    ) -> Result<()> {
         unimplemented!()
     }
 

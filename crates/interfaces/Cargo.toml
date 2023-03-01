@@ -22,7 +22,7 @@ reth-eth-wire = { path = "../net/eth-wire" }
 
 # codecs
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
-futures = "0.3.25"
+futures = "0.3"
 tokio-stream = "0.1.11"
 rand = "0.8.5"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }

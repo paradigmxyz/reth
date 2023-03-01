@@ -1,6 +1,6 @@
 use crate::{
-    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
-    UnwindOutput,
+    exec_or_return, DefaultDB, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -9,12 +9,11 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_executor::execution_result::AccountChangeSet;
+use reth_executor::{execution_result::AccountChangeSet, executor::Executor};
 use reth_interfaces::provider::ProviderError;
-use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, MAINNET, U256};
-use reth_provider::{LatestStateProviderRef, Transaction};
+use reth_primitives::{Address, Block, ChainSpec, Hardfork, StorageEntry, H256, U256};
+use reth_provider::{LatestStateProviderRef, StateProvider, Transaction};
 use reth_revm::database::{State, SubState};
-use std::fmt::Debug;
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
@@ -48,24 +47,35 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// - [tables::AccountHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
-#[derive(Debug)]
-pub struct ExecutionStage {
-    /// Executor configuration.
-    pub chain_spec: ChainSpec,
+// false positive, we cannot derive it if !DB: Debug.
+#[allow(missing_debug_implementations)]
+pub struct ExecutionStage<'a, DB = DefaultDB<'a>>
+where
+    DB: StateProvider,
+{
+    /// The stage's internal executor
+    pub executor: Executor<'a, DB>,
     /// Commit threshold
     pub commit_threshold: u64,
 }
 
-impl Default for ExecutionStage {
-    fn default() -> Self {
-        Self { chain_spec: MAINNET.clone(), commit_threshold: 1_000 }
+impl<'a, DB: StateProvider> From<Executor<'a, DB>> for ExecutionStage<'a, DB> {
+    fn from(executor: Executor<'a, DB>) -> Self {
+        Self { executor, commit_threshold: 1_000 }
     }
 }
 
-impl ExecutionStage {
+impl<'a, DB: StateProvider> From<ChainSpec> for ExecutionStage<'a, DB> {
+    fn from(chain_spec: ChainSpec) -> Self {
+        let executor = Executor::from(chain_spec);
+        Self::from(executor)
+    }
+}
+
+impl<'a, S: StateProvider> ExecutionStage<'a, S> {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
-        &self,
+        &mut self,
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
@@ -87,7 +97,6 @@ impl ExecutionStage {
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Skip sender recovery and load signer from database.
         let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
-
         // Get block headers and bodies
         let block_batch = headers_cursor
             .walk_range(start_block..=end_block)?
@@ -106,6 +115,7 @@ impl ExecutionStage {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Create state provider with cached state
+
         let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
         // Fetch transactions, execute them and generate results
@@ -143,14 +153,15 @@ impl ExecutionStage {
 
             trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
-            let changeset = reth_executor::executor::execute_and_verify_receipt(
-                &Block { header, body: transactions, ommers, withdrawals },
-                td,
-                Some(signers),
-                &self.chain_spec,
-                &mut state_provider,
-            )
-            .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
+            // Configure the executor to use the current state.
+            let mut executor = self.executor.with_db(&mut state_provider);
+            let changeset = executor
+                .execute_and_verify_receipt(
+                    &Block { header, body: transactions, ommers, withdrawals },
+                    td,
+                    Some(signers),
+                )
+                .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
             block_change_patches.push((changeset, block_number));
         }
 
@@ -160,8 +171,11 @@ impl ExecutionStage {
 
         // apply changes to plain database.
         for (results, block_number) in block_change_patches.into_iter() {
-            let spurious_dragon_active =
-                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
+            let spurious_dragon_active = self
+                .executor
+                .chain_spec
+                .fork(Hardfork::SpuriousDragon)
+                .active_at_block(block_number);
             // insert state change set
             for result in results.tx_changesets.into_iter() {
                 for (address, account_change_set) in result.changeset.into_iter() {
@@ -266,15 +280,15 @@ impl ExecutionStage {
     }
 }
 
-impl ExecutionStage {
+impl<'a, DB: StateProvider> ExecutionStage<'a, DB> {
     /// Create new execution stage with specified config.
-    pub fn new(chain_spec: ChainSpec, commit_threshold: u64) -> Self {
-        Self { chain_spec, commit_threshold }
+    pub fn new(executor: Executor<'a, DB>, commit_threshold: u64) -> Self {
+        Self { executor, commit_threshold }
     }
 }
 
 #[async_trait::async_trait]
-impl<DB: Database> Stage<DB> for ExecutionStage {
+impl<State: StateProvider, DB: Database> Stage<DB> for ExecutionStage<'_, State> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         EXECUTION
@@ -392,20 +406,18 @@ impl<DB: Database> Stage<DB> for ExecutionStage {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::{Deref, DerefMut};
-
-    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
-
     use super::*;
+    use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
     use reth_db::{
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, U256,
+        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, MAINNET, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
+    use std::ops::{Deref, DerefMut};
 
     #[tokio::test]
     async fn sanity_execution_of_block() {
@@ -448,11 +460,8 @@ mod tests {
         db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
         tx.commit().unwrap();
 
-        // execute
-        let mut execution_stage = ExecutionStage {
-            chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
-            ..Default::default()
-        };
+        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
+        let mut execution_stage = ExecutionStage::<DefaultDB<'_>>::from(chain_spec);
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
         assert_eq!(output, ExecOutput { stage_progress: 1, done: true });
@@ -536,14 +545,12 @@ mod tests {
         tx.commit().unwrap();
 
         // execute
-        let mut execution_stage = ExecutionStage {
-            chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
-            ..Default::default()
-        };
+        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
+        let mut execution_stage = ExecutionStage::<DefaultDB<'_>>::from(chain_spec);
         let _ = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 
-        let o = ExecutionStage::default()
+        let o = ExecutionStage::<DefaultDB<'_>>::from(MAINNET.clone())
             .unwind(&mut tx, UnwindInput { stage_progress: 1, unwind_to: 0, bad_block: None })
             .await
             .unwrap();
@@ -624,10 +631,8 @@ mod tests {
         tx.commit().unwrap();
 
         // execute
-        let mut execution_stage = ExecutionStage {
-            chain_spec: ChainSpecBuilder::mainnet().berlin_activated().build(),
-            ..Default::default()
-        };
+        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
+        let mut execution_stage = ExecutionStage::<DefaultDB<'_>>::from(chain_spec);
         let _ = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 

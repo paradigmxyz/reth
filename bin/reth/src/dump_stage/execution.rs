@@ -7,8 +7,9 @@ use eyre::Result;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
+use reth_primitives::MAINNET;
 use reth_provider::Transaction;
-use reth_stages::{stages::ExecutionStage, Stage, StageId, UnwindInput};
+use reth_stages::{stages::ExecutionStage, DefaultDB, Stage, StageId, UnwindInput};
 use std::ops::DerefMut;
 use tracing::info;
 
@@ -96,7 +97,7 @@ async fn unwind_and_copy<DB: Database>(
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
     let mut unwind_tx = Transaction::new(db_tool.db)?;
-    let mut exec_stage = ExecutionStage::default();
+    let mut exec_stage: ExecutionStage<'_, DefaultDB<'_>> = ExecutionStage::from(MAINNET.clone());
 
     exec_stage
         .unwind(
@@ -125,7 +126,7 @@ async fn dry_run(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let mut tx = Transaction::new(&output_db)?;
-    let mut exec_stage = ExecutionStage::default();
+    let mut exec_stage: ExecutionStage<'_, DefaultDB<'_>> = ExecutionStage::from(MAINNET.clone());
 
     exec_stage
         .execute(
