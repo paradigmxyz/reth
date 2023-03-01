@@ -585,10 +585,9 @@ impl ForkCondition {
 mod tests {
     use crate::{
         AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId,
-        Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA,
+        Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA, U256,
     };
     use ethers_core::types as EtherType;
-    use revm_primitives::U256;
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);

@@ -1,9 +1,8 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
-    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey},
+    models::ShardedKey,
     tables,
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
@@ -57,52 +56,10 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
             std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
         let to_transition = tx.get_block_transition(to_block)?;
 
-        let account_changesets = tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk(Some(from_transition))?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition).unwrap_or_default())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let account_changeset_lists = account_changesets
-            .into_iter()
-            // fold all account to one set of changed accounts
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, Vec<u64>>, (index, account)| {
-                    accounts.entry(account.address).or_default().push(index);
-                    accounts
-                },
-            );
-        // insert indexes to AccontHistory.
-        for (address, mut indices) in account_changeset_lists {
-            let mut last_shard = take_last_account_shard(tx, address)?;
-            last_shard.append(&mut indices);
-            // chunk indices and insert them in shards of N size.
-            let mut chunks = last_shard
-                .iter()
-                .chunks(NUM_OF_INDICES_IN_SHARD)
-                .into_iter()
-                .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
-                .collect::<Vec<_>>();
-            let last_chunk = chunks.pop();
-
-            chunks.into_iter().try_for_each(|list| {
-                tx.put::<tables::AccountHistory>(
-                    ShardedKey::new(
-                        address,
-                        *list.last().expect("Chuck does not return empty list") as TransitionId,
-                    ),
-                    TransitionList::new(list).expect("Indices are presorted and not empty"),
-                )
-            })?;
-            // Insert last list with u64::MAX
-            if let Some(last_list) = last_chunk {
-                tx.put::<tables::AccountHistory>(
-                    ShardedKey::new(address, u64::MAX),
-                    TransitionList::new(last_list).expect("Indices are presorted and not empty"),
-                )?
-            }
-        }
+        let indices =
+            tx.get_account_transition_ids_from_changeset(from_transition, to_transition)?;
+        // Insert changeset to history index
+        tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", "Stage finished");
         Ok(ExecOutput { stage_progress: to_block, done: true })
@@ -155,23 +112,6 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     }
 }
 
-/// Load last shard and check if it is full and remove if it is not. If list is empty, last shard
-/// was full or there is no shards at all.
-pub fn take_last_account_shard<DB: Database>(
-    tx: &Transaction<'_, DB>,
-    address: Address,
-) -> Result<Vec<u64>, StageError> {
-    let mut cursor = tx.cursor_read::<tables::AccountHistory>()?;
-    let last = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
-    if let Some((shard_key, list)) = last {
-        // delete old shard so new one can be inserted.
-        tx.delete::<tables::AccountHistory>(shard_key, None)?;
-        let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-        return Ok(list)
-    }
-    Ok(Vec::new())
-}
-
 /// Unwind all history shards. For boundary shard, remove it from database and
 /// return last part of shard with still valid items. If all full shard were removed, return list
 /// would be empty.
@@ -212,7 +152,7 @@ pub fn unwind_account_history_shards<DB: Database>(
 mod tests {
     use super::*;
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
-    use reth_db::models::AccountBeforeTx;
+    use reth_db::models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx};
     use reth_primitives::{hex_literal::hex, H160};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));

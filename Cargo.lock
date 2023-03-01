@@ -4858,6 +4858,7 @@ dependencies = [
  "crunchy",
  "derive_more",
  "ethers-core",
+ "eyre",
  "fixed-hash",
  "hash-db",
  "hex",
@@ -4879,6 +4880,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "shellexpand",
  "strum",
  "sucds",
  "test-fuzz",
@@ -4892,14 +4894,22 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "auto_impl",
+ "cita_trie",
+ "hasher",
+ "itertools 0.10.5",
  "parking_lot 0.12.1",
+ "proptest",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-revm-primitives",
+ "reth-rlp",
+ "reth-tracing",
  "revm-primitives",
  "thiserror",
+ "triehash",
 ]
 
 [[package]]
@@ -5116,11 +5126,9 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "async-trait",
- "cita_trie",
  "criterion",
  "eyre",
  "futures-util",
- "hasher",
  "itertools 0.10.5",
  "metrics",
  "num-traits",

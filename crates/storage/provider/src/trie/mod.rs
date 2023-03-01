@@ -1,3 +1,4 @@
+use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
@@ -11,18 +12,19 @@ use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
     H256, KECCAK_EMPTY, U256,
 };
-use reth_provider::Transaction;
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
     EMPTY_STRING_CODE,
 };
+use reth_tracing::tracing::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
     sync::Arc,
 };
-use tracing::*;
 
+/// Merkle Trie error types
+#[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum TrieError {
     #[error("Some error occurred: {0}")]
@@ -410,9 +412,8 @@ mod tests {
         hex_literal::hex,
         keccak256,
         proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
-        Address, ChainSpec,
+        Address, ChainSpec, MAINNET,
     };
-    use reth_staged_sync::utils::chainspec::chain_spec_value_parser;
     use std::{collections::HashMap, str::FromStr};
     use triehash::sec_trie_root;
 
@@ -553,7 +554,7 @@ mod tests {
         let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
-        let ChainSpec { genesis, .. } = chain_spec_value_parser("mainnet").unwrap();
+        let ChainSpec { genesis, .. } = MAINNET.clone();
 
         // Insert account state
         for (address, account) in &genesis.alloc {

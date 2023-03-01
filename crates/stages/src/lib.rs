@@ -53,7 +53,6 @@ mod error;
 mod id;
 mod pipeline;
 mod stage;
-mod trie;
 mod util;
 
 /// The real database type we use in Reth using MDBX.
@@ -77,7 +76,6 @@ pub use error::*;
 pub use id::*;
 pub use pipeline::*;
 pub use stage::*;
-pub use trie::DBTrieLoader;
 
 // NOTE: Needed so the link in the module-level rustdoc works.
 #[allow(unused_extern_crates)]

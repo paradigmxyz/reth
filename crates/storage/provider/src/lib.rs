@@ -22,6 +22,12 @@ pub use providers::{
     LatestStateProviderRef, ShareableDatabase,
 };
 
+/// Merkle trie
+pub mod trie;
+
+/// Execution result
+pub mod execution_result;
+
 /// Helper types for interacting with the database
 mod transaction;
 pub use transaction::{Transaction, TransactionError};

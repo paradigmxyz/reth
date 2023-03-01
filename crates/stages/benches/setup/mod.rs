@@ -10,10 +10,11 @@ use reth_interfaces::test_utils::generators::{
     random_transition_range,
 };
 use reth_primitives::{Account, Address, SealedBlock, H256};
+use reth_provider::trie::DBTrieLoader;
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
     test_utils::TestTransaction,
-    DBTrieLoader, ExecInput, Stage, UnwindInput,
+    ExecInput, Stage, UnwindInput,
 };
 use std::{
     collections::BTreeMap,
