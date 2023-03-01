@@ -6,7 +6,9 @@ use crate::{
     eth::error::{EthApiError, EthResult, InvalidTransactionError},
     EthApi,
 };
-use reth_primitives::{AccessList, Address, BlockId, Bytes, TransactionKind, U128, U256};
+use reth_primitives::{
+    AccessList, Address, BlockId, BlockNumberOrTag, Bytes, TransactionKind, U128, U256,
+};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::database::{State, SubState};
 use reth_rpc_types::CallRequest;
@@ -53,8 +55,23 @@ where
         transact(&mut db, env)
     }
 
-    /// Estimate gas needed for execution of the `request` at the [BlockId] .
-    pub(crate) fn estimate_gas_at(&self, mut request: CallRequest, at: BlockId) -> EthResult<U256> {
+    /// Estimate gas needed for execution of the `request` at the [BlockId].
+    pub(crate) async fn estimate_gas_at(
+        &self,
+        mut request: CallRequest,
+        at: BlockId,
+    ) -> EthResult<U256> {
+        // TODO handle Pending state
+        let block_hash = match at {
+            BlockId::Number(BlockNumberOrTag::Pending) => {
+                unimplemented!("support pending state")
+            }
+            at => self
+                .client()
+                .block_hash_for_id(at)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?,
+        };
+
         // TODO get a StateProvider for the given blockId and BlockEnv
         todo!()
     }
