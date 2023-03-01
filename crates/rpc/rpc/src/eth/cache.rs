@@ -31,7 +31,7 @@ type BlockLruCache<L> = MultiConsumerLruCache<H256, Block, L, BlockResponseSende
 
 type EnvLruCache<L> = MultiConsumerLruCache<H256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
-/// Settings for the [EthStateCacheService]
+/// Settings for the [EthStateCache]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthStateCacheConfig {
@@ -53,7 +53,7 @@ impl Default for EthStateCacheConfig {
 
 /// Provides async access to cached eth data
 ///
-/// This is the frontend to the [EthStateCacheService] which manages cached data on a different
+/// This is the frontend for the async caching service which manages cached data on a different
 /// task.
 #[derive(Debug, Clone)]
 pub struct EthStateCache {
@@ -141,7 +141,7 @@ impl EthStateCache {
 ///
 /// This type is an endless future that listens for incoming messages from the user facing
 /// [EthStateCache] via a channel. If the requested data is not cached then it spawns a new task
-/// that does the IO and sends the result back to it. This way the [EthStateCacheService] only
+/// that does the IO and sends the result back to it. This way the caching service only
 /// handles messages and does LRU lookups and never blocking IO.
 ///
 /// Caution: The channel for the data is _unbounded_ it is assumed that this is mainly used by the
