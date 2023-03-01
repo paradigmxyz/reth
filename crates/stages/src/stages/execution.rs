@@ -307,8 +307,8 @@ mod tests {
         models::AccountBeforeTx,
     };
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, H160, MAINNET,
-        U256, StorageEntry, H256,
+        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, StorageEntry, H160,
+        H256, MAINNET, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
