@@ -16,6 +16,7 @@ use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
     EMPTY_STRING_CODE,
 };
+use reth_tracing::tracing::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
@@ -23,7 +24,8 @@ use std::{
     sync::Arc,
 };
 
-/// Errors returned by [`DBTrieLoader`].
+/// Merkle Trie error types
+#[allow(missing_docs)]
 #[derive(Debug, thiserror::Error)]
 pub enum TrieError {
     /// Error returned by the underlying implementation.
@@ -546,14 +548,13 @@ mod tests {
         hex_literal::hex,
         keccak256,
         proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
-        Address, Bytes, ChainSpec, Genesis,
+        Address, Bytes, ChainSpec, Genesis, MAINNET,
     };
-    use reth_staged_sync::utils::chainspec::chain_spec_value_parser;
     use std::{collections::HashMap, str::FromStr};
     use triehash::sec_trie_root;
 
-    fn load_genesis_root<DB: Database>(tx: &mut Transaction<'_, DB>, chain: &str) -> Genesis {
-        let ChainSpec { genesis, .. } = chain_spec_value_parser(chain).unwrap();
+    fn load_genesis_root<DB: Database>(tx: &mut Transaction<'_, DB>) -> Genesis {
+        let ChainSpec { genesis, .. } = MAINNET.clone();
 
         // Insert account state
         for (address, account) in &genesis.alloc {
@@ -719,7 +720,7 @@ mod tests {
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
-        let genesis = load_genesis_root(&mut tx, "mainnet");
+        let genesis = load_genesis_root(&mut tx);
 
         let state_root = genesis_state_root(&genesis.alloc);
 
@@ -825,7 +826,7 @@ mod tests {
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
-        load_genesis_root(&mut tx, "mainnet");
+        load_genesis_root(&mut tx);
 
         let root = trie.calculate_root(&tx).expect("should be able to load trie");
 

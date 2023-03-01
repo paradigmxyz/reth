@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
-    DBTrieLoader, StateProvider,
+    providers::state::macros::delegate_provider_impls, trie::DBTrieLoader, AccountProvider,
+    BlockHashProvider, StateProvider,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRO},

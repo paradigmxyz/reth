@@ -22,13 +22,15 @@ pub use providers::{
     LatestStateProviderRef, ShareableDatabase,
 };
 
+/// Helper type for loading Merkle Patricia Trees from the database
+pub mod trie;
+
+/// Execution result
+pub mod execution_result;
+
 /// Helper types for interacting with the database
 mod transaction;
 pub use transaction::{Transaction, TransactionError};
-
-/// Helper type for loading Merkle Patricia Trees from the database
-mod trie;
-pub use trie::{DBTrieLoader, TrieError};
 
 /// Common database utilities.
 mod utils;
