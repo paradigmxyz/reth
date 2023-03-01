@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_primitives::BlockId;
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::{Block, Index, RichBlock};
+use reth_rpc_types::{Block, Index, OmmerBlock, RichBlock};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
@@ -27,14 +27,16 @@ where
         &self,
         block_id: impl Into<BlockId>,
         index: Index,
-    ) -> EthResult<Option<RichBlock>> {
+    ) -> EthResult<Option<OmmerBlock>> {
         let block_id = block_id.into();
         let index = usize::from(index);
         let uncles = self.client().ommers(block_id)?.unwrap_or_default();
-        let Some(uncle_header) = uncles.get(index) else {
+        let Some(uncle_header) = uncles.into_iter().skip(index).next() else {
             return Ok(None)
         };
-        self.block(BlockId::from(uncle_header.number), false).await
+        let uncle_block_response =
+            self.block(BlockId::from(uncle_header.number), false).await?.map(|block| block.into());
+        Ok(uncle_block_response)
     }
     pub(crate) async fn block_transaction_count(
         &self,

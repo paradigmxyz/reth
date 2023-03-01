@@ -4,7 +4,7 @@ use reth_primitives::{
     H256, H64, U256, U64,
 };
 use reth_rpc_types::{
-    CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock, SyncStatus,
+    CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, OmmerBlock, RichBlock, SyncStatus,
     Transaction, TransactionReceipt, TransactionRequest, Work,
 };
 
@@ -74,7 +74,7 @@ pub trait EthApi {
         &self,
         hash: H256,
         index: Index,
-    ) -> Result<Option<RichBlock>>;
+    ) -> Result<Option<OmmerBlock>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "eth_getUncleByBlockNumberAndIndex")]
@@ -82,7 +82,7 @@ pub trait EthApi {
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> Result<Option<RichBlock>>;
+    ) -> Result<Option<OmmerBlock>>;
 
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "eth_getTransactionByHash")]
