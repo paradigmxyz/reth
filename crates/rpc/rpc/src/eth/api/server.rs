@@ -104,7 +104,7 @@ where
         hash: H256,
         index: Index,
     ) -> Result<Option<RichBlock>> {
-        Ok(EthApi::ommer_by_block_and_index(self, hash, index).await?.map(|uncle| uncle.into()))
+        Ok(EthApi::ommer_by_block_and_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
@@ -113,7 +113,7 @@ where
         number: BlockNumberOrTag,
         index: Index,
     ) -> Result<Option<RichBlock>> {
-        Ok(EthApi::ommer_by_block_and_index(self, number, index).await?.map(|uncle| uncle.into()))
+        Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByHash`
