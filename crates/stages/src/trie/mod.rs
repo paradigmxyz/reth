@@ -419,7 +419,7 @@ impl DBTrieLoader {
     }
 
     fn update_storage_root<DB: Database>(
-        &self,
+        &mut self,
         shared_tx: Arc<Mutex<&mut Transaction<'_, DB>>>,
         accounts_trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
         root: H256,
