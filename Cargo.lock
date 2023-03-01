@@ -4825,7 +4825,6 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "cita_trie",
- "eyre",
  "hasher",
  "itertools 0.10.5",
  "parking_lot 0.12.1",

@@ -371,8 +371,7 @@ where
     ) -> Result<Vec<(Address, Vec<(H256, U256)>)>, TransactionError> {
         let mut plain_storage = self.cursor_dup_read::<tables::PlainStorageState>()?;
 
-        Ok(iter
-            .into_iter()
+        iter.into_iter()
             .map(|(address, storage)| {
                 storage
                     .into_iter()
@@ -386,7 +385,7 @@ where
                     .collect::<Result<Vec<(_, _)>, _>>()
                     .map(|storage| (address, storage))
             })
-            .collect::<Result<Vec<(_, _)>, _>>()?)
+            .collect::<Result<Vec<(_, _)>, _>>()
     }
 
     /// iterate over storages and insert them to hashing table
