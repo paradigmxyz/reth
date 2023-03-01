@@ -302,6 +302,18 @@ mod tests {
     }
 
     #[test]
+    fn valid_without_exp_claim() {
+        let secret = JwtSecret::random();
+
+        let claims = Claims { iat: to_u64(SystemTime::now()), exp: None };
+        let jwt: String = secret.encode(&claims).unwrap();
+
+        let result = secret.validate(jwt);
+
+        assert!(matches!(result, Ok(())));
+    }
+
+    #[test]
     fn ephemeral_secret_created() {
         let fpath: &Path = Path::new("secret0.hex");
         assert!(not_exists(fpath));
