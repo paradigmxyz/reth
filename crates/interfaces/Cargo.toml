@@ -10,7 +10,7 @@ readme = "README.md"
 reth-codecs = { path = "../storage/codecs" }
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../rpc/rpc-types" }
-reth-network-api = { path = "../net/network-api"}
+reth-network-api = { path = "../net/network-api" }
 revm-primitives = "1.0"
 async-trait = "0.1.57"
 thiserror = "1.0.37"
@@ -26,16 +26,24 @@ futures = "0.3"
 tokio-stream = "0.1.11"
 rand = "0.8.5"
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
-secp256k1 = { version = "0.24.2", default-features = false, features = ["alloc", "recovery", "rand"], optional = true }
+secp256k1 = { version = "0.24.2", default-features = false, features = [
+    "alloc",
+    "recovery",
+    "rand",
+], optional = true }
 modular-bitfield = "0.11.2"
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync"] }
-arbitrary = { version = "1.1.7", features = ["derive"]}
+arbitrary = { version = "1.1.7", features = ["derive"] }
 hex-literal = "0.3"
-secp256k1 = { version = "0.24.2", default-features = false, features = ["alloc", "recovery", "rand"] }
+secp256k1 = { version = "0.24.2", default-features = false, features = [
+    "alloc",
+    "recovery",
+    "rand",
+] }
 
 [features]
 bench = []

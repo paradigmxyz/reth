@@ -1,19 +1,26 @@
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     mdbx::{
         test_utils::{create_test_db, create_test_db_with_path},
         tx::Tx,
         Env, EnvKind, WriteMap, RW,
     },
-    models::StoredBlockBody,
+    models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, U256};
+use reth_primitives::{
+    keccak256, Account, Address, BlockNumber, SealedBlock, SealedHeader, StorageEntry, H256, U256,
+};
 use reth_provider::Transaction;
-use std::{borrow::Borrow, path::Path, sync::Arc};
+use std::{
+    borrow::Borrow,
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// The [TestTransaction] is used as an internal
 /// database for testing stage implementation.
@@ -26,18 +33,22 @@ use std::{borrow::Borrow, path::Path, sync::Arc};
 pub struct TestTransaction {
     /// WriteMap DB
     pub tx: Arc<Env<WriteMap>>,
+    pub path: Option<PathBuf>,
 }
 
 impl Default for TestTransaction {
     /// Create a new instance of [TestTransaction]
     fn default() -> Self {
-        Self { tx: create_test_db::<WriteMap>(EnvKind::RW) }
+        Self { tx: create_test_db::<WriteMap>(EnvKind::RW), path: None }
     }
 }
 
 impl TestTransaction {
     pub fn new(path: &Path) -> Self {
-        Self { tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)) }
+        Self {
+            tx: Arc::new(create_test_db_with_path::<WriteMap>(EnvKind::RW, path)),
+            path: Some(path.to_path_buf()),
+        }
     }
 
     /// Return a database wrapped in [Transaction].
@@ -177,23 +188,20 @@ impl TestTransaction {
         })
     }
 
+    /// Inserts a single [SealedHeader] into the corresponding tables of the headers stage.
+    fn insert_header(tx: &mut Tx<'_, RW, WriteMap>, header: &SealedHeader) -> Result<(), DbError> {
+        tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
+        tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
+        tx.put::<tables::Headers>(header.number, header.clone().unseal())
+    }
+
     /// Insert ordered collection of [SealedHeader] into the corresponding tables
     /// that are supposed to be populated by the headers stage.
     pub fn insert_headers<'a, I>(&self, headers: I) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedHeader>,
     {
-        self.commit(|tx| {
-            let headers = headers.collect::<Vec<_>>();
-
-            for header in headers {
-                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-                tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
-                tx.put::<tables::Headers>(header.number, header.clone().unseal())?;
-            }
-
-            Ok(())
-        })
+        self.commit(|tx| headers.into_iter().try_for_each(|header| Self::insert_header(tx, header)))
     }
 
     /// Inserts total difficulty of headers into the corresponding tables.
@@ -204,23 +212,19 @@ impl TestTransaction {
         I: Iterator<Item = &'a SealedHeader>,
     {
         self.commit(|tx| {
-            let headers = headers.collect::<Vec<_>>();
-
             let mut td = U256::ZERO;
-            for header in headers {
+            headers.into_iter().try_for_each(|header| {
+                Self::insert_header(tx, header)?;
                 td += header.difficulty;
-                tx.put::<tables::HeaderTD>(header.number, td.into())?;
-                tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-                tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
-                tx.put::<tables::Headers>(header.number, header.clone().unseal())?;
-            }
-
-            Ok(())
+                tx.put::<tables::HeaderTD>(header.number, td.into())
+            })
         })
     }
 
     /// Insert ordered collection of [SealedBlock] into corresponding tables.
     /// Superset functionality of [TestTransaction::insert_headers].
+    ///
+    /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, tx_offset: Option<u64>) -> Result<(), DbError>
     where
         I: Iterator<Item = &'a SealedBlock>,
@@ -228,12 +232,8 @@ impl TestTransaction {
         self.commit(|tx| {
             let mut current_tx_id = tx_offset.unwrap_or_default();
 
-            for block in blocks {
-                // Insert into header tables.
-                tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
-                tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
-                tx.put::<tables::Headers>(block.number, block.header.clone().unseal())?;
-
+            blocks.into_iter().try_for_each(|block| {
+                Self::insert_header(tx, &block.header)?;
                 // Insert into body tables.
                 tx.put::<tables::BlockBodies>(
                     block.number,
@@ -242,13 +242,88 @@ impl TestTransaction {
                         tx_count: block.body.len() as u64,
                     },
                 )?;
-                for body_tx in block.body.clone() {
-                    tx.put::<tables::Transactions>(current_tx_id, body_tx)?;
+                block.body.iter().try_for_each(|body_tx| {
+                    tx.put::<tables::TxTransitionIndex>(current_tx_id, current_tx_id)?;
+                    tx.put::<tables::Transactions>(current_tx_id, body_tx.clone())?;
                     current_tx_id += 1;
-                }
-            }
+                    Ok(())
+                })?;
+                tx.put::<tables::BlockTransitionIndex>(block.number, current_tx_id)
+            })
+        })
+    }
 
-            Ok(())
+    /// Insert collection of ([Address], [Account]) into corresponding tables.
+    pub fn insert_accounts_and_storages<I, S>(&self, accounts: I) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = (Address, (Account, S))>,
+        S: IntoIterator<Item = StorageEntry>,
+    {
+        self.commit(|tx| {
+            accounts.into_iter().try_for_each(|(address, (account, storage))| {
+                let hashed_address = keccak256(address);
+
+                // Insert into account tables.
+                tx.put::<tables::PlainAccountState>(address, account)?;
+                tx.put::<tables::HashedAccount>(hashed_address, account)?;
+
+                // Insert into storage tables.
+                storage.into_iter().filter(|e| e.value != U256::ZERO).try_for_each(|entry| {
+                    let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
+
+                    let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+                    if let Some(e) = cursor
+                        .seek_by_key_subkey(address, entry.key)?
+                        .filter(|e| e.key == entry.key)
+                    {
+                        cursor.delete_current()?;
+                    }
+                    cursor.upsert(address, entry)?;
+
+                    let mut cursor = tx.cursor_dup_write::<tables::HashedStorage>()?;
+                    if let Some(e) = cursor
+                        .seek_by_key_subkey(hashed_address, hashed_entry.key)?
+                        .filter(|e| e.key == hashed_entry.key)
+                    {
+                        cursor.delete_current()?;
+                    }
+                    cursor.upsert(hashed_address, hashed_entry)?;
+
+                    Ok(())
+                })
+            })
+        })
+    }
+
+    /// Insert collection of Vec<([Address], [Account], Vec<[StorageEntry]>)> into
+    /// corresponding tables.
+    pub fn insert_transitions<I>(
+        &self,
+        transitions: I,
+        transition_offset: Option<u64>,
+    ) -> Result<(), DbError>
+    where
+        I: IntoIterator<Item = Vec<(Address, Account, Vec<StorageEntry>)>>,
+    {
+        let offset = transition_offset.unwrap_or_default();
+        self.commit(|tx| {
+            transitions.into_iter().enumerate().try_for_each(|(transition_id, changes)| {
+                changes.into_iter().try_for_each(|(address, old_account, old_storage)| {
+                    let tid = offset + transition_id as u64;
+                    // Insert into account changeset.
+                    tx.put::<tables::AccountChangeSet>(
+                        tid,
+                        AccountBeforeTx { address, info: Some(old_account) },
+                    )?;
+
+                    let tid_address = (tid, address).into();
+
+                    // Insert into storage changeset.
+                    old_storage.into_iter().try_for_each(|entry| {
+                        tx.put::<tables::StorageChangeSet>(tid_address, entry)
+                    })
+                })
+            })
         })
     }
 }

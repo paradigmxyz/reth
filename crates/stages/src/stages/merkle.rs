@@ -14,6 +14,9 @@ pub const MERKLE_EXECUTION: StageId = StageId("MerkleExecute");
 /// The [`StageId`] of the merkle hashing unwind stage.
 pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
 
+/// The [`StageId`] of the merkle hashing unwind and execution stage.
+pub const MERKLE_BOTH: StageId = StageId("MerkleBoth");
+
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
 /// [`StorageHashingStage`][crate::stages::AccountHashingStage] to calculate intermediate hashes
@@ -35,7 +38,7 @@ pub const MERKLE_UNWIND: StageId = StageId("MerkleUnwind");
 /// - [`AccountHashingStage`][crate::stages::AccountHashingStage]
 /// - [`StorageHashingStage`][crate::stages::StorageHashingStage]
 /// - [`MerkleStage::Execution`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
     Execution {
@@ -46,7 +49,9 @@ pub enum MerkleStage {
     /// The unwind portion of the merkle stage.
     Unwind,
 
-    #[cfg(test)]
+    /// Able to execute and unwind. Used for tests
+    #[cfg(any(test, feature = "test-utils"))]
+    #[allow(missing_docs)]
     Both { clean_threshold: u64 },
 }
 
@@ -69,8 +74,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         match self {
             MerkleStage::Execution { .. } => MERKLE_EXECUTION,
             MerkleStage::Unwind => MERKLE_UNWIND,
-            #[cfg(test)]
-            MerkleStage::Both { .. } => unreachable!(),
+            #[cfg(any(test, feature = "test-utils"))]
+            MerkleStage::Both { .. } => MERKLE_BOTH,
         }
     }
 
@@ -89,7 +94,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 })
             }
             MerkleStage::Execution { clean_threshold } => *clean_threshold,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-utils"))]
             MerkleStage::Both { clean_threshold } => *clean_threshold,
         };
 
@@ -156,9 +161,21 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        loader
+        let block_root = loader
             .update_root(tx, current_root, from_transition..to_transition)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+        if block_root != target_root {
+            let unwind_to = input.unwind_to;
+            warn!(target: "sync::stages::merkle::unwind", ?unwind_to, got = ?block_root, expected = ?target_root, "Block's root state failed verification");
+            return Err(StageError::Validation {
+                block: unwind_to,
+                error: consensus::Error::BodyStateRootDiff {
+                    got: block_root,
+                    expected: target_root,
+                },
+            })
+        }
 
         info!(target: "sync::stages::merkle::unwind", "Stage finished");
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -175,12 +192,11 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-        models::{AccountBeforeTx, StoredBlockBody},
         tables,
         transaction::{DbTx, DbTxMut},
     };
     use reth_interfaces::test_utils::generators::{
-        random_block, random_block_range, random_contract_account_range,
+        random_block, random_block_range, random_contract_account_range, random_transition_range,
     };
     use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
     use std::collections::BTreeMap;
@@ -276,12 +292,16 @@ mod tests {
             let end = input.previous_stage_progress() + 1;
 
             let n_accounts = 31;
-            let mut accounts = random_contract_account_range(&mut (0..n_accounts));
+            let accounts = random_contract_account_range(&mut (0..n_accounts))
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
 
             let SealedBlock { header, body, ommers, withdrawals } =
                 random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
-            header.state_root = self.generate_initial_trie(&accounts)?;
+
+            header.state_root =
+                self.generate_initial_trie(accounts.iter().map(|(k, v)| (*k, *v)))?;
             let sealed_head = SealedBlock { header: header.seal_slow(), body, ommers, withdrawals };
 
             let head_hash = sealed_head.hash();
@@ -289,64 +309,18 @@ mod tests {
 
             blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..3));
 
-            self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
+            self.tx.insert_blocks(blocks.iter(), None)?;
 
-            let (mut transition_id, mut tx_id) = (0, 0);
+            let (transitions, final_state) = random_transition_range(
+                blocks.iter(),
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, Vec::new()))),
+                0..3,
+                0..256,
+            );
 
-            let mut storages: BTreeMap<Address, BTreeMap<H256, U256>> = BTreeMap::new();
+            self.tx.insert_transitions(transitions, None)?;
 
-            for progress in blocks.iter() {
-                // Insert last progress data
-                self.tx.commit(|tx| {
-                    let body = StoredBlockBody {
-                        start_tx_id: tx_id,
-                        tx_count: progress.body.len() as u64,
-                    };
-
-                    progress.body.iter().try_for_each(|transaction| {
-                        tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
-                        tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
-                        tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
-
-                        // seed account changeset
-                        let (addr, prev_acc) = accounts
-                            .get_mut(rand::random::<usize>() % n_accounts as usize)
-                            .unwrap();
-                        let acc_before_tx =
-                            AccountBeforeTx { address: *addr, info: Some(*prev_acc) };
-
-                        tx.put::<tables::AccountChangeSet>(transition_id, acc_before_tx)?;
-
-                        prev_acc.nonce += 1;
-                        prev_acc.balance = prev_acc.balance.wrapping_add(U256::from(1));
-
-                        let new_entry = StorageEntry {
-                            key: keccak256([rand::random::<u8>()]),
-                            value: U256::from(rand::random::<u8>() % 30 + 1),
-                        };
-                        let storage = storages.entry(*addr).or_default();
-                        let old_value = storage.entry(new_entry.key).or_default();
-
-                        tx.put::<tables::StorageChangeSet>(
-                            (transition_id, *addr).into(),
-                            StorageEntry { key: new_entry.key, value: *old_value },
-                        )?;
-
-                        *old_value = new_entry.value;
-
-                        tx_id += 1;
-                        transition_id += 1;
-
-                        Ok(())
-                    })?;
-
-                    tx.put::<tables::BlockTransitionIndex>(progress.number, transition_id)?;
-                    tx.put::<tables::BlockBodies>(progress.number, body)
-                })?;
-            }
-
-            self.insert_accounts(&accounts)?;
-            self.insert_storages(&storages)?;
+            self.tx.insert_accounts_and_storages(final_state)?;
 
             let last_block_number = end - 1;
             let root = self.state_root()?;
@@ -471,9 +445,11 @@ mod tests {
 
         pub(crate) fn generate_initial_trie(
             &self,
-            accounts: &[(Address, Account)],
+            accounts: impl IntoIterator<Item = (Address, Account)>,
         ) -> Result<H256, TestRunnerError> {
-            self.insert_accounts(accounts)?;
+            self.tx.insert_accounts_and_storages(
+                accounts.into_iter().map(|(addr, acc)| (addr, (acc, std::iter::empty()))),
+            )?;
 
             let loader = DBTrieLoader::default();
 
@@ -483,57 +459,6 @@ mod tests {
             tx.commit()?;
 
             Ok(root)
-        }
-
-        pub(crate) fn insert_accounts(
-            &self,
-            accounts: &[(Address, Account)],
-        ) -> Result<(), TestRunnerError> {
-            for (addr, acc) in accounts.iter() {
-                self.tx.commit(|tx| {
-                    tx.put::<tables::PlainAccountState>(*addr, *acc)?;
-                    tx.put::<tables::HashedAccount>(keccak256(addr), *acc)?;
-                    Ok(())
-                })?;
-            }
-
-            Ok(())
-        }
-
-        fn insert_storages(
-            &self,
-            storages: &BTreeMap<Address, BTreeMap<H256, U256>>,
-        ) -> Result<(), TestRunnerError> {
-            self.tx
-                .commit(|tx| {
-                    storages.iter().try_for_each(|(&addr, storage)| {
-                        storage.iter().try_for_each(|(&key, &value)| {
-                            let entry = StorageEntry { key, value };
-                            tx.put::<tables::PlainStorageState>(addr, entry)
-                        })
-                    })?;
-                    storages
-                        .iter()
-                        .map(|(addr, storage)| {
-                            (
-                                keccak256(addr),
-                                storage
-                                    .iter()
-                                    .filter(|(_, &value)| value != U256::ZERO)
-                                    .map(|(key, value)| (keccak256(key), value)),
-                            )
-                        })
-                        .collect::<BTreeMap<_, _>>()
-                        .into_iter()
-                        .try_for_each(|(addr, storage)| {
-                            storage.into_iter().try_for_each(|(key, &value)| {
-                                let entry = StorageEntry { key, value };
-                                tx.put::<tables::HashedStorage>(addr, entry)
-                            })
-                        })?;
-                    Ok(())
-                })
-                .map_err(|e| e.into())
         }
 
         fn check_root(&self, previous_stage_progress: u64) -> Result<(), TestRunnerError> {

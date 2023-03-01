@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use reth_db::{
     database::Database,
     mdbx::{test_utils::create_test_db_with_path, EnvKind, WriteMap},
@@ -7,12 +8,15 @@ use reth_db::{
 use std::path::Path;
 
 /// Path where the DB is initialized for benchmarks.
+#[allow(unused)]
 const BENCH_DB_PATH: &str = "/tmp/reth-benches";
 
 /// Used for RandomRead and RandomWrite benchmarks.
+#[allow(unused)]
 const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
+#[allow(unused)]
 fn load_vectors<T: reth_db::table::Table>() -> Vec<(T::Key, bytes::Bytes, T::Value, bytes::Bytes)>
 where
     T: Default,
