@@ -5,10 +5,11 @@ use crate::{
 };
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
+use reth_primitives::MAINNET;
 use reth_provider::Transaction;
 use reth_stages::{
     stages::{AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage},
-    Stage, StageId, UnwindInput,
+    DefaultDB, Stage, StageId, UnwindInput,
 };
 use std::ops::DerefMut;
 use tracing::info;
@@ -74,7 +75,9 @@ async fn unwind_and_copy<DB: Database>(
     MerkleStage::default_unwind().unwind(&mut unwind_tx, unwind).await?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
-    ExecutionStage { commit_threshold: u64::MAX, ..Default::default() }
+    let mut exec_stage: ExecutionStage<'_, DefaultDB<'_>> = ExecutionStage::from(MAINNET.clone());
+    exec_stage.commit_threshold = u64::MAX;
+    exec_stage
         .unwind(
             &mut unwind_tx,
             UnwindInput { unwind_to: to, stage_progress: tip_block_number, bad_block: None },
