@@ -24,7 +24,7 @@ use std::{
 use tracing::*;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum TrieError {
+pub enum TrieError {
     #[error("Some error occurred: {0}")]
     InternalError(#[from] cita_trie::TrieError),
     #[error("The root node wasn't found in the DB")]
@@ -54,15 +54,31 @@ where
         Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
     }
 
-    fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
-        // Caching and bulk inserting shouldn't be needed, as the data is ordered
-        self.tx.put::<tables::AccountsTrie>(H256::from_slice(key.as_slice()), value)?;
+    fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
+        unreachable!("Use batch instead.");
+    }
+
+    // Insert a batch of data into the cache.
+    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        for (key, value) in keys.into_iter().zip(values.into_iter()) {
+            cursor.upsert(H256::from_slice(key.as_slice()), value)?;
+        }
         Ok(())
     }
 
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
-        self.tx.delete::<tables::AccountsTrie>(H256::from_slice(key), None)?;
+    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
+        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        for key in keys {
+            if cursor.seek_exact(H256::from_slice(key.as_slice()))?.is_some() {
+                cursor.delete_current()?;
+            }
+        }
         Ok(())
+    }
+
+    fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
+        unreachable!("Use batch instead.");
     }
 
     fn flush(&self) -> Result<(), Self::Error> {
@@ -104,29 +120,47 @@ where
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         let mut cursor = self.tx.cursor_dup_read::<tables::StoragesTrie>()?;
-        Ok(cursor.seek_by_key_subkey(self.key, H256::from_slice(key))?.map(|entry| entry.node))
+        let subkey = H256::from_slice(key);
+        Ok(cursor
+            .seek_by_key_subkey(self.key, subkey)?
+            .filter(|entry| entry.hash == subkey)
+            .map(|entry| entry.node))
     }
 
     fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
         Ok(<Self as cita_trie::DB>::get(self, key)?.is_some())
     }
 
-    fn insert(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Self::Error> {
-        // Caching and bulk inserting shouldn't be needed, as the data is ordered
-        self.tx.put::<tables::StoragesTrie>(
-            self.key,
-            StorageTrieEntry { hash: H256::from_slice(key.as_slice()), node: value },
-        )?;
+    fn insert(&self, _key: Vec<u8>, _value: Vec<u8>) -> Result<(), Self::Error> {
+        unreachable!("Use batch instead.");
+    }
+
+    /// Insert a batch of data into the cache.
+    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+        let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        for (key, node) in keys.into_iter().zip(values.into_iter()) {
+            let hash = H256::from_slice(key.as_slice());
+            if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
+                cursor.delete_current()?;
+            }
+            cursor.upsert(self.key, StorageTrieEntry { hash, node })?;
+        }
         Ok(())
     }
 
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
+    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
         let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        cursor
-            .seek_by_key_subkey(self.key, H256::from_slice(key))?
-            .map(|_| cursor.delete_current())
-            .transpose()?;
+        for key in keys {
+            let hash = H256::from_slice(key.as_slice());
+            if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
+                cursor.delete_current()?;
+            }
+        }
         Ok(())
+    }
+
+    fn remove(&self, _key: &[u8]) -> Result<(), Self::Error> {
+        unreachable!("Use batch instead.");
     }
 
     fn flush(&self) -> Result<(), Self::Error> {
@@ -139,7 +173,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
     fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        if cursor.seek_by_key_subkey(key, root)?.is_none() {
+        if cursor.seek_by_key_subkey(key, root)?.filter(|entry| entry.hash == root).is_none() {
             tx.put::<tables::StoragesTrie>(
                 key,
                 StorageTrieEntry { hash: root, node: [EMPTY_STRING_CODE].to_vec() },
@@ -155,6 +189,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
         }
         tx.cursor_dup_read::<tables::StoragesTrie>()?
             .seek_by_key_subkey(key, root)?
+            .filter(|entry| entry.hash == root)
             .ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx, key })
     }
@@ -190,12 +225,14 @@ impl EthAccount {
     }
 }
 
+/// Struct for calculating the root of a merkle patricia tree,
+/// while populating the database with intermediate hashes.
 #[derive(Debug, Default)]
-pub(crate) struct DBTrieLoader;
+pub struct DBTrieLoader;
 
 impl DBTrieLoader {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
-    pub(crate) fn calculate_root<DB: Database>(
+    pub fn calculate_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
@@ -255,7 +292,7 @@ impl DBTrieLoader {
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
-    pub(crate) fn update_root<DB: Database>(
+    pub fn update_root<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
         root: H256,
@@ -272,20 +309,21 @@ impl DBTrieLoader {
         let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
 
         for (address, changed_storages) in changed_accounts {
-            if let Some(account) = trie.get(address.as_slice())? {
-                let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
+            let storage_root = if let Some(account) = trie.get(address.as_slice())? {
                 trie.remove(address.as_bytes())?;
 
-                if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
-                    let value = EthAccount::from_with_root(
-                        account,
-                        self.update_storage_root(tx, storage_root, address, changed_storages)?,
-                    );
+                let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
+                self.update_storage_root(tx, storage_root, address, changed_storages)?
+            } else {
+                self.calculate_storage_root(tx, address)?
+            };
 
-                    let mut out = Vec::new();
-                    Encodable::encode(&value, &mut out);
-                    trie.insert(address.as_bytes().to_vec(), out)?;
-                }
+            if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
+                let value = EthAccount::from_with_root(account, storage_root);
+
+                let mut out = Vec::new();
+                Encodable::encode(&value, &mut out);
+                trie.insert(address.as_bytes().to_vec(), out)?;
             }
         }
 
@@ -310,7 +348,7 @@ impl DBTrieLoader {
 
         for key in changed_storages {
             if let Some(StorageEntry { value, .. }) =
-                storage_cursor.seek_by_key_subkey(address, key)?
+                storage_cursor.seek_by_key_subkey(address, key)?.filter(|e| e.key == key)
             {
                 let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes().to_vec(), out)?;
