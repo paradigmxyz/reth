@@ -47,8 +47,6 @@ pub(crate) enum EthApiError {
     PoolError(GethTxPoolError),
     #[error("Unknown block number")]
     UnknownBlockNumber,
-    #[error("Unknown Uncle")]
-    UnknownOmmer,
     #[error("Invalid block range")]
     InvalidBlockRange,
     /// An internal error where prevrandao is not set in the evm's environment
