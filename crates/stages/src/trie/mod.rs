@@ -258,6 +258,9 @@ impl EthAccount {
 
 /// Struct for calculating the root of a merkle patricia tree,
 /// while populating the database with intermediate hashes.
+///
+/// Requires that `HashedAccount` and `HashedStorage` to have been committed to the DB before
+/// calling any kind of `root()` function.
 #[derive(Debug)]
 pub struct DBTrieLoader {
     /// The maximum number of keys to insert before committing. Both from `AccountsTrie` and
