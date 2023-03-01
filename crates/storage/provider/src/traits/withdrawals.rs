@@ -6,6 +6,6 @@ pub trait WithdrawalsProvider: Send + Sync {
     /// Get withdrawals by block id.
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>>;
 
-    /// Get lastest withdrawal from this block or earlier .
-    fn lastest_withdrawal(&self, id: BlockId, timestamp: u64) -> Result<Option<Withdrawal>>;
+    /// Get latest withdrawal from this block or earlier .
+    fn latest_withdrawal(&self) -> Result<Option<Withdrawal>>;
 }

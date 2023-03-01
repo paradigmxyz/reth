@@ -1,7 +1,7 @@
 //! Collection of methods for block validation.
 use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
 use reth_primitives::{
-    BlockId, BlockNumber, BlockNumberOrTag, ChainSpec, Hardfork, Header,InvalidTransactionError, SealedBlock, SealedHeader,
+    BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock, SealedHeader,
     Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
 use reth_provider::{AccountProvider, HeaderProvider, WithdrawalsProvider};
@@ -368,14 +368,28 @@ pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider
         .ok_or(ConsensusError::ParentUnknown { hash: block.parent_hash })?;
 
     // Check if withdrawals are valid.
-    let parent_block_id = BlockId::Number(BlockNumberOrTag::Number(parent.number));
-    let latest_withdrawal = provider.lastest_withdrawal(parent_block_id, parent.timestamp)?;
     if let Some(withdrawals) = &block.withdrawals {
         if !withdrawals.is_empty() {
-            let withdrawal_index = withdrawals.first().unwrap().index;
-            let lastest_withdrawal_index = latest_withdrawal.map_or(0, |w| w.index);
-            if lastest_withdrawal_index + 1 != withdrawal_index {
-                return Err(ConsensusError::BlockKnown { hash, number: block.header.number }.into())
+            let latest_withdrawal = provider.latest_withdrawal()?;
+            match latest_withdrawal {
+                Some(withdrawal) => {
+                    if withdrawal.index + 1 != withdrawals.first().unwrap().index {
+                        return Err(ConsensusError::WithdrawalIndexInvalid {
+                            got: withdrawals.first().unwrap().index,
+                            expected: withdrawal.index + 1,
+                        }
+                        .into())
+                    }
+                }
+                None => {
+                    if withdrawals.first().unwrap().index != 0 {
+                        return Err(ConsensusError::WithdrawalIndexInvalid {
+                            got: withdrawals.first().unwrap().index,
+                            expected: 0,
+                        }
+                        .into())
+                    }
+                }
             }
         }
     }
@@ -415,10 +429,11 @@ pub fn full_validation<Provider: HeaderProvider + AccountProvider + WithdrawalsP
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use reth_interfaces::Result;
+    use mockall::mock;
+    use reth_interfaces::{Error::Consensus, Result};
     use reth_primitives::{
-        hex_literal::hex, proofs, Account, Address, BlockHash, Bytes, ChainSpecBuilder, Header,
-        Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
+        hex_literal::hex, proofs, Account, Address, BlockHash, BlockId, Bytes, ChainSpecBuilder,
+        Header, Signature, TransactionKind, TransactionSigned, Withdrawal, MAINNET, U256,
     };
     use std::ops::RangeBounds;
 
@@ -449,20 +464,45 @@ mod tests {
         }
     }
 
+    mock! {
+        WithdrawalsProvider {}
+
+        impl WithdrawalsProvider for WithdrawalsProvider {
+            fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> ;
+
+            fn withdrawals_by_block(
+                &self,
+                _id: BlockId,
+                _timestamp: u64,
+            ) -> RethResult<Option<Vec<Withdrawal>>> ;
+        }
+    }
+
     struct Provider {
         is_known: bool,
         parent: Option<Header>,
         account: Option<Account>,
+        withdrawals_provider: MockWithdrawalsProvider,
     }
 
     impl Provider {
         /// New provider with parent
         fn new(parent: Option<Header>) -> Self {
-            Self { is_known: false, parent, account: None }
+            Self {
+                is_known: false,
+                parent,
+                account: None,
+                withdrawals_provider: MockWithdrawalsProvider::new(),
+            }
         }
         /// New provider where is_known is always true
         fn new_known() -> Self {
-            Self { is_known: true, parent: None, account: None }
+            Self {
+                is_known: true,
+                parent: None,
+                account: None,
+                withdrawals_provider: MockWithdrawalsProvider::new(),
+            }
         }
     }
 
@@ -499,12 +539,8 @@ mod tests {
     }
 
     impl WithdrawalsProvider for Provider {
-        fn lastest_withdrawal(
-            &self,
-            _block_id: BlockId,
-            _timestamp: u64,
-        ) -> Result<Option<Withdrawal>> {
-            Ok(None)
+        fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
+            self.withdrawals_provider.latest_withdrawal()
         }
 
         fn withdrawals_by_block(
@@ -512,7 +548,7 @@ mod tests {
             _id: BlockId,
             _timestamp: u64,
         ) -> RethResult<Option<Vec<Withdrawal>>> {
-            Ok(None)
+            self.withdrawals_provider.withdrawals_by_block(_id, _timestamp)
         }
     }
 
@@ -557,7 +593,7 @@ mod tests {
             mix_hash: hex!("0000000000000000000000000000000000000000000000000000000000000000").into(),
             nonce: 0x0000000000000000,
             base_fee_per_gas: 0x28f0001df.into(),
-            withdrawals_root: None
+            withdrawals_root: None,
         };
         // size: 0x9b5
 
@@ -688,6 +724,39 @@ mod tests {
             validate_block_standalone(&block, &chain_spec),
             Err(ConsensusError::WithdrawalIndexInvalid { .. })
         );
+
+        let (_, parent) = mock_block();
+        let mut provider = Provider::new(Some(parent.clone()));
+        // Withdrawal index should be 0 if there are no withdrawals in the chain
+        let block = create_block_with_withdrawals(&[1, 2, 3]);
+        provider.withdrawals_provider.expect_latest_withdrawal().return_const(Ok(None));
+        assert_matches!(
+            validate_block_regarding_chain(&block, &provider),
+            Err(Consensus(ConsensusError::WithdrawalIndexInvalid { got: 1, expected: 0 }))
+        );
+        let block = create_block_with_withdrawals(&[0, 1, 2]);
+        let res = validate_block_regarding_chain(&block, &provider);
+        assert!(res.is_ok());
+
+        // Withdrawal index should be the last withdrawal index + 1
+        let mut provider = Provider::new(Some(parent.clone()));
+        let block = create_block_with_withdrawals(&[4, 5, 6]);
+        provider
+            .withdrawals_provider
+            .expect_latest_withdrawal()
+            .return_const(Ok(Some(Withdrawal { index: 2, ..Default::default() })));
+        assert_matches!(
+            validate_block_regarding_chain(&block, &provider),
+            Err(Consensus(ConsensusError::WithdrawalIndexInvalid { got: 4, expected: 3 }))
+        );
+
+        let block = create_block_with_withdrawals(&[3, 4, 5]);
+        provider
+            .withdrawals_provider
+            .expect_latest_withdrawal()
+            .return_const(Ok(Some(Withdrawal { index: 2, ..Default::default() })));
+        let res = validate_block_regarding_chain(&block, &provider);
+        assert!(res.is_ok());
     }
 
     #[test]
