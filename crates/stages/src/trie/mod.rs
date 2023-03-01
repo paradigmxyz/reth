@@ -1,5 +1,6 @@
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
+use parking_lot::Mutex;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -37,7 +38,7 @@ pub enum TrieError {
 
 /// Database wrapper implementing HashDB trait.
 struct HashDatabase<'tx, 'itx, DB: Database> {
-    tx: &'tx Transaction<'itx, DB>,
+    tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>,
 }
 
 impl<'tx, 'itx, DB> cita_trie::DB for HashDatabase<'tx, 'itx, DB>
@@ -47,7 +48,7 @@ where
     type Error = TrieError;
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self.tx.get::<tables::AccountsTrie>(H256::from_slice(key))?)
+        Ok(self.tx.lock().get::<tables::AccountsTrie>(H256::from_slice(key))?)
     }
 
     fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
@@ -60,7 +61,8 @@ where
 
     // Insert a batch of data into the cache.
     fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
-        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        let tx = self.tx.lock();
+        let mut cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         for (key, value) in keys.into_iter().zip(values.into_iter()) {
             cursor.upsert(H256::from_slice(key.as_slice()), value)?;
         }
@@ -68,7 +70,8 @@ where
     }
 
     fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
-        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        let tx = self.tx.lock();
+        let mut cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         for key in keys {
             if cursor.seek_exact(H256::from_slice(key.as_slice()))?.is_some() {
                 cursor.delete_current()?;
@@ -82,34 +85,43 @@ where
     }
 
     fn flush(&self) -> Result<(), Self::Error> {
+        self.tx.lock().commit()?;
         Ok(())
     }
 }
 
 impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
     /// Instantiates a new Database for the accounts trie, with an empty root
-    fn new(tx: &'tx Transaction<'itx, DB>) -> Result<Self, TrieError> {
+    fn new(tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
-        if tx.get::<tables::AccountsTrie>(root)?.is_none() {
-            tx.put::<tables::AccountsTrie>(root, [EMPTY_STRING_CODE].to_vec())?;
+        {
+            let tx = tx.lock();
+            if tx.get::<tables::AccountsTrie>(root)?.is_none() {
+                tx.put::<tables::AccountsTrie>(root, [EMPTY_STRING_CODE].to_vec())?;
+            }
         }
         Ok(Self { tx })
     }
 
     /// Instantiates a new Database for the accounts trie, with an existing root
-    fn from_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
+    fn from_root(
+        tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>,
+        root: H256,
+    ) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
             return Self::new(tx)
         }
-        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
+        tx.lock().get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
         Ok(Self { tx })
     }
 }
 
 /// Database wrapper implementing HashDB trait.
 struct DupHashDatabase<'tx, 'itx, DB: Database> {
-    tx: &'tx Transaction<'itx, DB>,
+    tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>,
     key: H256,
+    /// By default we want the outsider owner of this DB to flush the data.
+    flush: bool,
 }
 
 impl<'tx, 'itx, DB> cita_trie::DB for DupHashDatabase<'tx, 'itx, DB>
@@ -119,7 +131,8 @@ where
     type Error = TrieError;
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-        let mut cursor = self.tx.cursor_dup_read::<tables::StoragesTrie>()?;
+        let tx = self.tx.lock();
+        let mut cursor = tx.cursor_dup_read::<tables::StoragesTrie>()?;
         let subkey = H256::from_slice(key);
         Ok(cursor
             .seek_by_key_subkey(self.key, subkey)?
@@ -137,7 +150,8 @@ where
 
     /// Insert a batch of data into the cache.
     fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
-        let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        let tx = self.tx.lock();
+        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
         for (key, node) in keys.into_iter().zip(values.into_iter()) {
             let hash = H256::from_slice(key.as_slice());
             if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
@@ -149,7 +163,8 @@ where
     }
 
     fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
-        let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        let tx = self.tx.lock();
+        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
         for key in keys {
             let hash = H256::from_slice(key.as_slice());
             if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
@@ -164,34 +179,50 @@ where
     }
 
     fn flush(&self) -> Result<(), Self::Error> {
+        if self.flush {
+            self.tx.lock().commit()?;
+        }
         Ok(())
     }
 }
 
 impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
     /// Instantiates a new Database for the storage trie, with an empty root
-    fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
+    fn new(
+        tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>,
+        key: H256,
+        flush: bool,
+    ) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
-        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        if cursor.seek_by_key_subkey(key, root)?.filter(|entry| entry.hash == root).is_none() {
-            tx.put::<tables::StoragesTrie>(
-                key,
-                StorageTrieEntry { hash: root, node: [EMPTY_STRING_CODE].to_vec() },
-            )?;
+        {
+            let tx = tx.lock();
+            let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+            if cursor.seek_by_key_subkey(key, root)?.filter(|entry| entry.hash == root).is_none() {
+                tx.put::<tables::StoragesTrie>(
+                    key,
+                    StorageTrieEntry { hash: root, node: [EMPTY_STRING_CODE].to_vec() },
+                )?;
+            }
         }
-        Ok(Self { tx, key })
+        Ok(Self { tx, key, flush })
     }
 
     /// Instantiates a new Database for the storage trie, with an existing root
-    fn from_root(tx: &'tx Transaction<'itx, DB>, key: H256, root: H256) -> Result<Self, TrieError> {
+    fn from_root(
+        tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>,
+        key: H256,
+        root: H256,
+        flush: bool,
+    ) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
-            return Self::new(tx, key)
+            return Self::new(tx, key, flush)
         }
-        tx.cursor_dup_read::<tables::StoragesTrie>()?
+        tx.lock()
+            .cursor_dup_read::<tables::StoragesTrie>()?
             .seek_by_key_subkey(key, root)?
             .filter(|entry| entry.hash == root)
             .ok_or(TrieError::MissingRoot(root))?;
-        Ok(Self { tx, key })
+        Ok(Self { tx, key, flush })
     }
 }
 
@@ -227,36 +258,51 @@ impl EthAccount {
 
 /// Struct for calculating the root of a merkle patricia tree,
 /// while populating the database with intermediate hashes.
-#[derive(Debug, Default)]
-pub struct DBTrieLoader;
+#[derive(Debug)]
+pub struct DBTrieLoader {
+    /// The maximum number of keys to insert before committing. Both from `AccountsTrie` and
+    /// `StoragesTrie`.
+    pub commit_threshold: u64,
+    /// The current number of inserted keys from both `AccountsTrie` and `StoragesTrie`.
+    current: u64,
+}
+
+impl Default for DBTrieLoader {
+    fn default() -> Self {
+        DBTrieLoader { commit_threshold: 100_000000, current: 0 }
+    }
+}
 
 impl DBTrieLoader {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
     pub fn calculate_root<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
+        &mut self,
+        tx: &mut Transaction<'_, DB>,
     ) -> Result<H256, TrieError> {
         tx.clear::<tables::AccountsTrie>()?;
         tx.clear::<tables::StoragesTrie>()?;
 
-        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
-        let mut walker = accounts_cursor.walk(None)?;
+        let read_tx = tx.inner().tx()?;
+        let mut accounts_cursor = read_tx.cursor_read::<tables::HashedAccount>()?;
+        let mut accounts_walker = accounts_cursor.walk(None)?;
 
-        let db = Arc::new(HashDatabase::new(tx)?);
+        let shared_tx = Arc::new(Mutex::new(tx));
+        let mut trie = PatriciaTrie::new(
+            Arc::new(HashDatabase::new(shared_tx.clone())?),
+            Arc::new(HasherKeccak::new()),
+        );
 
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
-
-        while let Some((hashed_address, account)) = walker.next().transpose()? {
+        while let Some((hashed_address, account)) = accounts_walker.next().transpose()? {
             let value = EthAccount::from_with_root(
                 account,
-                self.calculate_storage_root(tx, hashed_address)?,
+                self.calculate_storage_root(shared_tx.clone(), &mut trie, hashed_address)?,
             );
 
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
             trie.insert(hashed_address.as_bytes().to_vec(), out)?;
+
+            self.check_threshold(&mut trie, None)?;
         }
         let root = H256::from_slice(trie.root()?.as_slice());
 
@@ -264,17 +310,21 @@ impl DBTrieLoader {
     }
 
     fn calculate_storage_root<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
+        &mut self,
+        tx: Arc<Mutex<&mut Transaction<'_, DB>>>,
+        accounts_trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
         address: H256,
     ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::new(tx, address)?);
+        let mut trie = PatriciaTrie::new(
+            Arc::new(DupHashDatabase::new(tx.clone(), address, false)?),
+            Arc::new(HasherKeccak::new()),
+        );
 
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
-
-        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let read_tx = {
+            let tx = tx.lock();
+            tx.inner().tx()?
+        };
+        let mut storage_cursor = read_tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         // Should be able to use walk_dup, but any call to next() causes an assert fail in mdbx.c
         // let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
@@ -284,6 +334,8 @@ impl DBTrieLoader {
             let out = encode_fixed_size(&value).to_vec();
             trie.insert(storage_key.to_vec(), out)?;
             current = storage_cursor.next_dup()?.map(|(_, v)| v);
+
+            self.check_threshold(accounts_trie, Some(&mut trie))?
         }
 
         let root = H256::from_slice(trie.root()?.as_slice());
@@ -291,31 +343,58 @@ impl DBTrieLoader {
         Ok(root)
     }
 
+    /// Makes sure that we flush trie data before we run out of memory. Takes into account both the
+    /// `AccountsTrie` and `StoragesTrie`.
+    fn check_threshold<DB: Database>(
+        &mut self,
+        accounts_trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
+        storages_trie: Option<&mut PatriciaTrie<DupHashDatabase<'_, '_, DB>, HasherKeccak>>,
+    ) -> Result<(), TrieError> {
+        self.current += 1;
+        if self.current == self.commit_threshold {
+            self.current = 0;
+            if let Some(trie) = storages_trie {
+                // This will consume the data from trie.cache to DbTxMut
+                trie.root()?;
+            }
+            // This will consume the data from trie.cache to DbTxMut and commit it
+            accounts_trie.root()?;
+        }
+        Ok(())
+    }
+
     /// Calculates the root of the state trie by updating an existing trie.
     pub fn update_root<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
+        &mut self,
+        tx: &mut Transaction<'_, DB>,
         root: H256,
         tid_range: Range<TransitionId>,
     ) -> Result<H256, TrieError> {
-        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+        let read_tx = tx.inner().tx()?;
+        let mut accounts_cursor = read_tx.cursor_read::<tables::HashedAccount>()?;
 
         let changed_accounts = self.gather_changes(tx, tid_range)?;
 
-        let db = Arc::new(HashDatabase::from_root(tx, root)?);
-
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
+        let shared_tx = Arc::new(Mutex::new(tx));
+        let mut trie = PatriciaTrie::from(
+            Arc::new(HashDatabase::from_root(shared_tx.clone(), root)?),
+            Arc::new(HasherKeccak::new()),
+            root.as_bytes(),
+        )?;
 
         for (address, changed_storages) in changed_accounts {
             let storage_root = if let Some(account) = trie.get(address.as_slice())? {
                 trie.remove(address.as_bytes())?;
 
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
-                self.update_storage_root(tx, storage_root, address, changed_storages)?
+                self.update_storage_root(
+                    shared_tx.clone(),
+                    storage_root,
+                    address,
+                    changed_storages,
+                )?
             } else {
-                self.calculate_storage_root(tx, address)?
+                self.calculate_storage_root(shared_tx.clone(), &mut trie, address)?
             };
 
             if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
@@ -324,6 +403,8 @@ impl DBTrieLoader {
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
                 trie.insert(address.as_bytes().to_vec(), out)?;
+
+                self.check_threshold(&mut trie, None)?
             }
         }
 
@@ -334,17 +415,22 @@ impl DBTrieLoader {
 
     fn update_storage_root<DB: Database>(
         &self,
-        tx: &Transaction<'_, DB>,
+        shared_tx: Arc<Mutex<&mut Transaction<'_, DB>>>,
         root: H256,
         address: H256,
         changed_storages: BTreeSet<H256>,
     ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::from_root(tx, address, root)?);
+        let read_tx = {
+            let tx = shared_tx.lock();
+            tx.inner().tx()?
+        };
+        let mut storage_cursor = read_tx.cursor_dup_read::<tables::HashedStorage>()?;
 
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
-        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let mut trie = PatriciaTrie::from(
+            Arc::new(DupHashDatabase::from_root(shared_tx.clone(), address, root, false)?),
+            Arc::new(HasherKeccak::new()),
+            root.as_bytes(),
+        )?;
 
         for key in changed_storages {
             if let Some(StorageEntry { value, .. }) =
@@ -364,7 +450,7 @@ impl DBTrieLoader {
 
     fn gather_changes<DB: Database>(
         &self,
-        tx: &Transaction<'_, DB>,
+        tx: &mut Transaction<'_, DB>,
         tid_range: Range<TransitionId>,
     ) -> Result<BTreeMap<H256, BTreeSet<H256>>, TrieError> {
         let mut account_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
@@ -418,17 +504,17 @@ mod tests {
 
     #[test]
     fn empty_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
-        assert_matches!(trie.calculate_root(&tx), Ok(got) if got == EMPTY_ROOT);
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        assert_matches!(trie.calculate_root(&mut tx), Ok(got) if got == EMPTY_ROOT);
     }
 
     #[test]
     fn single_account_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let account = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
         tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
@@ -436,16 +522,16 @@ mod tests {
         EthAccount::from(account).encode(&mut encoded_account);
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, encoded_account)]).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            trie.calculate_root(&mut tx),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn two_accounts_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
 
         let accounts = [
             (
@@ -467,16 +553,16 @@ mod tests {
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            trie.calculate_root(&mut tx),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn single_storage_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
 
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let hashed_address = keccak256(address);
@@ -494,17 +580,24 @@ mod tests {
             (k, out)
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
+
+        let shared_tx = Arc::new(Mutex::new(&mut tx));
+        let mut accounts_trie = PatriciaTrie::new(
+            Arc::new(HashDatabase::new(shared_tx.clone()).unwrap()),
+            Arc::new(HasherKeccak::new()),
+        );
+
         assert_matches!(
-            trie.calculate_storage_root(&tx, hashed_address),
+            trie.calculate_storage_root(shared_tx.clone(), &mut accounts_trie, hashed_address),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn single_account_with_storage_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
 
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let hashed_address = keccak256(address);
@@ -543,14 +636,14 @@ mod tests {
 
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            trie.calculate_root(&mut tx),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn verify_genesis() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
         let ChainSpec { genesis, .. } = chain_spec_value_parser("mainnet").unwrap();
@@ -572,7 +665,7 @@ mod tests {
         let state_root = genesis_state_root(&genesis.alloc);
 
         assert_matches!(
-            trie.calculate_root(&tx),
+            trie.calculate_root(&mut tx),
             Ok(got) if got == state_root
         );
     }
@@ -580,7 +673,7 @@ mod tests {
     #[test]
     fn gather_changes() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
 
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let hashed_address = keccak256(address);
@@ -616,15 +709,15 @@ mod tests {
             BTreeSet::from([keccak256(H256::zero()), keccak256(H256::from_low_u64_be(2))]),
         )]);
         assert_matches!(
-            DBTrieLoader::default().gather_changes(&tx, 32..33),
+            DBTrieLoader::default().gather_changes(&mut tx, 32..33),
             Ok(got) if got == expected
         );
     }
 
     fn test_with_accounts(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>) {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
 
         let encoded_accounts = accounts
             .into_iter()
@@ -655,7 +748,7 @@ mod tests {
 
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            trie.calculate_root(&mut tx),
             Ok(got) if got == expected
         , "where expected is {expected:?}");
     }

@@ -111,13 +111,13 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else if to_transition - from_transition > threshold || stage_progress == 0 {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
-            let loader = DBTrieLoader::default();
+            let mut loader = DBTrieLoader::default();
             loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
             let current_root = tx.get_header(stage_progress)?.state_root;
-            let loader = DBTrieLoader::default();
+            let mut loader = DBTrieLoader::default();
             loader
                 .update_root(tx, current_root, from_transition..to_transition)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
@@ -155,7 +155,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let loader = DBTrieLoader::default();
+        let mut loader = DBTrieLoader::default();
         let current_root = tx.get_header(input.stage_progress)?.state_root;
 
         let from_transition = tx.get_block_transition(input.unwind_to)?;
@@ -440,7 +440,7 @@ mod tests {
 
     impl MerkleTestRunner {
         fn state_root(&self) -> Result<H256, TestRunnerError> {
-            Ok(DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap())
+            Ok(DBTrieLoader::default().calculate_root(&mut self.tx.inner()).unwrap())
         }
 
         pub(crate) fn generate_initial_trie(
@@ -451,10 +451,10 @@ mod tests {
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, std::iter::empty()))),
             )?;
 
-            let loader = DBTrieLoader::default();
+            let mut loader = DBTrieLoader::default();
 
             let mut tx = self.tx.inner();
-            let root = loader.calculate_root(&tx).expect("couldn't create initial trie");
+            let root = loader.calculate_root(&mut tx).expect("couldn't create initial trie");
 
             tx.commit()?;
 
@@ -465,7 +465,7 @@ mod tests {
             if previous_stage_progress != 0 {
                 let block_root =
                     self.tx.inner().get_header(previous_stage_progress).unwrap().state_root;
-                let root = DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap();
+                let root = DBTrieLoader::default().calculate_root(&mut self.tx.inner()).unwrap();
                 assert_eq!(block_root, root);
             }
             Ok(())
