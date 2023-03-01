@@ -1,3 +1,5 @@
+use reth_primitives::Address;
+
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub(crate) const MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -12,6 +14,8 @@ pub struct PoolConfig {
     pub queued_limit: SubPoolLimit,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
+    /// The address of the pool owner.
+    pub coinbase: Address,
 }
 
 impl Default for PoolConfig {
@@ -21,6 +25,7 @@ impl Default for PoolConfig {
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
             max_account_slots: MAX_ACCOUNT_SLOTS_PER_SENDER,
+            coinbase: Default::default(),
         }
     }
 }
