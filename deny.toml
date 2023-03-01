@@ -57,6 +57,8 @@ exceptions = [
     { allow = ["CC0-1.0"], name = "secp256k1-sys" },
     { allow = ["CC0-1.0"], name = "tiny-keccak" },
     { allow = ["CC0-1.0"], name = "more-asserts" },
+    # MIT with no attribution https://choosealicense.com/licenses/mit-0/
+    { allow = ["MIT-0"], name = "dunce" },
 
     # TODO: ethers transitive deps
     { allow = ["GPL-3.0"], name = "fastrlp" },
