@@ -1,9 +1,10 @@
-use rand::{distributions::uniform::SampleRange, thread_rng, Rng};
+use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, Transaction,
-    TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
+    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, StorageEntry,
+    Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
 };
 use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
+use std::{collections::BTreeMap, ops::Sub};
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
 // relevant crates?
@@ -163,6 +164,115 @@ pub fn random_block_range(
         ));
     }
     blocks
+}
+
+type Transition = Vec<(Address, Account, Vec<StorageEntry>)>;
+type AccountState = (Account, Vec<StorageEntry>);
+
+/// Generate a range of transitions for given blocks and accounts.
+/// Assumes all accounts start with an empty storage.
+///
+/// Returns a Vec of account and storage changes for each transition,
+/// along with the final state of all accounts and storages.
+pub fn random_transition_range<'a, IBlk, IAcc>(
+    blocks: IBlk,
+    accounts: IAcc,
+    n_changes: std::ops::Range<u64>,
+    key_range: std::ops::Range<u64>,
+) -> (Vec<Transition>, BTreeMap<Address, AccountState>)
+where
+    IBlk: IntoIterator<Item = &'a SealedBlock>,
+    IAcc: IntoIterator<Item = (Address, (Account, Vec<StorageEntry>))>,
+{
+    let mut rng = rand::thread_rng();
+    let mut state: BTreeMap<_, _> = accounts
+        .into_iter()
+        .map(|(addr, (acc, st))| (addr, (acc, st.into_iter().map(|e| (e.key, e.value)).collect())))
+        .collect();
+
+    let valid_addresses = state.keys().copied().collect();
+
+    let num_transitions: usize = blocks.into_iter().map(|block| block.body.len()).sum();
+    let mut transitions = Vec::with_capacity(num_transitions);
+
+    (0..num_transitions).for_each(|i| {
+        let mut transition = Vec::new();
+        let (from, to, mut transfer, new_entries) =
+            random_account_change(&valid_addresses, n_changes.clone(), key_range.clone());
+
+        // extract from sending account
+        let (prev_from, _) = state.get_mut(&from).unwrap();
+        transition.push((from, *prev_from, Vec::new()));
+
+        transfer = transfer.min(prev_from.balance).max(U256::from(1));
+        prev_from.balance = prev_from.balance.wrapping_sub(transfer);
+
+        // deposit in receiving account and update storage
+        let (prev_to, storage): &mut (Account, BTreeMap<H256, U256>) = state.get_mut(&to).unwrap();
+
+        let old_entries = new_entries
+            .into_iter()
+            .filter_map(|entry| {
+                let old = if entry.value != U256::ZERO {
+                    storage.insert(entry.key, entry.value)
+                } else {
+                    let old = storage.remove(&entry.key);
+                    if matches!(old, Some(U256::ZERO)) {
+                        return None
+                    }
+                    old
+                };
+                Some(StorageEntry { value: old.unwrap_or(U256::from(0)), ..entry })
+            })
+            .collect();
+
+        transition.push((to, *prev_to, old_entries));
+
+        prev_to.balance = prev_to.balance.wrapping_add(transfer);
+
+        transitions.push(transition);
+    });
+
+    let final_state = state
+        .into_iter()
+        .map(|(addr, (acc, storage))| {
+            (addr, (acc, storage.into_iter().map(|v| v.into()).collect()))
+        })
+        .collect();
+    (transitions, final_state)
+}
+
+/// Generate a random account change.
+///
+/// Returns two addresses, a balance_change, and a Vec of new storage entries.
+pub fn random_account_change(
+    valid_addresses: &Vec<Address>,
+    n_changes: std::ops::Range<u64>,
+    key_range: std::ops::Range<u64>,
+) -> (Address, Address, U256, Vec<StorageEntry>) {
+    let mut rng = rand::thread_rng();
+    let mut addresses = valid_addresses.choose_multiple(&mut rng, 2).cloned();
+
+    let addr_from = addresses.next().unwrap_or_else(Address::random);
+    let addr_to = addresses.next().unwrap_or_else(Address::random);
+
+    let balance_change = U256::from(rng.gen::<u64>());
+
+    let storage_changes = (0..n_changes.sample_single(&mut rng))
+        .map(|_| random_storage_entry(key_range.clone()))
+        .collect();
+
+    (addr_from, addr_to, balance_change, storage_changes)
+}
+
+/// Generate a random storage change.
+pub fn random_storage_entry(key_range: std::ops::Range<u64>) -> StorageEntry {
+    let mut rng = rand::thread_rng();
+
+    let key = H256::from_low_u64_be(key_range.sample_single(&mut rng));
+    let value = U256::from(rng.gen::<u64>());
+
+    StorageEntry { key, value }
 }
 
 /// Generate random Externaly Owned Account (EOA account without contract).

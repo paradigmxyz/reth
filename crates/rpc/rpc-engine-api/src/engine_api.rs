@@ -1,13 +1,12 @@
 use crate::{message::EngineApiMessageVersion, EngineApiError, EngineApiMessage, EngineApiResult};
 use futures::StreamExt;
-use reth_executor::executor;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
     BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
     H64, U256,
 };
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_revm::database::{State, SubState};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
@@ -17,6 +16,7 @@ use reth_rpc_types::engine::{
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot, watch};
@@ -37,7 +37,7 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 pub struct EngineApi<Client> {
     client: Client,
     /// Consensus configuration
-    chain_spec: ChainSpec,
+    chain_spec: Arc<ChainSpec>,
     message_rx: UnboundedReceiverStream<EngineApiMessage>,
     forkchoice_state_tx: watch::Sender<ForkchoiceState>,
     // TODO: Placeholder for storing future blocks. Make cache bounded. Use lru
@@ -45,7 +45,9 @@ pub struct EngineApi<Client> {
     // remote_store: HashMap<H64, ExecutionPayload>,
 }
 
-impl<Client: HeaderProvider + BlockProvider + StateProviderFactory> EngineApi<Client> {
+impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider>
+    EngineApi<Client>
+{
     /// Create new instance of [EngineApi].
     pub fn new(
         client: Client,
@@ -55,7 +57,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory> EngineApi<Cl
     ) -> Self {
         Self {
             client,
-            chain_spec,
+            chain_spec: Arc::new(chain_spec),
             message_rx: UnboundedReceiverStream::new(message_rx),
             forkchoice_state_tx,
         }
@@ -302,13 +304,10 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory> EngineApi<Cl
 
         let state_provider = self.client.latest()?;
         let total_difficulty = parent_td + block.header.difficulty;
-        match executor::execute_and_verify_receipt(
-            &block.unseal(),
-            total_difficulty,
-            None,
-            &self.chain_spec,
-            &mut SubState::new(State::new(&state_provider)),
-        ) {
+
+        let mut db = SubState::new(State::new(&state_provider));
+        let mut executor = reth_executor::executor::Executor::new(self.chain_spec.clone(), &mut db);
+        match executor.execute_and_verify_receipt(&block.unseal(), total_difficulty, None) {
             Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash)),
             Err(err) => Ok(PayloadStatus::new(
                 PayloadStatusEnum::Invalid { validation_error: err.to_string() },
@@ -409,7 +408,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory> EngineApi<Cl
 
 impl<Client> Future for EngineApi<Client>
 where
-    Client: HeaderProvider + BlockProvider + StateProviderFactory + Unpin,
+    Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider + Unpin,
 {
     type Output = ();
 
@@ -441,7 +440,7 @@ mod tests {
     };
 
     fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>>) {
-        let chain_spec = MAINNET.clone();
+        let chain_spec = Arc::new(MAINNET.clone());
         let client = Arc::new(MockEthProvider::default());
         let (msg_tx, msg_rx) = unbounded_channel();
         let (forkchoice_state_tx, forkchoice_state_rx) = watch::channel(ForkchoiceState::default());
@@ -456,7 +455,7 @@ mod tests {
     }
 
     struct EngineApiTestHandle {
-        chain_spec: ChainSpec,
+        chain_spec: Arc<ChainSpec>,
         client: Arc<MockEthProvider>,
         msg_tx: UnboundedSender<EngineApiMessage>,
         forkchoice_state_rx: WatchReceiver<ForkchoiceState>,

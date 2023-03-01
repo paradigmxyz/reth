@@ -376,10 +376,12 @@ where
             .map(|(address, storage)| {
                 storage
                     .into_iter()
-                    .map(|key| {
-                        plain_storage
-                            .seek_by_key_subkey(address, key)
-                            .map(|ret| (key, ret.map(|e| e.value).unwrap_or_default()))
+                    .map(|key| -> Result<_, TransactionError> {
+                        let ret = plain_storage
+                            .seek_by_key_subkey(address, key)?
+                            .filter(|v| v.key == key)
+                            .unwrap_or_default();
+                        Ok((key, ret.value))
                     })
                     .collect::<Result<Vec<(_, _)>, _>>()
                     .map(|storage| (address, storage))
@@ -405,10 +407,10 @@ where
         let mut hashed_storage = self.cursor_dup_write::<tables::HashedStorage>()?;
         // Hash the address and key and apply them to HashedStorage (if Storage is None
         // just remove it);
-        hashed.into_iter().try_for_each(|(address, storage)| {
+        hashed.into_iter().try_for_each(|(hashed_address, storage)| {
             storage.into_iter().try_for_each(|(key, value)| -> Result<(), TransactionError> {
                 if hashed_storage
-                    .seek_by_key_subkey(address, key)?
+                    .seek_by_key_subkey(hashed_address, key)?
                     .filter(|entry| entry.key == key)
                     .is_some()
                 {
@@ -416,7 +418,7 @@ where
                 }
 
                 if value != U256::ZERO {
-                    hashed_storage.upsert(address, StorageEntry { key, value })?;
+                    hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
                 }
                 Ok(())
             })

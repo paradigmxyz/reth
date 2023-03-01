@@ -181,9 +181,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             .collect::<BTreeMap<_, _>>()
             .into_iter()
             // Apply values to HashedStorage (if Value is zero just remove it);
-            .try_for_each(|((address, key), value)| -> Result<(), StageError> {
+            .try_for_each(|((hashed_address, key), value)| -> Result<(), StageError> {
                 if hashed_storage
-                    .seek_by_key_subkey(address, key)?
+                    .seek_by_key_subkey(hashed_address, key)?
                     .filter(|entry| entry.key == key)
                     .is_some()
                 {
@@ -191,7 +191,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 }
 
                 if value != U256::ZERO {
-                    hashed_storage.upsert(address, StorageEntry { key, value })?;
+                    hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
                 }
                 Ok(())
             })?;

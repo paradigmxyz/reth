@@ -216,8 +216,8 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let mut input = ExecInput::default();
-        input.previous_stage = Some((PREV_STAGE_ID, run_to));
+        let input =
+            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
@@ -226,9 +226,7 @@ mod tests {
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
-        let mut input = UnwindInput::default();
-        input.stage_progress = unwind_from;
-        input.unwind_to = unwind_to;
+        let input = UnwindInput { stage_progress: unwind_from, unwind_to, ..Default::default() };
         let mut stage = IndexStorageHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.unwind(&mut tx, input).await.unwrap();
@@ -291,8 +289,7 @@ mod tests {
     async fn insert_index_to_full_shard() {
         // init
         let tx = TestTransaction::default();
-        let mut input = ExecInput::default();
-        input.previous_stage = Some((PREV_STAGE_ID, 5));
+        let _input = ExecInput { previous_stage: Some((PREV_STAGE_ID, 5)), ..Default::default() };
 
         // change does not matter only that account is present in changeset.
         let full_list = vec![3; NUM_OF_INDICES_IN_SHARD];

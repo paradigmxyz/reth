@@ -10,7 +10,7 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, TransactionSigned, H256, U64,
 };
-use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
 use crate::eth::error::EthResult;
@@ -97,7 +97,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
@@ -176,7 +176,7 @@ where
 impl<Client, Pool, Network> EthApiSpec for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.

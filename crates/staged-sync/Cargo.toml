@@ -41,7 +41,7 @@ tracing = "0.1.37"
 rand = { version = "0.8", optional = true }
 
 # errors
-thiserror = { version = "1", optional = true }
+thiserror = "1"
 
 # enr
 enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"], optional = true }
@@ -89,7 +89,6 @@ test-utils = [
     "dep:enr",
     "dep:ethers-core",
     "dep:tempfile",
-    "dep:thiserror",
     "dep:hex",
     "dep:rand",
     "dep:tokio",
