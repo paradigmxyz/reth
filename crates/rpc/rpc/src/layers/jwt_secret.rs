@@ -111,7 +111,9 @@ impl JwtSecret {
     ///
     /// See also: [JWT Claims - Engine API specs](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md#jwt-claims)
     pub fn validate(&self, jwt: String) -> Result<(), JwtError> {
-        let validation = Validation::new(JWT_SIGNATURE_ALGO);
+        let mut validation = Validation::new(JWT_SIGNATURE_ALGO);
+        // ensure that the JWT has an `iat` claim
+        validation.set_required_spec_claims(&["iat"]);
         let bytes = &self.0;
 
         match decode::<Claims>(&jwt, &DecodingKey::from_secret(bytes), &validation) {
@@ -165,7 +167,7 @@ pub(crate) struct Claims {
     /// - [`RFC-7519 - Spec`](https://www.rfc-editor.org/rfc/rfc7519#section-4.1.6)
     /// - [`RFC-7519 - Notations`](https://www.rfc-editor.org/rfc/rfc7519#section-2)
     pub(crate) iat: u64,
-    pub(crate) exp: u64,
+    pub(crate) exp: Option<u64>,
 }
 
 impl Claims {
@@ -239,7 +241,7 @@ mod tests {
     #[test]
     fn validation_ok() {
         let secret = JwtSecret::random();
-        let claims = Claims { iat: to_u64(SystemTime::now()), exp: 10000000000 };
+        let claims = Claims { iat: to_u64(SystemTime::now()), exp: Some(10000000000) };
         let jwt: String = secret.encode(&claims).unwrap();
 
         let result = secret.validate(jwt);
@@ -254,7 +256,7 @@ mod tests {
         // Check past 'iat' claim more than 60 secs
         let offset = Duration::from_secs(JWT_MAX_IAT_DIFF.as_secs() + 1);
         let out_of_window_time = SystemTime::now().checked_sub(offset).unwrap();
-        let claims = Claims { iat: to_u64(out_of_window_time), exp: 10000000000 };
+        let claims = Claims { iat: to_u64(out_of_window_time), exp: Some(10000000000) };
         let jwt: String = secret.encode(&claims).unwrap();
 
         let result = secret.validate(jwt);
@@ -264,7 +266,7 @@ mod tests {
         // Check future 'iat' claim more than 60 secs
         let offset = Duration::from_secs(JWT_MAX_IAT_DIFF.as_secs() + 1);
         let out_of_window_time = SystemTime::now().checked_add(offset).unwrap();
-        let claims = Claims { iat: to_u64(out_of_window_time), exp: 10000000000 };
+        let claims = Claims { iat: to_u64(out_of_window_time), exp: Some(10000000000) };
         let jwt: String = secret.encode(&claims).unwrap();
 
         let result = secret.validate(jwt);
@@ -275,7 +277,7 @@ mod tests {
     #[test]
     fn validation_error_wrong_signature() {
         let secret_1 = JwtSecret::random();
-        let claims = Claims { iat: to_u64(SystemTime::now()), exp: 10000000000 };
+        let claims = Claims { iat: to_u64(SystemTime::now()), exp: Some(10000000000) };
         let jwt: String = secret_1.encode(&claims).unwrap();
 
         // A different secret will generate a different signature.
@@ -292,11 +294,23 @@ mod tests {
         let key = EncodingKey::from_secret(bytes);
         let unsupported_algo = Header::new(Algorithm::HS384);
 
-        let claims = Claims { iat: to_u64(SystemTime::now()), exp: 10000000000 };
+        let claims = Claims { iat: to_u64(SystemTime::now()), exp: Some(10000000000) };
         let jwt: String = encode(&unsupported_algo, &claims, &key).unwrap();
         let result = secret.validate(jwt);
 
         assert!(matches!(result, Err(JwtError::UnsupportedSignatureAlgorithm)));
+    }
+
+    #[test]
+    fn valid_without_exp_claim() {
+        let secret = JwtSecret::random();
+
+        let claims = Claims { iat: to_u64(SystemTime::now()), exp: None };
+        let jwt: String = secret.encode(&claims).unwrap();
+
+        let result = secret.validate(jwt);
+
+        assert!(matches!(result, Ok(())));
     }
 
     #[test]
