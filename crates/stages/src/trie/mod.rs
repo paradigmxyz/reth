@@ -269,7 +269,7 @@ pub struct DBTrieLoader {
 
 impl Default for DBTrieLoader {
     fn default() -> Self {
-        DBTrieLoader { commit_threshold: 100_000000, current: 0 }
+        DBTrieLoader { commit_threshold: 500_000, current: 0 }
     }
 }
 
@@ -311,17 +311,17 @@ impl DBTrieLoader {
 
     fn calculate_storage_root<DB: Database>(
         &mut self,
-        tx: Arc<Mutex<&mut Transaction<'_, DB>>>,
+        shared_tx: Arc<Mutex<&mut Transaction<'_, DB>>>,
         accounts_trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
         address: H256,
     ) -> Result<H256, TrieError> {
         let mut trie = PatriciaTrie::new(
-            Arc::new(DupHashDatabase::new(tx.clone(), address, false)?),
+            Arc::new(DupHashDatabase::new(shared_tx.clone(), address, false)?),
             Arc::new(HasherKeccak::new()),
         );
 
         let read_tx = {
-            let tx = tx.lock();
+            let tx = shared_tx.lock();
             tx.inner().tx()?
         };
         let mut storage_cursor = read_tx.cursor_dup_read::<tables::HashedStorage>()?;
