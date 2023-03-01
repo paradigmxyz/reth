@@ -160,7 +160,12 @@ impl Command {
 
         let _rpc_server = self
             .rpc
-            .start_rpc_server(shareable_db.clone(), test_transaction_pool.clone(), network.clone())
+            .start_rpc_server(
+                shareable_db.clone(),
+                test_transaction_pool.clone(),
+                network.clone(),
+                ctx.task_executor.clone(),
+            )
             .await?;
         info!(target: "reth::cli", "Started RPC server");
 
@@ -174,6 +179,7 @@ impl Command {
                 shareable_db,
                 test_transaction_pool,
                 network.clone(),
+                ctx.task_executor.clone(),
                 engine_api_handle,
             )
             .await?;

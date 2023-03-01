@@ -13,7 +13,7 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
-use crate::eth::error::EthResult;
+use crate::eth::{cache::EthStateCache, error::EthResult};
 use reth_provider::providers::ChainState;
 use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
@@ -67,8 +67,8 @@ pub struct EthApi<Client, Pool, Network> {
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Client, pool: Pool, network: Network) -> Self {
-        let inner = EthApiInner { client, pool, network, signers: Default::default() };
+    pub fn new(client: Client, pool: Pool, network: Network, eth_cache: EthStateCache) -> Self {
+        let inner = EthApiInner { client, pool, network, signers: Default::default(), eth_cache };
         Self {
             inner: Arc::new(inner),
             fee_history_cache: FeeHistoryCache::new(
@@ -216,4 +216,6 @@ struct EthApiInner<Client, Pool, Network> {
     network: Network,
     /// All configured Signers
     signers: Vec<Box<dyn EthSigner>>,
+    /// The async cache frontend for eth related data
+    eth_cache: EthStateCache,
 }

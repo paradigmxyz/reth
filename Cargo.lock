@@ -5032,6 +5032,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-rpc-types",
+ "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",

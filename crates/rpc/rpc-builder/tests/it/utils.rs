@@ -4,6 +4,7 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcModuleSelection, RpcServerConfig, RpcServerHandle,
     TransportRpcModuleConfig,
 };
+use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
@@ -50,9 +51,11 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
 }
 
 /// Returns an [RpcModuleBuilder] with testing components.
-pub fn test_rpc_builder() -> RpcModuleBuilder<NoopProvider, TestPool, NoopNetwork> {
+pub fn test_rpc_builder() -> RpcModuleBuilder<NoopProvider, TestPool, NoopNetwork, TokioTaskExecutor>
+{
     RpcModuleBuilder::default()
         .with_client(NoopProvider::default())
         .with_pool(testing_pool())
         .with_network(NoopNetwork::default())
+        .with_executor(TokioTaskExecutor::default())
 }

@@ -15,6 +15,7 @@ reth-rpc = { path = "../rpc" }
 reth-rpc-api = { path = "../rpc-api" }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
 reth-rpc-types = { path = "../rpc-types" }
+reth-tasks = { path = "../../tasks" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 jsonrpsee = { version = "0.16", features = ["server"] }

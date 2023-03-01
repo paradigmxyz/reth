@@ -14,7 +14,7 @@
 mod admin;
 mod debug;
 mod engine;
-mod eth;
+pub mod eth;
 mod layers;
 mod net;
 mod trace;
