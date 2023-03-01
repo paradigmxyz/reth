@@ -17,7 +17,7 @@ use reth_revm_primitives::{
     config::revm_spec,
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
 };
-use revm_primitives::{BlockEnv, CfgEnv, Env, SpecId};
+use revm_primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{ops::RangeBounds, sync::Arc};
 
 mod state;
@@ -241,16 +241,21 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
-    fn fill_env_at(&self, env: &mut Env, at: BlockId) -> Result<()> {
+    fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()> {
         let hash = self.block_hash_for_id(at)?.ok_or(ProviderError::HeaderNotFound)?;
         let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound)?;
-        self.fill_env_with_header(env, &header)
+        self.fill_env_with_header(cfg, block_env, &header)
     }
 
-    fn fill_env_with_header(&self, env: &mut Env, header: &Header) -> Result<()> {
+    fn fill_env_with_header(
+        &self,
+        cfg: &mut CfgEnv,
+        block_env: &mut BlockEnv,
+        header: &Header,
+    ) -> Result<()> {
         let total_difficulty =
             self.header_td_by_number(header.number)?.ok_or(ProviderError::HeaderNotFound)?;
-        fill_cfg_and_block_env(env, &self.chain_spec, header, total_difficulty);
+        fill_cfg_and_block_env(cfg, block_env, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
 

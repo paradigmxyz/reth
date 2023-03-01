@@ -160,33 +160,40 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 // Assumption we are okay with is that plain state represent
                 // `previous_stage_progress` state.
                 .map(|(address, storage)| {
-                    storage
-                        .into_iter()
-                        .map(|key| {
-                            plain_storage
-                                .seek_by_key_subkey(address, key)
-                                .map(|ret| (keccak256(key), ret.map(|e| e.value)))
-                        })
-                        .collect::<Result<BTreeMap<_, _>, _>>()
-                        .map(|storage| (keccak256(address), storage))
+                    let res = (
+                        keccak256(address),
+                        storage
+                            .into_iter()
+                            .map(|key| {
+                                Ok::<Option<_>, reth_db::Error>(
+                                    plain_storage
+                                        .seek_by_key_subkey(address, key)?
+                                        .filter(|v| v.key == key)
+                                        .map(|ret| (keccak256(key), ret.value)),
+                                )
+                            })
+                            .collect::<Result<Vec<Option<_>>, _>>()?
+                            .into_iter()
+                            .flatten()
+                            .collect::<BTreeMap<_, _>>(),
+                    );
+                    Ok::<_, reth_db::Error>(res)
                 })
                 .collect::<Result<BTreeMap<_, _>, _>>()?
                 .into_iter()
                 // Hash the address and key and apply them to HashedStorage (if Storage is None
                 // just remove it);
-                .try_for_each(|(address, storage)| {
+                .try_for_each(|(hashed_address, storage)| {
                     storage.into_iter().try_for_each(|(key, val)| -> Result<(), StageError> {
                         if hashed_storage
-                            .seek_by_key_subkey(address, key)?
+                            .seek_by_key_subkey(hashed_address, key)?
                             .filter(|entry| entry.key == key)
                             .is_some()
                         {
                             hashed_storage.delete_current()?;
                         }
 
-                        if let Some(value) = val {
-                            hashed_storage.upsert(address, StorageEntry { key, value })?;
-                        }
+                        hashed_storage.upsert(hashed_address, StorageEntry { key, value: val })?;
                         Ok(())
                     })
                 })?;
@@ -232,9 +239,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             .collect::<BTreeMap<_, _>>()
             .into_iter()
             // Apply values to HashedStorage (if Value is zero just remove it);
-            .try_for_each(|((address, key), value)| -> Result<(), StageError> {
+            .try_for_each(|((hashed_address, key), value)| -> Result<(), StageError> {
                 if hashed_storage
-                    .seek_by_key_subkey(address, key)?
+                    .seek_by_key_subkey(hashed_address, key)?
                     .filter(|entry| entry.key == key)
                     .is_some()
                 {
@@ -242,7 +249,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 }
 
                 if value != U256::ZERO {
-                    hashed_storage.upsert(address, StorageEntry { key, value })?;
+                    hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
                 }
                 Ok(())
             })?;

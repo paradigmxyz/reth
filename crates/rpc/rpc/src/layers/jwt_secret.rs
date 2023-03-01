@@ -58,8 +58,10 @@ impl JwtSecret {
     /// Returns an error if one of the following applies:
     /// - `hex` is not a valid hexadecimal string
     /// - `hex` argument length is less than `JWT_SECRET_LEN`
+    ///
+    /// This strips the leading `0x`, if any.
     pub fn from_hex<S: AsRef<str>>(hex: S) -> Result<Self, JwtError> {
-        let hex: &str = hex.as_ref().trim();
+        let hex: &str = hex.as_ref().trim().trim_start_matches("0x");
         if hex.len() != JWT_SECRET_LEN {
             Err(JwtError::InvalidLength(JWT_SECRET_LEN, hex.len()))
         } else {
@@ -210,6 +212,14 @@ mod tests {
         let secret = JwtSecret::random();
         let hex = hex::encode(secret.0);
         assert_eq!(hex.len(), expected_len);
+    }
+
+    #[test]
+    fn creation_ok_hex_string_with_0x() {
+        let hex: String =
+            "0x7365637265747365637265747365637265747365637265747365637265747365".into();
+        let result = JwtSecret::from_hex(hex);
+        assert!(matches!(result, Ok(_)));
     }
 
     #[test]

@@ -258,8 +258,8 @@ mod tests {
     }
 
     async fn run(tx: &TestTransaction, run_to: u64) {
-        let mut input = ExecInput::default();
-        input.previous_stage = Some((PREV_STAGE_ID, run_to));
+        let input =
+            ExecInput { previous_stage: Some((PREV_STAGE_ID, run_to)), ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.execute(&mut tx, input).await.unwrap();
@@ -268,9 +268,7 @@ mod tests {
     }
 
     async fn unwind(tx: &TestTransaction, unwind_from: u64, unwind_to: u64) {
-        let mut input = UnwindInput::default();
-        input.stage_progress = unwind_from;
-        input.unwind_to = unwind_to;
+        let input = UnwindInput { stage_progress: unwind_from, unwind_to, ..Default::default() };
         let mut stage = IndexAccountHistoryStage::default();
         let mut tx = tx.inner();
         let out = stage.unwind(&mut tx, input).await.unwrap();

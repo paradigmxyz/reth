@@ -27,3 +27,33 @@ pub struct Log {
     #[serde(default)]
     pub removed: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn serde_log() {
+        let log = Log {
+            address: Address::from_low_u64_be(0x1234),
+            topics: vec![H256::from_low_u64_be(0x1234)],
+            data: Bytes::from(vec![0x12, 0x34]),
+            block_hash: Some(H256::from_low_u64_be(0x1234)),
+            block_number: Some(U256::from(0x1234)),
+            transaction_hash: Some(H256::from_low_u64_be(0x1234)),
+            transaction_index: Some(U256::from(0x1234)),
+            log_index: Some(U256::from(0x1234)),
+            transaction_log_index: Some(U256::from(0x1234)),
+            removed: false,
+        };
+        let serialized = serde_json::to_string(&log).unwrap();
+        assert_eq!(
+            serialized,
+            r#"{"address":"0x0000000000000000000000000000000000001234","topics":["0x0000000000000000000000000000000000000000000000000000000000001234"],"data":"0x1234","blockHash":"0x0000000000000000000000000000000000000000000000000000000000001234","blockNumber":"0x1234","transactionHash":"0x0000000000000000000000000000000000000000000000000000000000001234","transactionIndex":"0x1234","logIndex":"0x1234","transactionLogIndex":"0x1234","removed":false}"#
+        );
+
+        let deserialized: Log = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(log, deserialized);
+    }
+}
