@@ -30,9 +30,8 @@ where
     ) -> EthResult<Option<RichBlock>> {
         let block_id = block_id.into();
         let index = usize::from(index);
-        let uncles = self.client().ommers(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
-        let uncle_header = uncles.get(index).ok_or(EthApiError::UnknownBlockNumber)?;
-
+        let uncles = self.client().ommers(block_id)?.ok_or(EthApiError::UnknownOmmer)?;
+        let uncle_header = uncles.get(index).ok_or(EthApiError::UnknownOmmer)?;
         self.block(BlockId::from(uncle_header.number), false).await
     }
     pub(crate) async fn block_transaction_count(

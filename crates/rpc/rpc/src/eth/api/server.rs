@@ -110,10 +110,10 @@ where
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
     async fn uncle_by_block_number_and_index(
         &self,
-        _number: BlockNumberOrTag,
-        _index: Index,
+        number: BlockNumberOrTag,
+        index: Index,
     ) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::ommer_by_block_and_index(self, number, index).await?.map(|uncle| uncle.into()))
     }
 
     /// Handler for: `eth_getTransactionByHash`
