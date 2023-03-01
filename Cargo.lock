@@ -3,6 +3,16 @@
 version = 3
 
 [[package]]
+name = "Inflector"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -605,9 +615,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_metadata"
-version = "0.15.2"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "982a0cf6a99c350d7246035613882e376d58cebe571785abc5da4f648d53ac0a"
+checksum = "08a1ec454bc3eead8719cb56e15dbbfecdbc14e4b3a3ae4936cc6e31f5fc0d07"
 dependencies = [
  "camino",
  "cargo-platform",
@@ -1482,6 +1492,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunce"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bd4b30a6560bbd9b4620f4de34c3f14f60848e58a9b7216801afcb4c7b31c3c"
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1758,8 +1774,10 @@ dependencies = [
 [[package]]
 name = "ethers-contract"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#537d0a9deb8b1fc549bf21b48684e9155f12707b"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
 dependencies = [
+ "ethers-contract-abigen",
+ "ethers-contract-derive",
  "ethers-core",
  "ethers-providers",
  "futures-util",
@@ -1772,12 +1790,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "ethers-contract-abigen"
+version = "1.0.2"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
+dependencies = [
+ "Inflector",
+ "cfg-if",
+ "dunce",
+ "ethers-core",
+ "ethers-etherscan",
+ "eyre",
+ "getrandom 0.2.8",
+ "hex",
+ "prettyplease",
+ "proc-macro2 1.0.51",
+ "quote 1.0.23",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "syn 1.0.109",
+ "tokio",
+ "toml",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "ethers-contract-derive"
+version = "1.0.2"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
+dependencies = [
+ "ethers-contract-abigen",
+ "ethers-core",
+ "eyre",
+ "hex",
+ "proc-macro2 1.0.51",
+ "quote 1.0.23",
+ "serde_json",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "ethers-core"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#537d0a9deb8b1fc549bf21b48684e9155f12707b"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
 dependencies = [
  "arrayvec",
  "bytes",
+ "cargo_metadata",
  "chrono",
  "convert_case 0.6.0",
  "elliptic-curve",
@@ -1787,6 +1848,7 @@ dependencies = [
  "hex",
  "k256",
  "num_enum",
+ "once_cell",
  "open-fastrlp",
  "proc-macro2 1.0.51",
  "rand 0.8.5",
@@ -1805,7 +1867,7 @@ dependencies = [
 [[package]]
 name = "ethers-etherscan"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#537d0a9deb8b1fc549bf21b48684e9155f12707b"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
 dependencies = [
  "ethers-core",
  "getrandom 0.2.8",
@@ -1821,7 +1883,7 @@ dependencies = [
 [[package]]
 name = "ethers-middleware"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#537d0a9deb8b1fc549bf21b48684e9155f12707b"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -1846,7 +1908,7 @@ dependencies = [
 [[package]]
 name = "ethers-providers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#537d0a9deb8b1fc549bf21b48684e9155f12707b"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
 dependencies = [
  "async-trait",
  "auto_impl",
@@ -1883,7 +1945,7 @@ dependencies = [
 [[package]]
 name = "ethers-signers"
 version = "1.0.2"
-source = "git+https://github.com/gakonst/ethers-rs#537d0a9deb8b1fc549bf21b48684e9155f12707b"
+source = "git+https://github.com/gakonst/ethers-rs#73636a906e40810beb3b55b305f5e81640478a01"
 dependencies = [
  "async-trait",
  "coins-bip32",
@@ -3919,6 +3981,16 @@ name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
+
+[[package]]
+name = "prettyplease"
+version = "0.1.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e97e3215779627f01ee256d2fad52f3d95e8e1c11e9fc6fd08f7cd455d5d5c78"
+dependencies = [
+ "proc-macro2 1.0.51",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "primitive-types"
