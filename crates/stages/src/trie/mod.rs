@@ -315,15 +315,16 @@ impl DBTrieLoader {
         accounts_trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
         address: H256,
     ) -> Result<H256, TrieError> {
-        let mut trie = PatriciaTrie::new(
-            Arc::new(DupHashDatabase::new(shared_tx.clone(), address, false)?),
-            Arc::new(HasherKeccak::new()),
-        );
-
         let read_tx = {
             let tx = shared_tx.lock();
             tx.inner().tx()?
         };
+
+        let mut trie = PatriciaTrie::new(
+            Arc::new(DupHashDatabase::new(shared_tx, address, false)?),
+            Arc::new(HasherKeccak::new()),
+        );
+
         let mut storage_cursor = read_tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         // Should be able to use walk_dup, but any call to next() causes an assert fail in mdbx.c
@@ -389,6 +390,7 @@ impl DBTrieLoader {
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
                 self.update_storage_root(
                     shared_tx.clone(),
+                    &mut trie,
                     storage_root,
                     address,
                     changed_storages,
@@ -416,6 +418,7 @@ impl DBTrieLoader {
     fn update_storage_root<DB: Database>(
         &self,
         shared_tx: Arc<Mutex<&mut Transaction<'_, DB>>>,
+        accounts_trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
         root: H256,
         address: H256,
         changed_storages: BTreeSet<H256>,
@@ -427,7 +430,7 @@ impl DBTrieLoader {
         let mut storage_cursor = read_tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         let mut trie = PatriciaTrie::from(
-            Arc::new(DupHashDatabase::from_root(shared_tx.clone(), address, root, false)?),
+            Arc::new(DupHashDatabase::from_root(shared_tx, address, root, false)?),
             Arc::new(HasherKeccak::new()),
             root.as_bytes(),
         )?;
@@ -438,6 +441,8 @@ impl DBTrieLoader {
             {
                 let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes().to_vec(), out)?;
+
+                self.check_threshold(accounts_trie, Some(&mut trie))?
             } else {
                 trie.remove(key.as_bytes())?;
             }
@@ -518,6 +523,7 @@ mod tests {
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
         let account = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None };
         tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
+        tx.commit().unwrap();
         let mut encoded_account = Vec::new();
         EthAccount::from(account).encode(&mut encoded_account);
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, encoded_account)]).0);
@@ -546,6 +552,7 @@ mod tests {
         for (address, account) in accounts {
             tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
         }
+        tx.commit().unwrap();
         let encoded_accounts = accounts.iter().map(|(k, v)| {
             let mut out = Vec::new();
             EthAccount::from(*v).encode(&mut out);
@@ -627,6 +634,7 @@ mod tests {
             let out = encode_fixed_size(v).to_vec();
             (k, out)
         });
+        tx.commit().unwrap();
 
         let eth_account = EthAccount::from_with_root(
             account,
@@ -703,6 +711,7 @@ mod tests {
             )
             .unwrap();
         }
+        tx.commit().unwrap();
 
         let expected = BTreeMap::from([(
             hashed_address,
@@ -745,6 +754,7 @@ mod tests {
                 (address, out)
             })
             .collect::<Vec<(Address, Vec<u8>)>>();
+        tx.commit().unwrap();
 
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
         assert_matches!(
