@@ -4973,6 +4973,8 @@ name = "reth-rpc"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
+ "ethers-core",
  "futures",
  "hex",
  "http",
