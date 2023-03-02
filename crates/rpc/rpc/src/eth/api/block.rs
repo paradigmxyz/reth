@@ -31,12 +31,8 @@ where
         let block_id = block_id.into();
         let index = usize::from(index);
         let uncles = self.client().ommers(block_id)?.unwrap_or_default();
-        let Some(uncle_header) = uncles.into_iter().skip(index).next() else {
-            return Ok(None)
-        };
-        let uncle_block_response =
-            self.block(BlockId::from(uncle_header.number), false).await?.map(|block| block.into());
-        Ok(uncle_block_response)
+        let uncle = uncles.into_iter().skip(index).next().map(|uncle| uncle.into());
+        Ok(uncle)
     }
     pub(crate) async fn block_transaction_count(
         &self,
