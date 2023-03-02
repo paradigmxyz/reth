@@ -90,7 +90,7 @@ struct Cli {
 
 #[derive(Args)]
 #[command(next_help_heading = "Logging")]
-struct Logs {
+pub struct Logs {
     /// The path to put log files in.
     #[arg(
         long = "log.directory",
@@ -112,7 +112,7 @@ struct Logs {
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    fn layer<S>(&self) -> (BoxedLayer<S>, Option<FileWorkerGuard>)
+    pub fn layer<S>(&self) -> (BoxedLayer<S>, Option<FileWorkerGuard>)
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
@@ -131,7 +131,7 @@ impl Logs {
 
 #[derive(Args)]
 #[command(next_help_heading = "Display")]
-struct Verbosity {
+pub struct Verbosity {
     /// Set the minimum log level.
     ///
     /// -v      Errors
@@ -150,7 +150,7 @@ struct Verbosity {
 impl Verbosity {
     /// Get the corresponding [Directive] for the given verbosity, or none if the verbosity
     /// corresponds to silent.
-    fn directive(&self) -> Directive {
+    pub fn directive(&self) -> Directive {
         if self.quiet {
             LevelFilter::OFF.into()
         } else {

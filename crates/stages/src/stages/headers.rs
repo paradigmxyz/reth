@@ -236,9 +236,12 @@ where
 
 /// Represents a gap to sync: from `local_head` to `target`
 #[derive(Debug)]
-struct SyncGap {
-    local_head: SealedHeader,
-    target: SyncTarget,
+pub struct SyncGap {
+    /// The local head block. Represents lower bound of sync range.
+    pub local_head: SealedHeader,
+
+    /// The sync target. Represents upper bound of sync range.
+    pub target: SyncTarget,
 }
 
 // === impl SyncGap ===
