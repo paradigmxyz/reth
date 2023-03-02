@@ -85,6 +85,7 @@ pprof = { version = "0.11", features = [
 [features]
 default = []
 arbitrary = [
+    "revm-primitives/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
@@ -93,11 +94,3 @@ arbitrary = [
 [[bench]]
 name = "recover_ecdsa_crit"
 harness = false
-
-
-[package.metadata.cargo-udeps.ignore]
-normal = [
-    # Only used for benchmarking
-    "criterion",
-    "pproof"
-]
