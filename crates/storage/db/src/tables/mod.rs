@@ -290,11 +290,6 @@ table!(
 );
 
 table!(
-    /// Configuration values.
-    ( Config ) ConfigKey | ConfigValue
-);
-
-table!(
     /// Stores the highest synced block number of each stage.
     ( SyncStage ) StageId | BlockNumber
 );
