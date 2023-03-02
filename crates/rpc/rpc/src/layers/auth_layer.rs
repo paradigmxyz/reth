@@ -191,7 +191,7 @@ mod tests {
     }
 
     async fn valid_jwt() {
-        let claims = Claims { iat: to_u64(SystemTime::now()), exp: 10000000000 };
+        let claims = Claims { iat: to_u64(SystemTime::now()), exp: Some(10000000000) };
         let secret = JwtSecret::from_hex(SECRET).unwrap(); // Same secret as the server
         let jwt = secret.encode(&claims).unwrap();
         let (status, _) = send_request(Some(jwt)).await;
@@ -209,7 +209,7 @@ mod tests {
         // This secret is different from the server. This will generate a
         // different signature
         let secret = JwtSecret::random();
-        let claims = Claims { iat: to_u64(SystemTime::now()), exp: 10000000000 };
+        let claims = Claims { iat: to_u64(SystemTime::now()), exp: Some(10000000000) };
         let jwt = secret.encode(&claims).unwrap();
 
         let (status, body) = send_request(Some(jwt)).await;
@@ -222,7 +222,7 @@ mod tests {
         let secret = JwtSecret::from_hex(SECRET).unwrap(); // Same secret as the server
 
         let iat = to_u64(SystemTime::now()) + 1000;
-        let claims = Claims { iat, exp: 10000000000 };
+        let claims = Claims { iat, exp: Some(10000000000) };
         let jwt = secret.encode(&claims).unwrap();
 
         let (status, body) = send_request(Some(jwt)).await;

@@ -43,10 +43,6 @@ itertools = "0.10.5"
 rayon = "1.6.0"
 num-traits = "0.2.15"
 
-# trie
-cita_trie = "4.0.0"
-hasher = "0.1.4"
-
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 proptest = { version = "1.0", optional = true }

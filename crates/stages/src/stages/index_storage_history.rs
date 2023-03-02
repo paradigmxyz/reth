@@ -1,9 +1,8 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::{Database, DatabaseGAT},
-    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey},
+    models::storage_sharded_key::StorageShardedKey,
     tables,
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
@@ -57,58 +56,9 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
             std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
         let to_transition = tx.get_block_transition(to_block)?;
 
-        let storage_chageset = tx
-            .cursor_read::<tables::StorageChangeSet>()?
-            .walk(Some((from_transition, Address::zero()).into()))?
-            .take_while(|res| {
-                res.as_ref().map(|(k, _)| k.transition_id() < to_transition).unwrap_or_default()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // fold all storages to one set of changes
-        let storage_changeset_lists = storage_chageset.into_iter().fold(
-            BTreeMap::new(),
-            |mut storages: BTreeMap<(Address, H256), Vec<u64>>, (index, storage)| {
-                storages
-                    .entry((index.address(), storage.key))
-                    .or_default()
-                    .push(index.transition_id());
-                storages
-            },
-        );
-
-        for ((address, storage_key), mut indices) in storage_changeset_lists {
-            let mut last_shard = take_last_storage_shard(tx, address, storage_key)?;
-            last_shard.append(&mut indices);
-
-            // chunk indices and insert them in shards of N size.
-            let mut chunks = last_shard
-                .iter()
-                .chunks(NUM_OF_INDICES_IN_SHARD)
-                .into_iter()
-                .map(|chunks| chunks.map(|i| *i as usize).collect::<Vec<usize>>())
-                .collect::<Vec<_>>();
-            let last_chunk = chunks.pop();
-
-            // chunk indices and insert them in shards of N size.
-            chunks.into_iter().try_for_each(|list| {
-                tx.put::<tables::StorageHistory>(
-                    StorageShardedKey::new(
-                        address,
-                        storage_key,
-                        *list.last().expect("Chuck does not return empty list") as TransitionId,
-                    ),
-                    TransitionList::new(list).expect("Indices are presorted and not empty"),
-                )
-            })?;
-            // Insert last list with u64::MAX
-            if let Some(last_list) = last_chunk {
-                tx.put::<tables::StorageHistory>(
-                    StorageShardedKey::new(address, storage_key, u64::MAX),
-                    TransitionList::new(last_list).expect("Indices are presorted and not empty"),
-                )?;
-            }
-        }
+        let indices =
+            tx.get_storage_transition_ids_from_changeset(from_transition, to_transition)?;
+        tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", "Stage finished");
         Ok(ExecOutput { stage_progress: to_block, done: true })
@@ -164,24 +114,6 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
     }
 }
 
-/// Load last shard and check if it is full and remove if it is not. If list is empty, last shard
-/// was full or there is no shards at all.
-pub fn take_last_storage_shard<DB: Database>(
-    tx: &Transaction<'_, DB>,
-    address: Address,
-    storage_key: H256,
-) -> Result<Vec<u64>, StageError> {
-    let mut cursor = tx.cursor_read::<tables::StorageHistory>()?;
-    let last = cursor.seek_exact(StorageShardedKey::new(address, storage_key, u64::MAX))?;
-    if let Some((storage_shard_key, list)) = last {
-        // delete old shard so new one can be inserted.
-        tx.delete::<tables::StorageHistory>(storage_shard_key, None)?;
-        let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-        return Ok(list)
-    }
-    Ok(Vec::new())
-}
-
 /// Unwind all history shards. For boundary shard, remove it from database and
 /// return last part of shard with still valid items. If all full shard were removed, return list
 /// would be empty but this does not mean that there is none shard left but that there is no
@@ -226,7 +158,9 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
-    use reth_db::models::{ShardedKey, TransitionIdAddress};
+    use reth_db::models::{
+        storage_sharded_key::NUM_OF_INDICES_IN_SHARD, ShardedKey, TransitionIdAddress,
+    };
     use reth_primitives::{hex_literal::hex, StorageEntry, H160, U256};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));

@@ -1,4 +1,4 @@
-use super::constants;
+use super::{constants, StageRange};
 use reth_db::{
     cursor::DbCursorRO, database::Database, tables, transaction::DbTx, Error as DbError,
 };
@@ -15,9 +15,7 @@ use std::path::{Path, PathBuf};
 /// generate its own random data.
 ///
 /// Returns the path to the database file, stage and range of stage execution if it exists.
-pub fn prepare_account_hashing(
-    num_blocks: u64,
-) -> (PathBuf, AccountHashingStage, (ExecInput, UnwindInput)) {
+pub fn prepare_account_hashing(num_blocks: u64) -> (PathBuf, AccountHashingStage, StageRange) {
     let (path, stage_range) = match std::env::var(constants::ACCOUNT_HASHING_DB) {
         Ok(db) => {
             let path = Path::new(&db).to_path_buf();
@@ -30,7 +28,7 @@ pub fn prepare_account_hashing(
     (path, AccountHashingStage::default(), stage_range)
 }
 
-fn find_stage_range(db: &Path) -> (ExecInput, UnwindInput) {
+fn find_stage_range(db: &Path) -> StageRange {
     let mut stage_range = None;
     TestTransaction::new(db)
         .tx
@@ -54,7 +52,7 @@ fn find_stage_range(db: &Path) -> (ExecInput, UnwindInput) {
     stage_range.expect("Could not find the stage range from the external DB.")
 }
 
-fn generate_testdata_db(num_blocks: u64) -> (PathBuf, (ExecInput, UnwindInput)) {
+fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
     let opts = SeedOpts {
         blocks: 0..num_blocks + 1,
         accounts: 0..10_000,

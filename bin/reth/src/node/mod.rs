@@ -50,6 +50,7 @@ use reth_staged_sync::{
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
+    DefaultDB,
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -159,7 +160,12 @@ impl Command {
 
         let _rpc_server = self
             .rpc
-            .start_rpc_server(shareable_db.clone(), test_transaction_pool.clone(), network.clone())
+            .start_rpc_server(
+                shareable_db.clone(),
+                test_transaction_pool.clone(),
+                network.clone(),
+                ctx.task_executor.clone(),
+            )
             .await?;
         info!(target: "reth::cli", "Started RPC server");
 
@@ -173,6 +179,7 @@ impl Command {
                 shareable_db,
                 test_transaction_pool,
                 network.clone(),
+                ctx.task_executor.clone(),
                 engine_api_handle,
             )
             .await?;
@@ -448,9 +455,11 @@ impl Command {
                     .set(SenderRecoveryStage {
                         commit_threshold: stage_conf.sender_recovery.commit_threshold,
                     })
-                    .set(ExecutionStage {
-                        chain_spec: self.chain.clone(),
-                        commit_threshold: stage_conf.execution.commit_threshold,
+                    .set({
+                        let mut stage: ExecutionStage<'_, DefaultDB<'_>> =
+                            ExecutionStage::from(self.chain.clone());
+                        stage.commit_threshold = stage_conf.execution.commit_threshold;
+                        stage
                     }),
             )
             .build();

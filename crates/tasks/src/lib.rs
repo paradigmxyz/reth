@@ -66,7 +66,7 @@ pub mod shutdown;
 /// ```
 ///
 /// The [TaskSpawner] trait is [DynClone] so `Box<dyn TaskSpawner>` are also `Clone`.
-pub trait TaskSpawner: Send + Sync + std::fmt::Debug + DynClone {
+pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     /// Spawns the task onto the runtime.
     /// See also [`Handle::spawn`].
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;

@@ -27,6 +27,7 @@ use reth_staged_sync::{
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
+    DefaultDB,
 };
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -156,9 +157,11 @@ impl ImportCommand {
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage {
-                    chain_spec: self.chain.clone(),
-                    commit_threshold: config.stages.execution.commit_threshold,
+                .set({
+                    let mut stage: ExecutionStage<'_, DefaultDB<'_>> =
+                        ExecutionStage::from(self.chain.clone());
+                    stage.commit_threshold = config.stages.execution.commit_threshold;
+                    stage
                 }),
             )
             .with_max_block(0)

@@ -12,6 +12,12 @@ pub struct StorageEntry {
     pub value: U256,
 }
 
+impl From<(H256, U256)> for StorageEntry {
+    fn from((key, value): (H256, U256)) -> Self {
+        StorageEntry { key, value }
+    }
+}
+
 // NOTE: Removing main_codec and manually encode subkey
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey

@@ -10,7 +10,7 @@ use revm::{
 /// - Block: Hook on block execution
 /// - BlockWithIndex: Hook on block execution transaction index
 /// - Transaction: Hook on a specific transaction hash
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub enum Hook {
     #[default]
     /// No hook.
@@ -23,7 +23,7 @@ pub enum Hook {
     All,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 /// An inspector that calls multiple inspectors in sequence.
 ///
 /// If a call to an inspector returns a value other than [InstructionResult::Continue] (or
