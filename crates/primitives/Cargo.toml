@@ -13,11 +13,10 @@ reth-rlp = { path = "../rlp", features = ["std", "derive", "ethereum-types"] }
 reth-rlp-derive = { path = "../rlp/rlp-derive" }
 reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 
-revm-primitives = { version = "1.0.0", features = ["serde"] }
+revm-primitives = { version = "1.0", features = ["serde"] }
 
 # ethereum
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
-parity-scale-codec = { version = "3.2.1", features = ["derive", "bytes"] }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"] }
 
@@ -57,10 +56,6 @@ triehash = "0.8"
 plain_hasher = "0.2"
 hash-db = "0.15"
 
-# used for clap value parser
-eyre = "0.6"
-shellexpand = "3.0"
-
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
 proptest = { version = "1.0", optional = true }
@@ -72,7 +67,7 @@ serde_json = "1.0"
 hex-literal = "0.3"
 test-fuzz = "3.0.4"
 rand = "0.8"
-revm-primitives = "1.0.0"
+revm-primitives = { version = "1.0", features = ["arbitrary"] }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 proptest = { version = "1.0" }
 proptest-derive = "0.3"
