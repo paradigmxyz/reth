@@ -2,10 +2,10 @@
 
 use crate::result::{internal_rpc_err, rpc_err};
 use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
-use reth_primitives::U128;
+use reth_primitives::{constants::SELECTOR_LEN, U128, U256};
 use reth_rpc_types::BlockError;
 use reth_transaction_pool::error::PoolError;
-use revm::primitives::EVMError;
+use revm::primitives::{EVMError, Halt};
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
@@ -166,6 +166,15 @@ pub enum InvalidTransactionError {
     /// Thrown if the sender of a transaction is a contract.
     #[error("sender not an eoa")]
     SenderNoEOA,
+    /// Thrown during estimate if caller has insufficient funds to cover the tx.
+    #[error("Out of gas: gas required exceeds allowance: {0:?}")]
+    OutOfGas(U256),
+    /// Thrown if executing a transaction failed during estimate/call
+    #[error("{0}")]
+    Revert(RevertError),
+    /// Unspecific evm halt error
+    #[error("EVM error {0:?}")]
+    EvmHalt(Halt),
 }
 
 impl InvalidTransactionError {
@@ -175,6 +184,7 @@ impl InvalidTransactionError {
             InvalidTransactionError::GasTooLow | InvalidTransactionError::GasTooHigh => {
                 EthRpcErrorCode::InvalidInput.code()
             }
+            InvalidTransactionError::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
     }
@@ -182,7 +192,17 @@ impl InvalidTransactionError {
 
 impl From<InvalidTransactionError> for RpcError {
     fn from(err: InvalidTransactionError) -> Self {
-        rpc_err(err.error_code(), err.to_string(), None)
+        match err {
+            InvalidTransactionError::Revert(revert) => {
+                // include out data if some
+                rpc_err(
+                    revert.error_code(),
+                    revert.to_string(),
+                    revert.output.as_ref().map(|out| out.as_ref()),
+                )
+            }
+            err => rpc_err(err.error_code(), err.to_string(), None),
+        }
     }
 }
 
@@ -214,6 +234,48 @@ impl From<revm::primitives::InvalidTransaction> for InvalidTransactionError {
         }
     }
 }
+
+/// Represents a reverted transaction and its output data.
+///
+/// Displays "execution reverted(: reason)?" if the reason is a string.
+#[derive(Debug, Clone)]
+pub struct RevertError {
+    /// The transaction output data
+    ///
+    /// Note: this is `None` if output was empty
+    output: Option<bytes::Bytes>,
+}
+
+// === impl RevertError ==
+
+impl RevertError {
+    /// Wraps the output bytes
+    ///
+    /// Note: this is intended to wrap an revm output
+    pub fn new(output: bytes::Bytes) -> Self {
+        if output.is_empty() {
+            Self { output: None }
+        } else {
+            Self { output: Some(output) }
+        }
+    }
+
+    fn error_code(&self) -> i32 {
+        EthRpcErrorCode::ExecutionError.code()
+    }
+}
+
+impl std::fmt::Display for RevertError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("execution reverted")?;
+        if let Some(reason) = self.output.as_ref().and_then(decode_revert_reason) {
+            write!(f, ": {reason}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RevertError {}
 
 /// A helper error type that mirrors `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
@@ -253,4 +315,16 @@ impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
         EthApiError::PoolError(GethTxPoolError::from(err))
     }
+}
+
+/// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.
+///
+/// **Note:** it's assumed the `out` buffer starts with the call's signature
+pub(crate) fn decode_revert_reason(out: impl AsRef<[u8]>) -> Option<String> {
+    use ethers_core::abi::AbiDecode;
+    let out = out.as_ref();
+    if out.len() < SELECTOR_LEN {
+        return None
+    }
+    String::decode(&out[SELECTOR_LEN..]).ok()
 }
