@@ -76,7 +76,7 @@ where
                     .client()
                     .block_hash_for_id(hash_or_num)?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                self.cache().get_evm_evn(block_hash).await?
+                self.cache().get_evm_env(block_hash).await?
             }
         };
         let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
