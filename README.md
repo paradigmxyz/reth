@@ -29,6 +29,10 @@ More concretely, our goals are:
 6. **Configurability**: We want to solve for node operators that care about fast historical queries, but also for hobbyists who cannot operate on large hardware. We also want to support teams and individuals who want both sync from genesis and via "fast sync". We envision that Reth will be configurable enough and provide configurable "profiles" for the tradeoffs that each team faces.
 
 
+# Why Rust?
+For an in-depth explanation we recommend that you read this article: https://www.technologyreview.com/2023/02/14/1067869/rust-worlds-fastest-growing-programming-language/
+
+
 # Status
 
 The project is not ready for use. We hope to have full sync implemented sometime in January/February 2023, followed by optimizations. In the meantime, we're working on making sure every crate of the repository is well documented, abstracted and tested.
