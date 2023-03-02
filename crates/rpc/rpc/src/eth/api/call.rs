@@ -180,7 +180,7 @@ where
                             Err(InvalidTransactionError::OutOfGas(U256::from(req_gas_limit)).into())
                         }
                         ExecutionResult::Revert { .. } => {
-                            // reverted again after despite bumping the limit
+                            // reverted again after bumping the limit
                             Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
                         }
                         ExecutionResult::Halt { reason, .. } => {
