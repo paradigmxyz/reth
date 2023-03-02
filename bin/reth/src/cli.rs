@@ -88,6 +88,7 @@ struct Cli {
     verbosity: Verbosity,
 }
 
+/// The log configuration.
 #[derive(Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
@@ -129,6 +130,7 @@ impl Logs {
     }
 }
 
+/// The verbosity settings for the cli.
 #[derive(Args)]
 #[command(next_help_heading = "Display")]
 pub struct Verbosity {
