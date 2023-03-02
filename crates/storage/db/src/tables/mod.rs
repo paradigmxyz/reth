@@ -32,7 +32,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 28] = [
+pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -59,7 +59,6 @@ pub const TABLES: [(TableType, &str); 28] = [
     (TableType::Table, AccountsTrie::const_name()),
     (TableType::DupSort, StoragesTrie::const_name()),
     (TableType::Table, TxSenders::const_name()),
-    (TableType::Table, Config::const_name()),
     (TableType::Table, SyncStage::const_name()),
 ];
 
@@ -296,11 +295,6 @@ table!(
 );
 
 table!(
-    /// Configuration values.
-    ( Config ) ConfigKey | ConfigValue
-);
-
-table!(
     /// Stores the highest synced block number of each stage.
     ( SyncStage ) StageId | BlockNumber
 );
@@ -317,9 +311,5 @@ pub type StageId = Vec<u8>;
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
 //
 
-/// Temporary placeholder type for DB.
-pub type ConfigKey = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type ConfigValue = Vec<u8>;
 /// Temporary placeholder type for DB.
 pub type Bytecode = Vec<u8>;
