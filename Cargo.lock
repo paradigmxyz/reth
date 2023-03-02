@@ -5133,7 +5133,6 @@ dependencies = [
  "itertools 0.10.5",
  "metrics",
  "num-traits",
- "parking_lot 0.12.1",
  "paste",
  "pin-project",
  "pprof",

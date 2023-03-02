@@ -286,6 +286,7 @@ impl DBTrieLoader {
     ) -> Result<H256, TrieError> {
         tx.clear::<tables::AccountsTrie>()?;
         tx.clear::<tables::StoragesTrie>()?;
+        tx.commit()?;
 
         let read_tx = tx.inner().tx()?;
         let mut accounts_cursor = read_tx.cursor_read::<tables::HashedAccount>()?;
@@ -376,6 +377,8 @@ impl DBTrieLoader {
         root: H256,
         tid_range: Range<TransitionId>,
     ) -> Result<H256, TrieError> {
+        tx.commit()?;
+
         let read_tx = tx.inner().tx()?;
         let mut accounts_cursor = read_tx.cursor_read::<tables::HashedAccount>()?;
 
