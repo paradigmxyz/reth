@@ -336,6 +336,8 @@ impl From<PrimitiveHeader> for OmmerBlock {
     fn from(header: PrimitiveHeader) -> Self {
         let hash = header.hash_slow();
         let rpc_header = Header::from_primitive_with_hash(header.clone(), hash);
+        // This block declaration is to be able
+        // to properly calculate the rlp size.
         let uncle_block = PrimitiveBlock { header, ..Default::default() };
         let size = Some(U256::from(uncle_block.length()));
         Self { header: rpc_header, size, uncles: vec![] }
