@@ -59,17 +59,19 @@ where
     pub(crate) async fn estimate_gas_at(
         &self,
         mut request: CallRequest,
-        at: BlockId,
+        mut at: BlockId,
     ) -> EthResult<U256> {
-        // TODO handle Pending state
-        let block_hash = match at {
+        // TODO handle Pending state's env
+        let (cfg, block_env) = match at {
             BlockId::Number(BlockNumberOrTag::Pending) => {
                 unimplemented!("support pending state")
             }
-            at => self
-                .client()
-                .block_hash_for_id(at)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?,
+            at => {
+                let block_hash = self
+                    .client()
+                    .block_hash_for_id(at)?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            }
         };
 
         // TODO get a StateProvider for the given blockId and BlockEnv
