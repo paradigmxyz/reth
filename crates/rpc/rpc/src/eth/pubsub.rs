@@ -18,7 +18,8 @@ use tokio_stream::{
 
 /// `Eth` pubsub RPC implementation.
 ///
-/// This handles
+/// This handles `eth_subscribe` RPC calls.
+#[derive(Clone)]
 pub struct EthPubSub<Client, Pool, Events> {
     /// All nested fields bundled together.
     inner: EthPubSubInner<Client, Pool, Events>,
