@@ -27,13 +27,38 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
+    /// Returns the revm evm env for the requested [BlockId]
+    ///
+    /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
+    /// for.
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
+        // TODO handle Pending state's env
+        match at {
+            BlockId::Number(BlockNumberOrTag::Pending) => {
+                // This should perhaps use the latest env settings and update block specific
+                // settings like basefee/number
+                unimplemented!("support pending state env")
+            }
+            hash_or_num => {
+                let block_hash = self
+                    .client()
+                    .block_hash_for_id(hash_or_num)?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+                Ok((cfg, env, block_hash.into()))
+            }
+        }
+    }
+
     /// Executes the call request at the given [BlockId]
-    pub(crate) fn call_at(
+    pub(crate) async fn call_at(
         &self,
         request: CallRequest,
         at: BlockId,
     ) -> EthResult<(ResultAndState, Env)> {
-        todo!()
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
+        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        self.call_with(cfg, block_env, request, state)
     }
 
     /// Executes the call request using the given environment against the state provider
@@ -64,21 +89,7 @@ where
         request: CallRequest,
         at: BlockId,
     ) -> EthResult<U256> {
-        // TODO handle Pending state's env
-        let (cfg, block_env) = match at {
-            BlockId::Number(BlockNumberOrTag::Pending) => {
-                // This should perhaps use the latest env settings and update block specific
-                // settings like basefee/number
-                unimplemented!("support pending state env")
-            }
-            hash_or_num => {
-                let block_hash = self
-                    .client()
-                    .block_hash_for_id(hash_or_num)?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                self.cache().get_evm_env(block_hash).await?
-            }
-        };
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         self.estimate_gas_with(cfg, block_env, request, state)
     }
