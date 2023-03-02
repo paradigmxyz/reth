@@ -189,6 +189,7 @@ pub struct Header {
     /// Transactions receipts root hash
     pub receipts_root: H256,
     /// Withdrawals root hash
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawals_root: Option<H256>,
     /// Block number
     pub number: Option<U256>,
@@ -319,32 +320,25 @@ impl<T: Serialize> Serialize for Rich<T> {
 }
 
 /// An uncle block RPC response representation.
-/// Uncles do not contain individual transactions.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OmmerBlock {
     /// Header of the block
     #[serde(flatten)]
     pub header: Header,
-    /// Total difficulty
-    pub total_difficulty: U256,
     /// Uncles' hashes
     pub uncles: Vec<H256>,
     /// Integer the size of this block in bytes.
     pub size: Option<U256>,
-    /// Base Fee for post-EIP1559 blocks.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_fee_per_gas: Option<U256>,
 }
-impl From<Block> for OmmerBlock {
-    fn from(b: Block) -> Self {
-        let Block { header, total_difficulty, uncles, size, base_fee_per_gas, .. } = b;
-        Self { header, total_difficulty, uncles, size, base_fee_per_gas }
-    }
-}
-impl From<RichBlock> for OmmerBlock {
-    fn from(b: RichBlock) -> Self {
-        b.inner.into()
+impl From<PrimitiveHeader> for OmmerBlock {
+    /// Create an uncle block RPC response from a header.
+    fn from(header: PrimitiveHeader) -> Self {
+        let hash = header.hash_slow();
+        let rpc_header = Header::from_primitive_with_hash(header.clone(), hash);
+        let uncle_block = PrimitiveBlock { header, ..Default::default() };
+        let size = Some(U256::from(uncle_block.length()));
+        Self { header: rpc_header, size, uncles: vec![] }
     }
 }
 #[cfg(test)]
