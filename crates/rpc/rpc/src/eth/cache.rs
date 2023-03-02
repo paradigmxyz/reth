@@ -32,7 +32,7 @@ type BlockLruCache<L> = MultiConsumerLruCache<H256, Block, L, BlockResponseSende
 type EnvLruCache<L> = MultiConsumerLruCache<H256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
 /// Settings for the [EthStateCache]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthStateCacheConfig {
     /// Max number of bytes for cached block data.

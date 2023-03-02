@@ -64,7 +64,7 @@ use jsonrpsee::{
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
-use reth_rpc::{AdminApi, DebugApi, EthApi, NetApi, TraceApi, Web3Api};
+use reth_rpc::{AdminApi, DebugApi, EthApi, EthFilter, NetApi, TraceApi, Web3Api};
 use reth_rpc_api::servers::*;
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
@@ -84,8 +84,12 @@ pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 /// Auth server utilities.
 pub mod auth;
 
+/// Eth utils
+mod eth;
+
 /// Common RPC constants.
 pub mod constants;
+pub use crate::eth::{EthConfig, EthHandlers};
 use constants::*;
 use reth_rpc::eth::cache::EthStateCache;
 use reth_tasks::TaskSpawner;
@@ -204,10 +208,17 @@ where
 
         let Self { client, pool, network, executor } = self;
 
-        let mut registry = RethModuleRegistry::new(client, pool, network, executor);
-
         if !module_config.is_empty() {
-            let TransportRpcModuleConfig { http, ws, ipc } = module_config;
+            let TransportRpcModuleConfig { http, ws, ipc, config } = module_config;
+
+            let mut registry = RethModuleRegistry::new(
+                client,
+                pool,
+                network,
+                executor,
+                config.unwrap_or_default(),
+            );
+
             modules.http = registry.maybe_module(http.as_ref());
             modules.ws = registry.maybe_module(ws.as_ref());
             modules.ipc = registry.maybe_module(ipc.as_ref());
@@ -220,6 +231,44 @@ where
 impl Default for RpcModuleBuilder<(), (), (), ()> {
     fn default() -> Self {
         RpcModuleBuilder::new((), (), (), ())
+    }
+}
+
+/// Bundles settings for modules
+#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RpcModuleConfig {
+    /// `eth` namespace settings
+    eth: EthConfig,
+}
+
+// === impl RpcModuleConfig ===
+
+impl RpcModuleConfig {
+    /// Convenience method to create a new [RpcModuleConfigBuilder]
+    pub fn builder() -> RpcModuleConfigBuilder {
+        RpcModuleConfigBuilder::default()
+    }
+}
+
+/// Configures [RpcModuleConfig]
+#[derive(Default)]
+pub struct RpcModuleConfigBuilder {
+    eth: Option<EthConfig>,
+}
+
+// === impl RpcModuleConfigBuilder ===
+
+impl RpcModuleConfigBuilder {
+    /// Configures a custom eth namespace config
+    pub fn eth(mut self, eth: EthConfig) -> Self {
+        self.eth = Some(eth);
+        self
+    }
+
+    /// Consumes the type and creates the [RpcModuleConfig]
+    pub fn build(self) -> RpcModuleConfig {
+        let RpcModuleConfigBuilder { eth } = self;
+        RpcModuleConfig { eth: eth.unwrap_or_default() }
     }
 }
 
@@ -244,7 +293,7 @@ pub enum RpcModuleSelection {
     Selection(Vec<RethRpcModule>),
 }
 
-// === impl RpcModuleConfig ===
+// === impl RpcModuleSelection ===
 
 impl RpcModuleSelection {
     /// The standard modules to instantiate by default `eth`, `net`, `web3`
@@ -291,6 +340,7 @@ impl RpcModuleSelection {
         pool: Pool,
         network: Network,
         executor: Tasks,
+        config: RpcModuleConfig,
     ) -> RpcModule<()>
     where
         Client: BlockProvider
@@ -304,7 +354,7 @@ impl RpcModuleSelection {
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
-        let mut registry = RethModuleRegistry::new(client, pool, network, executor);
+        let mut registry = RethModuleRegistry::new(client, pool, network, executor, config);
         registry.module_for(self)
     }
 
@@ -389,11 +439,10 @@ pub struct RethModuleRegistry<Client, Pool, Network, Tasks> {
     pool: Pool,
     network: Network,
     executor: Tasks,
-    /// Holds a clone of the async [EthStateCache] channel.
-    eth_cache: Option<EthStateCache>,
-    /// Holds a clone of the actual [EthApi] namespace impl since this can be required by other
-    /// namespaces
-    eth_api: Option<EthApi<Client, Pool, Network>>,
+    /// Additional settings for handlers.
+    config: RpcModuleConfig,
+    /// Holds a clone of all the eth namespace handlers
+    eth: Option<EthHandlers<Client, Pool, Network, ()>>,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
 }
@@ -402,16 +451,14 @@ pub struct RethModuleRegistry<Client, Pool, Network, Tasks> {
 
 impl<Client, Pool, Network, Tasks> RethModuleRegistry<Client, Pool, Network, Tasks> {
     /// Creates a new, empty instance.
-    pub fn new(client: Client, pool: Pool, network: Network, executor: Tasks) -> Self {
-        Self {
-            client,
-            pool,
-            network,
-            eth_api: None,
-            executor,
-            modules: Default::default(),
-            eth_cache: None,
-        }
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        network: Network,
+        executor: Tasks,
+        config: RpcModuleConfig,
+    ) -> Self {
+        Self { client, pool, network, eth: None, executor, modules: Default::default(), config }
     }
 
     /// Returns all installed methods
@@ -538,25 +585,39 @@ where
     /// This will spawn exactly one [EthStateCache] service if this is the first time the cache is
     /// requested.
     pub fn eth_cache(&mut self) -> EthStateCache {
-        self.eth_cache
-            .get_or_insert_with(|| {
-                EthStateCache::spawn_with(
-                    self.client.clone(),
-                    Default::default(),
-                    self.executor.clone(),
-                )
-            })
-            .clone()
+        self.with_eth(|handlers| handlers.eth_cache.clone())
+    }
+
+    /// Creates the [EthHandlers] type the first time this is called.
+    fn with_eth<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&EthHandlers<Client, Pool, Network, ()>) -> R,
+    {
+        if self.eth.is_none() {
+            let eth_cache = EthStateCache::spawn_with(
+                self.client.clone(),
+                self.config.eth.cache.clone(),
+                self.executor.clone(),
+            );
+            let api = EthApi::new(
+                self.client.clone(),
+                self.pool.clone(),
+                self.network.clone(),
+                eth_cache.clone(),
+            );
+            let filter = EthFilter::new(self.client.clone(), self.pool.clone());
+
+            // TODO: install pubsub
+
+            let eth = EthHandlers { api, eth_cache, filter, pubsub: None };
+            self.eth = Some(eth);
+        }
+        f(self.eth.as_ref().expect("exists; qed"))
     }
 
     /// Returns the configured [EthApi] or creates it if it does not exist yet
     fn eth_api(&mut self) -> EthApi<Client, Pool, Network> {
-        let cache = self.eth_cache();
-        self.eth_api
-            .get_or_insert_with(|| {
-                EthApi::new(self.client.clone(), self.pool.clone(), self.network.clone(), cache)
-            })
-            .clone()
+        self.with_eth(|handlers| handlers.api.clone())
     }
 }
 
@@ -731,7 +792,7 @@ impl RpcServerConfig {
 ///
 /// # Example
 ///
-/// Configure an http transport only
+/// Configure a http transport only
 ///
 /// ```
 /// use reth_rpc_builder::{RethRpcModule, TransportRpcModuleConfig};
@@ -746,6 +807,8 @@ pub struct TransportRpcModuleConfig {
     ws: Option<RpcModuleSelection>,
     /// ipc module configuration
     ipc: Option<RpcModuleSelection>,
+    /// Config for the modules
+    config: Option<RpcModuleConfig>,
 }
 
 // === impl TransportRpcModuleConfig ===
@@ -781,6 +844,12 @@ impl TransportRpcModuleConfig {
     /// Sets the [RpcModuleSelection] for the http transport.
     pub fn with_ipc(mut self, ipc: impl Into<RpcModuleSelection>) -> Self {
         self.ipc = Some(ipc.into());
+        self
+    }
+
+    /// Sets a custom [RpcModuleConfig] for the configured modules.
+    pub fn with_config(mut self, config: RpcModuleConfig) -> Self {
+        self.config = Some(config);
         self
     }
 
@@ -1058,6 +1127,7 @@ mod tests {
                 ])),
                 ws: None,
                 ipc: None,
+                config: None,
             }
         )
     }

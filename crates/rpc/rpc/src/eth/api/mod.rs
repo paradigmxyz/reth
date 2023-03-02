@@ -58,7 +58,6 @@ pub trait EthApiSpec: Send + Sync {
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
 #[derive(Clone)]
-#[allow(missing_debug_implementations)]
 pub struct EthApi<Client, Pool, Network> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Client, Pool, Network>>,
@@ -169,6 +168,12 @@ where
         &self,
     ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
         self.state_at_block_number(BlockNumberOrTag::Latest)
+    }
+}
+
+impl<Client, Pool, Events> std::fmt::Debug for EthApi<Client, Pool, Events> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EthApi").finish_non_exhaustive()
     }
 }
 
