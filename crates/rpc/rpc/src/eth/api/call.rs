@@ -169,7 +169,6 @@ where
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if request_gas.is_some() || request_gas_price.is_some() {
-                    let mut env = env;
                     let req_gas_limit = env.tx.gas_limit;
                     env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
                     let (res, _) = transact(&mut db, env)?;
