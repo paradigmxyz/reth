@@ -249,7 +249,7 @@ pub struct SyncGap {
 impl SyncGap {
     /// Returns `true` if the gap from the head to the target was closed
     #[inline]
-    fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.local_head.hash() == self.target.tip()
     }
 }
