@@ -32,7 +32,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 27] = [
+pub const TABLES: [(TableType, &str); 26] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -58,7 +58,6 @@ pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, AccountsTrie::const_name()),
     (TableType::DupSort, StoragesTrie::const_name()),
     (TableType::Table, TxSenders::const_name()),
-    (TableType::Table, Config::const_name()),
     (TableType::Table, SyncStage::const_name()),
 ];
 
