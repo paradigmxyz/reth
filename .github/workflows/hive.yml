@@ -62,13 +62,35 @@ jobs:
     strategy:
       matrix:
         experimental: [true]
-        sim: [issues/go-ethereum-14359, ethereum/engine, ethereum/rpc-compat, ethereum/rpc, ethereum/sync, smoke/genesis, smoke/network]
+        sim: [issues/go-ethereum-14359, ethereum/rpc-compat, ethereum/rpc, ethereum/sync, smoke/genesis, smoke/network]
         include:
           - sim: devp2p
             limit: discv4
             experimental: true
           - sim: devp2p
             limit: eth
+            # we have excluded these tests because we do not support block
+            # announcements
+            # exclude: [TestLargeAnnounce, TestBroadcast, TestBlockHashAnnounce]
+            include: [TestStatus, TestGetBlockHeaders, TestSimultaneousRequests, TestSameRequestID, TestZeroRequestID, TestGetBlockBodies, TestMaliciousHandshake, TestMaliciousStatus, TestTransaction, TestMaliciousTx, TestLargeTxRequest]
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-exchange-capabilities
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-withdrawals
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-auth
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-transition
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-api
+            experimental: true
+          - sim: ethereum/engine
+            limit: engine-sync
             experimental: true
       fail-fast: false
     needs: prepare
@@ -102,7 +124,7 @@ jobs:
       - name: Run ${{ matrix.sim }} simulator
         run: |
           cd hivetests
-          hive --sim "${{ matrix.sim }}$" --sim.limit "${{ matrix.limit }}" --client reth
+          hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --client reth
 
       - name: Print simulator output
         if: ${{ failure() }}
