@@ -306,8 +306,4 @@ pub type StageId = Vec<u8>;
 //
 
 /// Temporary placeholder type for DB.
-pub type ConfigKey = Vec<u8>;
-/// Temporary placeholder type for DB.
-pub type ConfigValue = Vec<u8>;
-/// Temporary placeholder type for DB.
 pub type Bytecode = Vec<u8>;
