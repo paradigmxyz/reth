@@ -4,9 +4,10 @@ use futures::StreamExt;
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Block, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
-use reth_tasks::TaskSpawner;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
 use schnellru::{ByMemoryUsage, Limiter, LruMap};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{hash_map::Entry, HashMap},
     future::Future,
@@ -30,23 +31,43 @@ type BlockLruCache<L> = MultiConsumerLruCache<H256, Block, L, BlockResponseSende
 
 type EnvLruCache<L> = MultiConsumerLruCache<H256, (CfgEnv, BlockEnv), L, EnvResponseSender>;
 
+/// Settings for the [EthStateCache]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EthStateCacheConfig {
+    /// Max number of bytes for cached block data.
+    ///
+    /// Default is 50MB
+    pub max_block_bytes: usize,
+    /// Max number of bytes for cached env data.
+    ///
+    /// Default is 500kb (env configs are very small)
+    pub max_env_bytes: usize,
+}
+
+impl Default for EthStateCacheConfig {
+    fn default() -> Self {
+        Self { max_block_bytes: 50 * 1024 * 1024, max_env_bytes: 500 * 1024 }
+    }
+}
+
 /// Provides async access to cached eth data
 ///
-/// This is the frontend to the [EthStateCacheService] which manages cached data on a different
+/// This is the frontend for the async caching service which manages cached data on a different
 /// task.
 #[derive(Debug, Clone)]
-pub(crate) struct EthStateCache {
+pub struct EthStateCache {
     to_service: UnboundedSender<CacheAction>,
 }
 
 impl EthStateCache {
     /// Creates and returns both [EthStateCache] frontend and the memory bound service.
-    fn create<Client>(
+    fn create<Client, Tasks>(
         client: Client,
-        action_task_spawner: Box<dyn TaskSpawner>,
+        action_task_spawner: Tasks,
         max_block_bytes: usize,
         max_env_bytes: usize,
-    ) -> (Self, EthStateCacheService<Client>) {
+    ) -> (Self, EthStateCacheService<Client, Tasks>) {
         let (to_service, rx) = unbounded_channel();
         let service = EthStateCacheService {
             client,
@@ -60,21 +81,34 @@ impl EthStateCache {
         (cache, service)
     }
 
+    /// Creates a new async LRU backed cache service task and spawns it to a new task via
+    /// [tokio::spawn].
+    ///
+    /// See also [Self::spawn_with]
+    pub fn spawn<Client>(client: Client, config: EthStateCacheConfig) -> Self
+    where
+        Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    {
+        Self::spawn_with(client, config, TokioTaskExecutor::default())
+    }
+
     /// Creates a new async LRU backed cache service task and spawns it to a new task via the given
     /// spawner.
     ///
     /// The cache is memory limited by the given max bytes values.
-    pub(crate) fn spawn<Client>(
+    pub fn spawn_with<Client, Tasks>(
         client: Client,
-        spawner: Box<dyn TaskSpawner>,
-        max_block_bytes: usize,
-        max_env_bytes: usize,
+        config: EthStateCacheConfig,
+        executor: Tasks,
     ) -> Self
     where
         Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+        Tasks: TaskSpawner + Clone + 'static,
     {
-        let (this, service) = Self::create(client, spawner.clone(), max_block_bytes, max_env_bytes);
-        spawner.spawn(Box::pin(service));
+        let EthStateCacheConfig { max_block_bytes, max_env_bytes } = config;
+        let (this, service) =
+            Self::create(client, executor.clone(), max_block_bytes, max_env_bytes);
+        executor.spawn(Box::pin(service));
         this
     }
 
@@ -107,7 +141,7 @@ impl EthStateCache {
 ///
 /// This type is an endless future that listens for incoming messages from the user facing
 /// [EthStateCache] via a channel. If the requested data is not cached then it spawns a new task
-/// that does the IO and sends the result back to it. This way the [EthStateCacheService] only
+/// that does the IO and sends the result back to it. This way the caching service only
 /// handles messages and does LRU lookups and never blocking IO.
 ///
 /// Caution: The channel for the data is _unbounded_ it is assumed that this is mainly used by the
@@ -116,6 +150,7 @@ impl EthStateCache {
 #[must_use = "Type does nothing unless spawned"]
 pub(crate) struct EthStateCacheService<
     Client,
+    Tasks,
     LimitBlocks = ByMemoryUsage,
     LimitEnvs = ByMemoryUsage,
 > where
@@ -133,12 +168,13 @@ pub(crate) struct EthStateCacheService<
     /// Receiver half of the action channel.
     action_rx: UnboundedReceiverStream<CacheAction>,
     /// The type that's used to spawn tasks that do the actual work
-    action_task_spawner: Box<dyn TaskSpawner>,
+    action_task_spawner: Tasks,
 }
 
-impl<Client> Future for EthStateCacheService<Client>
+impl<Client, Tasks> Future for EthStateCacheService<Client, Tasks>
 where
     Client: StateProviderFactory + BlockProvider + EvmEnvProvider + Clone + Unpin + 'static,
+    Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();
 
