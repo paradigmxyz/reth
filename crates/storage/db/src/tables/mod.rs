@@ -18,7 +18,7 @@ use crate::{
     },
 };
 use reth_primitives::{
-    Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
+    Account, Address, Block, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
     StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
@@ -32,13 +32,14 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 27] = [
+pub const TABLES: [(TableType, &str); 28] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
     (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
+    (TableType::Table, PendingBlocks::const_name()),
     (TableType::Table, BlockWithdrawals::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
@@ -139,6 +140,11 @@ table!(
 table!(
     /// Stores the uncles/ommers of the block.
     ( BlockOmmers ) BlockNumber | StoredBlockOmmers
+);
+
+table!(
+    /// Stores full block that can be potentially included to canonical chain.
+    ( PendingBlocks ) BlockHash | Block
 );
 
 table!(

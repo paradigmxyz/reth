@@ -104,7 +104,7 @@ impl Command {
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
         let network = network_config_builder
-            .build(Arc::new(ShareableDatabase::new(noop_db, self.chain.clone())))
+            .build(Arc::new(ShareableDatabase::new(noop_db, Arc::new(self.chain.clone()))))
             .start_network()
             .await?;
 

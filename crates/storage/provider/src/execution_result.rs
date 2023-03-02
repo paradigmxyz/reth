@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 /// Execution Result containing vector of transaction changesets
 /// and block reward if present
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutionResult {
     /// Transaction changeset containing [Receipt], changed [Accounts][Account] and Storages.
     pub tx_changesets: Vec<TransactionChangeSet>,
@@ -31,9 +31,11 @@ pub struct TransactionChangeSet {
 }
 
 /// Contains old/new account changes
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub enum AccountInfoChangeSet {
-    /// The account is newly created.
+    /// The account is newly created. Account can be created by just by sending balance,
+    ///
+    /// Revert of this changeset is empty account,
     Created {
         /// The newly created account.
         new: Account,
@@ -41,11 +43,15 @@ pub enum AccountInfoChangeSet {
     /// An account was deleted (selfdestructed) or we have touched
     /// an empty account and we need to remove/destroy it.
     /// (Look at state clearing [EIP-158](https://eips.ethereum.org/EIPS/eip-158))
+    ///
+    /// Revert of this changeset is old account
     Destroyed {
         /// The account that was destroyed.
         old: Account,
     },
     /// The account was changed.
+    ///
+    /// revert of this changeset is old account
     Changed {
         /// The account after the change.
         new: Account,
@@ -53,10 +59,26 @@ pub enum AccountInfoChangeSet {
         old: Account,
     },
     /// Nothing was changed for the account (nonce/balance).
+    #[default]
     NoChange,
 }
 
 impl AccountInfoChangeSet {
+    /// Create new account info changeset
+    pub fn new(old: Option<Account>, new: Option<Account>) -> Self {
+        match (old, new) {
+            (Some(old), Some(new)) => {
+                if new != old {
+                    Self::Changed { new, old }
+                } else {
+                    Self::NoChange
+                }
+            }
+            (None, Some(new)) => Self::Created { new },
+            (Some(old), None) => Self::Destroyed { old },
+            (None, None) => Self::NoChange,
+        }
+    }
     /// Apply the changes from the changeset to a database transaction.
     pub fn apply_to_db<'a, TX: DbTxMut<'a>>(
         self,

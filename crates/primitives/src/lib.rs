@@ -37,7 +37,9 @@ pub mod proofs;
 
 pub use account::Account;
 pub use bits::H512;
-pub use block::{Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock};
+pub use block::{
+    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock, SealedBlockWithSenders,
+};
 pub use bloom::Bloom;
 pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,

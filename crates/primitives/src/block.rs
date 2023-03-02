@@ -1,6 +1,6 @@
-use crate::{Header, SealedHeader, TransactionSigned, Withdrawal, H256};
+use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256};
 use ethers_core::types::BlockNumber;
-use reth_codecs::derive_arbitrary;
+use reth_codecs::{derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
     de::{MapAccess, Visitor},
@@ -12,20 +12,35 @@ use std::{fmt, fmt::Formatter, ops::Deref, str::FromStr};
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 25)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
+#[derive_arbitrary(rlp, 25)]
 #[rlp(trailing)]
 pub struct Block {
-    /// Block header.
-    pub header: Header,
     /// Transactions in this block.
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header.
     pub ommers: Vec<Header>,
+    /// Block header.
+    pub header: Header,
     /// Block withdrawals.
     pub withdrawals: Option<Vec<Withdrawal>>,
+}
+
+/// TODO allow either to move `Option` at the end fpr rlp decoding or `Header` (that has Bytes)
+/// requirement to be on last place.
+impl Compact for Block {
+    fn to_compact(self, _buf: &mut impl bytes::BufMut) -> usize {
+        0
+    }
+
+    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
+    where
+        Self: Sized,
+    {
+        (Block::default(), buf)
+    }
 }
 
 impl Deref for Block {
@@ -65,6 +80,11 @@ impl SealedBlock {
         (self.header, self.body, self.ommers)
     }
 
+    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    pub fn senders(self) -> Option<Vec<Address>> {
+        self.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<Address>>>()
+    }
+
     /// Unseal the block
     pub fn unseal(self) -> Block {
         Block {
@@ -80,6 +100,38 @@ impl Deref for SealedBlock {
     type Target = SealedHeader;
     fn deref(&self) -> &Self::Target {
         &self.header
+    }
+}
+
+/// Sealed block with senders recovered from transactions.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SealedBlockWithSenders {
+    /// Sealed block
+    pub block: SealedBlock,
+    /// List of senders that match trasanctions from block.
+    pub senders: Vec<Address>,
+}
+
+impl SealedBlockWithSenders {
+    /// New sealed block with sender. Return none if len of tx and senders does not match
+    pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
+        if block.body.len() != senders.len() {
+            None
+        } else {
+            Some(Self { block, senders })
+        }
+    }
+
+    /// Split Structure to its components
+    pub fn split(self) -> (SealedBlock, Vec<Address>) {
+        (self.block, self.senders)
+    }
+}
+
+impl Deref for SealedBlockWithSenders {
+    type Target = SealedBlock;
+    fn deref(&self) -> &Self::Target {
+        &self.block
     }
 }
 

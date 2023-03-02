@@ -1,4 +1,4 @@
-use itertools::Itertools;
+use itertools::{izip, Itertools};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::{Database, DatabaseGAT},
@@ -7,24 +7,26 @@ use reth_db::{
         storage_sharded_key::{self, StorageShardedKey},
         ShardedKey, StoredBlockBody, TransitionIdAddress,
     },
-    table::Table,
+    table::{KeyValue, Table},
     tables,
     transaction::{DbTx, DbTxMut},
     TransitionList,
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    StorageEntry, TransitionId, TxNumber, H256, U256,
+    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered, TransitionId,
+    TxNumber, H256, U256,
 };
 use reth_tracing::tracing::{info, trace};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, RangeBounds},
 };
 
 use crate::{
+    execution_result::{AccountInfoChangeSet, TransactionChangeSet},
     insert_canonical_block,
     trie::{DBTrieLoader, TrieError},
 };
@@ -332,9 +334,374 @@ where
             self.insert_storage_history_index(indices)?;
         }
 
-        // commit block to database
-        self.commit()?;
         Ok(())
+    }
+
+    /// Return list of entries from table
+    ///
+    /// If TAKE is true, opened cursor would be write and it would delete all values from db.
+    #[inline]
+    pub fn get_or_take<T: Table, const TAKE: bool>(
+        &self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<Vec<KeyValue<T>>, DbError> {
+        if TAKE {
+            let mut cursor_write = self.cursor_write::<T>()?;
+            let mut walker = cursor_write.walk_range(range)?;
+            let mut items = Vec::new();
+            while let Some(i) = walker.next().transpose()? {
+                walker.delete_current()?;
+                items.push(i)
+            }
+            Ok(items)
+        } else {
+            self.cursor_read::<T>()?.walk_range(range)?.collect::<Result<Vec<_>, _>>()
+        }
+    }
+
+    /// Get requested blocks transaction with signer
+    pub fn get_block_transaction_range<const TAKE: bool>(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
+        // Just read block tx id from table. as it is needed to get execution results.
+        let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
+
+        if block_bodies.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        // iterate over and get all transaction and signers
+        let first_transaction =
+            block_bodies.first().expect("If we have headers").1.first_tx_index();
+        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_index();
+
+        let transactions =
+            self.get_or_take::<tables::Transactions, TAKE>(first_transaction..last_transaction)?;
+        let senders =
+            self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..last_transaction)?;
+
+        if TAKE {
+            // rm TxHashNumber
+            let mut tx_hash_cursor = self.cursor_write::<tables::TxHashNumber>()?;
+            for (_, tx) in transactions.iter() {
+                if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
+                    tx_hash_cursor.delete_current()?;
+                }
+            }
+        }
+
+        // Merge transaction into blocks
+        let mut block_tx = Vec::new();
+        let mut senders = senders.into_iter();
+        let mut transactions = transactions.into_iter();
+        for (block_number, block_body) in block_bodies {
+            let mut one_block_tx = Vec::new();
+            for _ in 0..block_body.tx_count() {
+                let tx = transactions.next();
+                let sender = senders.next();
+
+                let recovered = match (tx, sender) {
+                    (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
+                        if tx_id != sender_tx_id {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
+                        } else {
+                            Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        }
+                    }
+                    (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
+                        Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
+                    }
+                    (None, None) => Err(ProviderError::BlockBodyTransactionCount),
+                }?;
+                one_block_tx.push(recovered)
+            }
+            block_tx.push((block_number, one_block_tx));
+        }
+
+        Ok(block_tx)
+    }
+
+    /// Return range of blocks and its execution result
+    pub fn get_block_range<const TAKE: bool>(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<SealedBlockWithSenders>, TransactionError> {
+        // For block we need Headers, Bodies, Uncles, withdrawals, Transactions, Signers
+
+        let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
+        if block_headers.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        let block_header_hashes =
+            self.get_or_take::<tables::CanonicalHeaders, TAKE>(range.clone())?;
+        let block_ommers = self.get_or_take::<tables::BlockOmmers, TAKE>(range.clone())?;
+        let block_withdrawals =
+            self.get_or_take::<tables::BlockWithdrawals, TAKE>(range.clone())?;
+
+        let block_tx = self.get_block_transaction_range::<TAKE>(range.clone())?;
+
+        if TAKE {
+            // rm HeaderTD
+            self.get_or_take::<tables::HeaderTD, TAKE>(range)?;
+            // rm HeaderNumbers
+            let mut header_number_cursor = self.cursor_write::<tables::HeaderNumbers>()?;
+            for (_, hash) in block_header_hashes.iter() {
+                if header_number_cursor.seek_exact(*hash)?.is_some() {
+                    header_number_cursor.delete_current()?;
+                }
+            }
+        }
+
+        // merge all into block
+        let block_header_iter = block_headers.into_iter();
+        let block_header_hashes_iter = block_header_hashes.into_iter();
+        let block_tx_iter = block_tx.into_iter();
+
+        // can be not found in tables
+        let mut block_ommers_iter = block_ommers.into_iter();
+        let mut block_withdrawals_iter = block_withdrawals.into_iter();
+        let mut block_ommers = block_ommers_iter.next();
+        let mut block_withdrawals = block_withdrawals_iter.next();
+
+        let mut blocks = Vec::new();
+        for ((main_block_number, header), (_, header_hash), (_, tx)) in izip!(
+            block_header_iter.into_iter(),
+            block_header_hashes_iter.into_iter(),
+            block_tx_iter.into_iter()
+        ) {
+            let header = header.seal(header_hash);
+
+            let (body, senders) = tx.into_iter().map(|tx| tx.to_components()).unzip();
+
+            // Ommers can be missing
+            let mut ommers = Vec::new();
+            if let Some((block_number, _)) = block_ommers.as_ref() {
+                if *block_number == main_block_number {
+                    // Seal ommers as they dont have hash.
+                    ommers = block_ommers
+                        .take()
+                        .unwrap()
+                        .1
+                        .ommers
+                        .into_iter()
+                        .map(|h| h.seal_slow())
+                        .collect();
+                    block_ommers = block_ommers_iter.next();
+                }
+            };
+
+            // withdrawal can be missing
+            let shanghai_is_active = true;
+            let mut withdrawals = Some(Vec::new());
+            if shanghai_is_active {
+                if let Some((block_number, _)) = block_withdrawals.as_ref() {
+                    if *block_number == main_block_number {
+                        withdrawals = Some(block_withdrawals.take().unwrap().1.withdrawals);
+                        block_withdrawals = block_withdrawals_iter.next();
+                    }
+                }
+            } else {
+                withdrawals = None
+            }
+
+            blocks.push(SealedBlockWithSenders {
+                block: SealedBlock { header, body, ommers, withdrawals },
+                senders,
+            })
+        }
+
+        Ok(blocks)
+    }
+
+    /// Transverse over changesets and plain state and recreated the execution results.
+    pub fn get_block_execution_result_range<const TAKE: bool>(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<ExecutionResult>, TransactionError> {
+        let block_transition =
+            self.get_or_take::<tables::BlockTransitionIndex, TAKE>(range.clone())?;
+
+        if block_transition.is_empty() {
+            return Ok(Vec::new())
+        }
+        // get block transitions
+        let first_block_number =
+            block_transition.first().expect("Check for empty is already done").0;
+
+        let from = self.get_block_transition(first_block_number.saturating_sub(1))?;
+        let to = block_transition.last().expect("Check for empty is already done").1;
+
+        // NOTE: Just get block bodies dont remove them
+        // it is connection point for bodies getter and execution result getter.
+        let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
+
+        // get saved previous values
+        let from_storage: TransitionIdAddress = (from, Address::zero()).into();
+        let to_storage: TransitionIdAddress = (to, Address::zero()).into();
+
+        let storage_changeset =
+            self.get_or_take::<tables::StorageChangeSet, TAKE>(from_storage..to_storage)?;
+        let account_changeset = self.get_or_take::<tables::AccountChangeSet, TAKE>(from..to)?;
+
+        // iterate previous value and get plain state value to create changeset
+        // Double option around Account represent if Account state is know (first option) and
+        // account is removed (Second Option)
+        type LocalPlainState = HashMap<Address, (Option<Option<Account>>, HashMap<H256, U256>)>;
+        type Changesets = HashMap<
+            TransitionId,
+            BTreeMap<Address, (AccountInfoChangeSet, BTreeMap<H256, (U256, U256)>)>,
+        >;
+
+        let mut local_plain_state: LocalPlainState = HashMap::new();
+
+        // iterate in reverse and get plain state.
+
+        // Bundle execution changeset to its particular transaction and block
+        let mut all_changesets: Changesets = HashMap::new();
+
+        let mut plain_accounts_cursor = self.cursor_read::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor = self.cursor_dup_read::<tables::PlainStorageState>()?;
+
+        // add account changeset changes
+        for (transition_id, account_before) in account_changeset.into_iter().rev() {
+            let new_info = match local_plain_state.entry(account_before.address) {
+                Entry::Vacant(entry) => {
+                    let new_account =
+                        plain_accounts_cursor.seek(account_before.address)?.map(|(_s, i)| i);
+                    entry.insert((Some(account_before.info), HashMap::new()));
+                    new_account
+                }
+                Entry::Occupied(mut entry) => {
+                    let new_account =
+                        std::mem::replace(&mut entry.get_mut().0, Some(account_before.info));
+                    new_account.expect("As we are stacking account first, account would always be Some(Some) or Some(None)")
+                }
+            };
+            let account_info_changeset = AccountInfoChangeSet::new(account_before.info, new_info);
+            // insert changeset to transition id. Multiple account for same transition Id are not
+            // possible.
+            all_changesets
+                .entry(transition_id)
+                .or_default()
+                .entry(account_before.address)
+                .or_default()
+                .0 = account_info_changeset
+        }
+
+        // add storage changeset changes
+        for (transition_and_address, storage_entry) in storage_changeset.into_iter() {
+            let TransitionIdAddress((transition_id, address)) = transition_and_address;
+            let new_storage =
+                match local_plain_state.entry(address).or_default().1.entry(storage_entry.key) {
+                    Entry::Vacant(entry) => {
+                        let new_storage = plain_storage_cursor
+                            .seek_by_key_subkey(address, storage_entry.key)?
+                            .filter(|storage| storage.key == storage_entry.key)
+                            .unwrap_or_default();
+                        entry.insert(storage_entry.value);
+                        new_storage.value
+                    }
+                    Entry::Occupied(mut entry) => {
+                        std::mem::replace(entry.get_mut(), storage_entry.value)
+                    }
+                };
+            all_changesets
+                .entry(transition_id)
+                .or_default()
+                .entry(address)
+                .or_default()
+                .1
+                .insert(storage_entry.key, (storage_entry.value, new_storage));
+        }
+
+        if TAKE {
+            // TODO iterate over local plain state
+            // remove all account
+            // and all storages.
+        }
+
+        //
+        // NOTE: Some storage changesets can be empty,
+        // all account changeset have at least beneficiary fee transfer.
+
+        // iterate over block body and create ExecutionResult
+        let mut block_exec_results = Vec::new();
+
+        let mut changeset_iter = all_changesets.into_iter();
+        let mut block_body_iter = block_bodies.into_iter();
+        let mut block_transition_iter = block_transition.into_iter();
+        let mut last_transition_id = from;
+        loop {
+            // loop break if we are at the end of the blocks.
+            let Some((_,block_body)) = block_body_iter.next() else { break };
+            let mut block_exec_res = ExecutionResult::default(); //TODO ExecResult
+
+            for _ in 0..block_body.tx_count {
+                let Some((transition_id, changeset)) = changeset_iter.next() else { break};
+                last_transition_id = transition_id;
+                block_exec_res.tx_changesets.push(TransactionChangeSet {
+                    receipt: Receipt::default(), /* TODO(receipt) when they are saved, load them
+                                                  * from db */
+                    changeset: changeset
+                        .into_iter()
+                        .map(|(address, (account, storage))| {
+                            (
+                                address,
+                                AccountChangeSet {
+                                    account,
+                                    storage: storage
+                                        .into_iter()
+                                        .map(|(key, val)| (U256::from_be_bytes(key.0), val))
+                                        .collect(),
+                                    wipe_storage: false, /* it is always false as all storage
+                                                          * changesets for selfdestruct are
+                                                          * already accounted. */
+                                },
+                            )
+                        })
+                        .collect(),
+                    new_bytecodes: Default::default(), /* TODO(bytecode), bytecode is not cleared
+                                                        * so it is same sa previous. */
+                });
+            }
+
+            let Some((_,block_transition)) = block_transition_iter.next() else { break};
+            if block_transition != last_transition_id {
+                // take block changeset
+                let Some((transition_id, changeset)) = changeset_iter.next() else { break};
+                last_transition_id = transition_id;
+                block_exec_res.block_changesets = changeset
+                    .into_iter()
+                    .map(|(address, (account, _))| (address, account))
+                    .collect();
+            }
+            block_exec_results.push(block_exec_res)
+        }
+        Ok(block_exec_results)
+    }
+
+    /// Return range of blocks and its execution result
+    pub fn get_block_and_execution_range<const TAKE: bool>(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
+        // get blocks
+        let blocks = self.get_block_range::<TAKE>(range.clone())?;
+        // get execution res
+        let execution_res = self.get_block_execution_result_range::<TAKE>(range.clone())?;
+        // combine them
+        let res = blocks.into_iter().zip(execution_res.into_iter()).collect();
+
+        // remove block bodies it is needed for both get block range and get block execution results
+        // that is why it is deleted afterwards.
+        if TAKE {
+            self.get_or_take::<tables::BlockBodies, TAKE>(range)?;
+        }
+
+        // return them
+        Ok(res)
     }
 
     /// Iterate over account changesets and return all account address that were changed.

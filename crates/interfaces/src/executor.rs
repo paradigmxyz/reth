@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use reth_primitives::{Address, Block, Bloom, H256, U256};
+use reth_primitives::{Address, Block, BlockHash, BlockNumber, Bloom, H256, U256};
 use thiserror::Error;
 
 /// An executor capable of executing a block.
@@ -54,4 +54,24 @@ pub enum Error {
     BlockGasUsed { got: u64, expected: u64 },
     #[error("Provider error")]
     ProviderError,
+    #[error("Chain can't be found with internal index {chain_id}")]
+    ChainIdConsistency { chain_id: u64 },
+    #[error("Canonical chain header #{block_hash} can't be found ")]
+    CanonicalChain { block_hash: BlockHash },
+    #[error("Can't insert #{block_number} {block_hash} as last finalized block number is {last_finalized}")]
+    PendingBlockIsFinalized {
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        last_finalized: BlockNumber,
+    },
+    #[error("Can't insert block  #{block_number} {block_hash} to far in future, as last finalized block number is {last_finalized}")]
+    PendingBlockIsInFuture {
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        last_finalized: BlockNumber,
+    },
+    #[error("Block number #{block_number} not found in blockchain tree chain")]
+    BlockNumberNotFoundInChain { block_number: BlockNumber },
+    #[error("Block hash {block_hash} not found in blockchain tree chain")]
+    BlockHashNotFoundInChain { block_hash: BlockHash },
 }

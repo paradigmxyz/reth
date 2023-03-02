@@ -135,7 +135,7 @@ impl Command {
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
-        let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::new(self.chain.clone()));
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint()?;
@@ -317,7 +317,7 @@ impl Command {
     ) -> EngineApiHandle {
         let (message_tx, message_rx) = unbounded_channel();
         let engine_api = EngineApi::new(
-            ShareableDatabase::new(db, self.chain.clone()),
+            ShareableDatabase::new(db, Arc::new(self.chain.clone())),
             self.chain.clone(),
             message_rx,
             forkchoice_state_tx,
@@ -418,7 +418,7 @@ impl Command {
             .network_config(config, self.chain.clone())
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .build(ShareableDatabase::new(db, self.chain.clone()))
+            .build(ShareableDatabase::new(db, Arc::new(self.chain.clone())))
     }
 
     async fn build_pipeline<H, B, U>(
