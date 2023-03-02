@@ -13,9 +13,6 @@ use reth_provider::StateProvider;
 use reth_revm::database::{State, SubState};
 use std::{collections::BTreeMap, sync::Arc};
 
-/// TODO: Chain substate
-pub type ChainSubState = bool; //SubState<Box<dyn StateProvider>>;
-
 /// Side chain that contain it state and connect to block found in canonical chain.
 #[derive(Clone, Default)]
 pub struct Chain {
@@ -28,8 +25,7 @@ pub struct Chain {
 }
 
 /// Where does the chain connect to.
-/// TODO Should be removed with Chain default. Used for scaffolding.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct ForkBlock {
     /// Block number of block that chains branches from
     pub number: u64,

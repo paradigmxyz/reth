@@ -9,7 +9,7 @@ use reth_db::{
     },
     table::{KeyValue, Table},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
@@ -276,6 +276,171 @@ impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
+    /// Unwind and clear account hashing
+    pub fn unwind_account_hashing(
+        &self,
+        range: impl RangeBounds<TransitionId>,
+    ) -> Result<(), TransactionError> {
+        let mut hashed_accounts = self.cursor_write::<tables::HashedAccount>()?;
+
+        // Aggregate all transition changesets and and make list of account that have been changed.
+        self.cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .rev()
+            // fold all account to get the old balance/nonces and account that needs to be removed
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
+                    accounts.insert(account_before.address, account_before.info);
+                    accounts
+                },
+            )
+            .into_iter()
+            // hash addresses and collect it inside sorted BTreeMap.
+            // We are doing keccak only once per address.
+            .map(|(address, account)| (keccak256(address), account))
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            // Apply values to HashedState (if Account is None remove it);
+            .try_for_each(|(hashed_address, account)| -> Result<(), TransactionError> {
+                if let Some(account) = account {
+                    hashed_accounts.upsert(hashed_address, account)?;
+                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
+                    hashed_accounts.delete_current()?;
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// Unwind and clear storage hashing
+    pub fn unwind_storage_hashing(
+        &self,
+        range: impl RangeBounds<TransitionIdAddress>,
+    ) -> Result<(), TransactionError> {
+        let mut hashed_storage = self.cursor_dup_write::<tables::HashedStorage>()?;
+
+        // Aggregate all transition changesets and make list of accounts that have been changed.
+        self.cursor_read::<tables::StorageChangeSet>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .rev()
+            // fold all account to get the old balance/nonces and account that needs to be removed
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<(Address, H256), U256>,
+                 (TransitionIdAddress((_, address)), storage_entry)| {
+                    accounts.insert((address, storage_entry.key), storage_entry.value);
+                    accounts
+                },
+            )
+            .into_iter()
+            // hash addresses and collect it inside sorted BTreeMap.
+            // We are doing keccak only once per address.
+            .map(|((address, key), value)| ((keccak256(address), keccak256(key)), value))
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            // Apply values to HashedStorage (if Value is zero just remove it);
+            .try_for_each(|((hashed_address, key), value)| -> Result<(), TransactionError> {
+                if hashed_storage
+                    .seek_by_key_subkey(hashed_address, key)?
+                    .filter(|entry| entry.key == key)
+                    .is_some()
+                {
+                    hashed_storage.delete_current()?;
+                }
+
+                if value != U256::ZERO {
+                    hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
+                }
+                Ok(())
+            })?;
+        Ok(())
+    }
+
+    /// Unwind and clear account history indices
+    pub fn unwind_account_history_indices(
+        &self,
+        range: impl RangeBounds<TransitionId>,
+    ) -> Result<(), TransactionError> {
+        let mut cursor = self.cursor_write::<tables::AccountHistory>()?;
+
+        let account_changeset = self
+            .cursor_read::<tables::AccountChangeSet>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let last_indices = account_changeset
+            .into_iter()
+            // reverse so we can get lowest transition id where we need to unwind account.
+            .rev()
+            // fold all account and get last transition index
+            .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
+                // we just need address and lowest transition id.
+                accounts.insert(account.address, index);
+                accounts
+            });
+        // try to unwind the index
+        for (address, rem_index) in last_indices {
+            let shard_part = unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
+
+            // check last shard_part, if present, items needs to be reinserted.
+            if !shard_part.is_empty() {
+                // there are items in list
+                self.put::<tables::AccountHistory>(
+                    ShardedKey::new(address, u64::MAX),
+                    TransitionList::new(shard_part)
+                        .expect("There is at least one element in list and it is sorted."),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Unwind and clear storage history indices
+    pub fn unwind_storage_history_indices(
+        &self,
+        range: impl RangeBounds<TransitionIdAddress>,
+    ) -> Result<(), TransactionError> {
+        let mut cursor = self.cursor_write::<tables::StorageHistory>()?;
+
+        let storage_changesets = self
+            .cursor_read::<tables::StorageChangeSet>()?
+            .walk_range(range)?
+            .collect::<Result<Vec<_>, _>>()?;
+        let last_indices = storage_changesets
+            .into_iter()
+            // reverse so we can get lowest transition id where we need to unwind account.
+            .rev()
+            // fold all storages and get last transition index
+            .fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<(Address, H256), u64>, (index, storage)| {
+                    // we just need address and lowest transition id.
+                    accounts.insert((index.address(), storage.key), index.transition_id());
+                    accounts
+                },
+            );
+        for ((address, storage_key), rem_index) in last_indices {
+            let shard_part =
+                unwind_storage_history_shards::<DB>(&mut cursor, address, storage_key, rem_index)?;
+
+            // check last shard_part, if present, items needs to be reinserted.
+            if !shard_part.is_empty() {
+                // there are items in list
+                self.put::<tables::StorageHistory>(
+                    StorageShardedKey::new(address, storage_key, u64::MAX),
+                    TransitionList::new(shard_part)
+                        .expect("There is at least one element in list and it is sorted."),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Insert full block and make it canonical
     ///
     /// This is atomic operation and transaction will do one commit at the end of the function.
@@ -660,7 +825,7 @@ where
         let mut next_changeset = changeset_iter.next().unwrap_or_default();
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies.into_iter() {
-            let mut block_exec_res = ExecutionResult::default(); //TODO ExecResult
+            let mut block_exec_res = ExecutionResult::default();
             for _ in 0..block_body.tx_count {
                 // only if next_changeset
                 let changeset = if next_transition_id == next_changeset.0 {
@@ -725,6 +890,29 @@ where
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
+        if TAKE {
+            //TODO handle ranges Inclusive/Exclusive bounds
+            let from_transition = self.get_block_transition(0)?;
+            let to_transition = self.get_block_transition(10)?;
+            let transition_range = from_transition..to_transition;
+            let transition_storage_range = TransitionIdAddress((from_transition, Address::zero()))..
+                TransitionIdAddress((to_transition, Address::zero()));
+
+            self.unwind_account_hashing(transition_range.clone())?;
+            self.unwind_account_history_indices(transition_range)?;
+            self.unwind_storage_hashing(transition_storage_range.clone())?;
+            self.unwind_storage_history_indices(transition_storage_range)?;
+
+            // merkle tree
+            {
+                //TODO handle ranges Inclusive/Exclusive bounds
+                let current_root = self.get_header(10)?.state_root;
+                let loader = DBTrieLoader::default();
+                let _block_root =
+                    loader.update_root(self, current_root, from_transition..to_transition)?;
+            }
+            // check root
+        }
         // get blocks
         let blocks = self.get_block_range::<TAKE>(range.clone())?;
         // get execution res
@@ -1153,6 +1341,82 @@ where
         }
         Ok(())
     }
+}
+
+/// Unwind all history shards. For boundary shard, remove it from database and
+/// return last part of shard with still valid items. If all full shard were removed, return list
+/// would be empty.
+fn unwind_account_history_shards<DB: Database>(
+    cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
+        tables::AccountHistory,
+    >,
+    address: Address,
+    transition_id: TransitionId,
+) -> Result<Vec<usize>, TransactionError> {
+    let mut item = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
+
+    while let Some((sharded_key, list)) = item {
+        // there is no more shard for address
+        if sharded_key.key != address {
+            break
+        }
+        cursor.delete_current()?;
+        // check first item and if it is more and eq than `transition_id` delete current
+        // item.
+        let first = list.iter(0).next().expect("List can't empty");
+        if first >= transition_id as usize {
+            item = cursor.prev()?;
+            continue
+        } else if transition_id <= sharded_key.highest_transition_id {
+            // if first element is in scope whole list would be removed.
+            // so at least this first element is present.
+            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
+        } else {
+            let new_list = list.iter(0).collect::<Vec<_>>();
+            return Ok(new_list)
+        }
+    }
+    Ok(Vec::new())
+}
+
+/// Unwind all history shards. For boundary shard, remove it from database and
+/// return last part of shard with still valid items. If all full shard were removed, return list
+/// would be empty but this does not mean that there is none shard left but that there is no
+/// splitted shards.
+fn unwind_storage_history_shards<DB: Database>(
+    cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
+        tables::StorageHistory,
+    >,
+    address: Address,
+    storage_key: H256,
+    transition_id: TransitionId,
+) -> Result<Vec<usize>, TransactionError> {
+    let mut item = cursor.seek_exact(StorageShardedKey::new(address, storage_key, u64::MAX))?;
+
+    while let Some((storage_sharded_key, list)) = item {
+        // there is no more shard for address
+        if storage_sharded_key.address != address ||
+            storage_sharded_key.sharded_key.key != storage_key
+        {
+            // there is no more shard for address and storage_key.
+            break
+        }
+        cursor.delete_current()?;
+        // check first item and if it is more and eq than `transition_id` delete current
+        // item.
+        let first = list.iter(0).next().expect("List can't empty");
+        if first >= transition_id as usize {
+            item = cursor.prev()?;
+            continue
+        } else if transition_id <= storage_sharded_key.sharded_key.highest_transition_id {
+            // if first element is in scope whole list would be removed.
+            // so at least this first element is present.
+            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
+        } else {
+            return Ok(list.iter(0).collect::<Vec<_>>())
+        }
+    }
+    Ok(Vec::new())
 }
 
 /// An error that can occur when using the transaction container

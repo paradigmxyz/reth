@@ -152,12 +152,11 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let loader = DBTrieLoader::default();
-        let current_root = tx.get_header(input.stage_progress)?.state_root;
-
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
+        let current_root = tx.get_header(input.stage_progress)?.state_root;
+        let loader = DBTrieLoader::default();
         let block_root = loader
             .update_root(tx, current_root, from_transition..to_transition)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
