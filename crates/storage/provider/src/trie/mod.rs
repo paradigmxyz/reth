@@ -41,6 +41,7 @@ pub enum TrieError {
 /// Database wrapper implementing HashDB trait.
 struct HashDatabase<'tx, 'itx, DB: Database> {
     tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>,
+    flush: bool,
 }
 
 impl<'tx, 'itx, DB> cita_trie::DB for HashDatabase<'tx, 'itx, DB>
@@ -87,14 +88,16 @@ where
     }
 
     fn flush(&self) -> Result<(), Self::Error> {
-        self.tx.lock().commit()?;
+        if self.flush {
+            self.tx.lock().commit()?;
+        }
         Ok(())
     }
 }
 
 impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
     /// Instantiates a new Database for the accounts trie, with an empty root
-    fn new(tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>) -> Result<Self, TrieError> {
+    fn new(tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>, flush: bool) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         {
             let tx = tx.lock();
@@ -102,19 +105,20 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
                 tx.put::<tables::AccountsTrie>(root, [EMPTY_STRING_CODE].to_vec())?;
             }
         }
-        Ok(Self { tx })
+        Ok(Self { tx, flush })
     }
 
     /// Instantiates a new Database for the accounts trie, with an existing root
     fn from_root(
         tx: Arc<Mutex<&'tx mut Transaction<'itx, DB>>>,
         root: H256,
+        flush: bool,
     ) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
-            return Self::new(tx)
+            return Self::new(tx, flush)
         }
         tx.lock().get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
-        Ok(Self { tx })
+        Ok(Self { tx, flush })
     }
 }
 
@@ -268,13 +272,16 @@ pub struct DBTrieLoader {
     /// The maximum number of keys to insert before committing. Both from `AccountsTrie` and
     /// `StoragesTrie`.
     pub commit_threshold: u64,
+    /// Whether it should flush to DB when calling `PatriciaTrie<AccountsTrie>.root()`. Having this
+    /// as false will make `commit_threshold` meaningless.
+    pub flush: bool,
     /// The current number of inserted keys from both `AccountsTrie` and `StoragesTrie`.
     current: u64,
 }
 
 impl Default for DBTrieLoader {
     fn default() -> Self {
-        DBTrieLoader { commit_threshold: 500_000, current: 0 }
+        DBTrieLoader { commit_threshold: 500_000, current: 0, flush: false }
     }
 }
 
@@ -286,7 +293,6 @@ impl DBTrieLoader {
     ) -> Result<H256, TrieError> {
         tx.clear::<tables::AccountsTrie>()?;
         tx.clear::<tables::StoragesTrie>()?;
-        tx.commit()?;
 
         let read_tx = tx.inner().tx()?;
         let mut accounts_cursor = read_tx.cursor_read::<tables::HashedAccount>()?;
@@ -294,7 +300,7 @@ impl DBTrieLoader {
 
         let shared_tx = Arc::new(Mutex::new(tx));
         let mut trie = PatriciaTrie::new(
-            Arc::new(HashDatabase::new(shared_tx.clone())?),
+            Arc::new(HashDatabase::new(shared_tx.clone(), self.flush)?),
             Arc::new(HasherKeccak::new()),
         );
 
@@ -357,16 +363,19 @@ impl DBTrieLoader {
         accounts_trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
         storages_trie: Option<&mut PatriciaTrie<DupHashDatabase<'_, '_, DB>, HasherKeccak>>,
     ) -> Result<(), TrieError> {
-        self.current += 1;
-        if self.current == self.commit_threshold {
-            self.current = 0;
-            if let Some(trie) = storages_trie {
-                // This will consume the data from trie.cache to DbTxMut
-                trie.root()?;
+        if self.flush {
+            self.current += 1;
+            if self.current == self.commit_threshold {
+                self.current = 0;
+                if let Some(trie) = storages_trie {
+                    // This will consume the data from trie.cache to DbTxMut
+                    trie.root()?;
+                }
+                // This will consume the data from trie.cache to DbTxMut and commit it
+                accounts_trie.root()?;
             }
-            // This will consume the data from trie.cache to DbTxMut and commit it
-            accounts_trie.root()?;
         }
+
         Ok(())
     }
 
@@ -377,8 +386,6 @@ impl DBTrieLoader {
         root: H256,
         tid_range: Range<TransitionId>,
     ) -> Result<H256, TrieError> {
-        tx.commit()?;
-
         let read_tx = tx.inner().tx()?;
         let mut accounts_cursor = read_tx.cursor_read::<tables::HashedAccount>()?;
 
@@ -386,7 +393,7 @@ impl DBTrieLoader {
 
         let shared_tx = Arc::new(Mutex::new(tx));
         let mut trie = PatriciaTrie::from(
-            Arc::new(HashDatabase::from_root(shared_tx.clone(), root)?),
+            Arc::new(HashDatabase::from_root(shared_tx.clone(), root, self.flush)?),
             Arc::new(HasherKeccak::new()),
             root.as_bytes(),
         )?;
@@ -594,15 +601,16 @@ mod tests {
             (k, out)
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
+        tx.commit().unwrap();
 
         let shared_tx = Arc::new(Mutex::new(&mut tx));
         let mut accounts_trie = PatriciaTrie::new(
-            Arc::new(HashDatabase::new(shared_tx.clone()).unwrap()),
+            Arc::new(HashDatabase::new(shared_tx.clone(), self.flush).unwrap()),
             Arc::new(HasherKeccak::new()),
         );
 
         assert_matches!(
-            trie.calculate_storage_root(shared_tx.clone(), &mut accounts_trie, hashed_address),
+            trie.calculate_storage_root(shared_tx, &mut accounts_trie, hashed_address),
             Ok(got) if got == expected
         );
     }

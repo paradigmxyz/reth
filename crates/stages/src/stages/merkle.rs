@@ -109,12 +109,14 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
             let mut loader = DBTrieLoader::default();
+            loader.flush = true;
             loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
             let current_root = tx.get_header(stage_progress)?.state_root;
             let mut loader = DBTrieLoader::default();
+            loader.flush = true;
             loader
                 .update_root(tx, current_root, from_transition..to_transition)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
