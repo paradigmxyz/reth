@@ -6,7 +6,7 @@ pub use chain::{Chain, ChainId, ForkBlock};
 
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
-use reth_primitives::{BlockHash, BlockNumber, ChainSpec, SealedBlock};
+use reth_primitives::{BlockHash, BlockNumber, ChainSpec, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{
     HeaderProvider, ShareableDatabase, StateProvider, StateProviderFactory, Transaction,
 };
@@ -132,7 +132,11 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
     }
 
     /// Fork side chain or append the block if parent is the top of the chain
-    fn fork_side_chain(&mut self, block: SealedBlock, chain_id: ChainId) -> Result<(), Error> {
+    fn fork_side_chain(
+        &mut self,
+        block: SealedBlockWithSenders,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
         let block_hashes = self.all_chain_hashes(chain_id);
 
         // get canonical fork.
@@ -185,7 +189,7 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
     }
 
     /// Fork canonical chain by creating new chain
-    pub fn fork_canonical_chain(&mut self, block: SealedBlock) -> Result<(), Error> {
+    pub fn fork_canonical_chain(&mut self, block: SealedBlockWithSenders) -> Result<(), Error> {
         let canonical_block_hashes = self.block_indices.canonical_chain();
         let (_, canonical_tip) =
             canonical_block_hashes.last_key_value().map(|(i, j)| (*i, *j)).unwrap_or_default();
@@ -272,8 +276,19 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
         chain_id
     }
 
-    /// Insert block inside tree
-    pub fn insert_block(&mut self, block: &SealedBlock) -> Result<bool, Error> {
+    /// Insert block inside tree. recover transaction signers and call [`insert_block_with_senders`]
+    /// fn.
+    pub fn insert_block(&mut self, block: SealedBlock) -> Result<bool, Error> {
+        let senders = block.senders().ok_or(ExecError::SenderRecoveryError)?;
+        let block = SealedBlockWithSenders::new(block, senders).unwrap();
+        self.insert_block_with_senders(&block)
+    }
+
+    /// Insert block with senders inside tree
+    pub fn insert_block_with_senders(
+        &mut self,
+        block: &SealedBlockWithSenders,
+    ) -> Result<bool, Error> {
         // check if block number is inside pending block slide
         let last_finalized_block = self.block_indices.last_finalized_block();
         if block.number <= last_finalized_block {
@@ -431,12 +446,18 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
         let mut tx = Transaction::new(&self.db)?;
 
-        for ((_, block), changeset) in chain.blocks.into_iter().zip(chain.changesets.into_iter()) {
-            // TODO error handling needs to be done
+        let new_tip = chain.tip().number;
+
+        for item in chain.blocks.into_iter().zip(chain.changesets.into_iter()) {
+            let ((_, block), changeset) = item;
+
             tx.insert_block(&block, &self.chain_spec, changeset)
                 .map_err(|_| ExecError::VerificationFailed)?;
         }
-        // TODO(rakita) update pipeline progress.
+        // update pipeline progress.
+        tx.update_pipeline_stages(new_tip).map_err(|_| ExecError::VerificationFailed)?;
+
+        // TODO error cast
 
         tx.commit()?;
 
@@ -449,17 +470,21 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
     fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Chain, Error> {
         // read data that is needed for new sidechain
 
-        let tx = Transaction::new(&self.db)?;
+        let mut tx = Transaction::new(&self.db)?;
 
-        // TODO error handling
-        let _blocks_and_execution = tx
+        // read block and execution result from database. and remove traces of block from tables.
+        let blocks_and_execution = tx
             .get_block_and_execution_range::<true>(revert_until + 1..)
             .map_err(|_| ExecError::VerificationFailed)?;
 
-        // TODO wipe canonical blocks from database
+        // update pipeline progress.
+        tx.update_pipeline_stages(revert_until).map_err(|_| ExecError::VerificationFailed)?;
+        // TODO error cast
 
-        // TODO insert chain made from `blocks_and_execution`.
+        tx.commit()?;
 
-        Ok(Chain::default())
+        let chain = Chain::new(blocks_and_execution);
+
+        Ok(chain)
     }
 }

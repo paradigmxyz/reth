@@ -1,7 +1,7 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
 use super::chain::{Chain, ChainId, ForkBlock};
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock};
+use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the block.
@@ -161,7 +161,7 @@ impl BlockIndices {
     /// Remove all blocks from canonical list and insert new blocks to it.
     ///
     /// It is assumed that blocks are interconnected and that they connect to canonical chain
-    pub fn canonicalize_blocks(&mut self, blocks: &BTreeMap<BlockNumber, SealedBlock>) {
+    pub fn canonicalize_blocks(&mut self, blocks: &BTreeMap<BlockNumber, SealedBlockWithSenders>) {
         if blocks.is_empty() {
             return
         }

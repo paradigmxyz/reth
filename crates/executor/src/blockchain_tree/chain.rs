@@ -6,7 +6,9 @@ use crate::{
     substate::{SubStateData, SubStateWithProvider},
 };
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
-use reth_primitives::{BlockHash, BlockNumber, ChainSpec, SealedBlock, SealedHeader, U256};
+use reth_primitives::{
+    BlockHash, BlockNumber, ChainSpec, SealedBlockWithSenders, SealedHeader, U256,
+};
 use reth_provider::StateProvider;
 use reth_revm::database::{State, SubState};
 use std::{collections::BTreeMap, sync::Arc};
@@ -22,7 +24,7 @@ pub struct Chain {
     /// Changesets for block and transaction.
     pub changesets: Vec<ExecutionResult>,
     /// Blocks in this chain
-    pub blocks: BTreeMap<BlockNumber, SealedBlock>,
+    pub blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
 }
 
 /// Where does the chain connect to.
@@ -56,24 +58,36 @@ impl Chain {
     }
 
     /// First block in chain.
-    pub fn first(&self) -> &SealedBlock {
+    pub fn first(&self) -> &SealedBlockWithSenders {
         self.blocks.first_key_value().expect("Chain has at least one block for first").1
     }
 
     /// Return tip of the chain. Chain always have at least one block inside
-    pub fn tip(&self) -> &SealedBlock {
+    pub fn tip(&self) -> &SealedBlockWithSenders {
         self.last()
     }
 
     /// Return tip of the chain. Chain always have at least one block inside
-    pub fn last(&self) -> &SealedBlock {
+    pub fn last(&self) -> &SealedBlockWithSenders {
         self.blocks.last_key_value().expect("Chain has at least one block for last").1
+    }
+
+    /// Create new chain with given blocks and execution result.
+    pub fn new(blocks: Vec<(SealedBlockWithSenders, ExecutionResult)>) -> Self {
+        let (blocks, changesets): (Vec<_>, Vec<_>) = blocks.into_iter().unzip();
+
+        let blocks = blocks.into_iter().map(|b| (b.number, b)).collect::<BTreeMap<_, _>>();
+
+        let mut substate = SubStateData::default();
+        substate.apply(&changesets);
+
+        Self { substate, changesets, blocks }
     }
 
     /// Create new chain that joins canonical block
     /// If parent block is the tip mark chain fork.
     pub fn new_canonical_fork<PROVIDER: StateProvider, CONSENSUS: Consensus>(
-        block: &SealedBlock,
+        block: &SealedBlockWithSenders,
         parent_header: SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         chain_spec: Arc<ChainSpec>,
@@ -89,7 +103,7 @@ impl Chain {
         let mut substate = SubStateData::default();
         let empty = BTreeMap::new();
 
-        let unseal = block.clone().unseal();
+        let unseal = block.clone().split().0.unseal();
         let provider =
             SubStateWithProvider::new(&mut substate, provider, &empty, canonical_block_hashes);
         let mut state_provider = SubState::new(State::new(provider));
@@ -105,7 +119,7 @@ impl Chain {
     /// Create new chain that branches out from existing side chain.
     pub fn new_chain_fork<PROVIDER: StateProvider, CONSENSUS: Consensus>(
         &self,
-        block: SealedBlock,
+        block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         chain_spec: Arc<ChainSpec>,
@@ -137,7 +151,7 @@ impl Chain {
             canonical_block_hashes,
         );
 
-        let unseal = block.clone().unseal();
+        let unseal = block.clone().split().0.unseal();
         // Create state provider with cached state
         let mut state_provider = SubState::new(State::new(provider));
 
@@ -154,7 +168,7 @@ impl Chain {
     /// Append block to this chain
     pub fn append_block<PROVIDER: StateProvider, CONSENSUS: Consensus>(
         &mut self,
-        block: SealedBlock,
+        block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         chain_spec: Arc<ChainSpec>,
@@ -175,7 +189,7 @@ impl Chain {
             canonical_block_hashes,
         );
 
-        let unseal = block.clone().unseal();
+        let unseal = block.clone().split().0.unseal();
         // Create state provider with cached state
         let mut state_provider = SubState::new(State::new(provider));
 

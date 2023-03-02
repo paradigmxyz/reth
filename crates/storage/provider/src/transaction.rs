@@ -561,8 +561,8 @@ where
         // Bundle execution changeset to its particular transaction and block
         let mut all_changesets: Changesets = HashMap::new();
 
-        let mut plain_accounts_cursor = self.cursor_read::<tables::PlainAccountState>()?;
-        let mut plain_storage_cursor = self.cursor_dup_read::<tables::PlainStorageState>()?;
+        let mut plain_accounts_cursor = self.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor = self.cursor_dup_write::<tables::PlainStorageState>()?;
 
         // add account changeset changes
         for (transition_id, account_before) in account_changeset.into_iter().rev() {
@@ -617,12 +617,36 @@ where
         }
 
         if TAKE {
-            // TODO iterate over local plain state
-            // remove all account
-            // and all storages.
+            // iterate over local plain state remove all account and all storages.
+            for (address, (account, storage)) in local_plain_state.into_iter() {
+                // revert account
+                if let Some(account) = account {
+                    plain_accounts_cursor.seek_exact(address)?;
+                    if let Some(account) = account {
+                        plain_accounts_cursor.upsert(address, account)?;
+                    } else {
+                        plain_accounts_cursor.delete_current()?;
+                    }
+                }
+                // revert storages
+                for (storage_key, storage_value) in storage.into_iter() {
+                    let storage_entry = StorageEntry { key: storage_key, value: storage_value };
+                    // delete previous value
+                    if plain_storage_cursor
+                        .seek_by_key_subkey(address, storage_key)?
+                        .filter(|s| s.key == storage_key)
+                        .is_some()
+                    {
+                        plain_storage_cursor.delete_current()?
+                    }
+                    // insert value if needed
+                    if storage_value != U256::ZERO {
+                        plain_storage_cursor.insert(address, storage_entry)?;
+                    }
+                }
+            }
         }
 
-        //
         // NOTE: Some storage changesets can be empty,
         // all account changeset have at least beneficiary fee transfer.
 
@@ -630,21 +654,18 @@ where
         let mut block_exec_results = Vec::new();
 
         let mut changeset_iter = all_changesets.into_iter();
-        let mut block_body_iter = block_bodies.into_iter();
         let mut block_transition_iter = block_transition.into_iter();
-        let mut last_transition_id = from;
-        loop {
-            // loop break if we are at the end of the blocks.
-            let Some((_,block_body)) = block_body_iter.next() else { break };
-            let mut block_exec_res = ExecutionResult::default(); //TODO ExecResult
+        let mut next_transition_id = from;
 
+        let mut next_changeset = changeset_iter.next().unwrap_or_default();
+        // loop break if we are at the end of the blocks.
+        for (_, block_body) in block_bodies.into_iter() {
+            let mut block_exec_res = ExecutionResult::default(); //TODO ExecResult
             for _ in 0..block_body.tx_count {
-                let Some((transition_id, changeset)) = changeset_iter.next() else { break};
-                last_transition_id = transition_id;
-                block_exec_res.tx_changesets.push(TransactionChangeSet {
-                    receipt: Receipt::default(), /* TODO(receipt) when they are saved, load them
-                                                  * from db */
-                    changeset: changeset
+                // only if next_changeset
+                let changeset = if next_transition_id == next_changeset.0 {
+                    let changeset = next_changeset
+                        .1
                         .into_iter()
                         .map(|(address, (account, storage))| {
                             (
@@ -661,21 +682,38 @@ where
                                 },
                             )
                         })
-                        .collect(),
+                        .collect();
+                    next_changeset = changeset_iter.next().unwrap_or_default();
+                    changeset
+                } else {
+                    BTreeMap::new()
+                };
+
+                next_transition_id += 1;
+                block_exec_res.tx_changesets.push(TransactionChangeSet {
+                    receipt: Receipt::default(), /* TODO(receipt) when they are saved, load them
+                                                  * from db */
+                    changeset,
                     new_bytecodes: Default::default(), /* TODO(bytecode), bytecode is not cleared
                                                         * so it is same sa previous. */
                 });
             }
 
             let Some((_,block_transition)) = block_transition_iter.next() else { break};
-            if block_transition != last_transition_id {
-                // take block changeset
-                let Some((transition_id, changeset)) = changeset_iter.next() else { break};
-                last_transition_id = transition_id;
-                block_exec_res.block_changesets = changeset
-                    .into_iter()
-                    .map(|(address, (account, _))| (address, account))
-                    .collect();
+            // if block transition points to next transition id it means that there is block
+            // changeset.
+            if block_transition == next_transition_id {
+                // assert last_transition_id == block_transition
+                if next_transition_id == next_changeset.0 {
+                    // take block changeset
+                    block_exec_res.block_changesets = next_changeset
+                        .1
+                        .into_iter()
+                        .map(|(address, (account, _))| (address, account))
+                        .collect();
+                    next_changeset = changeset_iter.next().unwrap_or_default();
+                }
+                next_transition_id += 1;
             }
             block_exec_results.push(block_exec_res)
         }
@@ -702,6 +740,20 @@ where
 
         // return them
         Ok(res)
+    }
+
+    /// Update all pipeline sync stage progress.
+    pub fn update_pipeline_stages(
+        &self,
+        block_number: BlockNumber,
+    ) -> Result<(), TransactionError> {
+        // iterate over
+        let mut cursor = self.cursor_write::<tables::SyncStage>()?;
+        while let Some((stage_name, _)) = cursor.next()? {
+            cursor.upsert(stage_name, block_number)?
+        }
+
+        Ok(())
     }
 
     /// Iterate over account changesets and return all account address that were changed.
