@@ -9,8 +9,8 @@ use crate::{
 };
 use async_trait::async_trait;
 pub use mock::*;
-use std::{marker::PhantomData, sync::Arc};
 use reth_interfaces::consensus::Error;
+use std::{marker::PhantomData, sync::Arc};
 
 /// A [Pool] used for testing
 pub type TestPool = Pool<NoopTransactionValidator<MockTransaction>, MockOrdering>;
@@ -38,7 +38,6 @@ impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
-
         Ok(TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,

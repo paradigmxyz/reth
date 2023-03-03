@@ -238,8 +238,8 @@ where
         }
     }
 
-     /// Adds all transactions in the iterator to the pool, returning a list of results.
-     pub fn add_transactions(
+    /// Adds all transactions in the iterator to the pool, returning a list of results.
+    pub fn add_transactions(
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,

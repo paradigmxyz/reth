@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_interfaces::consensus::Error;
-use reth_primitives::{Address, TransactionKind, TxHash, U256};
+use reth_primitives::{Address, Transaction, TransactionKind, TxHash, TxType, U256};
 use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
 
@@ -83,13 +83,17 @@ pub trait TransactionValidator: Send + Sync {
 }
 
 pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
-    ///
+    /// Chain id
     chain_id: u64,
     /// This type fetches account info from the db
     client: Client,
-    /// whether shanghai is enabled.
+    /// Fork indicator whether we are in the Shanghai stage.
     shanghai: bool,
-    ///  
+    /// Fork indicator whether we are using EIP-2718 type transactions.
+    eip2718: bool,
+    /// Fork indicator whether we are using EIP-1559 type transactions.
+    eip1559: bool,
+    /// The current max gas limit
     currentMaxGasLimit: u64,
 }
 
@@ -104,10 +108,46 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
-        
-        // Checks for chainid
-        
         let invalid_transaction = transaction.clone();
+
+        match transaction.tx_type() {
+            0 => {
+                // Accept legacy transactions
+            }
+
+            1 => {
+                // Accept only legacy transactions until EIP-2718/2930 activates
+                if !self.eip2718 {
+                    return Err(Error::TransactionEip2930Disabled)
+                }
+            }
+
+            2 => {
+                // Reject dynamic fee transactions until EIP-1559 activates.
+                if !self.eip1559 {
+                    return Err(Error::TransactionEip1559Disabled)
+                }
+            }
+
+            _ => panic!("Invalid transaction type"),
+        };
+
+        // self.ensure_max_init_code_size(transaction.clone(), 4 * 32 * 1024)?;
+
+        // transaction size
+        if transaction.size() > 4 * 32 * 1024 {
+            return Ok(TransactionValidationOutcome::Invalid(
+                transaction,
+                PoolError::TxExceedsMaxInitCodeSize(
+                    *invalid_transaction.hash(),
+                    invalid_transaction.size(),
+                    4 * 32 * 1024,
+                ),
+            ))
+        }
+
+        // Checks for chainid
+
         // Checks for gaslimit
         if transaction.gas_limit() > self.currentMaxGasLimit {
             return Ok(TransactionValidationOutcome::Invalid(
@@ -120,6 +160,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
             ))
         }
 
+        // Checks for sender
         let account = match self.client.basic_account(transaction.sender())? {
             Some(account) => account,
             None => {
