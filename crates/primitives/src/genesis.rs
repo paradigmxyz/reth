@@ -6,9 +6,8 @@ use crate::{
     utils::serde_helpers::deserialize_stringified_u64,
     Address, Bytes, H256, KECCAK_EMPTY, U256,
 };
-use bytes::BytesMut;
 use ethers_core::utils::GenesisAccount as EthersGenesisAccount;
-use reth_rlp::{length_of_length, Encodable, Header as RlpHeader};
+use reth_rlp::{encode_fixed_size, length_of_length, Encodable, Header as RlpHeader};
 use serde::{Deserialize, Serialize};
 use triehash::sec_trie_root;
 
@@ -62,7 +61,8 @@ impl GenesisAccount {
         // rather than rlp-encoding the storage, we just return the length of a single hash
         // hashes are a fixed size, so it is safe to use the empty root for this
         len += EMPTY_ROOT.length();
-        len += self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).length();
+        // we are encoding a hash, so let's just use the length of the empty hash for the code hash
+        len += KECCAK_EMPTY.length();
         len
     }
 }
@@ -83,13 +83,14 @@ impl Encodable for GenesisAccount {
         self.storage
             .as_ref()
             .map_or(EMPTY_ROOT, |storage| {
+                if storage.is_empty() {
+                    return EMPTY_ROOT
+                }
                 let storage_values =
                     storage.iter().filter(|(_k, &v)| v != KECCAK_EMPTY).map(|(&k, v)| {
-                        let mut value_rlp = BytesMut::new();
-                        v.encode(&mut value_rlp);
-                        (k, value_rlp.freeze())
+                        let value = U256::from_be_bytes(**v);
+                        (k, encode_fixed_size(&value))
                     });
-
                 sec_trie_root::<KeccakHasher, _, _, _>(storage_values)
             })
             .encode(out);

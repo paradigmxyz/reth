@@ -11,7 +11,7 @@ use reth_primitives::{
     rpc::transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
     Header, H256, H64, U256, U64,
 };
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
     CallRequest, EIP1186AccountProofResponse, FeeHistory, FeeHistoryCacheItem, Index, RichBlock,
@@ -26,7 +26,7 @@ impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
     Self: EthApiSpec,
     Pool: TransactionPool + 'static,
-    Client: BlockProvider + HeaderProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
     /// Handler for: `eth_protocolVersion`
@@ -378,6 +378,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::eth::cache::EthStateCache;
     use jsonrpsee::{
         core::{error::Error as RpcError, RpcResult},
         types::error::{CallError, INVALID_PARAMS_CODE},
@@ -394,7 +395,12 @@ mod tests {
     #[tokio::test]
     /// Handler for: `eth_test_fee_history`
     async fn test_fee_history() {
-        let eth_api = EthApi::new(NoopProvider::default(), testing_pool(), NoopNetwork::default());
+        let eth_api = EthApi::new(
+            NoopProvider::default(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+        );
 
         let response = eth_api.fee_history(1.into(), BlockNumberOrTag::Latest.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
@@ -434,7 +440,12 @@ mod tests {
                 .push(base_fee_per_gas.map(|fee| U256::try_from(fee).unwrap()).unwrap_or_default());
         }
 
-        let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
+        let eth_api = EthApi::new(
+            mock_provider,
+            testing_pool(),
+            NoopNetwork::default(),
+            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+        );
 
         let response =
             eth_api.fee_history((newest_block + 1).into(), newest_block.into(), None).await;

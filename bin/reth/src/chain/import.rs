@@ -1,6 +1,6 @@
 use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
-    node::{handle_events, NodeEvent},
+    node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
 use eyre::Context;
@@ -27,6 +27,7 @@ use reth_staged_sync::{
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
+    DefaultDB,
 };
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -69,7 +70,7 @@ pub struct ImportCommand {
     ///
     /// The online stages (headers and bodies) are replaced by a file import, after which the
     /// remaining stages are executed.
-    #[arg(long, value_name = "IMPORT_PATH", verbatim_doc_comment)]
+    #[arg(value_name = "IMPORT_PATH", verbatim_doc_comment)]
     path: PlatformPath<ConfigPath>,
 }
 
@@ -109,7 +110,7 @@ impl ImportCommand {
         let (mut pipeline, events) =
             self.build_import_pipeline(config, db.clone(), &consensus, file_client).await?;
 
-        tokio::spawn(handle_events(events));
+        tokio::spawn(handle_events(None, events));
 
         // Run pipeline
         info!(target: "reth::cli", "Starting sync pipeline");
@@ -156,9 +157,11 @@ impl ImportCommand {
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage {
-                    chain_spec: self.chain.clone(),
-                    commit_threshold: config.stages.execution.commit_threshold,
+                .set({
+                    let mut stage: ExecutionStage<'_, DefaultDB<'_>> =
+                        ExecutionStage::from(self.chain.clone());
+                    stage.commit_threshold = config.stages.execution.commit_threshold;
+                    stage
                 }),
             )
             .with_max_block(0)
@@ -181,8 +184,7 @@ mod tests {
     #[test]
     fn parse_common_import_command_chain_args() {
         for chain in ["mainnet", "sepolia", "goerli"] {
-            let args: ImportCommand =
-                ImportCommand::parse_from(["reth", "--chain", chain, "--path", "."]);
+            let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
     }

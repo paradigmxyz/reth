@@ -1539,7 +1539,7 @@ mod test {
 
     #[tokio::test]
     async fn test_dropped_incoming() {
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 0, 1, 2)), 8008);
         let ban_duration = Duration::from_millis(500);
         let config = PeersConfig { ban_duration, ..Default::default() };
         let mut peers = PeersManager::new(config);

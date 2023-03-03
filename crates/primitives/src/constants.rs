@@ -3,6 +3,9 @@
 use crate::H256;
 use hex_literal::hex;
 
+/// The first four bytes of the call data for a function call specifies the function to be called.
+pub const SELECTOR_LEN: usize = 4;
+
 /// Initial base fee as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_INITIAL_BASE_FEE: u64 = 1_000_000_000;
 

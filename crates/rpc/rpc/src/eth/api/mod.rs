@@ -10,10 +10,10 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, TransactionSigned, H256, U64,
 };
-use reth_provider::{BlockProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use std::num::NonZeroUsize;
 
-use crate::eth::error::EthResult;
+use crate::eth::{cache::EthStateCache, error::EthResult};
 use reth_provider::providers::ChainState;
 use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
@@ -58,7 +58,6 @@ pub trait EthApiSpec: Send + Sync {
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).
 #[derive(Clone)]
-#[allow(missing_debug_implementations)]
 pub struct EthApi<Client, Pool, Network> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Client, Pool, Network>>,
@@ -67,14 +66,19 @@ pub struct EthApi<Client, Pool, Network> {
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     /// Creates a new, shareable instance.
-    pub fn new(client: Client, pool: Pool, network: Network) -> Self {
-        let inner = EthApiInner { client, pool, network, signers: Default::default() };
+    pub fn new(client: Client, pool: Pool, network: Network, eth_cache: EthStateCache) -> Self {
+        let inner = EthApiInner { client, pool, network, signers: Default::default(), eth_cache };
         Self {
             inner: Arc::new(inner),
             fee_history_cache: FeeHistoryCache::new(
                 NonZeroUsize::new(FEE_HISTORY_CACHE_LIMIT).unwrap(),
             ),
         }
+    }
+
+    /// Returns the state cache frontend
+    pub(crate) fn cache(&self) -> &EthStateCache {
+        &self.inner.eth_cache
     }
 
     /// Returns the inner `Client`
@@ -97,7 +101,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
@@ -172,11 +176,17 @@ where
     }
 }
 
+impl<Client, Pool, Events> std::fmt::Debug for EthApi<Client, Pool, Events> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EthApi").finish_non_exhaustive()
+    }
+}
+
 #[async_trait]
 impl<Client, Pool, Network> EthApiSpec for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: BlockProvider + StateProviderFactory + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
 {
     /// Returns the current ethereum protocol version.
@@ -216,4 +226,6 @@ struct EthApiInner<Client, Pool, Network> {
     network: Network,
     /// All configured Signers
     signers: Vec<Box<dyn EthSigner>>,
+    /// The async cache frontend for eth related data
+    eth_cache: EthStateCache,
 }

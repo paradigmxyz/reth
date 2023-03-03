@@ -7,11 +7,7 @@ use reth_db::{
 };
 use reth_primitives::{keccak256, Account, Address};
 use reth_provider::Transaction;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Debug,
-    ops::Range,
-};
+use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 use tracing::*;
 
 /// The [`StageId`] of the account hashing stage.
@@ -180,38 +176,15 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 break
             }
         } else {
-            let mut plain_accounts = tx.cursor_read::<tables::PlainAccountState>()?;
-            let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>()?;
-
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
-            tx.cursor_read::<tables::AccountChangeSet>()?
-                .walk_range(from_transition..to_transition)?
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                // fold all account to one set of changed accounts
-                .fold(BTreeSet::new(), |mut accounts: BTreeSet<Address>, (_, account_before)| {
-                    accounts.insert(account_before.address);
-                    accounts
-                })
-                .into_iter()
-                // iterate over plain state and get newest value.
-                // Assumption we are okay to make is that plainstate represent
-                // `previous_stage_progress` state.
-                .map(|address| {
-                    plain_accounts.seek_exact(address).map(|a| (address, a.map(|(_, v)| v)))
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .try_for_each(|(address, account)| -> Result<(), StageError> {
-                    let hashed_address = keccak256(address);
-                    if let Some(account) = account {
-                        hashed_accounts.upsert(hashed_address, account)?
-                    } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
-                        hashed_accounts.delete_current()?;
-                    }
-                    Ok(())
-                })?;
+            let lists = tx.get_addresses_of_changed_accounts(from_transition, to_transition)?;
+            // iterate over plain state and get newest value.
+            // Assumption we are okay to make is that plainstate represent
+            // `previous_stage_progress` state.
+            let accounts = tx.get_plainstate_accounts(lists.into_iter())?;
+            // insert and hash accounts to hashing table
+            tx.insert_account_for_hashing(accounts.into_iter())?;
         }
 
         info!(target: "sync::stages::hashing_account", "Stage finished");

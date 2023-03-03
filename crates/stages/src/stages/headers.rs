@@ -9,7 +9,7 @@ use reth_db::{
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
-    provider::Error as ProviderError,
+    provider::ProviderError,
 };
 use reth_primitives::{BlockNumber, SealedHeader};
 use reth_provider::Transaction;
@@ -236,9 +236,12 @@ where
 
 /// Represents a gap to sync: from `local_head` to `target`
 #[derive(Debug)]
-struct SyncGap {
-    local_head: SealedHeader,
-    target: SyncTarget,
+pub struct SyncGap {
+    /// The local head block. Represents lower bound of sync range.
+    pub local_head: SealedHeader,
+
+    /// The sync target. Represents upper bound of sync range.
+    pub target: SyncTarget,
 }
 
 // === impl SyncGap ===
@@ -246,7 +249,7 @@ struct SyncGap {
 impl SyncGap {
     /// Returns `true` if the gap from the head to the target was closed
     #[inline]
-    fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.local_head.hash() == self.target.tip()
     }
 }

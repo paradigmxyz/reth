@@ -19,11 +19,12 @@ reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"]}
 reth-network-api = { path = "../../net/network-api", features = ["test-utils"] }
 reth-rpc-engine-api = { path = "../rpc-engine-api" }
-reth-executor = { path = "../../executor" }
+reth-revm = { path = "../../revm" }
 reth-tasks = { path = "../../tasks" }
 
 # eth
-revm = "3.0.0"
+revm = { version = "3.0.0", features = ["optional_block_gas_limit"] }
+ethers-core = { git = "https://github.com/gakonst/ethers-rs" }
 
 # rpc
 jsonrpsee = { version = "0.16" }
@@ -39,7 +40,7 @@ tower = "0.4"
 tokio-stream = "0.1"
 pin-project = "1.0"
 
-# misc
+bytes = "1.4"
 secp256k1 = { version = "0.26.0", features = [
     "global-context",
     "rand-std",
@@ -51,6 +52,8 @@ thiserror = "1.0"
 hex = "0.4"
 rand = "0.8.5"
 tracing = "0.1"
+schnellru = "0.2"
+futures = "0.3.26"
 
 [dev-dependencies]
 jsonrpsee = { version = "0.16", features = ["client"]}

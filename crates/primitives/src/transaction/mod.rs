@@ -899,6 +899,16 @@ impl Encodable for TransactionSignedEcRecovered {
     }
 }
 
+impl Decodable for TransactionSignedEcRecovered {
+    fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        let signed_transaction = TransactionSigned::decode(buf)?;
+        let signer = signed_transaction
+            .recover_signer()
+            .ok_or(DecodeError::Custom("Unable to recover decoded transaction signer."))?;
+        Ok(TransactionSignedEcRecovered { signer, signed_transaction })
+    }
+}
+
 /// The inverse of [`FromRecoveredTransaction`] that ensure the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
@@ -919,7 +929,8 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
 mod tests {
     use crate::{
         transaction::{signature::Signature, TransactionKind, TxEip1559, TxEip2930, TxLegacy},
-        AccessList, Address, Bytes, Transaction, TransactionSigned, H256, U256,
+        AccessList, Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        H256, U256,
     };
     use bytes::BytesMut;
     use ethers_core::utils::hex;
@@ -1243,5 +1254,19 @@ mod tests {
 
         let encoded = decoded.envelope_encoded();
         assert_eq!(encoded, input);
+    }
+
+    #[test]
+    fn test_decode_signed_ec_recovered_transaction() {
+        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
+        let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
+        let tx = TransactionSigned::decode(&mut &input[..]).unwrap();
+        let recovered = tx.into_ecrecovered().unwrap();
+
+        let mut encoded = BytesMut::new();
+        recovered.encode(&mut encoded);
+
+        let decoded = TransactionSignedEcRecovered::decode(&mut &encoded[..]).unwrap();
+        assert_eq!(recovered, decoded)
     }
 }

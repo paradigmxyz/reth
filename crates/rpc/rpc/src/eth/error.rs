@@ -1,10 +1,11 @@
 //! Error variants for the `eth_` namespace.
 
-use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
-
 use crate::result::{internal_rpc_err, rpc_err};
+use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
+use reth_primitives::{constants::SELECTOR_LEN, U128, U256};
 use reth_rpc_types::BlockError;
 use reth_transaction_pool::error::PoolError;
+use revm::primitives::{EVMError, Halt};
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
@@ -48,6 +49,19 @@ pub(crate) enum EthApiError {
     UnknownBlockNumber,
     #[error("Invalid block range")]
     InvalidBlockRange,
+    /// An internal error where prevrandao is not set in the evm's environment
+    #[error("Prevrandao not in th EVM's environment after merge")]
+    PrevrandaoNotSet,
+    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} and maxFeePerGas {max_fee_per_gas} set")]
+    ConflictingRequestGasPrice { gas_price: U128, max_fee_per_gas: U128 },
+    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} maxFeePerGas {max_fee_per_gas} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
+    ConflictingRequestGasPriceAndTipSet {
+        gas_price: U128,
+        max_fee_per_gas: U128,
+        max_priority_fee_per_gas: U128,
+    },
+    #[error("Conflicting fee values in request. Legacy gasPrice {gas_price} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
+    RequestLegacyGasPriceAndTipSet { gas_price: U128, max_priority_fee_per_gas: U128 },
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
     /// Thrown when constructing an RPC block from a primitive block data failed.
@@ -65,16 +79,42 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::UnknownBlockNumber |
-            EthApiError::InvalidBlockRange => rpc_err(INVALID_PARAMS_CODE, value.to_string(), None),
+            EthApiError::InvalidBlockRange |
+            EthApiError::ConflictingRequestGasPrice { .. } |
+            EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
+            EthApiError::RequestLegacyGasPriceAndTipSet { .. } => {
+                rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
+            }
             EthApiError::InvalidTransaction(err) => err.into(),
             err => internal_rpc_err(err.to_string()),
         }
     }
 }
 
-/// An error due to invalid transaction
+impl<T> From<EVMError<T>> for EthApiError
+where
+    T: Into<EthApiError>,
+{
+    fn from(err: EVMError<T>) -> Self {
+        match err {
+            EVMError::Transaction(err) => InvalidTransactionError::from(err).into(),
+            EVMError::PrevrandaoNotSet => EthApiError::PrevrandaoNotSet,
+            EVMError::Database(err) => err.into(),
+        }
+    }
+}
+
+/// An error due to invalid transaction.
 ///
-/// These error variants can be thrown when the transaction is checked prior to execution
+/// This adds compatibility with geth.
+///
+/// These error variants can be thrown when the transaction is checked prior to execution.
+///
+/// ## Nomenclature
+///
+/// This type is explicitly modeled after geth's error variants and uses
+///   `fee cap` for `max_fee_per_gas`
+///   `tip` for `max_priority_fee_per_gas`
 #[derive(thiserror::Error, Debug)]
 pub enum InvalidTransactionError {
     /// returned if the nonce of a transaction is lower than the one present in the local chain.
@@ -126,6 +166,15 @@ pub enum InvalidTransactionError {
     /// Thrown if the sender of a transaction is a contract.
     #[error("sender not an eoa")]
     SenderNoEOA,
+    /// Thrown during estimate if caller has insufficient funds to cover the tx.
+    #[error("Out of gas: gas required exceeds allowance: {0:?}")]
+    OutOfGas(U256),
+    /// Thrown if executing a transaction failed during estimate/call
+    #[error("{0}")]
+    Revert(RevertError),
+    /// Unspecific evm halt error
+    #[error("EVM error {0:?}")]
+    EvmHalt(Halt),
 }
 
 impl InvalidTransactionError {
@@ -135,6 +184,7 @@ impl InvalidTransactionError {
             InvalidTransactionError::GasTooLow | InvalidTransactionError::GasTooHigh => {
                 EthRpcErrorCode::InvalidInput.code()
             }
+            InvalidTransactionError::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
     }
@@ -142,9 +192,90 @@ impl InvalidTransactionError {
 
 impl From<InvalidTransactionError> for RpcError {
     fn from(err: InvalidTransactionError) -> Self {
-        rpc_err(err.error_code(), err.to_string(), None)
+        match err {
+            InvalidTransactionError::Revert(revert) => {
+                // include out data if some
+                rpc_err(
+                    revert.error_code(),
+                    revert.to_string(),
+                    revert.output.as_ref().map(|out| out.as_ref()),
+                )
+            }
+            err => rpc_err(err.error_code(), err.to_string(), None),
+        }
     }
 }
+
+impl From<revm::primitives::InvalidTransaction> for InvalidTransactionError {
+    fn from(err: revm::primitives::InvalidTransaction) -> Self {
+        use revm::primitives::InvalidTransaction;
+        match err {
+            InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
+                InvalidTransactionError::TipAboveFeeCap
+            }
+            InvalidTransaction::GasPriceLessThanBasefee => InvalidTransactionError::FeeCapTooLow,
+            InvalidTransaction::CallerGasLimitMoreThanBlock => InvalidTransactionError::GasTooHigh,
+            InvalidTransaction::CallGasCostMoreThanGasLimit => InvalidTransactionError::GasTooHigh,
+            InvalidTransaction::RejectCallerWithCode => InvalidTransactionError::SenderNoEOA,
+            InvalidTransaction::LackOfFundForGasLimit { .. } => {
+                InvalidTransactionError::InsufficientFunds
+            }
+            InvalidTransaction::OverflowPaymentInTransaction => {
+                InvalidTransactionError::GasUintOverflow
+            }
+            InvalidTransaction::NonceOverflowInTransaction => {
+                InvalidTransactionError::NonceMaxValue
+            }
+            InvalidTransaction::CreateInitcodeSizeLimit => {
+                InvalidTransactionError::MaxInitCodeSizeExceeded
+            }
+            InvalidTransaction::NonceTooHigh { .. } => InvalidTransactionError::NonceTooHigh,
+            InvalidTransaction::NonceTooLow { .. } => InvalidTransactionError::NonceTooLow,
+        }
+    }
+}
+
+/// Represents a reverted transaction and its output data.
+///
+/// Displays "execution reverted(: reason)?" if the reason is a string.
+#[derive(Debug, Clone)]
+pub struct RevertError {
+    /// The transaction output data
+    ///
+    /// Note: this is `None` if output was empty
+    output: Option<bytes::Bytes>,
+}
+
+// === impl RevertError ==
+
+impl RevertError {
+    /// Wraps the output bytes
+    ///
+    /// Note: this is intended to wrap an revm output
+    pub fn new(output: bytes::Bytes) -> Self {
+        if output.is_empty() {
+            Self { output: None }
+        } else {
+            Self { output: Some(output) }
+        }
+    }
+
+    fn error_code(&self) -> i32 {
+        EthRpcErrorCode::ExecutionError.code()
+    }
+}
+
+impl std::fmt::Display for RevertError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("execution reverted")?;
+        if let Some(reason) = self.output.as_ref().and_then(decode_revert_reason) {
+            write!(f, ": {reason}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for RevertError {}
 
 /// A helper error type that mirrors `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
@@ -185,4 +316,16 @@ impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
         EthApiError::PoolError(GethTxPoolError::from(err))
     }
+}
+
+/// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.
+///
+/// **Note:** it's assumed the `out` buffer starts with the call's signature
+pub(crate) fn decode_revert_reason(out: impl AsRef<[u8]>) -> Option<String> {
+    use ethers_core::abi::AbiDecode;
+    let out = out.as_ref();
+    if out.len() < SELECTOR_LEN {
+        return None
+    }
+    String::decode(&out[SELECTOR_LEN..]).ok()
 }

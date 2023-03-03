@@ -15,7 +15,7 @@ use reth_primitives::{
 };
 use reth_provider::Transaction;
 use reth_rlp::Decodable;
-use reth_stages::{stages::ExecutionStage, ExecInput, Stage, StageId};
+use reth_stages::{stages::ExecutionStage, DefaultDB, ExecInput, Stage, StageId};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -193,7 +193,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         // Initialize the execution stage
         // Hardcode the chain_id to Ethereum 1.
-        let mut stage = ExecutionStage::new(chain_spec, 1000);
+        let mut stage = ExecutionStage::<DefaultDB<'_>>::from(chain_spec);
 
         // Call execution stage
         let input = ExecInput {

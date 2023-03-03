@@ -4,13 +4,14 @@ use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
     constants, IpcServerBuilder, RethRpcModule, RpcModuleSelection, RpcServerConfig,
     RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApiHandle;
+use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -103,16 +104,24 @@ impl RpcServerArgs {
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub(crate) async fn start_rpc_server<Client, Pool, Network>(
+    pub(crate) async fn start_rpc_server<Client, Pool, Network, Tasks>(
         &self,
         client: Client,
         pool: Pool,
         network: Network,
+        executor: Tasks,
     ) -> Result<RpcServerHandle, RpcError>
     where
-        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Client: BlockProvider
+            + HeaderProvider
+            + StateProviderFactory
+            + EvmEnvProvider
+            + Clone
+            + Unpin
+            + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
+        Tasks: TaskSpawner + Clone + 'static,
     {
         reth_rpc_builder::launch(
             client,
@@ -120,29 +129,47 @@ impl RpcServerArgs {
             network,
             self.transport_rpc_module_config(),
             self.rpc_server_config(),
+            executor,
         )
         .await
     }
 
     /// Create Engine API server.
-    pub(crate) async fn start_auth_server<Client, Pool, Network>(
+    pub(crate) async fn start_auth_server<Client, Pool, Network, Tasks>(
         &self,
         client: Client,
         pool: Pool,
         network: Network,
+        executor: Tasks,
         handle: EngineApiHandle,
     ) -> Result<ServerHandle, RpcError>
     where
-        Client: BlockProvider + HeaderProvider + StateProviderFactory + Clone + 'static,
+        Client: BlockProvider
+            + HeaderProvider
+            + StateProviderFactory
+            + EvmEnvProvider
+            + Clone
+            + Unpin
+            + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
+        Tasks: TaskSpawner + Clone + 'static,
     {
         let socket_address = SocketAddr::new(
             self.auth_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
             self.auth_port.unwrap_or(constants::DEFAULT_AUTH_PORT),
         );
         let secret = self.jwt_secret().map_err(|err| RpcError::Custom(err.to_string()))?;
-        reth_rpc_builder::auth::launch(client, pool, network, handle, socket_address, secret).await
+        reth_rpc_builder::auth::launch(
+            client,
+            pool,
+            network,
+            executor,
+            handle,
+            socket_address,
+            secret,
+        )
+        .await
     }
 
     /// Creates the [TransportRpcModuleConfig] from cli args.
@@ -173,7 +200,7 @@ impl RpcServerArgs {
             config = config
                 .with_http_address(socket_address)
                 .with_http(ServerBuilder::new())
-                .with_cors(self.http_corsdomain.clone().unwrap_or("".to_string()));
+                .with_cors(self.http_corsdomain.clone().unwrap_or_default());
         }
 
         if self.ws {
