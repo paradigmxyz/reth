@@ -86,13 +86,12 @@ pub use crate::{
         BestTransactions, OnNewBlockEvent, PoolTransaction, PropagateKind, PropagatedTransactions,
         TransactionOrigin, TransactionPool,
     },
-    validate::{TransactionValidationOutcome, TransactionValidator},
+    validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
 };
 use crate::{
     error::PoolResult,
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
-    validate::ValidPoolTransaction,
 };
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
