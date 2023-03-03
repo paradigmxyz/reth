@@ -24,7 +24,6 @@ mod hardfork;
 mod header;
 mod hex_bytes;
 mod integer_list;
-mod jsonu256;
 mod log;
 mod net;
 mod peer;
@@ -53,11 +52,11 @@ pub use hardfork::Hardfork;
 pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
-pub use jsonu256::JsonU256;
 pub use log::Log;
 pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
+pub use serde_helper::JsonU256;
 pub use storage::{StorageEntry, StorageTrieEntry};
 pub use transaction::{
     AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction, Signature,
@@ -109,9 +108,7 @@ pub mod utils {
 }
 
 /// Helpers for working with serde
-pub mod serde_helper {
-    pub use crate::jsonu256::deserialize_json_u256;
-}
+pub mod serde_helper;
 
 /// Returns the keccak256 hash for the given data.
 #[inline]
