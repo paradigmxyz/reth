@@ -64,10 +64,8 @@ pub trait TransactionValidator: Send + Sync {
         transaction: Self::Transaction,
         max_init_code_size: usize,
     ) -> Result<(), PoolError> {
-        // TODO check whether we are in the Shanghai stage.
-        // if !self.shanghai {
-        //     return Ok(())
-        // }
+        
+        
 
         if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
         {
@@ -84,7 +82,7 @@ pub trait TransactionValidator: Send + Sync {
 
 pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
     /// Chain id
-    chain_id: u64,
+    chain_id: Option<u64>,
     /// This type fetches account info from the db
     client: Client,
     /// Fork indicator whether we are in the Shanghai stage.
@@ -94,7 +92,9 @@ pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
     /// Fork indicator whether we are using EIP-1559 type transactions.
     eip1559: bool,
     /// The current max gas limit
-    currentMaxGasLimit: u64,
+    current_max_gas_limit: u64,
+    /// gasprice
+    gas_price: U256,
 }
 
 #[async_trait::async_trait]
@@ -132,7 +132,31 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
             _ => panic!("Invalid transaction type"),
         };
 
-        // self.ensure_max_init_code_size(transaction.clone(), 4 * 32 * 1024)?;
+       
+        if self.shanghai {
+            match self.ensure_max_init_code_size(transaction.clone(), 2 * 24576) {
+                Ok(_) => {}
+                Err(e) => {
+                    return Ok(TransactionValidationOutcome::Invalid(
+                        transaction,
+                        e,
+                    ))
+                }
+            }
+        }
+
+        // Drop non-local transactions under our own minimal accepted gas price or tip
+        // if !origin.is_local() && transaction.gas_price() < self.gas_price {
+        //     return Ok(TransactionValidationOutcome::Invalid(
+        //         transaction,
+        //         PoolError::InsufficientGasPrice {
+        //             minimal: self.gas_price,
+        //             got: transaction.gas_price(),
+        //         },
+        //     ))
+        // }
+
+        // }
 
         // transaction size
         if transaction.size() > 4 * 32 * 1024 {
@@ -147,17 +171,8 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         }
 
         // Checks for chainid
-
-        // Checks for gaslimit
-        if transaction.gas_limit() > self.currentMaxGasLimit {
-            return Ok(TransactionValidationOutcome::Invalid(
-                transaction,
-                PoolError::TxExceedsGasLimit(
-                    *invalid_transaction.hash(),
-                    invalid_transaction.gas_limit(),
-                    self.currentMaxGasLimit,
-                ),
-            ))
+        if transaction.chain_id() != self.chain_id {
+            return Err(Error::TransactionChainId)
         }
 
         // Checks for sender
