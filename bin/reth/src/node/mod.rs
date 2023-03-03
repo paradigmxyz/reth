@@ -505,6 +505,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_help_node_command() {
+        let err = Command::try_parse_from(["reth", "--help"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+    }
+
+    #[test]
     fn parse_common_node_command_chain_args() {
         for chain in ["mainnet", "sepolia", "goerli"] {
             let args: Command = Command::parse_from(["reth", "--chain", chain]);
