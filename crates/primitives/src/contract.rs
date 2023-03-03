@@ -1,6 +1,6 @@
 //! Helpers for deriving contract addresses
 
-use crate::{keccak256, Address, U256};
+use crate::{keccak256, Address, U256, H256};
 use reth_rlp::Encodable;
 use reth_rlp_derive::RlpEncodable;
 
@@ -25,9 +25,11 @@ pub fn get_contract_address(sender: impl Into<Address>, nonce: impl Into<U256>) 
 /// [EIP1014](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1014.md)
 ///
 /// keccak256( 0xff ++ senderAddress ++ salt ++ keccak256(init_code))[12..]
+///
+/// where `salt` is always 32 bytes (a stack item).
 pub fn get_create2_address(
     from: impl Into<Address>,
-    salt: impl AsRef<[u8]>,
+    salt: [u8; 32],
     init_code: impl AsRef<[u8]>,
 ) -> Address {
     let init_code_hash = keccak256(init_code);
@@ -41,20 +43,22 @@ pub fn get_create2_address(
 /// keccak256( 0xff ++ senderAddress ++ salt ++ keccak256(init_code))[12..]
 pub fn get_create2_address_from_hash(
     from: impl Into<Address>,
-    salt: impl AsRef<[u8]>,
-    init_code_hash: impl AsRef<[u8]>,
+    salt: [u8; 32],
+    init_code_hash: impl Into<H256>,
 ) -> Address {
     let from = from.into();
-    let salt = salt.as_ref();
-    let init_code_hash = init_code_hash.as_ref();
+    let init_code_hash = init_code_hash.into();
+    // always 85 bytes: 0xff+20+salt+code_hash
+    let mut preimage = [0xff; 85];
 
-    let mut bytes = Vec::with_capacity(1 + 20 + salt.len() + init_code_hash.len());
-    bytes.push(0xff);
-    bytes.extend_from_slice(from.as_bytes());
-    bytes.extend_from_slice(salt);
-    bytes.extend_from_slice(init_code_hash);
+    // 20bytes address
+    preimage[1..21].copy_from_slice(from.as_bytes());
+    // 32bytes salt
+    preimage[21..53].copy_from_slice(&salt[..]);
+    // 32bytes code hash
+    preimage[53..].copy_from_slice(init_code_hash.as_ref());
 
-    let hash = keccak256(bytes);
+    let hash = keccak256(&preimage[..]);
     let addr: [u8; 20] = (&hash[12..]).try_into().expect("correct len");
     Address::from(addr)
 }
@@ -133,11 +137,11 @@ mod tests {
             let salt = hex::decode(salt).unwrap();
             let init_code = hex::decode(init_code).unwrap();
             let expected = expected.parse::<Address>().unwrap();
-            assert_eq!(expected, get_create2_address(from, salt.clone(), init_code.clone()));
+            assert_eq!(expected, get_create2_address(from, salt.clone().try_into().unwrap(), init_code.clone()));
 
             // get_create2_address_from_hash()
-            let init_code_hash = keccak256(init_code).to_vec();
-            assert_eq!(expected, get_create2_address_from_hash(from, salt, init_code_hash))
+            let init_code_hash = keccak256(init_code);
+            assert_eq!(expected, get_create2_address_from_hash(from, salt.try_into().unwrap(), init_code_hash))
         }
     }
 }
