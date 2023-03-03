@@ -1,6 +1,6 @@
 //! Helpers for deriving contract addresses
 
-use crate::{keccak256, Address, U256, H256};
+use crate::{keccak256, Address, H256, U256};
 use reth_rlp::Encodable;
 use reth_rlp_derive::RlpEncodable;
 
