@@ -8,7 +8,8 @@ use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
 use std::{collections::BTreeMap, ops::Deref};
 
-/// Block Transactions depending on the boolean attribute of `eth_getBlockBy*`
+/// Block Transactions depending on the boolean attribute of `eth_getBlockBy*`,
+/// or if used by `eth_getUncle*`
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum BlockTransactions {
@@ -16,8 +17,16 @@ pub enum BlockTransactions {
     Hashes(Vec<H256>),
     /// Full transactions
     Full(Vec<Transaction>),
+    /// Special case for uncle response.
+    NoTx,
 }
-
+impl BlockTransactions {
+    /// Check if the enum variant is
+    /// used for an uncle response.
+    pub fn is_uncle(&self) -> bool {
+        matches!(self, Self::NoTx)
+    }
+}
 /// Determines how the `transactions` field of [Block] should be filled.
 ///
 /// This essentially represents the `full:bool` argument in RPC calls that determine whether the
@@ -56,17 +65,20 @@ pub struct Block {
     #[serde(flatten)]
     pub header: Header,
     /// Total difficulty
-    pub total_difficulty: U256,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_difficulty: Option<U256>,
     /// Uncles' hashes
     pub uncles: Vec<H256>,
     /// Transactions
-    pub transactions: BlockTransactions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transactions: Option<BlockTransactions>,
     /// Integer the size of this block in bytes.
     pub size: Option<U256>,
     /// Base Fee for post-EIP1559 blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
     /// Withdrawals
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
@@ -158,11 +170,29 @@ impl Block {
         Self {
             header,
             uncles,
-            transactions,
+            transactions: Some(transactions),
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
-            total_difficulty,
+            total_difficulty: Some(total_difficulty),
             size: Some(U256::from(block_length)),
             withdrawals: block.withdrawals,
+        }
+    }
+
+    /// Build an RPC block response representing
+    /// an Uncle from its header.
+    pub fn uncle_block_from_header(header: PrimitiveHeader) -> Self {
+        let hash = header.hash_slow();
+        let rpc_header = Header::from_primitive_with_hash(header.clone(), hash);
+        let uncle_block = PrimitiveBlock { header, ..Default::default() };
+        let size = Some(U256::from(uncle_block.length()));
+        Self {
+            uncles: vec![],
+            header: rpc_header,
+            transactions: None,
+            base_fee_per_gas: None,
+            withdrawals: None,
+            size,
+            total_difficulty: None,
         }
     }
 }
@@ -319,30 +349,6 @@ impl<T: Serialize> Serialize for Rich<T> {
     }
 }
 
-/// An uncle block RPC response representation.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OmmerBlock {
-    /// Header of the block
-    #[serde(flatten)]
-    pub header: Header,
-    /// Uncles' hashes
-    pub uncles: Vec<H256>,
-    /// Integer the size of this block in bytes.
-    pub size: Option<U256>,
-}
-impl From<PrimitiveHeader> for OmmerBlock {
-    /// Create an uncle block RPC response from a header.
-    fn from(header: PrimitiveHeader) -> Self {
-        let hash = header.hash_slow();
-        let rpc_header = Header::from_primitive_with_hash(header.clone(), hash);
-        // This block declaration is to be able
-        // to properly calculate the rlp size.
-        let uncle_block = PrimitiveBlock { header, ..Default::default() };
-        let size = Some(U256::from(uncle_block.length()));
-        Self { header: rpc_header, size, uncles: vec![] }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;

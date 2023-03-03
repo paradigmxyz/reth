@@ -14,8 +14,8 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    CallRequest, EIP1186AccountProofResponse, FeeHistory, FeeHistoryCacheItem, Index, OmmerBlock,
-    RichBlock, SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    CallRequest, EIP1186AccountProofResponse, FeeHistory, FeeHistoryCacheItem, Index, RichBlock,
+    SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -103,7 +103,7 @@ where
         &self,
         hash: H256,
         index: Index,
-    ) -> Result<Option<OmmerBlock>> {
+    ) -> Result<Option<RichBlock>> {
         Ok(EthApi::ommer_by_block_and_index(self, hash, index).await?)
     }
 
@@ -112,7 +112,7 @@ where
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> Result<Option<OmmerBlock>> {
+    ) -> Result<Option<RichBlock>> {
         Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
