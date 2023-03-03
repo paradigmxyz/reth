@@ -15,6 +15,7 @@ mod block;
 pub mod bloom;
 mod chain;
 pub mod constants;
+pub mod contract;
 mod error;
 pub mod filter;
 mod forkid;
