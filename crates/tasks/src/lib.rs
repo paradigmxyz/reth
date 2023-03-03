@@ -70,6 +70,9 @@ pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     /// Spawns the task onto the runtime.
     /// See also [`Handle::spawn`].
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+
+    /// This spawns a critical task onto the runtime.
+    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
 }
 
 dyn_clone::clone_trait_object!(TaskSpawner);
@@ -81,6 +84,10 @@ pub struct TokioTaskExecutor;
 
 impl TaskSpawner for TokioTaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        tokio::task::spawn(fut)
+    }
+
+    fn spawn_critical(&self, _name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         tokio::task::spawn(fut)
     }
 }
@@ -330,6 +337,10 @@ impl TaskExecutor {
 impl TaskSpawner for TaskExecutor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.spawn(fut)
+    }
+
+    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        TaskExecutor::spawn_critical(self, name, fut)
     }
 }
 
