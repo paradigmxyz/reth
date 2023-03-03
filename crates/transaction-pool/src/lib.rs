@@ -94,7 +94,7 @@ use crate::{
     traits::{NewTransactionEvent, PoolSize},
     validate::ValidPoolTransaction,
 };
-use reth_interfaces::consensus::Error;
+
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;

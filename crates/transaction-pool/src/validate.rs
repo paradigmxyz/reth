@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
 };
 use reth_interfaces::consensus::Error;
-use reth_primitives::{Address, Transaction, TransactionKind, TxHash, TxType, U256};
+use reth_primitives::{Address, TransactionKind, TxHash, U256};
 use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
 
@@ -64,9 +64,6 @@ pub trait TransactionValidator: Send + Sync {
         transaction: Self::Transaction,
         max_init_code_size: usize,
     ) -> Result<(), PoolError> {
-        
-        
-
         if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
         {
             Err(PoolError::TxExceedsMaxInitCodeSize(
@@ -94,7 +91,7 @@ pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
     /// The current max gas limit
     current_max_gas_limit: u64,
     /// gasprice
-    gas_price: U256,
+    gas_price: Option<u128>,
 }
 
 #[async_trait::async_trait]
@@ -129,34 +126,37 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
                 }
             }
 
-            _ => panic!("Invalid transaction type"),
+            _ => return Err(Error::TxTypeNotSupported),
         };
 
-       
         if self.shanghai {
             match self.ensure_max_init_code_size(transaction.clone(), 2 * 24576) {
                 Ok(_) => {}
-                Err(e) => {
-                    return Ok(TransactionValidationOutcome::Invalid(
-                        transaction,
-                        e,
-                    ))
-                }
+                Err(e) => return Ok(TransactionValidationOutcome::Invalid(transaction, e)),
             }
         }
 
         // Drop non-local transactions under our own minimal accepted gas price or tip
-        // if !origin.is_local() && transaction.gas_price() < self.gas_price {
-        //     return Ok(TransactionValidationOutcome::Invalid(
-        //         transaction,
-        //         PoolError::InsufficientGasPrice {
-        //             minimal: self.gas_price,
-        //             got: transaction.gas_price(),
-        //         },
-        //     ))
-        // }
+        if !origin.is_local() && transaction.max_fee_per_gas() < self.gas_price {
+            return Err(Error::TransactionMaxFeeLessThenBaseFee)
+        }
 
-        // }
+        // Ensure gasFeeCap is greater than or equal to gasTipCap.
+        if transaction.max_fee_per_gas() >= transaction.max_priority_fee_per_gas() {
+            return Err(Error::TransactionMaxFeeLessThenBaseFee)
+        }
+
+        // Checks for gas limit
+        if transaction.gas_limit() > self.current_max_gas_limit {
+            return Ok(TransactionValidationOutcome::Invalid(
+                transaction,
+                PoolError::TxExceedsGasLimit(
+                    *invalid_transaction.hash(),
+                    invalid_transaction.gas_limit(),
+                    self.current_max_gas_limit,
+                ),
+            ))
+        }
 
         // transaction size
         if transaction.size() > 4 * 32 * 1024 {

@@ -130,12 +130,12 @@ pub enum Error {
     WithdrawalIndexInvalid { got: u64, expected: u64 },
     #[error("Missing withdrawals")]
     BodyWithdrawalsMissing,
+    #[error("transaction type not supported")]
+    TxTypeNotSupported,
 }
 
 impl From<crate::error::Error> for Error {
-    fn from(error: crate::error::Error) -> Self {
-        match error {
-            _ => Error::TransactionSignerRecoveryError,
-        }
+    fn from(_: crate::error::Error) -> Self {
+        Error::TransactionSignerRecoveryError
     }
 }
