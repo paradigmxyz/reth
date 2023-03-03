@@ -36,6 +36,9 @@ use tracing::trace;
 /// Cache limit of transactions to keep track of for a single peer.
 const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 
+/// Soft limit for NewPooledTransactions
+const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMT: usize = 4096;
+
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
@@ -352,7 +355,23 @@ where
                 // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
                 // pool
                 if !self.network.is_syncing() {
-                    todo!("get access to full tx");
+                    let mut hashes = PooledTransactionsHashesBuilder::new(version);
+                    let to_propogate = self.pool.pooled_transactions().into_iter().map(|tx| {
+                        let tx = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
+                        PropagateTransaction::new(tx)
+                    });
+
+                    for tx in to_propogate.take(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMT) {
+                        let peer = self.peers.get_mut(&peer_id).unwrap();
+
+                        if peer.transactions.insert(tx.hash()) {
+                            hashes.push(&tx);
+                        }
+                    }
+
+                    let hashes = hashes.build();
+
+                    self.network.send_transactions_hashes(peer_id, hashes);
                     // let msg = NewPooledTransactionHashes66(self.pool.pooled_transactions());
                     // self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
                     //     peer_id,
@@ -547,19 +566,12 @@ enum PooledTransactionsHashesBuilder {
 
 impl PooledTransactionsHashesBuilder {
     fn push(&mut self, tx: &PropagateTransaction) {
-        let soft_limit = 4096;
         match self {
-            PooledTransactionsHashesBuilder::Eth66(msg) => {
-                if msg.0.len() <= soft_limit {
-                    msg.0.push(tx.hash());
-                }
-            },
+            PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(tx.hash()),
             PooledTransactionsHashesBuilder::Eth68(msg) => {
-                if msg.hashes.len() <= soft_limit {
-                    msg.hashes.push(tx.hash());
-                    msg.sizes.push(tx.length);
-                    msg.types.push(tx.tx_type);
-                }
+                msg.hashes.push(tx.hash());
+                msg.sizes.push(tx.length);
+                msg.types.push(tx.tx_type);
             }
         }
     }
