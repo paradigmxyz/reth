@@ -106,6 +106,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.hash()
     }
 
+    /// Returns the type identifier of the transaction
+    pub fn tx_type(&self) -> u8 {
+        self.transaction.tx_type()
+    }
+
     /// Returns the address of the sender
     pub fn sender(&self) -> Address {
         self.transaction.sender()
