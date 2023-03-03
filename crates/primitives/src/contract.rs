@@ -1,25 +1,8 @@
 //! Helpers for deriving contract addresses
 
-use crate::{keccak256, Address, H256, U256};
-use reth_rlp::Encodable;
-use reth_rlp_derive::RlpEncodable;
-
-/// The address for an Ethereum contract is deterministically computed from the
-/// address of its creator (sender) and how many transactions the creator has
-/// sent (nonce). The sender and nonce are RLP encoded and then hashed with Keccak-256.
-pub fn get_contract_address(sender: impl Into<Address>, nonce: impl Into<U256>) -> Address {
-    #[derive(RlpEncodable)]
-    struct S {
-        sender: Address,
-        nonce: U256,
-    }
-    let sender = S { sender: sender.into(), nonce: nonce.into() };
-    let mut buf = Vec::new();
-    sender.encode(&mut buf);
-    let hash = keccak256(buf);
-    let addr: [u8; 20] = hash[12..].try_into().expect("correct len");
-    Address::from(addr)
-}
+// re-export from revm
+use crate::{keccak256, Address, U256};
+pub use revm_primitives::utilities::{create2_address, create_address};
 
 /// Returns the CREATE2 address of a smart contract as specified in
 /// [EIP1014](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1014.md)
@@ -27,40 +10,13 @@ pub fn get_contract_address(sender: impl Into<Address>, nonce: impl Into<U256>) 
 /// keccak256( 0xff ++ senderAddress ++ salt ++ keccak256(init_code))[12..]
 ///
 /// where `salt` is always 32 bytes (a stack item).
-pub fn get_create2_address(
-    from: impl Into<Address>,
-    salt: [u8; 32],
+pub fn create2_address_from_code(
+    from: Address,
     init_code: impl AsRef<[u8]>,
+    salt: U256,
 ) -> Address {
     let init_code_hash = keccak256(init_code);
-    get_create2_address_from_hash(from, salt, init_code_hash)
-}
-
-/// Returns the CREATE2 address of a smart contract as specified in
-/// [EIP1014](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1014.md),
-/// taking the pre-computed hash of the init code as input.
-///
-/// keccak256( 0xff ++ senderAddress ++ salt ++ keccak256(init_code))[12..]
-pub fn get_create2_address_from_hash(
-    from: impl Into<Address>,
-    salt: [u8; 32],
-    init_code_hash: impl Into<H256>,
-) -> Address {
-    let from = from.into();
-    let init_code_hash = init_code_hash.into();
-    // always 85 bytes: 0xff+20+salt+code_hash
-    let mut preimage = [0xff; 85];
-
-    // 20bytes address
-    preimage[1..21].copy_from_slice(from.as_bytes());
-    // 32bytes salt
-    preimage[21..53].copy_from_slice(&salt[..]);
-    // 32bytes code hash
-    preimage[53..].copy_from_slice(init_code_hash.as_ref());
-
-    let hash = keccak256(&preimage[..]);
-    let addr: [u8; 20] = hash[12..].try_into().expect("correct len");
-    Address::from(addr)
+    create2_address(from, init_code_hash, salt)
 }
 
 #[cfg(test)]
@@ -80,14 +36,14 @@ mod tests {
         .iter()
         .enumerate()
         {
-            let address = get_contract_address(from, U256::from(nonce));
+            let address = create_address(from, nonce as u64);
             assert_eq!(address, expected.parse::<Address>().unwrap());
         }
     }
 
     #[test]
     // Test vectors from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1014.md#examples
-    fn create2_address() {
+    fn test_create2_address() {
         for (from, salt, init_code, expected) in &[
             (
                 "0000000000000000000000000000000000000000",
@@ -132,16 +88,17 @@ mod tests {
                 "E33C0C7F7df4809055C3ebA6c09CFe4BaF1BD9e0",
             ),
         ] {
-            // get_create2_address()
+            // create2_address()
             let from = from.parse::<Address>().unwrap();
             let salt = hex::decode(salt).unwrap();
+            let salt = U256::try_from_be_slice(&salt).unwrap();
             let init_code = hex::decode(init_code).unwrap();
             let expected = expected.parse::<Address>().unwrap();
-            assert_eq!(expected, get_create2_address(from, salt.clone().try_into().unwrap(), init_code.clone()));
+            assert_eq!(expected, create2_address_from_code(from, init_code.clone(),salt ));
 
             // get_create2_address_from_hash()
             let init_code_hash = keccak256(init_code);
-            assert_eq!(expected, get_create2_address_from_hash(from, salt.try_into().unwrap(), init_code_hash))
+            assert_eq!(expected, create2_address(from, init_code_hash,  salt))
         }
     }
 }
