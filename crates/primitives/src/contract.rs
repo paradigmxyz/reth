@@ -17,7 +17,7 @@ pub fn get_contract_address(sender: impl Into<Address>, nonce: impl Into<U256>) 
     let mut buf = Vec::new();
     sender.encode(&mut buf);
     let hash = keccak256(buf);
-    let addr: [u8; 20] = (&hash[12..]).try_into().expect("correct len");
+    let addr: [u8; 20] = hash[12..].try_into().expect("correct len");
     Address::from(addr)
 }
 
@@ -59,7 +59,7 @@ pub fn get_create2_address_from_hash(
     preimage[53..].copy_from_slice(init_code_hash.as_ref());
 
     let hash = keccak256(&preimage[..]);
-    let addr: [u8; 20] = (&hash[12..]).try_into().expect("correct len");
+    let addr: [u8; 20] = hash[12..].try_into().expect("correct len");
     Address::from(addr)
 }
 
