@@ -87,9 +87,9 @@ pub struct BlockBody {
 
 impl BlockBody {
     /// Create a [`Block`](reth_primitives::Block) from the body and its header.
-    pub fn create_block(&self, header: &Header) -> Block {
+    pub fn create_block(&self, header: Header) -> Block {
         Block {
-            header: header.clone(),
+            header,
             body: self.transactions.clone(),
             ommers: self.ommers.clone(),
             withdrawals: self.withdrawals.clone(),
