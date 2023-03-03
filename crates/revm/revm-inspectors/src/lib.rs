@@ -14,3 +14,6 @@ pub mod access_list;
 /// each inspector and allowing to hook on block/transaciton execution,
 /// used in the main RETH executor.
 pub mod stack;
+
+/// An inspector for recording traces
+pub mod tracing;
