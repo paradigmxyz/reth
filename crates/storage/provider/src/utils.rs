@@ -95,7 +95,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     }
 
     let mut has_withdrawals = false;
-    if let Some(withdrawals) = block.withdrawals.clone() {
+    if let Some(withdrawals) = block.withdrawals {
         if !withdrawals.is_empty() {
             has_withdrawals = true;
             tx.put::<tables::BlockWithdrawals>(

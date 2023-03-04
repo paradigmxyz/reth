@@ -474,7 +474,7 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
 
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
-            .get_block_and_execution_range::<true>(revert_until + 1..)
+            .get_block_and_execution_range::<true>(self.chain_spec.as_ref(), revert_until + 1..)
             .map_err(|_| ExecError::VerificationFailed)?;
 
         // update pipeline progress.

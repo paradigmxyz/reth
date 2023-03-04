@@ -156,6 +156,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aquamarine"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "759d98a5db12e9c9d98ef2b92f794ae5c7ded6ec18d21c3fa485c9c65bec237d"
+dependencies = [
+ "itertools 0.10.5",
+ "proc-macro-error",
+ "proc-macro2 1.0.51",
+ "quote 1.0.23",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4644,6 +4657,7 @@ dependencies = [
 name = "reth-executor"
 version = "0.1.0"
 dependencies = [
+ "aquamarine 0.3.0",
  "async-trait",
  "auto_impl",
  "hash-db",
@@ -4788,7 +4802,7 @@ dependencies = [
 name = "reth-network"
 version = "0.1.0"
 dependencies = [
- "aquamarine",
+ "aquamarine 0.2.1",
  "async-trait",
  "auto_impl",
  "enr 0.7.0",
@@ -5122,7 +5136,7 @@ dependencies = [
 name = "reth-stages"
 version = "0.1.0"
 dependencies = [
- "aquamarine",
+ "aquamarine 0.2.1",
  "arbitrary",
  "assert_matches",
  "async-trait",
@@ -5184,7 +5198,7 @@ dependencies = [
 name = "reth-transaction-pool"
 version = "0.1.0"
 dependencies = [
- "aquamarine",
+ "aquamarine 0.2.1",
  "async-trait",
  "auto_impl",
  "bitflags",

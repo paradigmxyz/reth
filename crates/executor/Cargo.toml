@@ -6,6 +6,12 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine"
+]
+
 [dependencies]
 # reth 
 reth-primitives = { path = "../primitives" }
@@ -26,6 +32,9 @@ thiserror = "1.0.37"
 auto_impl = "1.0"
 tracing = "0.1.37"
 tokio = { version = "1.21.2", features = ["sync"] }
+
+# mics
+aquamarine = "0.2.1" #docs
 
 triehash = "0.8"
 # See to replace hashers to simplify libraries
