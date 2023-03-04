@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 /// Execution Result containing vector of transaction changesets
 /// and block reward if present
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct ExecutionResult {
     /// Transaction changeset containing [Receipt], changed [Accounts][Account] and Storages.
     pub tx_changesets: Vec<TransactionChangeSet>,
@@ -20,7 +20,7 @@ pub struct ExecutionResult {
 /// transaction [Receipt] every change to state ([Account], Storage, [Bytecode])
 /// that this transaction made and its old values
 /// so that history account table can be updated.
-#[derive(Debug, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct TransactionChangeSet {
     /// Transaction receipt
     pub receipt: Receipt,
@@ -125,7 +125,7 @@ impl AccountInfoChangeSet {
 }
 
 /// Diff change set that is needed for creating history index and updating current world state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct AccountChangeSet {
     /// Old and New account account change.
     pub account: AccountInfoChangeSet,

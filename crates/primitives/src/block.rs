@@ -43,6 +43,18 @@ impl Compact for Block {
     }
 }
 
+impl Block {
+    /// Create SealedBLock that will create all header hashes.
+    pub fn seal_slow(self) -> SealedBlock {
+        SealedBlock {
+            header: self.header.seal_slow(),
+            body: self.body,
+            ommers: self.ommers.into_iter().map(|o| o.seal_slow()).collect(),
+            withdrawals: self.withdrawals,
+        }
+    }
+}
+
 impl Deref for Block {
     type Target = Header;
     fn deref(&self) -> &Self::Target {
@@ -123,7 +135,7 @@ impl SealedBlockWithSenders {
     }
 
     /// Split Structure to its components
-    pub fn split(self) -> (SealedBlock, Vec<Address>) {
+    pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
         (self.block, self.senders)
     }
 }

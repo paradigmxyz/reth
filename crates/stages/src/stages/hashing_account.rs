@@ -76,7 +76,7 @@ impl AccountHashingStage {
         let transitions = std::cmp::min(opts.transitions, num_transitions);
 
         for block in blocks {
-            insert_canonical_block(&**tx, &block, true).unwrap();
+            insert_canonical_block(&**tx, block, None, true).unwrap();
         }
         let mut accounts = random_eoa_account_range(opts.accounts);
         {

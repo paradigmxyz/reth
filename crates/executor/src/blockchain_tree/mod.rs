@@ -451,7 +451,7 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
         for item in chain.blocks.into_iter().zip(chain.changesets.into_iter()) {
             let ((_, block), changeset) = item;
 
-            tx.insert_block(&block, &self.chain_spec, changeset)
+            tx.insert_block(block, &self.chain_spec, changeset)
                 .map_err(|_| ExecError::VerificationFailed)?;
         }
         // update pipeline progress.

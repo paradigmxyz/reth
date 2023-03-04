@@ -22,7 +22,7 @@ use reth_tracing::tracing::{info, trace};
 use std::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
-    ops::{Deref, DerefMut, RangeBounds},
+    ops::{Bound, Deref, DerefMut, Range, RangeBounds},
 };
 
 use crate::{
@@ -279,7 +279,7 @@ where
     /// Unwind and clear account hashing
     pub fn unwind_account_hashing(
         &self,
-        range: impl RangeBounds<TransitionId>,
+        range: Range<TransitionId>,
     ) -> Result<(), TransactionError> {
         let mut hashed_accounts = self.cursor_write::<tables::HashedAccount>()?;
 
@@ -318,7 +318,7 @@ where
     /// Unwind and clear storage hashing
     pub fn unwind_storage_hashing(
         &self,
-        range: impl RangeBounds<TransitionIdAddress>,
+        range: Range<TransitionIdAddress>,
     ) -> Result<(), TransactionError> {
         let mut hashed_storage = self.cursor_dup_write::<tables::HashedStorage>()?;
 
@@ -364,7 +364,7 @@ where
     /// Unwind and clear account history indices
     pub fn unwind_account_history_indices(
         &self,
-        range: impl RangeBounds<TransitionId>,
+        range: Range<TransitionId>,
     ) -> Result<(), TransactionError> {
         let mut cursor = self.cursor_write::<tables::AccountHistory>()?;
 
@@ -403,7 +403,7 @@ where
     /// Unwind and clear storage history indices
     pub fn unwind_storage_history_indices(
         &self,
-        range: impl RangeBounds<TransitionIdAddress>,
+        range: Range<TransitionIdAddress>,
     ) -> Result<(), TransactionError> {
         let mut cursor = self.cursor_write::<tables::StorageHistory>()?;
 
@@ -446,14 +446,19 @@ where
     /// This is atomic operation and transaction will do one commit at the end of the function.
     pub fn insert_block(
         &mut self,
-        block: &SealedBlock,
+        block: SealedBlockWithSenders,
         chain_spec: &ChainSpec,
         changeset: ExecutionResult,
     ) -> Result<(), TransactionError> {
         // Header, Body, SenderRecovery, TD, TxLookup stages
-        let (from, to) = insert_canonical_block(self.deref_mut(), block, false).unwrap();
+        let (block, senders) = block.into_components();
+        let block_number = block.number;
+        let block_state_root = block.state_root;
+        let block_hash = block.hash();
+        let parent_block_number = block.number.saturating_sub(1);
 
-        let parent_block_number = block.number - 1;
+        let (from, to) =
+            insert_canonical_block(self.deref_mut(), block, Some(senders), false).unwrap();
 
         // execution stage
         self.insert_execution_result(vec![changeset], chain_spec, parent_block_number)?;
@@ -477,12 +482,12 @@ where
             let current_root = self.get_header(parent_block_number)?.state_root;
             let loader = DBTrieLoader::default();
             let root = loader.update_root(self, current_root, from..to)?;
-            if root != block.state_root {
+            if root != block_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
-                    expected: block.state_root,
-                    block_number: block.number,
-                    block_hash: block.hash(),
+                    expected: block_state_root,
+                    block_number,
+                    block_hash,
                 })
             }
         }
@@ -541,10 +546,9 @@ where
             block_bodies.first().expect("If we have headers").1.first_tx_index();
         let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_index();
 
-        let transactions =
-            self.get_or_take::<tables::Transactions, TAKE>(first_transaction..last_transaction)?;
+        let transactions = self.get_or_take::<tables::Transactions, TAKE>(..)?; //first_transaction..=last_transaction)?;
         let senders =
-            self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..last_transaction)?;
+            self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         if TAKE {
             // rm TxHashNumber
@@ -590,6 +594,7 @@ where
     /// Return range of blocks and its execution result
     pub fn get_block_range<const TAKE: bool>(
         &self,
+        chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<SealedBlockWithSenders>, TransactionError> {
         // For block we need Headers, Bodies, Uncles, withdrawals, Transactions, Signers
@@ -658,7 +663,8 @@ where
             };
 
             // withdrawal can be missing
-            let shanghai_is_active = true;
+            let shanghai_is_active =
+                chain_spec.fork(Hardfork::Paris).active_at_block(main_block_number);
             let mut withdrawals = Some(Vec::new());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
@@ -888,33 +894,43 @@ where
     /// Return range of blocks and its execution result
     pub fn get_block_and_execution_range<const TAKE: bool>(
         &self,
+        chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
         if TAKE {
-            //TODO handle ranges Inclusive/Exclusive bounds
-            let from_transition = self.get_block_transition(0)?;
-            let to_transition = self.get_block_transition(10)?;
+            let from_transition = match range.start_bound() {
+                Bound::Included(n) => self.get_block_transition(n.saturating_sub(1))?,
+                Bound::Excluded(n) => self.get_block_transition(*n)?,
+                Bound::Unbounded => 0,
+            };
+            let to_transition = match range.end_bound() {
+                Bound::Included(n) => self.get_block_transition(*n)?,
+                Bound::Excluded(n) => self.get_block_transition(n.saturating_sub(1))?,
+                Bound::Unbounded => TransitionId::MAX,
+            };
+
             let transition_range = from_transition..to_transition;
-            let transition_storage_range = TransitionIdAddress((from_transition, Address::zero()))..
-                TransitionIdAddress((to_transition, Address::zero()));
+            let zero = Address::zero();
+            let transition_storage_range =
+                (from_transition, zero).into()..(to_transition, zero).into();
 
             self.unwind_account_hashing(transition_range.clone())?;
-            self.unwind_account_history_indices(transition_range)?;
+            self.unwind_account_history_indices(transition_range.clone())?;
             self.unwind_storage_hashing(transition_storage_range.clone())?;
             self.unwind_storage_history_indices(transition_storage_range)?;
 
             // merkle tree
             {
-                //TODO handle ranges Inclusive/Exclusive bounds
-                let current_root = self.get_header(10)?.state_root;
+                let (tip_number, _) =
+                    self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
+                let current_root = self.get_header(tip_number)?.state_root;
                 let loader = DBTrieLoader::default();
-                let _block_root =
-                    loader.update_root(self, current_root, from_transition..to_transition)?;
+                let _block_root = loader.update_root(self, current_root, transition_range)?;
             }
             // check root
         }
         // get blocks
-        let blocks = self.get_block_range::<TAKE>(range.clone())?;
+        let blocks = self.get_block_range::<TAKE>(chain_spec, range.clone())?;
         // get execution res
         let execution_res = self.get_block_execution_result_range::<TAKE>(range.clone())?;
         // combine them
@@ -1443,4 +1459,71 @@ pub enum TransactionError {
         /// Block hash
         block_hash: BlockHash,
     },
+}
+
+#[cfg(test)]
+mod test {
+    use std::{collections::BTreeMap, ops::DerefMut};
+
+    use crate::{
+        execution_result::{AccountChangeSet, ExecutionResult, TransactionChangeSet},
+        insert_canonical_block, Transaction,
+    };
+    use reth_db::mdbx::test_utils::create_test_rw_db;
+    use reth_primitives::{
+        hex_literal::hex, ChainSpecBuilder, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+        H160, H256, MAINNET, U256,
+    };
+    use reth_rlp::Decodable;
+
+    #[test]
+    fn insert_get() {
+        let db = create_test_rw_db();
+
+        // setup
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(MAINNET.genesis.clone())
+            .shanghai_activated()
+            .build();
+
+        let genesis = SealedBlock {
+            header: Header { number: 0, difficulty: U256::from(1), ..Default::default() }
+                .seal(H256::zero()),
+            body: vec![],
+            ommers: vec![],
+            withdrawals: Some(vec![]),
+        };
+        insert_canonical_block(tx.deref_mut(), genesis, None, false).unwrap();
+
+        let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
+        let mut block = SealedBlock::decode(&mut block_rlp).unwrap();
+        block.withdrawals = Some(vec![]);
+        let mut header = block.header.clone().unseal();
+        header.number = 1;
+        header.state_root =
+            H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
+        block.header = header.seal_slow();
+
+        let mut account_changeset = AccountChangeSet::default();
+        account_changeset.storage.insert(U256::from(5), (U256::from(9), U256::from(10)));
+
+        let exec_res = ExecutionResult {
+            tx_changesets: vec![TransactionChangeSet {
+                receipt: Receipt::default(), /* receipts are not saved. */
+                changeset: BTreeMap::from([(H160([50; 20]), account_changeset)]),
+                new_bytecodes: BTreeMap::from([]),
+            }],
+            block_changesets: BTreeMap::from([]),
+        };
+
+        let block = SealedBlockWithSenders { block, senders: vec![H160([3; 20])] };
+
+        tx.insert_block(block.clone(), &chain_spec, exec_res.clone()).unwrap();
+
+        let out = tx.get_block_and_execution_range::<true>(&chain_spec, 1..2).unwrap();
+
+        assert_eq!(out, vec![(block, exec_res)]);
+    }
 }

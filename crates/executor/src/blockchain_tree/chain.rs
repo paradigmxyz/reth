@@ -99,7 +99,7 @@ impl Chain {
         let mut substate = SubStateData::default();
         let empty = BTreeMap::new();
 
-        let unseal = block.clone().split().0.unseal();
+        let unseal = block.clone().into_components().0.unseal();
         let provider =
             SubStateWithProvider::new(&mut substate, provider, &empty, canonical_block_hashes);
         let mut state_provider = SubState::new(State::new(provider));
@@ -147,7 +147,7 @@ impl Chain {
             canonical_block_hashes,
         );
 
-        let unseal = block.clone().split().0.unseal();
+        let unseal = block.clone().into_components().0.unseal();
         // Create state provider with cached state
         let mut state_provider = SubState::new(State::new(provider));
 
@@ -185,7 +185,7 @@ impl Chain {
             canonical_block_hashes,
         );
 
-        let unseal = block.clone().split().0.unseal();
+        let unseal = block.clone().into_components().0.unseal();
         // Create state provider with cached state
         let mut state_provider = SubState::new(State::new(provider));
 

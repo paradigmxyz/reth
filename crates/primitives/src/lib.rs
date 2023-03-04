@@ -125,3 +125,6 @@ pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     hasher.finalize(&mut buf);
     buf.into()
 }
+
+#[cfg(any(test, feature = "arbitrary"))]
+pub use arbitrary;

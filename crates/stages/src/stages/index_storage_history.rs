@@ -10,7 +10,7 @@ pub const INDEX_STORAGE_HISTORY: StageId = StageId("IndexStorageHistory");
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
-/// on index sharding take a look at [`tables::StorageHistory`].
+/// on index sharding take a look at [`reth_db::tables::StorageHistory`].
 #[derive(Debug)]
 pub struct IndexStorageHistoryStage {
     /// Number of blocks after which the control
