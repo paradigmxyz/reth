@@ -9,7 +9,7 @@ pub type StateOverride = HashMap<Address, AccountOverride>;
 
 /// Custom account override used in call
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 #[allow(missing_docs)]
 pub struct AccountOverride {
     pub nonce: Option<u64>,

@@ -2,7 +2,7 @@
 
 use crate::result::{internal_rpc_err, rpc_err};
 use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
-use reth_primitives::{constants::SELECTOR_LEN, U128, U256};
+use reth_primitives::{constants::SELECTOR_LEN, Address, U128, U256};
 use reth_rpc_types::BlockError;
 use reth_transaction_pool::error::PoolError;
 use revm::primitives::{EVMError, Halt};
@@ -67,6 +67,10 @@ pub(crate) enum EthApiError {
     /// Thrown when constructing an RPC block from a primitive block data failed.
     #[error(transparent)]
     InvalidBlockData(#[from] BlockError),
+    /// Thrown when a [AccountOverride](reth_rpc_types::state::AccountOverride) contains
+    /// conflicting `state` and `stateDiff` fields
+    #[error("account {0:?} has both 'state' and 'stateDiff'")]
+    BothStateAndStateDiffInOverride(Address),
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
