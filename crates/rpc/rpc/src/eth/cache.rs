@@ -108,7 +108,7 @@ impl EthStateCache {
         let EthStateCacheConfig { max_block_bytes, max_env_bytes } = config;
         let (this, service) =
             Self::create(client, executor.clone(), max_block_bytes, max_env_bytes);
-        executor.spawn(Box::pin(service));
+        executor.spawn_critical("eth state cache", Box::pin(service));
         this
     }
 
