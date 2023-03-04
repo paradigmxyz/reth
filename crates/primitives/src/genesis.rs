@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use triehash::sec_trie_root;
 
 /// The genesis block specification.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Genesis {
     /// The genesis header nonce.
@@ -81,7 +81,10 @@ impl Genesis {
 
     /// Add accounts to the genesis block. If the address is already present,
     /// the account is updated.
-    pub fn with_accounts(mut self, accounts: HashMap<Address, GenesisAccount>) -> Self {
+    pub fn extend_accounts(
+        mut self,
+        accounts: impl IntoIterator<Item = (Address, GenesisAccount)>,
+    ) -> Self {
         self.alloc.extend(accounts);
         self
     }
@@ -217,7 +220,7 @@ mod tests {
             .with_difficulty(difficulty)
             .with_mix_hash(mix_hash)
             .with_coinbase(coinbase)
-            .with_accounts(account.clone());
+            .extend_accounts(account.clone());
 
         assert_ne!(custom_genesis, default_genesis);
         // check every field
@@ -241,15 +244,14 @@ mod tests {
         };
         let mut updated_account = HashMap::default();
         updated_account.insert(same_address, new_alloc_account);
-        let custom_genesis = custom_genesis.with_accounts(updated_account.clone());
+        let custom_genesis = custom_genesis.extend_accounts(updated_account.clone());
         assert_ne!(account, updated_account);
         assert_eq!(custom_genesis.alloc.len(), 1);
 
         // add second account
         let different_address = hex!("94e0681e3073dd71cec54b53afe988f39078fd1a").into();
-        let mut more_accounts = HashMap::default();
-        more_accounts.insert(different_address, GenesisAccount::default());
-        let custom_genesis = custom_genesis.with_accounts(more_accounts);
+        let more_accounts = HashMap::from([(different_address, GenesisAccount::default())]);
+        let custom_genesis = custom_genesis.extend_accounts(more_accounts);
         assert_eq!(custom_genesis.alloc.len(), 2);
 
         // ensure accounts are different
