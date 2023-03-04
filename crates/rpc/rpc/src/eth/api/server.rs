@@ -14,8 +14,9 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    CallRequest, EIP1186AccountProofResponse, FeeHistory, FeeHistoryCacheItem, Index, RichBlock,
-    SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory,
+    FeeHistoryCacheItem, Index, RichBlock, SyncStatus, TransactionReceipt, TransactionRequest,
+    Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -177,7 +178,12 @@ where
     }
 
     /// Handler for: `eth_call`
-    async fn call(&self, _request: CallRequest, _block_number: Option<BlockId>) -> Result<Bytes> {
+    async fn call(
+        &self,
+        _request: CallRequest,
+        _block_number: Option<BlockId>,
+        _state_overrides: Option<StateOverride>,
+    ) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
