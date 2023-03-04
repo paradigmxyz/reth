@@ -24,8 +24,8 @@ use crate::{
 use discv5::{
     kbucket,
     kbucket::{
-        BucketInsertResult, Distance, Entry as BucketEntry, KBucketsTable, NodeStatus,
-        MAX_NODES_PER_BUCKET,
+        BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable,
+        NodeStatus, MAX_NODES_PER_BUCKET,
     },
     ConnectionDirection, ConnectionState,
 };
@@ -553,20 +553,24 @@ impl Discv4Service {
     /// **Note:** This is a noop if there are no bootnodes.
     pub fn bootstrap(&mut self) {
         for record in self.config.bootstrap_nodes.clone() {
-            debug!(target : "discv4",  ?record, "Adding bootstrap node");
+            debug!(target : "discv4",  ?record, "pinging boot node");
             let key = kad_key(record.id);
             let entry = NodeEntry::new(record);
 
             // insert the boot node in the table
-            let _ = self.kbuckets.insert_or_update(
+            match self.kbuckets.insert_or_update(
                 &key,
                 entry,
                 NodeStatus {
                     state: ConnectionState::Connected,
                     direction: ConnectionDirection::Outgoing,
                 },
-            );
-            self.try_ping(record, PingReason::Initial);
+            ) {
+                InsertResult::Failed(_) => {}
+                _ => {
+                    self.try_ping(record, PingReason::Initial);
+                }
+            }
         }
     }
 
@@ -625,13 +629,23 @@ impl Discv4Service {
             target_key.clone(),
             self.kbuckets
                 .closest_values(&target_key)
+                .filter(|node| !self.pending_find_nodes.contains_key(&node.key.preimage().0))
                 .take(MAX_NODES_PER_BUCKET)
                 .map(|n| (target_key.distance(&n.key), n.value.record)),
             tx,
         );
 
         // From those 16, pick the 3 closest to start the concurrent lookup.
-        let closest = ctx.closest(ALPHA, |node| !self.pending_find_nodes.contains_key(&node.id));
+        let closest = ctx.closest(ALPHA);
+
+        if closest.is_empty() && self.pending_find_nodes.is_empty() {
+            // no closest nodes, and no lookup in progress: table is empty.
+            // This could happen if all records were deleted from the table due to missed pongs
+            // (e.g. connectivity problems over a long period of time, or issues during initial
+            // bootstrapping) so we attempt to bootstrap again
+            self.bootstrap();
+            return
+        }
 
         trace!(target : "net::discv4", ?target, num = closest.len(), "Start lookup closest nodes");
 
@@ -1172,7 +1186,8 @@ impl Discv4Service {
         }
 
         // get the next closest nodes, not yet queried nodes and start over.
-        let closest = ctx.closest(ALPHA, |node| !self.pending_find_nodes.contains_key(&node.id));
+        let closest =
+            ctx.filter_closest(ALPHA, |node| !self.pending_find_nodes.contains_key(&node.id));
 
         for closest in closest {
             let key = kad_key(closest.id);
@@ -1704,8 +1719,19 @@ impl LookupContext {
         self.inner.target.preimage().0
     }
 
+    fn closest(&self, num: usize) -> Vec<NodeRecord> {
+        self.inner
+            .closest_nodes
+            .borrow()
+            .iter()
+            .filter(|(_, node)| !node.queried)
+            .map(|(_, n)| n.record)
+            .take(num)
+            .collect()
+    }
+
     /// Returns the closest nodes that have not been queried yet.
-    fn closest<P>(&self, num: usize, filter: P) -> Vec<NodeRecord>
+    fn filter_closest<P>(&self, num: usize, filter: P) -> Vec<NodeRecord>
     where
         P: FnMut(&NodeRecord) -> bool,
     {

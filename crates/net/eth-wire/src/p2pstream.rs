@@ -250,7 +250,15 @@ impl<S> P2PStream<S> {
         let pong = P2PMessage::Pong;
         let mut pong_bytes = BytesMut::with_capacity(pong.length());
         pong.encode(&mut pong_bytes);
-        self.outgoing_messages.push_back(pong_bytes.into());
+        self.outgoing_messages.push_back(pong_bytes.freeze());
+    }
+
+    /// Queues in a _snappy_ encoded [`P2PMessage::Ping`] message.
+    fn send_ping(&mut self) {
+        let ping = P2PMessage::Ping;
+        let mut ping_bytes = BytesMut::with_capacity(ping.length());
+        ping.encode(&mut ping_bytes);
+        self.outgoing_messages.push_back(ping_bytes.freeze());
     }
 
     /// Starts to gracefully disconnect the connection by sending a Disconnect message and stop
@@ -439,17 +447,7 @@ where
         match this.pinger.poll_ping(cx) {
             Poll::Pending => {}
             Poll::Ready(Ok(PingerEvent::Ping)) => {
-                // encode the ping message
-                let mut ping_bytes = BytesMut::new();
-                P2PMessage::Ping.encode(&mut ping_bytes);
-
-                // check if the buffer is full
-                if this.outgoing_messages.len() >= MAX_P2P_CAPACITY {
-                    return Poll::Ready(Err(P2PStreamError::SendBufferFull))
-                }
-
-                // if the sink is not ready, buffer the message
-                this.outgoing_messages.push_back(ping_bytes.into());
+                this.send_ping();
             }
             _ => {
                 // encode the disconnect message
