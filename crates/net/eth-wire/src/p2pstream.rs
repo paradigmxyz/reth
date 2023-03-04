@@ -698,8 +698,22 @@ impl Encodable for P2PMessage {
 /// The [`Decodable`](reth_rlp::Decodable) implementation for [`P2PMessage`] assumes that each of
 /// the message variants are snappy compressed, except for the [`P2PMessage::Hello`] variant since
 /// the hello message is never compressed in the `p2p` subprotocol.
+/// The [`Decodable`] implementation for [`P2PMessage::Ping`] and
+/// [`P2PMessage::Pong`] expects a snappy encoded payload, see [`Encodable`] implementation.
 impl Decodable for P2PMessage {
     fn decode(buf: &mut &[u8]) -> Result<Self, DecodeError> {
+        /// Removes the snappy prefix from the Ping/Pong buffer
+        fn advance_snappy_ping_pong_payload(buf: &mut &[u8]) -> Result<(), DecodeError> {
+            if buf.len() < 3 {
+                return Err(DecodeError::InputTooShort)
+            }
+            if buf[..3] != [0x01, 0x00, EMPTY_LIST_CODE] {
+                return Err(DecodeError::Custom("expected snappy payload"))
+            }
+            buf.advance(3);
+            Ok(())
+        }
+
         let message_id = u8::decode(&mut &buf[..])?;
         let id = P2PMessageID::try_from(message_id)
             .or(Err(DecodeError::Custom("unknown p2p message id")))?;
@@ -708,11 +722,11 @@ impl Decodable for P2PMessage {
             P2PMessageID::Hello => Ok(P2PMessage::Hello(HelloMessage::decode(buf)?)),
             P2PMessageID::Disconnect => Ok(P2PMessage::Disconnect(DisconnectReason::decode(buf)?)),
             P2PMessageID::Ping => {
-                buf.advance(1);
+                advance_snappy_ping_pong_payload(buf)?;
                 Ok(P2PMessage::Ping)
             }
             P2PMessageID::Pong => {
-                buf.advance(1);
+                advance_snappy_ping_pong_payload(buf)?;
                 Ok(P2PMessage::Pong)
             }
         }
