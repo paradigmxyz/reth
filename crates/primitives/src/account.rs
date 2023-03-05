@@ -98,7 +98,7 @@ impl Compact for Bytecode {
         Self: Sized,
     {
         let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
-        let bytes = buf.copy_to_bytes(len as usize).into();
+        let bytes = buf.copy_to_bytes(len as usize);
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
             0 => Bytecode(RevmBytecode::new_raw(bytes)),
@@ -114,7 +114,7 @@ impl Compact for Bytecode {
                 hash: KECCAK_EMPTY,
                 state: BytecodeState::Analysed {
                     len: buf.read_u64::<BigEndian>().unwrap() as usize,
-                    jump_map: JumpMap::from_slice(&buf),
+                    jump_map: JumpMap::from_slice(buf),
                 },
             }),
             _ => unreachable!(),
