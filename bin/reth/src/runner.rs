@@ -37,12 +37,17 @@ impl CliRunner {
         // fires the shutdown signal to all tasks spawned via the task executor
         drop(task_manager);
 
+        // drop the tokio runtime on a separate thread because drop blocks until its pools
+        // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
+        // the current thread but we want to exit right away.
+        std::thread::spawn(move || drop(tokio_runtime));
+
         // give all tasks that are now being shut down some time to finish before tokio leaks them
         // see [Runtime::shutdown_timeout](tokio::runtime::Runtime::shutdown_timeout)
         // TODO: enable this again, when pipeline/stages are not longer blocking tasks
-        std::process::exit(0);
         // warn!(target: "reth::cli", "Received shutdown signal, waiting up to 30 seconds for
         // tasks."); tokio_runtime.shutdown_timeout(Duration::from_secs(30));
+        Ok(())
     }
 
     /// Executes a regular future until completion or until external signal received.

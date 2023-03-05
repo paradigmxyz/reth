@@ -98,6 +98,12 @@ impl From<bytes::Bytes> for Bytes {
     }
 }
 
+impl From<Bytes> for bytes::Bytes {
+    fn from(src: Bytes) -> Self {
+        src.0
+    }
+}
+
 impl From<Vec<u8>> for Bytes {
     fn from(src: Vec<u8>) -> Self {
         Self(src.into())
@@ -147,11 +153,11 @@ impl PartialEq<bytes::Bytes> for Bytes {
 }
 
 impl Encodable for Bytes {
-    fn length(&self) -> usize {
-        self.0.length()
-    }
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.0.encode(out)
+    }
+    fn length(&self) -> usize {
+        self.0.length()
     }
 }
 

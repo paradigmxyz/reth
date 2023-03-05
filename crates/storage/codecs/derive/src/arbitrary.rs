@@ -36,10 +36,12 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                 {
                     let mut buf = vec![];
 
-                    let len = field.clone().encode(&mut buf);
-                    let decoded = super::#type_ident::decode(&mut buf.as_slice()).unwrap();
-
-                    assert!(field == decoded);
+                    let len = field.encode(&mut buf);
+                    let mut b = &mut buf.as_slice();
+                    let decoded = super::#type_ident::decode(b).unwrap();
+                    assert_eq!(field, decoded);
+                    // ensure buffer is fully consumed by decode
+                    assert!(b.is_empty());
                 }
             });
         } else if let Ok(num) = arg.to_string().parse() {

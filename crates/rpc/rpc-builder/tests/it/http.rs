@@ -98,7 +98,7 @@ where
     ));
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
     assert!(is_unimplemented(
-        EthApiClient::call(client, call_request.clone(), None).await.err().unwrap()
+        EthApiClient::call(client, call_request.clone(), None, None).await.err().unwrap()
     ));
     assert!(is_unimplemented(
         EthApiClient::create_access_list(client, call_request.clone(), None).await.err().unwrap()

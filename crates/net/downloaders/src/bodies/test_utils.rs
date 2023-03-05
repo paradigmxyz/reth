@@ -41,7 +41,7 @@ pub(crate) fn create_raw_bodies<'a>(
         .into_iter()
         .map(|header| {
             let body = bodies.remove(&header.hash()).expect("body exists");
-            body.create_block(header)
+            body.create_block(header.as_ref().clone())
         })
         .collect()
 }
