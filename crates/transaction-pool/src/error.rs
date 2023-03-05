@@ -1,6 +1,5 @@
 //! Transaction pool errors
 
-use reth_interfaces::consensus::Error;
 use reth_primitives::{Address, TxHash};
 
 /// Transaction pool result type.
@@ -34,12 +33,6 @@ pub enum PoolError {
     #[error("[{0:?}]: Invalid sender")]
     AccountNotFound(TxHash),
 }
-
-// impl From<Error> for PoolError {
-//     fn from(_: Error) -> Self {
-//         PoolError::AccountNotFound(TxHash::default())
-//     }
-// }
 
 // === impl PoolError ===
 

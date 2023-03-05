@@ -89,11 +89,12 @@ pub use crate::{
     validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
 };
 use crate::{
-    error::{PoolError, PoolResult},
+    error::PoolResult,
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
 
+use reth_interfaces::consensus::Error;
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -157,7 +158,8 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
+    ) -> PoolResult<HashMap<TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>>>
+    {
         let outcome = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
@@ -173,27 +175,31 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
+    ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>) {
         let hash = *transaction.hash();
-        let transaction = Arc::new(transaction);
+        // let transaction = Arc::new(transaction);
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
         // let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
         // (hash, outcome)
-        match self
-            .pool
-            .validator()
-            .validate_transaction(origin, Arc::try_unwrap(transaction).unwrap())
-            .await
-        {
-            Ok(TransactionValidationOutcome::Valid { balance, state_nonce, transaction }) => {
-                (hash, TransactionValidationOutcome::Valid { balance, state_nonce, transaction })
-            }
-            Ok(TransactionValidationOutcome::Invalid(transaction, error)) => {
-                (hash, TransactionValidationOutcome::Invalid(transaction, error))
-            }
-            Err(err) => (hash, TransactionValidationOutcome::Invalid(transaction, error)),
-        }
+        // match self
+        //     .pool
+        //     .validator()
+        //     .validate_transaction(origin, Arc::try_unwrap(transaction).unwrap())
+        //     .await
+        // {
+        //     Ok(TransactionValidationOutcome::Valid { balance, state_nonce, transaction }) => {
+        //         (hash, Ok(TransactionValidationOutcome::Valid { balance, state_nonce, transaction
+        // }))     }
+        //     Ok(TransactionValidationOutcome::Invalid(transaction, error)) => {
+        //         (hash, (TransactionValidationOutcome::Invalid(transaction, error)))
+        //     }
+        //     Err(err) => (hash, TransactionValidationOutcome::Invalid(transaction, err)),
+        // }
+
+        let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
+
+        (hash, outcome)
     }
 
     /// Number of transactions in the entire pool
@@ -230,7 +236,7 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+        self.pool.add_transactions(origin, std::iter::once(tx.unwrap())).pop().expect("exists; qed")
     }
 
     async fn add_transactions(
@@ -239,7 +245,9 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(origin, transactions).await?;
-        let transactions = self.pool.add_transactions(origin, validated.into_values());
+
+        let transactions =
+            self.pool.add_transactions(origin, validated.into_values().map(|x| x.unwrap()));
         Ok(transactions)
     }
 

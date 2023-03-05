@@ -7,7 +7,10 @@ use crate::{
     TX_MAX_SIZE,
 };
 use reth_interfaces::consensus::Error;
-use reth_primitives::{Address, TransactionKind, TxHash, U256};
+use reth_primitives::{
+    Address, TransactionKind, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    U256,
+};
 use reth_provider::AccountProvider;
 use std::{fmt, sync::Arc, time::Instant};
 
@@ -132,7 +135,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         };
 
         if self.shanghai {
-            match self.ensure_max_init_code_size(transaction, 2 * 24576) {
+            match self.ensure_max_init_code_size(transaction.clone(), 2 * 24576) {
                 Ok(_) => {}
                 Err(e) => return Ok(TransactionValidationOutcome::Invalid(transaction, e)),
             }
@@ -152,7 +155,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         // Checks for gas limit
         if transaction.gas_limit() > self.current_max_gas_limit {
             return Ok(TransactionValidationOutcome::Invalid(
-                transaction,
+                transaction.clone(),
                 PoolError::TxExceedsGasLimit(
                     *transaction.hash(),
                     transaction.gas_limit(),
@@ -165,7 +168,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         // Reject transactions over defined size to prevent DOS attacks
         if transaction.size() > TX_MAX_SIZE {
             return Ok(TransactionValidationOutcome::Invalid(
-                transaction,
+                transaction.clone(),
                 PoolError::TxExceedsMaxInitCodeSize(
                     *transaction.hash(),
                     transaction.size(),
@@ -184,14 +187,14 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
                 // Signer account shouldn't have bytecode. Presence of bytecode means this is a
                 // smartcontract.
                 if account.has_bytecode() {
-                    return Err(Error::SignerAccountHasBytecode.into())
+                    return Err(Error::SignerAccountHasBytecode)
                 } else {
                     account
                 }
             }
             None => {
                 return Ok(TransactionValidationOutcome::Invalid(
-                    transaction,
+                    transaction.clone(),
                     PoolError::AccountNotFound(*transaction.hash()),
                 ))
             }
