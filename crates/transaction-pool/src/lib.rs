@@ -177,25 +177,9 @@ where
         transaction: V::Transaction,
     ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>) {
         let hash = *transaction.hash();
-        // let transaction = Arc::new(transaction);
+
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
-        // let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
-        // (hash, outcome)
-        // match self
-        //     .pool
-        //     .validator()
-        //     .validate_transaction(origin, Arc::try_unwrap(transaction).unwrap())
-        //     .await
-        // {
-        //     Ok(TransactionValidationOutcome::Valid { balance, state_nonce, transaction }) => {
-        //         (hash, Ok(TransactionValidationOutcome::Valid { balance, state_nonce, transaction
-        // }))     }
-        //     Ok(TransactionValidationOutcome::Invalid(transaction, error)) => {
-        //         (hash, (TransactionValidationOutcome::Invalid(transaction, error)))
-        //     }
-        //     Err(err) => (hash, TransactionValidationOutcome::Invalid(transaction, err)),
-        // }
 
         let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
 
