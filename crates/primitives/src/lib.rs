@@ -35,7 +35,7 @@ mod withdrawal;
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
 
-pub use account::Account;
+pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock};
 pub use bloom::Bloom;
@@ -56,6 +56,7 @@ pub use log::Log;
 pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
+pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::{StorageEntry, StorageTrieEntry};
 pub use transaction::{
