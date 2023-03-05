@@ -38,7 +38,7 @@ pub fn run() -> eyre::Result<()> {
 }
 
 /// Commands to be executed
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum Commands {
     /// Start the node
     #[command(name = "node")]
@@ -74,7 +74,7 @@ pub enum Commands {
     TestVectors(test_vectors::Command),
 }
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(author, version = "0.1", about = "Reth", long_about = None)]
 struct Cli {
     /// The command to run
@@ -89,7 +89,7 @@ struct Cli {
 }
 
 /// The log configuration.
-#[derive(Args)]
+#[derive(Debug, Args)]
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
     /// The path to put log files in.
@@ -131,7 +131,7 @@ impl Logs {
 }
 
 /// The verbosity settings for the cli.
-#[derive(Args)]
+#[derive(Debug, Copy, Clone, Args)]
 #[command(next_help_heading = "Display")]
 pub struct Verbosity {
     /// Set the minimum log level.
@@ -165,6 +165,26 @@ impl Verbosity {
             };
 
             format!("reth::cli={level}").parse().unwrap()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// Tests that the help message is parsed correctly. This ensures that clap args are configured
+    /// correctly and no conflicts are introduced via attributes that would result in a panic at
+    /// runtime
+    #[test]
+    fn test_parse_help_all_subcommands() {
+        let reth = Cli::command();
+        for sub_command in reth.get_subcommands() {
+            let err = Cli::try_parse_from(["reth", sub_command.get_name(), "--help"]).unwrap_err();
+            // --help is treated as error, but
+            // > Not a true "error" as it means --help or similar was used. The help message will be sent to stdout.
+            assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
         }
     }
 }
