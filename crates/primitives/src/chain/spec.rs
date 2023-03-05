@@ -143,6 +143,30 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
+/// The Optimism Goerli spec
+#[cfg(feature = "optimism")]
+pub static OP_GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
+    chain: Chain::optimism_goerli(),
+    genesis: serde_json::from_str(include_str!("../../res/genesis/goerli_op.json"))
+        .expect("Can't deserialize Optimism Goerli genesis json"),
+    genesis_hash: Some(H256(hex!(
+        "c1fc15cd51159b1f1e5cbc4b82e85c1447ddfa33c52cf1d98d14fba0d6354be1"
+    ))),
+    hardforks: BTreeMap::from([
+        (Hardfork::Byzantium, ForkCondition::Block(0)),
+        (Hardfork::Constantinople, ForkCondition::Block(0)),
+        (Hardfork::Petersburg, ForkCondition::Block(0)),
+        (Hardfork::Istanbul, ForkCondition::Block(0)),
+        (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+        (Hardfork::Berlin, ForkCondition::Block(0)),
+        (Hardfork::London, ForkCondition::Block(4061224)),
+        (Hardfork::ArrowGlacier, ForkCondition::Block(4061224)),
+        (Hardfork::GrayGlacier, ForkCondition::Block(4061224)),
+        (Hardfork::Bedrock, ForkCondition::Block(4061224)),
+    ]),
+    optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
+});
+
 /// An Ethereum chain specification.
 ///
 /// A chain specification describes:
@@ -939,9 +963,10 @@ mod tests {
         ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, DEV, GOERLI, H256, MAINNET,
         SEPOLIA, U256,
     };
-    use bytes::BytesMut;
-    use ethers_core::types as EtherType;
-    use reth_rlp::Encodable;
+
+    #[cfg(feature = "optimism")]
+    use crate::OP_GOERLI;
+
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1237,6 +1262,7 @@ Post-merge hard forks (timestamp based):
         );
     }
 
+<<<<<<< HEAD
     #[test]
     fn dev_forkids() {
         test_fork_ids(
@@ -1246,6 +1272,25 @@ Post-merge hard forks (timestamp based):
                 ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
             )],
         )
+=======
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn optimism_goerli_forkids() {
+        // TODO
+        test_fork_ids(
+            &OP_GOERLI,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0x00, 0x00, 0x00, 0x00]), next: 4061224 },
+                ),
+                (
+                    Head { number: 4061224, ..Default::default() },
+                    ForkId { hash: ForkHash([0x00, 0x00, 0x00, 0x00]), next: 0 },
+                ),
+            ],
+        );
+>>>>>>> ce41d797 (WIP: OP Goerli genesis)
     }
 
     /// Checks that time-based forks work

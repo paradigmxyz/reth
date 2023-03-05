@@ -14,6 +14,9 @@ pub use spec::{
     ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,
 };
 
+#[cfg(feature = "optimism")]
+pub use spec::OP_GOERLI;
+
 // The chain info module.
 mod info;
 pub use info::ChainInfo;
@@ -42,6 +45,18 @@ impl Chain {
     /// Returns the sepolia chain.
     pub const fn sepolia() -> Self {
         Chain::Named(ethers_core::types::Chain::Sepolia)
+    }
+
+    /// Returns the optimism goerli chain.
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_goerli() -> Self {
+        Chain::Named(ethers_core::types::Chain::OptimismGoerli)
+    }
+
+    /// Returns the optimism mainnet chain.
+    #[cfg(feature = "optimism")]
+    pub const fn optimism_mainnet() -> Self {
+        Chain::Named(ethers_core::types::Chain::Optimism)
     }
 
     /// Returns the dev chain.

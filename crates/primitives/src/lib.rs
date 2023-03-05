@@ -58,6 +58,8 @@ pub use block::{
     BlockWithSenders, ForkBlock, SealedBlock, SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
+#[cfg(feature = "optimism")]
+pub use chain::OP_GOERLI;
 pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, DisplayHardforks,
     ForkCondition, ForkTimestamps, DEV, GOERLI, MAINNET, SEPOLIA,

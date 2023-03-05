@@ -242,6 +242,119 @@ where
         Ok(result)
     }
 
+    /// When the Consensus layer receives a new block via the consensus gossip protocol,
+    /// the transactions in the block are sent to the execution layer in the form of a
+    /// `ExecutionPayload`. The Execution layer executes the transactions and validates the
+    /// state in the block header, then passes validation data back to Consensus layer, that
+    /// adds the block to the head of its own blockchain and attests to it. The block is then
+    /// broadcasted over the consensus p2p network in the form of a "Beacon block".
+    pub fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus> {
+        let block = match self.try_construct_block(payload) {
+            Ok(b) => b,
+            Err(err) => {
+                return Ok(PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
+                    validation_error: err.to_string(),
+                }))
+            }
+        };
+        let block_hash = block.header.hash();
+        let parent_hash = block.parent_hash;
+
+        // The block already exists in our database
+        if self.client.is_known(&block_hash)? {
+            return Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash))
+        }
+
+        let Some(parent) = self.client.block_by_hash(parent_hash)? else {
+             // TODO: cache block for storing later
+             return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
+        };
+
+        let parent_td = if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
+            parent_td
+        } else {
+            return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::PayloadPreMerge.to_string(),
+            }))
+        };
+
+        // Short circuit the check by passing parent total difficulty.
+        if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
+            return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::PayloadPreMerge.to_string(),
+            }))
+        }
+
+        if block.timestamp <= parent.timestamp {
+            return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::PayloadTimestamp {
+                    invalid: block.timestamp,
+                    latest: parent.timestamp,
+                }
+                .to_string(),
+            }))
+        }
+
+        let state_provider = self.client.latest()?;
+        let total_difficulty = parent_td + block.header.difficulty;
+        match executor::execute_and_verify_receipt(
+            &block.unseal(),
+            total_difficulty,
+            None,
+            &self.chain_spec,
+            &mut SubState::new(State::new(&state_provider)),
+        ) {
+            Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash)),
+            Err(err) => Ok(PayloadStatus::new(
+                PayloadStatusEnum::Invalid { validation_error: err.to_string() },
+                parent_hash, // The parent hash is already in our database hence it is valid
+            )),
+        }
+    }
+
+    /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
+    /// valid chain.
+    pub fn fork_choice_updated(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let ForkchoiceState { head_block_hash, finalized_block_hash, .. } = fork_choice_state;
+
+        if head_block_hash.is_zero() {
+            return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::ForkchoiceEmptyHead.to_string(),
+            }))
+        }
+
+        // Block is not known, nothing to do.
+        if !self.client.is_known(&head_block_hash)? {
+            return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
+        }
+
+        // The finalized block hash is not known, we are still syncing
+        if !finalized_block_hash.is_zero() && !self.client.is_known(&finalized_block_hash)? {
+            return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
+        }
+
+        if let Err(error) = self.forkchoice_state_tx.send(fork_choice_state) {
+            tracing::error!(target: "rpc::engine_api", ?error, "Failed to update forkchoice state");
+        }
+
+        if let Some(attr) = payload_attributes {
+            #[cfg(feature = "optimism")]
+            if self.chain_spec.optimism.is_some() && attr.gas_limit.is_none() {
+                return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
+            }
+
+            // TODO: optionally build the block
+        }
+
+        let chain_info = self.client.chain_info()?;
+        Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
+            .with_latest_valid_hash(chain_info.best_hash))
+    }
+
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
     /// layers are using the latest configuration.
     pub async fn exchange_transition_configuration(
