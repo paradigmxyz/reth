@@ -79,7 +79,7 @@ pub trait TransactionValidator: Send + Sync {
 
 pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
     /// Chain id
-    chain_id: Option<u64>,
+    chain_id: u64,
     /// This type fetches account info from the db
     client: Client,
     /// Fork indicator whether we are in the Shanghai stage.
@@ -171,7 +171,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         }
 
         // Checks for chainid
-        if transaction.chain_id() != self.chain_id {
+        if transaction.chain_id() != Some(self.chain_id) {
             return Err(Error::TransactionChainId)
         }
 

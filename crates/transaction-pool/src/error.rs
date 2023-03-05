@@ -30,8 +30,8 @@ pub enum PoolError {
     /// respect the max_init_code_size.
     #[error("[{0:?}] Transaction's size {1} exceeds max_init_code_size {2}.")]
     TxExceedsMaxInitCodeSize(TxHash, usize, usize),
-    /// Thrown if a replacement transaction's gas price is below the already imported transaction
-    #[error("[{0:?}]: insufficient gas price to replace existing transaction.")]
+    /// Thrown if the transaction contains an invalid signature
+    #[error("[{0:?}]: Invalid sender")]
     AccountNotFound(TxHash),
 }
 

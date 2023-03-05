@@ -17,7 +17,7 @@ normal = [
 
 [dependencies]
 
-# rreth
+# reth
 reth-primitives = { path  = "../primitives" }
 reth-provider = { path = "../storage/provider" }
 reth-interfaces = { path = "../interfaces" }
