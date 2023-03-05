@@ -111,6 +111,18 @@ mod validate;
 /// Common test helpers for mocking A pool
 pub mod test_utils;
 
+// TX_SLOT_SIZE is used to calculate how many data slots a single transaction
+// takes up based on its size. The slots are used as DoS protection, ensuring
+// that validating a new transaction remains a constant operation (in reality
+// O(maxslots), where max slots are 4 currently).
+pub(crate) const TX_SLOT_SIZE: usize = 32 * 1024;
+
+// TX_MAX_SIZE is the maximum size a single transaction can have. This field has
+// non-trivial consequences: larger transactions are significantly harder and
+// more expensive to propagate; larger transactions also take more resources
+// to validate whether they fit into the pool or not.
+pub(crate) const TX_MAX_SIZE: usize = 4 * TX_SLOT_SIZE; //128KB
+
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
 pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
@@ -163,22 +175,24 @@ where
         transaction: V::Transaction,
     ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
-        let invalid_transaction = transaction.clone();
+        let transaction = Arc::new(transaction);
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
         // let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
         // (hash, outcome)
-        match self.pool.validator().validate_transaction(origin, transaction).await {
+        match self
+            .pool
+            .validator()
+            .validate_transaction(origin, Arc::try_unwrap(transaction).unwrap())
+            .await
+        {
             Ok(TransactionValidationOutcome::Valid { balance, state_nonce, transaction }) => {
                 (hash, TransactionValidationOutcome::Valid { balance, state_nonce, transaction })
             }
             Ok(TransactionValidationOutcome::Invalid(transaction, error)) => {
                 (hash, TransactionValidationOutcome::Invalid(transaction, error))
             }
-            Err(err) => {
-                let error = PoolError::from(err);
-                (hash, TransactionValidationOutcome::Invalid(invalid_transaction, error))
-            }
+            Err(err) => (hash, TransactionValidationOutcome::Invalid(transaction, error)),
         }
     }
 

@@ -4,11 +4,12 @@ use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
+    TX_MAX_SIZE,
 };
 use reth_interfaces::consensus::Error;
 use reth_primitives::{Address, TransactionKind, TxHash, U256};
 use reth_provider::AccountProvider;
-use std::{fmt, time::Instant};
+use std::{fmt, sync::Arc, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -20,11 +21,11 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         /// Current nonce of the sender.
         state_nonce: u64,
         /// Validated transaction.
-        transaction: T,
+        transaction: Arc<T>,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
-    Invalid(T, PoolError),
+    Invalid(Arc<T>, PoolError),
 }
 
 /// Provides support for validating transaction at any given state of the chain
@@ -61,7 +62,7 @@ pub trait TransactionValidator: Send + Sync {
     /// `max_init_code_size` should be configurable so this will take it as an argument.
     fn ensure_max_init_code_size(
         &self,
-        transaction: Self::Transaction,
+        transaction: Arc<Self::Transaction>,
         max_init_code_size: usize,
     ) -> Result<(), PoolError> {
         if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
@@ -77,6 +78,7 @@ pub trait TransactionValidator: Send + Sync {
     }
 }
 
+/// TODO: Add docs and make this public
 pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
     /// Chain id
     chain_id: u64,
@@ -105,21 +107,21 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
-        let invalid_transaction = transaction.clone();
+        let transaction = Arc::new(transaction);
 
         match transaction.tx_type() {
-            0 => {
+            LEGACY_TX_TYPE_ID => {
                 // Accept legacy transactions
             }
 
-            1 => {
+            EIP2930_TX_TYPE_ID => {
                 // Accept only legacy transactions until EIP-2718/2930 activates
                 if !self.eip2718 {
                     return Err(Error::TransactionEip2930Disabled)
                 }
             }
 
-            2 => {
+            EIP1559_TX_TYPE_ID => {
                 // Reject dynamic fee transactions until EIP-1559 activates.
                 if !self.eip1559 {
                     return Err(Error::TransactionEip1559Disabled)
@@ -130,7 +132,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         };
 
         if self.shanghai {
-            match self.ensure_max_init_code_size(transaction.clone(), 2 * 24576) {
+            match self.ensure_max_init_code_size(transaction, 2 * 24576) {
                 Ok(_) => {}
                 Err(e) => return Ok(TransactionValidationOutcome::Invalid(transaction, e)),
             }
@@ -141,7 +143,8 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
             return Err(Error::TransactionMaxFeeLessThenBaseFee)
         }
 
-        // Ensure gasFeeCap is greater than or equal to gasTipCap.
+        //TODO: Error doesn't match see InvalidTransactionError
+        // Ensure max_fee_per_gas is greater than or equal to max_priority_fee_per_gas.
         if transaction.max_fee_per_gas() >= transaction.max_priority_fee_per_gas() {
             return Err(Error::TransactionMaxFeeLessThenBaseFee)
         }
@@ -151,21 +154,22 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
             return Ok(TransactionValidationOutcome::Invalid(
                 transaction,
                 PoolError::TxExceedsGasLimit(
-                    *invalid_transaction.hash(),
-                    invalid_transaction.gas_limit(),
+                    *transaction.hash(),
+                    transaction.gas_limit(),
                     self.current_max_gas_limit,
                 ),
             ))
         }
 
-        // transaction size
-        if transaction.size() > 4 * 32 * 1024 {
+        // TODO: Error doesn't match.
+        // Reject transactions over defined size to prevent DOS attacks
+        if transaction.size() > TX_MAX_SIZE {
             return Ok(TransactionValidationOutcome::Invalid(
                 transaction,
                 PoolError::TxExceedsMaxInitCodeSize(
-                    *invalid_transaction.hash(),
-                    invalid_transaction.size(),
-                    4 * 32 * 1024,
+                    *transaction.hash(),
+                    transaction.size(),
+                    TX_MAX_SIZE,
                 ),
             ))
         }
@@ -175,13 +179,20 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
             return Err(Error::TransactionChainId)
         }
 
-        // Checks for sender
         let account = match self.client.basic_account(transaction.sender())? {
-            Some(account) => account,
+            Some(account) => {
+                // Signer account shouldn't have bytecode. Presence of bytecode means this is a
+                // smartcontract.
+                if account.has_bytecode() {
+                    return Err(Error::SignerAccountHasBytecode.into())
+                } else {
+                    account
+                }
+            }
             None => {
                 return Ok(TransactionValidationOutcome::Invalid(
                     transaction,
-                    PoolError::AccountNotFound(*invalid_transaction.hash()),
+                    PoolError::AccountNotFound(*transaction.hash()),
                 ))
             }
         };
@@ -211,7 +222,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
 /// A valid transaction in the pool.
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
-    pub transaction: T,
+    pub transaction: Arc<T>,
     /// The identifier for this transaction.
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.

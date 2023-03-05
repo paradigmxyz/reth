@@ -447,7 +447,7 @@ impl MockTransactionFactory {
             propagate: false,
             transaction_id,
             cost: transaction.cost(),
-            transaction,
+            transaction: Arc::new(transaction),
             timestamp: Instant::now(),
             origin,
             encoded_length,

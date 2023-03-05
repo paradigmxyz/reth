@@ -35,11 +35,11 @@ pub enum PoolError {
     AccountNotFound(TxHash),
 }
 
-impl From<Error> for PoolError {
-    fn from(_: Error) -> Self {
-        PoolError::AccountNotFound(TxHash::default())
-    }
-}
+// impl From<Error> for PoolError {
+//     fn from(_: Error) -> Self {
+//         PoolError::AccountNotFound(TxHash::default())
+//     }
+// }
 
 // === impl PoolError ===
 
