@@ -4,7 +4,7 @@ use crate::{
     error::PoolError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
-    TX_MAX_SIZE,
+    MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
 use reth_interfaces::consensus::Error;
 use reth_primitives::{
@@ -112,6 +112,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
     ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
         let transaction = Arc::new(transaction);
 
+        // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
                 // Accept legacy transactions
@@ -134,22 +135,20 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
             _ => return Err(Error::TxTypeNotSupported),
         };
 
+        // Reject transactions over defined size to prevent DOS attacks
+        if transaction.size() > TX_MAX_SIZE {
+            return Ok(TransactionValidationOutcome::Invalid(
+                transaction.clone(),
+                PoolError::OversizedData(*transaction.hash(), transaction.size(), TX_MAX_SIZE),
+            ))
+        }
+
+        // Check whether the init code size has been exceeded.
         if self.shanghai {
-            match self.ensure_max_init_code_size(transaction.clone(), 2 * 24576) {
+            match self.ensure_max_init_code_size(transaction.clone(), MAX_INIT_CODE_SIZE) {
                 Ok(_) => {}
                 Err(e) => return Ok(TransactionValidationOutcome::Invalid(transaction, e)),
             }
-        }
-
-        // Drop non-local transactions under our own minimal accepted gas price or tip
-        if !origin.is_local() && transaction.max_fee_per_gas() < self.gas_price {
-            return Err(Error::TransactionMaxFeeLessThenBaseFee)
-        }
-
-        //TODO: Error doesn't match see InvalidTransactionError
-        // Ensure max_fee_per_gas is greater than or equal to max_priority_fee_per_gas.
-        if transaction.max_fee_per_gas() >= transaction.max_priority_fee_per_gas() {
-            return Err(Error::TransactionMaxFeeLessThenBaseFee)
         }
 
         // Checks for gas limit
@@ -164,17 +163,22 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
             ))
         }
 
-        // TODO: Error doesn't match.
-        // Reject transactions over defined size to prevent DOS attacks
-        if transaction.size() > TX_MAX_SIZE {
-            return Ok(TransactionValidationOutcome::Invalid(
-                transaction.clone(),
-                PoolError::TxExceedsMaxInitCodeSize(
-                    *transaction.hash(),
-                    transaction.size(),
-                    TX_MAX_SIZE,
-                ),
-            ))
+        // Sanity check for extremely large numbers
+        if transaction.max_fee_per_gas() > Some((2 ^ 256) - 1) {
+            return Err(Error::FeeCapVeryHigh)
+        }
+        if transaction.max_priority_fee_per_gas() > Some((2 ^ 256) - 1) {
+            return Err(Error::TipVeryHigh)
+        }
+
+        // Ensure max_fee_per_gas is greater than or equal to max_priority_fee_per_gas.
+        if transaction.max_fee_per_gas() <= transaction.max_priority_fee_per_gas() {
+            return Err(Error::TipAboveFeeCap)
+        }
+
+        // Drop non-local transactions under our own minimal accepted gas price or tip
+        if !origin.is_local() && transaction.max_fee_per_gas() < self.gas_price {
+            return Err(Error::TransactionMaxFeeLessThenBaseFee)
         }
 
         // Checks for chainid

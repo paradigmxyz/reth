@@ -32,6 +32,11 @@ pub enum PoolError {
     /// Thrown if the transaction contains an invalid signature
     #[error("[{0:?}]: Invalid sender")]
     AccountNotFound(TxHash),
+    /// Thrown if the input data of a transaction is greater
+    /// than some meaningful limit a user might use. This is not a consensus error
+    /// making the transaction invalid, rather a DOS protection.
+    #[error("[{0:?}]: Input data too large")]
+    OversizedData(TxHash, usize, usize),
 }
 
 // === impl PoolError ===
@@ -47,6 +52,7 @@ impl PoolError {
             PoolError::TxExceedsGasLimit(hash, _, _) => hash,
             PoolError::TxExceedsMaxInitCodeSize(hash, _, _) => hash,
             PoolError::AccountNotFound(hash) => hash,
+            PoolError::OversizedData(hash, _, _) => hash,
         }
     }
 }

@@ -124,6 +124,12 @@ pub(crate) const TX_SLOT_SIZE: usize = 32 * 1024;
 // to validate whether they fit into the pool or not.
 pub(crate) const TX_MAX_SIZE: usize = 4 * TX_SLOT_SIZE; //128KB
 
+// Maximum bytecode to permit for a contract
+pub(crate) const MAX_CODE_SIZE: usize = 24576;
+
+// Maximum initcode to permit in a creation transaction and create instructions
+pub(crate) const MAX_INIT_CODE_SIZE: usize = 2 * MAX_CODE_SIZE;
+
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
 pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
