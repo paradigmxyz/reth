@@ -7,7 +7,8 @@ use crate::{
     EthApi,
 };
 use reth_primitives::{
-    AccessList, Address, BlockId, BlockNumberOrTag, Bytes, TransactionKind, U128, U256,
+    AccessList, AccessListItem, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
+    TransactionKind, H256, U128, U256,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::database::{State, SubState};
@@ -273,6 +274,27 @@ where
         }
 
         Ok(U256::from(highest_gas_limit))
+    }
+
+    pub(crate) async fn create_access_list_at(
+        &self,
+        request: CallRequest,
+        at: Option<BlockId>,
+    ) -> EthResult<AccessList> {
+        let (result, _env) = self.call_at(request, at.unwrap_or_default(), None).await?;
+        let access_list = result
+            .state
+            .into_iter()
+            .map(|(addr, acc)| AccessListItem {
+                address: addr.into(),
+                storage_keys: acc
+                    .storage
+                    .into_iter()
+                    .map(|(k, v)| H256::from_slice(&U256::to_be_bytes::<{ U256::BYTES }>(&k)))
+                    .collect::<Vec<H256>>(),
+            })
+            .collect::<Vec<AccessListItem>>();
+        Ok(AccessList(access_list))
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
-pub use access_list::{AccessList, AccessListItem};
+pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
