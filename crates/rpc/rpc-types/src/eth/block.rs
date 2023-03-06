@@ -388,7 +388,7 @@ mod tests {
             },
             total_difficulty: Some(U256::from(100000)),
             uncles: vec![H256::from_low_u64_be(17)],
-            transactions: Some(BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)])),
+            transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
             size: Some(U256::from(19)),
             base_fee_per_gas: Some(U256::from(20)),
             withdrawals: None,
