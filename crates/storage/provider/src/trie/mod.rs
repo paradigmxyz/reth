@@ -290,6 +290,11 @@ impl DBTrieLoader {
 
         let root = H256::from_slice(trie.root()?.as_slice());
 
+        // if root is empty remove it from db
+        if root == EMPTY_ROOT {
+            tx.delete::<tables::StoragesTrie>(root, None)?;
+        }
+
         Ok(root)
     }
 
@@ -335,6 +340,10 @@ impl DBTrieLoader {
             if cursor.seek_exact(root)?.is_some() {
                 cursor.delete_current()?;
             }
+        }
+        // if root is empty remove it from db
+        if new_root == EMPTY_ROOT {
+            tx.delete::<tables::StoragesTrie>(root, None)?;
         }
 
         Ok(new_root)
