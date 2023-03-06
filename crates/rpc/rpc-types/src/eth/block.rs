@@ -64,7 +64,7 @@ pub struct Block {
     /// Header of the block
     #[serde(flatten)]
     pub header: Header,
-    /// Total difficulty, this field is None only if  representing
+    /// Total difficulty, this field is None only if representing
     /// an Uncle block.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_difficulty: Option<U256>,
