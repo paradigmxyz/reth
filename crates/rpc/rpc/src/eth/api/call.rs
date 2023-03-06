@@ -11,11 +11,15 @@ use reth_primitives::{
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::database::{State, SubState};
-use reth_rpc_types::CallRequest;
+use reth_rpc_types::{
+    state::{AccountOverride, StateOverride},
+    CallRequest,
+};
 use revm::{
+    db::{CacheDB, DatabaseRef},
     primitives::{
-        ruint::Uint, BlockEnv, CfgEnv, Env, ExecutionResult, Halt, ResultAndState, TransactTo,
-        TxEnv,
+        ruint::Uint, BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState,
+        TransactTo, TxEnv,
     },
     Database,
 };
@@ -55,10 +59,11 @@ where
         &self,
         request: CallRequest,
         at: BlockId,
+        state_overrides: Option<StateOverride>,
     ) -> EthResult<(ResultAndState, Env)> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        self.call_with(cfg, block_env, request, state)
+        self.call_with(cfg, block_env, request, state, state_overrides)
     }
 
     /// Executes the call request using the given environment against the state provider
@@ -70,6 +75,7 @@ where
         block: BlockEnv,
         mut request: CallRequest,
         state: S,
+        state_overrides: Option<StateOverride>,
     ) -> EthResult<(ResultAndState, Env)>
     where
         S: StateProvider,
@@ -80,6 +86,12 @@ where
 
         let mut env = build_call_evm_env(cfg, block, request)?;
         let mut db = SubState::new(State::new(state));
+
+        // apply state overrides
+        if let Some(state_overrides) = state_overrides {
+            apply_state_overrides(state_overrides, &mut db)?;
+        }
+
         transact(&mut db, env)
     }
 
@@ -390,4 +402,73 @@ impl CallFees {
             }
         }
     }
+}
+
+/// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
+fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+{
+    for (account, account_overrides) in overrides {
+        apply_account_override(account, account_overrides, db)?;
+    }
+    Ok(())
+}
+
+/// Applies a single [AccountOverride] to the [CacheDB].
+fn apply_account_override<DB>(
+    account: Address,
+    account_override: AccountOverride,
+    db: &mut CacheDB<DB>,
+) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+{
+    let mut account_info = db.basic(account)?.unwrap_or_default();
+
+    if let Some(nonce) = account_override.nonce {
+        account_info.nonce = nonce;
+    }
+    if let Some(code) = account_override.code {
+        account_info.code = Some(Bytecode::new_raw(code.0));
+    }
+    if let Some(balance) = account_override.balance {
+        account_info.balance = balance;
+    }
+
+    db.insert_account_info(account, account_info);
+
+    // We ensure that not both state and state_diff are set.
+    // If state is set, we must mark the account as "NewlyCreated", so that the old storage
+    // isn't read from
+    match (account_override.state, account_override.state_diff) {
+        (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
+        (None, None) => {
+            // nothing to do
+        }
+        (Some(new_account_state), None) => {
+            db.replace_account_storage(
+                account,
+                new_account_state
+                    .into_iter()
+                    .map(|(slot, value)| {
+                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
+                    })
+                    .collect(),
+            )?;
+        }
+        (None, Some(account_state_diff)) => {
+            for (slot, value) in account_state_diff {
+                db.insert_account_storage(
+                    account,
+                    U256::from_be_bytes(slot.0),
+                    U256::from_be_bytes(value.0),
+                )?;
+            }
+        }
+    };
+
+    Ok(())
 }
