@@ -337,7 +337,7 @@ impl DBTrieLoader {
             }
         }
 
-        Ok(root)
+        Ok(new_root)
     }
 
     fn update_storage_root<DB: Database>(
