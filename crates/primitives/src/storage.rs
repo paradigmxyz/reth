@@ -1,6 +1,20 @@
 use super::{H256, U256};
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
+
+/// Saves the progress of MerkleStage
+#[main_codec]
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct TrieStageProgress {
+    /// The next hashed account to insert into the trie
+    pub next_hashed_account: Option<H256>,
+    /// The next storage entry from an account to insert into the trie
+    pub next_storage: Option<H256>,
+    /// Current intermediate root of `AccountsTrie`
+    pub current_account_root: Option<H256>,
+    /// Current intermediate storage root from an account
+    pub current_storage_root: Option<H256>,
+}
 
 /// Account storage entry.
 #[derive_arbitrary(compact)]

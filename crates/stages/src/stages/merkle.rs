@@ -1,7 +1,10 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::consensus;
-use reth_provider::{trie::DBTrieLoader, Transaction};
+use reth_provider::{
+    trie::{DBTrieLoader, TrieProgress},
+    Transaction,
+};
 use std::fmt::Debug;
 use tracing::*;
 
@@ -105,19 +108,28 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let trie_root = if from_transition == to_transition {
             block_root
-        } else if to_transition - from_transition > threshold || stage_progress == 0 {
-            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
-            // if there are more blocks than threshold it is faster to rebuild the trie
-            let loader = DBTrieLoader::default();
-            loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
-            // Iterate over changeset (similar to Hashing stages) and take new values
-            let current_root = tx.get_header(stage_progress)?.state_root;
-            let loader = DBTrieLoader::default();
-            loader
-                .update_root(tx, current_root, from_transition..to_transition)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?
+            let res = if to_transition - from_transition > threshold || stage_progress == 0 {
+                debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
+                // if there are more blocks than threshold it is faster to rebuild the trie
+                let mut loader = DBTrieLoader::default();
+                loader.calculate_root(tx).map_err(|e| StageError::Fatal(Box::new(e)))?
+            } else {
+                debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
+                // Iterate over changeset (similar to Hashing stages) and take new values
+                let current_root = tx.get_header(stage_progress)?.state_root;
+                let mut loader = DBTrieLoader::default();
+                loader
+                    .update_root(tx, current_root, from_transition..to_transition)
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?
+            };
+
+            match res {
+                TrieProgress::Complete(root) => root,
+                TrieProgress::InProgress(_) => {
+                    return Ok(ExecOutput { stage_progress, done: false })
+                }
+            }
         };
 
         if block_root != trie_root {
@@ -152,15 +164,19 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let loader = DBTrieLoader::default();
+        let mut loader = DBTrieLoader::default();
         let current_root = tx.get_header(input.stage_progress)?.state_root;
 
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let block_root = loader
+        let block_root = match loader
             .update_root(tx, current_root, from_transition..to_transition)
-            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            .map_err(|e| StageError::Fatal(Box::new(e)))?
+        {
+            TrieProgress::Complete(root) => root,
+            TrieProgress::InProgress(_) => unimplemented!(),
+        };
 
         if block_root != target_root {
             let unwind_to = input.unwind_to;
@@ -448,7 +464,7 @@ mod tests {
                 accounts.into_iter().map(|(addr, acc)| (addr, (acc, std::iter::empty()))),
             )?;
 
-            let loader = DBTrieLoader::default();
+            let mut loader = DBTrieLoader::default();
 
             let mut tx = self.tx.inner();
             let root = loader.calculate_root(&tx).expect("couldn't create initial trie");

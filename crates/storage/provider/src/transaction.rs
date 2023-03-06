@@ -308,8 +308,13 @@ where
         // merkle tree
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
-            let loader = DBTrieLoader::default();
-            let root = loader.update_root(self, current_root, from..to)?;
+            let mut loader = DBTrieLoader::default();
+            let root = match loader.update_root(self, current_root, from..to)? {
+                crate::trie::TrieProgress::Complete(root) => root,
+                crate::trie::TrieProgress::InProgress(_) => {
+                    return Err(TransactionError::Custom("asd"))
+                }
+            };
             if root != block.state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
@@ -760,4 +765,7 @@ pub enum TransactionError {
         /// Block hash
         block_hash: BlockHash,
     },
+    /// Custom transaction error
+    #[error("A custom error occurred: {0}")]
+    Custom(&'static str),
 }

@@ -1,6 +1,7 @@
 use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
+use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -10,7 +11,7 @@ use reth_db::{
 };
 use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
-    H256, KECCAK_EMPTY, U256,
+    TrieStageProgress, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
@@ -229,124 +230,240 @@ impl EthAccount {
 
 /// Struct for calculating the root of a merkle patricia tree,
 /// while populating the database with intermediate hashes.
-#[derive(Debug, Default)]
-pub struct DBTrieLoader;
+#[derive(Debug)]
+pub struct DBTrieLoader {
+    /// The maximum number of keys to insert before committing. Both from `AccountsTrie` and
+    /// `StoragesTrie`.
+    pub commit_threshold: u64,
+    /// The current number of inserted keys from both `AccountsTrie` and `StoragesTrie`.
+    current: u64,
+}
+
+impl Default for DBTrieLoader {
+    fn default() -> Self {
+        DBTrieLoader { commit_threshold: 500_000, current: 0 }
+    }
+}
+
+/// Status of the trie calculation.
+#[derive(Debug, PartialEq)]
+pub enum TrieProgress {
+    /// Trie has finished with the passed root.
+    Complete(H256),
+    /// Trie has hit its commit threshold.
+    InProgress(TrieStageProgress),
+}
 
 impl DBTrieLoader {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
     pub fn calculate_root<DB: Database>(
-        &self,
+        &mut self,
         tx: &Transaction<'_, DB>,
-    ) -> Result<H256, TrieError> {
-        tx.clear::<tables::AccountsTrie>()?;
-        tx.clear::<tables::StoragesTrie>()?;
+    ) -> Result<TrieProgress, TrieError> {
+        let mut progress = self.get_progress(tx)?;
+
+        if progress.next_hashed_account.is_none() {
+            tx.clear::<tables::AccountsTrie>()?;
+            tx.clear::<tables::StoragesTrie>()?;
+        }
+
+        let mut trie = PatriciaTrie::new(
+            Arc::new(if let Some(root) = progress.current_account_root {
+                HashDatabase::from_root(tx, root)?
+            } else {
+                HashDatabase::new(tx)?
+            }),
+            Arc::new(HasherKeccak::new()),
+        );
 
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
-        let mut walker = accounts_cursor.walk(None)?;
-
-        let db = Arc::new(HashDatabase::new(tx)?);
-
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
+        let mut walker = accounts_cursor.walk(progress.next_hashed_account.take())?;
 
         while let Some((hashed_address, account)) = walker.next().transpose()? {
-            let value = EthAccount::from_with_root(
-                account,
-                self.calculate_storage_root(tx, hashed_address)?,
-            );
+            match self.calculate_storage_root(
+                tx,
+                hashed_address,
+                progress.next_storage.take(),
+                progress.current_storage_root.take(),
+            )? {
+                TrieProgress::Complete(root) => {
+                    let value = EthAccount::from_with_root(account, root);
 
-            let mut out = Vec::new();
-            Encodable::encode(&value, &mut out);
-            trie.insert(hashed_address.as_bytes().to_vec(), out)?;
+                    let mut out = Vec::new();
+                    Encodable::encode(&value, &mut out);
+                    trie.insert(hashed_address.as_bytes().to_vec(), out)?;
+
+                    if self.has_hit_threshold() {
+                        return self.save_account_progress(
+                            Default::default(),
+                            H256::from_slice(trie.root()?.as_slice()),
+                            hashed_address,
+                            tx,
+                        )
+                    }
+                }
+                TrieProgress::InProgress(in_progress) => {
+                    return self.save_account_progress(
+                        in_progress,
+                        H256::from_slice(trie.root()?.as_slice()),
+                        hashed_address,
+                        tx,
+                    )
+                }
+            }
         }
-        let root = H256::from_slice(trie.root()?.as_slice());
 
-        Ok(root)
+        // Reset inner stage progress
+        self.save_progress(tx, Default::default())?;
+
+        Ok(TrieProgress::Complete(H256::from_slice(trie.root()?.as_slice())))
     }
 
     fn calculate_storage_root<DB: Database>(
-        &self,
+        &mut self,
         tx: &Transaction<'_, DB>,
         address: H256,
-    ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::new(tx, address)?);
-
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
-
+        next_storage: Option<H256>,
+        current_storage_root: Option<H256>,
+    ) -> Result<TrieProgress, TrieError> {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
-        // Should be able to use walk_dup, but any call to next() causes an assert fail in mdbx.c
-        // let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
-        let mut current = storage_cursor.seek_by_key_subkey(address, H256::zero())?;
+        let (mut current_entry, db) = if let Some(entry) = next_storage {
+            (
+                storage_cursor.seek_by_key_subkey(address, entry)?.filter(|e| e.key == entry),
+                DupHashDatabase::from_root(tx, address, current_storage_root.expect("is some"))?,
+            )
+        } else {
+            (
+                storage_cursor.seek_by_key_subkey(address, H256::zero())?,
+                DupHashDatabase::new(tx, address)?,
+            )
+        };
 
-        while let Some(StorageEntry { key: storage_key, value }) = current {
+        let mut trie = PatriciaTrie::new(Arc::new(db), Arc::new(HasherKeccak::new()));
+
+        while let Some(StorageEntry { key: storage_key, value }) = current_entry {
             let out = encode_fixed_size(&value).to_vec();
             trie.insert(storage_key.to_vec(), out)?;
-            current = storage_cursor.next_dup()?.map(|(_, v)| v);
+            // Should be able to use walk_dup, but any call to next() causes an assert fail in
+            // mdbx.c
+            current_entry = storage_cursor.next_dup()?.map(|(_, v)| v);
+            let threshold = self.has_hit_threshold();
+            if let Some(current_entry) = current_entry {
+                if threshold {
+                    return Ok(TrieProgress::InProgress(TrieStageProgress {
+                        current_storage_root: Some(H256::from_slice(trie.root()?.as_slice())),
+                        next_storage: Some(current_entry.key),
+                        ..Default::default()
+                    }))
+                }
+            }
         }
 
-        let root = H256::from_slice(trie.root()?.as_slice());
-
-        Ok(root)
+        Ok(TrieProgress::Complete(H256::from_slice(trie.root()?.as_slice())))
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
     pub fn update_root<DB: Database>(
-        &self,
+        &mut self,
         tx: &Transaction<'_, DB>,
-        root: H256,
+        mut root: H256,
         tid_range: Range<TransitionId>,
-    ) -> Result<H256, TrieError> {
+    ) -> Result<TrieProgress, TrieError> {
+        let mut progress = self.get_progress(tx)?;
+
+        if let Some(intermediate_root) = progress.current_account_root.take() {
+            root = intermediate_root;
+        }
+
+        let next_acc = progress.next_hashed_account.take();
+        let changed_accounts = self
+            .gather_changes(tx, tid_range)?
+            .into_iter()
+            .skip_while(|(addr, _)| next_acc.is_some() && next_acc.expect("is some") != *addr);
+
+        let mut trie = PatriciaTrie::from(
+            Arc::new(HashDatabase::from_root(tx, root)?),
+            Arc::new(HasherKeccak::new()),
+            root.as_bytes(),
+        )?;
+
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
 
-        let changed_accounts = self.gather_changes(tx, tid_range)?;
-
-        let db = Arc::new(HashDatabase::from_root(tx, root)?);
-
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
-
-        for (address, changed_storages) in changed_accounts {
-            let storage_root = if let Some(account) = trie.get(address.as_slice())? {
-                trie.remove(address.as_bytes())?;
+        for (hashed_address, changed_storages) in changed_accounts {
+            let res = if let Some(account) = trie.get(hashed_address.as_slice())? {
+                trie.remove(hashed_address.as_bytes())?;
 
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
-                self.update_storage_root(tx, storage_root, address, changed_storages)?
+                self.update_storage_root(
+                    tx,
+                    progress.current_storage_root.take().unwrap_or(storage_root),
+                    hashed_address,
+                    changed_storages,
+                    progress.next_storage.take(),
+                )?
             } else {
-                self.calculate_storage_root(tx, address)?
+                self.calculate_storage_root(
+                    tx,
+                    hashed_address,
+                    progress.next_storage.take(),
+                    progress.current_storage_root.take(),
+                )?
             };
 
-            if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
+            let storage_root = match res {
+                TrieProgress::Complete(root) => root,
+                TrieProgress::InProgress(in_progress) => {
+                    return self.save_account_progress(
+                        in_progress,
+                        H256::from_slice(trie.root()?.as_slice()),
+                        hashed_address,
+                        tx,
+                    )
+                }
+            };
+
+            if let Some((_, account)) = accounts_cursor.seek_exact(hashed_address)? {
                 let value = EthAccount::from_with_root(account, storage_root);
 
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
-                trie.insert(address.as_bytes().to_vec(), out)?;
+
+                trie.insert(hashed_address.as_bytes().to_vec(), out)?;
+
+                if self.has_hit_threshold() {
+                    return self.save_account_progress(
+                        Default::default(),
+                        H256::from_slice(trie.root()?.as_slice()),
+                        hashed_address,
+                        tx,
+                    )
+                }
             }
         }
-
         let root = H256::from_slice(trie.root()?.as_slice());
 
-        Ok(root)
+        Ok(TrieProgress::Complete(root))
     }
 
     fn update_storage_root<DB: Database>(
-        &self,
+        &mut self,
         tx: &Transaction<'_, DB>,
         root: H256,
         address: H256,
         changed_storages: BTreeSet<H256>,
-    ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::from_root(tx, address, root)?);
-
-        let hasher = Arc::new(HasherKeccak::new());
-
-        let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
+        next_storage: Option<H256>,
+    ) -> Result<TrieProgress, TrieError> {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+
+        let mut trie = PatriciaTrie::new(
+            Arc::new(DupHashDatabase::from_root(tx, address, root)?),
+            Arc::new(HasherKeccak::new()),
+        );
+
+        let changed_storages = changed_storages
+            .into_iter()
+            .skip_while(|k| next_storage.is_some() && *k == next_storage.expect("is some"));
 
         for key in changed_storages {
             if let Some(StorageEntry { value, .. }) =
@@ -354,6 +471,13 @@ impl DBTrieLoader {
             {
                 let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes().to_vec(), out)?;
+                if self.has_hit_threshold() {
+                    return Ok(TrieProgress::InProgress(TrieStageProgress {
+                        current_storage_root: Some(H256::from_slice(trie.root()?.as_slice())),
+                        next_storage: Some(key),
+                        ..Default::default()
+                    }))
+                }
             } else {
                 trie.remove(key.as_bytes())?;
             }
@@ -361,7 +485,7 @@ impl DBTrieLoader {
 
         let root = H256::from_slice(trie.root()?.as_slice());
 
-        Ok(root)
+        Ok(TrieProgress::Complete(root))
     }
 
     fn gather_changes<DB: Database>(
@@ -399,6 +523,47 @@ impl DBTrieLoader {
             .collect();
 
         Ok(hashed_changes)
+    }
+
+    fn save_account_progress<DB: Database>(
+        &mut self,
+        mut in_progress: TrieStageProgress,
+        root: H256,
+        hashed_address: H256,
+        tx: &Transaction<'_, DB>,
+    ) -> Result<TrieProgress, TrieError> {
+        in_progress.current_account_root = Some(root);
+        in_progress.next_hashed_account = Some(hashed_address);
+
+        self.save_progress(tx, in_progress.clone())?;
+
+        Ok(TrieProgress::InProgress(in_progress))
+    }
+
+    /// Saves the trie progress
+    pub fn save_progress<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        progress: TrieStageProgress,
+    ) -> Result<(), TrieError> {
+        let mut buf = vec![];
+        progress.to_compact(&mut buf);
+        Ok(tx.put::<tables::SyncStageProgress>("TrieLoader".into(), buf)?)
+    }
+
+    /// Gets the trie progress
+    pub fn get_progress<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+    ) -> Result<TrieStageProgress, TrieError> {
+        let buf = tx.get::<tables::SyncStageProgress>("TrieLoader".into())?.unwrap_or_default();
+        let (progress, _) = TrieStageProgress::from_compact(&buf, buf.len());
+        Ok(progress)
+    }
+
+    fn has_hit_threshold(&mut self) -> bool {
+        self.current += 1;
+        self.current >= self.commit_threshold
     }
 }
 

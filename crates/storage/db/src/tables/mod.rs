@@ -293,6 +293,11 @@ table!(
     ( SyncStage ) StageId | BlockNumber
 );
 
+table!(
+    /// Stores arbitrary data to keep track of a stage first-sync progress.
+    ( SyncStageProgress ) StageId | Vec<u8>
+);
+
 ///
 /// Alias Types
 
