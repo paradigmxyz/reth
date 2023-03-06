@@ -18,13 +18,13 @@ pub enum BlockTransactions {
     /// Full transactions
     Full(Vec<Transaction>),
     /// Special case for uncle response.
-    NoTx,
+    Uncle,
 }
 impl BlockTransactions {
     /// Check if the enum variant is
     /// used for an uncle response.
     pub fn is_uncle(&self) -> bool {
-        matches!(self, Self::NoTx)
+        matches!(self, Self::Uncle)
     }
 }
 /// Determines how the `transactions` field of [Block] should be filled.
@@ -64,14 +64,15 @@ pub struct Block {
     /// Header of the block
     #[serde(flatten)]
     pub header: Header,
-    /// Total difficulty
+    /// Total difficulty, this field is None only if  representing
+    /// an Uncle block.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_difficulty: Option<U256>,
     /// Uncles' hashes
     pub uncles: Vec<H256>,
     /// Transactions
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transactions: Option<BlockTransactions>,
+    #[serde(skip_serializing_if = "BlockTransactions::is_uncle")]
+    pub transactions: BlockTransactions,
     /// Integer the size of this block in bytes.
     pub size: Option<U256>,
     /// Base Fee for post-EIP1559 blocks.
@@ -170,7 +171,7 @@ impl Block {
         Self {
             header,
             uncles,
-            transactions: Some(transactions),
+            transactions,
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
             total_difficulty: Some(total_difficulty),
             size: Some(U256::from(block_length)),
@@ -188,7 +189,7 @@ impl Block {
         Self {
             uncles: vec![],
             header: rpc_header,
-            transactions: None,
+            transactions: BlockTransactions::Uncle,
             base_fee_per_gas: None,
             withdrawals: None,
             size,
