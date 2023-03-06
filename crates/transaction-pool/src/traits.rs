@@ -313,6 +313,13 @@ pub struct PooledTransaction {
     pub(crate) effective_gas_price: u128,
 }
 
+impl PooledTransaction {
+    /// Return the reference to the underlying transaction.
+    pub fn transaction(&self) -> &TransactionSignedEcRecovered {
+        &self.transaction
+    }
+}
+
 impl PoolTransaction for PooledTransaction {
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
