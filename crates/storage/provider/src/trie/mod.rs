@@ -292,7 +292,7 @@ impl DBTrieLoader {
 
         // if root is empty remove it from db
         if root == EMPTY_ROOT {
-            tx.delete::<tables::StoragesTrie>(root, None)?;
+            tx.delete::<tables::StoragesTrie>(address, None)?;
         }
 
         Ok(root)
@@ -341,10 +341,6 @@ impl DBTrieLoader {
                 cursor.delete_current()?;
             }
         }
-        // if root is empty remove it from db
-        if new_root == EMPTY_ROOT {
-            tx.delete::<tables::StoragesTrie>(root, None)?;
-        }
 
         Ok(new_root)
     }
@@ -384,6 +380,10 @@ impl DBTrieLoader {
             {
                 cursor.delete_current()?;
             }
+        }
+        // if root is empty remove it from db
+        if new_root == EMPTY_ROOT {
+            tx.delete::<tables::StoragesTrie>(address, None)?;
         }
 
         Ok(new_root)
