@@ -291,13 +291,11 @@ where
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
 
-        let access_list = request.access_list.clone().unwrap_or_default();
         let mut env = build_call_evm_env(cfg, block, request)?;
         let mut db = SubState::new(State::new(state));
 
-        let mut inspector =
-            AccessListInspector::new(access_list, Address::zero(), Address::zero(), vec![]);
-        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
+        let mut inspector = AccessListInspector::default();
+        let (_result, _env) = inspect(&mut db, env, &mut inspector)?;
 
         Ok(inspector.into_access_list())
     }
@@ -357,7 +355,7 @@ fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv
     let CallFees { max_priority_fee_per_gas, gas_price } =
         CallFees::ensure_fees(gas_price, max_fee_per_gas, max_priority_fee_per_gas)?;
 
-    let gas_limit = gas.unwrap_or(block_env.gas_limit);
+    let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
 
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| InvalidTransactionError::GasUintOverflow)?,
