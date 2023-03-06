@@ -388,7 +388,7 @@ impl DBTrieLoader {
 
         // if root is empty remove it from db
         if new_root == EMPTY_ROOT {
-            tx.delete::<tables::StoragesTrie>(addres, None)?;
+            tx.delete::<tables::StoragesTrie>(address, None)?;
         }
 
         Ok(new_root)
