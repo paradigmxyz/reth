@@ -11,7 +11,10 @@ use reth_primitives::{
     TransactionKind, H256, U128, U256,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
-use reth_revm::database::{State, SubState};
+use reth_revm::{
+    access_list::AccessListInspector,
+    database::{State, SubState},
+};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     CallRequest,
@@ -22,7 +25,7 @@ use revm::{
         ruint::Uint, BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState,
         TransactTo, TxEnv,
     },
-    Database,
+    Database, Inspector,
 };
 
 // Gas per transaction not creating a contract.
@@ -281,20 +284,22 @@ where
         request: CallRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
-        let (result, _env) = self.call_at(request, at.unwrap_or_default(), None).await?;
-        let access_list = result
-            .state
-            .into_iter()
-            .map(|(addr, acc)| AccessListItem {
-                address: addr.into(),
-                storage_keys: acc
-                    .storage
-                    .into_iter()
-                    .map(|(k, v)| H256::from_slice(&U256::to_be_bytes::<{ U256::BYTES }>(&k)))
-                    .collect::<Vec<H256>>(),
-            })
-            .collect::<Vec<AccessListItem>>();
-        Ok(AccessList(access_list))
+        let (mut cfg, block, at) = self.evm_env_at(at.unwrap_or_default()).await?;
+        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+        // we want to disable this in eth_call, since this is common practice used by other node
+        // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+        cfg.disable_block_gas_limit = true;
+
+        let access_list = request.access_list.clone().unwrap_or_default();
+        let mut env = build_call_evm_env(cfg, block, request)?;
+        let mut db = SubState::new(State::new(state));
+
+        let mut inspector =
+            AccessListInspector::new(access_list, Address::zero(), Address::zero(), vec![]);
+        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
+
+        Ok(inspector.into_access_list())
     }
 }
 
@@ -307,6 +312,19 @@ where
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
     let res = evm.transact()?;
+    Ok((res, evm.env))
+}
+
+/// Executes the [Env] against the given [Database] without committing state changes.
+pub(crate) fn inspect<S, I>(db: S, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
+where
+    S: Database,
+    <S as Database>::Error: Into<EthApiError>,
+    I: Inspector<S>,
+{
+    let mut evm = revm::EVM::with_env(env);
+    evm.database(db);
+    let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
 }
 

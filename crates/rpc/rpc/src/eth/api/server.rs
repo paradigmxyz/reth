@@ -194,7 +194,7 @@ where
     ) -> Result<AccessListWithGasUsed> {
         let access_list = self.create_access_list_at(request.clone(), block_number).await?;
         request.access_list = Some(access_list.clone());
-        let gas_used = self.estimate_gas(request, block_number).await?;
+        let gas_used = self.estimate_gas_at(request, block_number.unwrap_or_default()).await?;
         Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 
