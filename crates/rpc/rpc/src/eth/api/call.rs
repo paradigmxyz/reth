@@ -313,7 +313,7 @@ where
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
-    let res = evm.transact().map_err(|e| e)?;
+    let res = evm.transact()?;
     Ok((res, evm.env))
 }
 
