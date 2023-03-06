@@ -23,21 +23,21 @@ use tokio_stream::{
 ///
 /// This handles `eth_subscribe` RPC calls.
 #[derive(Clone)]
-pub struct EthPubSub<Client, Pool, Events> {
+pub struct EthPubSub<Client, Pool, Events, Network> {
     /// All nested fields bundled together.
-    inner: EthPubSubInner<Client, Pool, Events>,
+    inner: EthPubSubInner<Client, Pool, Events, Network>,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl EthPubSub ===
 
-impl<Client, Pool, Events> EthPubSub<Client, Pool, Events> {
+impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [tokio::task::spawn]
-    pub fn new(client: Client, pool: Pool, chain_events: Events) -> Self {
-        Self::with_spawner(client, pool, chain_events, Box::<TokioTaskExecutor>::default())
+    pub fn new(client: Client, pool: Pool, chain_events: Events, network: Network) -> Self {
+        Self::with_spawner(client, pool, chain_events, network, Box::<TokioTaskExecutor>::default())
     }
 
     /// Creates a new, shareable instance.
@@ -45,18 +45,20 @@ impl<Client, Pool, Events> EthPubSub<Client, Pool, Events> {
         client: Client,
         pool: Pool,
         chain_events: Events,
+        network: Network,
         subscription_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
-        let inner = EthPubSubInner { client, pool, chain_events };
+        let inner = EthPubSubInner { client, pool, chain_events, network };
         Self { inner, subscription_task_spawner }
     }
 }
 
-impl<Client, Pool, Events> EthPubSubApiServer for EthPubSub<Client, Pool, Events>
+impl<Client, Pool, Events, Network> EthPubSubApiServer for EthPubSub<Client, Pool, Events, Network>
 where
     Client: BlockProvider + EvmEnvProvider + SyncStateProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
+    Network: SyncStateProvider + Clone + 'static,
 {
     fn subscribe(
         &self,
@@ -76,15 +78,16 @@ where
 }
 
 /// The actual handler for and accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Client, Pool, Events>(
-    pubsub: EthPubSubInner<Client, Pool, Events>,
+async fn handle_accepted<Client, Pool, Events, Network>(
+    pubsub: EthPubSubInner<Client, Pool, Events, Network>,
     mut accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
 ) where
-    Client: BlockProvider + EvmEnvProvider + SyncStateProvider +'static,
+    Client: BlockProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + 'static,
+    Network: SyncStateProvider + 'static,
 {
     // if no params are provided, used default filter params
     let _params = match params {
@@ -110,11 +113,25 @@ async fn handle_accepted<Client, Pool, Events>(
         }
         SubscriptionKind::Syncing => {
             // TODO subscribe new blocks -> read is_syncing from network
-            tokio::spawn(async move {
-                let mut block_subscription = pubsub.chain_events.subscribe_new_blocks();
-                let initial_sync_status = pubsub.client.is_syncing();
 
-                let initial_sub_res = if initial_sync_status {
+            let mut block_subscription = pubsub.chain_events.subscribe_new_blocks();
+            let initial_sync_status = pubsub.network.is_syncing();
+
+            let initial_sub_res = if initial_sync_status {
+                EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
+                    syncing: true,
+                    starting_block: 0,
+                    current_block: pubsub.client.chain_info().unwrap_or_default().best_number,
+                    highest_block: None,
+                }))
+            } else {
+                EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
+            };
+
+            accepted_sink.send(&initial_sub_res).unwrap_or_default();
+
+            while let Some(_) = block_subscription.recv().await {
+                let sub_res = if pubsub.network.is_syncing() {
                     EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(
                         SyncStatusMetadata {
                             syncing: true,
@@ -127,46 +144,15 @@ async fn handle_accepted<Client, Pool, Events>(
                     EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
                 };
 
-                match accepted_sink.send(&initial_sub_res) {
-                    Ok(_) => {
-                        // The message was successfully sent
-                    }
-                    Err(_) => {
-                        // An error occurred while sending the message
-                    }
+                if pubsub.network.is_syncing() != initial_sync_status {
+                    accepted_sink.send(&initial_sub_res).unwrap_or_default();
                 }
-
-                while let Some(_) = block_subscription.recv().await {
-                    let sub_res = if pubsub.client.is_syncing() {
-                        EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(
-                            SyncStatusMetadata {
-                                syncing: true,
-                                starting_block: 0,
-                                current_block: pubsub.client.chain_info().unwrap().best_number,
-                                highest_block: None,
-                            },
-                        ))
-                    } else {
-                        EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
-                    };
-
-                    if pubsub.client.is_syncing() != initial_sync_status {
-                        match accepted_sink.send(&sub_res) {
-                            Ok(_) => {
-                                // The message was successfully sent
-                            }
-                            Err(_) => {
-                                // An error occurred while sending the message
-                            }
-                        }
-                    }
-                }
-            });
+            }
         }
     }
 }
 
-impl<Client, Pool, Events> std::fmt::Debug for EthPubSub<Client, Pool, Events> {
+impl<Client, Pool, Events, Network> std::fmt::Debug for EthPubSub<Client, Pool, Events, Network> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthPubSub").finish_non_exhaustive()
     }
@@ -174,18 +160,20 @@ impl<Client, Pool, Events> std::fmt::Debug for EthPubSub<Client, Pool, Events> {
 
 /// Container type `EthPubSub`
 #[derive(Clone)]
-struct EthPubSubInner<Client, Pool, Events> {
+struct EthPubSubInner<Client, Pool, Events, Network> {
     /// The transaction pool.
     pool: Pool,
     /// The client that can interact with the chain.
     client: Client,
     /// A type that allows to create new event subscriptions,
     chain_events: Events,
+    /// The network.
+    network: Network,
 }
 
 // == impl EthPubSubInner ===
 
-impl<Client, Pool, Events> EthPubSubInner<Client, Pool, Events>
+impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
 where
     Pool: TransactionPool + 'static,
 {
@@ -195,10 +183,11 @@ where
     }
 }
 
-impl<Client, Pool, Events> EthPubSubInner<Client, Pool, Events>
+impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
 where
     Client: BlockProvider + EvmEnvProvider + 'static,
     Events: ChainEventSubscriptions + 'static,
+    Network: SyncStateProvider + 'static,
 {
     /// Returns a stream that yields all new RPC blocks.
     fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
