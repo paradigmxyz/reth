@@ -302,7 +302,7 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
 /// This type is essentially a wrapper around [TransactionSignedEcRecovered] with additional fields
 /// derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct PooledTransaction {
+pub struct PooledTransaction {
     /// EcRecovered transaction info
     pub(crate) transaction: TransactionSignedEcRecovered,
 

@@ -14,8 +14,9 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    CallRequest, EIP1186AccountProofResponse, FeeHistory, FeeHistoryCacheItem, Index, RichBlock,
-    SyncStatus, TransactionReceipt, TransactionRequest, Work,
+    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory,
+    FeeHistoryCacheItem, Index, RichBlock, SyncStatus, TransactionReceipt, TransactionRequest,
+    Work,
 };
 use reth_transaction_pool::TransactionPool;
 use serde_json::Value;
@@ -101,19 +102,19 @@ where
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
     async fn uncle_by_block_hash_and_index(
         &self,
-        _hash: H256,
-        _index: Index,
+        hash: H256,
+        index: Index,
     ) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::ommer_by_block_and_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
     async fn uncle_by_block_number_and_index(
         &self,
-        _number: BlockNumberOrTag,
-        _index: Index,
+        number: BlockNumberOrTag,
+        index: Index,
     ) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByHash`
@@ -177,7 +178,12 @@ where
     }
 
     /// Handler for: `eth_call`
-    async fn call(&self, _request: CallRequest, _block_number: Option<BlockId>) -> Result<Bytes> {
+    async fn call(
+        &self,
+        _request: CallRequest,
+        _block_number: Option<BlockId>,
+        _state_overrides: Option<StateOverride>,
+    ) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
@@ -383,7 +389,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::EthApi;
+    use crate::{eth::cache::EthStateCache, EthApi};
     use jsonrpsee::{
         core::{error::Error as RpcError, RpcResult},
         types::error::{CallError, INVALID_PARAMS_CODE},
@@ -398,7 +404,12 @@ mod tests {
     #[tokio::test]
     /// Handler for: `eth_test_fee_history`
     async fn test_fee_history() {
-        let eth_api = EthApi::new(NoopProvider::default(), testing_pool(), NoopNetwork::default());
+        let eth_api = EthApi::new(
+            NoopProvider::default(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+        );
 
         let response = eth_api.fee_history(1.into(), BlockNumberOrTag::Latest.into(), None).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
@@ -438,7 +449,12 @@ mod tests {
                 .push(base_fee_per_gas.map(|fee| U256::try_from(fee).unwrap()).unwrap_or_default());
         }
 
-        let eth_api = EthApi::new(mock_provider, testing_pool(), NoopNetwork::default());
+        let eth_api = EthApi::new(
+            mock_provider,
+            testing_pool(),
+            NoopNetwork::default(),
+            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+        );
 
         let response =
             eth_api.fee_history((newest_block + 1).into(), newest_block.into(), None).await;

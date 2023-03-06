@@ -25,7 +25,6 @@ jobs:
       - name: Install toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2022-12-27
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
         with:

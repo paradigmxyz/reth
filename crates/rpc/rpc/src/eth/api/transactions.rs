@@ -46,6 +46,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::eth::cache::EthStateCache;
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
@@ -58,7 +59,12 @@ mod tests {
 
         let pool = testing_pool();
 
-        let eth_api = EthApi::new(noop_provider, pool.clone(), ());
+        let eth_api = EthApi::new(
+            noop_provider,
+            pool.clone(),
+            (),
+            EthStateCache::spawn(NoopProvider::default(), Default::default()),
+        );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
         let tx_1 = Bytes::from(hex!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"));

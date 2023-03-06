@@ -160,7 +160,12 @@ impl Command {
 
         let _rpc_server = self
             .rpc
-            .start_rpc_server(shareable_db.clone(), test_transaction_pool.clone(), network.clone())
+            .start_rpc_server(
+                shareable_db.clone(),
+                test_transaction_pool.clone(),
+                network.clone(),
+                ctx.task_executor.clone(),
+            )
             .await?;
         info!(target: "reth::cli", "Started RPC server");
 
@@ -174,6 +179,7 @@ impl Command {
                 shareable_db,
                 test_transaction_pool,
                 network.clone(),
+                ctx.task_executor.clone(),
                 engine_api_handle,
             )
             .await?;
@@ -497,6 +503,12 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_help_node_command() {
+        let err = Command::try_parse_from(["reth", "--help"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+    }
 
     #[test]
     fn parse_common_node_command_chain_args() {

@@ -1,7 +1,7 @@
 //! `eth` namespace handler implementation.
 
 mod api;
-mod cache;
+pub mod cache;
 pub(crate) mod error;
 mod filter;
 mod pubsub;

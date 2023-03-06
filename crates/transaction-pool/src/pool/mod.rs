@@ -92,7 +92,6 @@ mod parked;
 pub(crate) mod pending;
 pub(crate) mod size;
 pub(crate) mod state;
-mod transaction;
 pub mod txpool;
 mod update;
 
