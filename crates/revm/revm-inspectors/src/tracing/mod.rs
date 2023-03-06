@@ -1,10 +1,18 @@
-use crate::tracing::{
-    arena::{CallTrace, CallTraceArena, CallTraceStep, LogCallOrder},
-    call::CallKind,
-    node::RawLog,
+use crate::{
+    stack::MaybeOwnedInspector,
+    tracing::{
+        arena::{CallTrace, CallTraceArena, CallTraceStep, LogCallOrder},
+        call::CallKind,
+        node::RawLog,
+    },
 };
-use reth_primitives::{bytes::Bytes, Address, H256, U256};
+use reth_primitives::{
+    bytes::Bytes,
+    contract::{create2_address_from_code, create_address},
+    Address, H256, U256,
+};
 use revm::{
+    inspectors::GasInspector,
     interpreter::{
         opcode, return_ok, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult,
         Interpreter, OpCode,
@@ -12,6 +20,7 @@ use revm::{
     primitives::{CreateScheme, SpecId},
     Database, EVMData, Inspector, JournalEntry,
 };
+use std::{cell::RefCell, rc::Rc};
 
 mod arena;
 mod call;
@@ -26,11 +35,29 @@ pub struct TracingInspector {
     traces: CallTraceArena,
     trace_stack: Vec<usize>,
     step_stack: Vec<StackStep>,
+    /// The gas inspector used to track remaining gas.
+    ///
+    /// This is either owned by this inspector directly or part of a stack of inspectors, in which
+    /// case all delegated functions are noops.
+    gas_inspector: MaybeOwnedInspector<GasInspector>,
 }
 
 // === impl TracingInspector ===
 
 impl TracingInspector {
+    /// Enables step recording and uses [GasInspector] to report gas costs for each step.
+    ///
+    /// Caution: if this inspector is part of a stack, the [MaybeOwnedInspector] should be
+    /// [MaybeOwnedInspector::Stacked].
+    pub fn with_steps_recording(
+        mut self,
+        gas_inspector: MaybeOwnedInspector<GasInspector>,
+    ) -> Self {
+        self.record_steps = true;
+        self.gas_inspector = gas_inspector;
+        self
+    }
+
     fn start_trace(
         &mut self,
         depth: usize,
@@ -147,13 +174,23 @@ impl<DB> Inspector<DB> for TracingInspector
 where
     DB: Database,
 {
+    fn initialize_interp(
+        &mut self,
+        interp: &mut Interpreter,
+        data: &mut EVMData<'_, DB>,
+        is_static: bool,
+    ) -> InstructionResult {
+        self.gas_inspector.initialize_interp(interp, data, is_static)
+    }
+
     fn step(
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        _is_static: bool,
+        is_static: bool,
     ) -> InstructionResult {
         if self.record_steps {
+            self.gas_inspector.step(interp, data, is_static);
             self.start_step(interp, data);
         }
 
@@ -162,11 +199,13 @@ where
 
     fn log(
         &mut self,
-        _evm_data: &mut EVMData<'_, DB>,
-        _address: &Address,
+        evm_data: &mut EVMData<'_, DB>,
+        address: &Address,
         topics: &[H256],
         data: &Bytes,
     ) {
+        self.gas_inspector.log(evm_data, address, topics, data);
+
         let node = &mut self.traces.arena[*self.trace_stack.last().expect("no ongoing trace")];
         node.ordering.push(LogCallOrder::Log(node.logs.len()));
         node.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
@@ -176,10 +215,11 @@ where
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
-        _is_static: bool,
+        is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
         if self.record_steps {
+            self.gas_inspector.step_end(interp, data, is_static, eval);
             self.fill_step(interp, data, eval);
             return eval
         }
@@ -190,8 +230,10 @@ where
         &mut self,
         data: &mut EVMData<'_, DB>,
         inputs: &mut CallInputs,
-        _is_static: bool,
+        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
+        self.gas_inspector.call(data, inputs, is_static);
+
         // determine correct `from` and `to`  based on the call scheme
         let (from, to) = match inputs.context.scheme {
             CallScheme::DelegateCall | CallScheme::CallCode => {
@@ -215,12 +257,14 @@ where
     fn call_end(
         &mut self,
         data: &mut EVMData<'_, DB>,
-        _inputs: &CallInputs,
+        inputs: &CallInputs,
         gas: Gas,
         ret: InstructionResult,
         out: Bytes,
-        _is_static: bool,
+        is_static: bool,
     ) -> (InstructionResult, Gas, Bytes) {
+        self.gas_inspector.call_end(data, inputs, gas, ret, out.clone(), is_static);
+
         self.fill_trace(
             ret,
             gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
@@ -236,6 +280,8 @@ where
         data: &mut EVMData<'_, DB>,
         inputs: &mut CreateInputs,
     ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
+        self.gas_inspector.create(data, inputs);
+
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
         self.start_trace(
@@ -257,12 +303,14 @@ where
     fn create_end(
         &mut self,
         data: &mut EVMData<'_, DB>,
-        _inputs: &CreateInputs,
+        inputs: &CreateInputs,
         status: InstructionResult,
         address: Option<Address>,
         gas: Gas,
         retdata: Bytes,
     ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
+        self.gas_inspector.create_end(data, inputs, status, address, gas, retdata.clone());
+
         let code = match address {
             Some(address) => data
                 .journaled_state
@@ -295,16 +343,12 @@ pub fn gas_used(spec: SpecId, spent: u64, refunded: u64) -> u64 {
     let refund_quotient = if SpecId::enabled(spec, SpecId::LONDON) { 5 } else { 2 };
     spent - (refunded).min(spent / refund_quotient)
 }
-
 /// Get the address of a contract creation
-pub fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {
-    todo!()
-    // match call.scheme {
-    //     CreateScheme::Create => get_contract_address(call.caller, nonce),
-    //     CreateScheme::Create2 { salt } => {
-    //         let mut buffer: [u8; 4 * 8] = [0; 4 * 8];
-    //         salt.to_big_endian(&mut buffer);
-    //         get_create2_address(call.caller, buffer, call.init_code.clone())
-    //     }
-    // }
+fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {
+    match call.scheme {
+        CreateScheme::Create => create_address(call.caller, nonce),
+        CreateScheme::Create2 { salt } => {
+            create2_address_from_code(call.caller, call.init_code.clone(), salt)
+        }
+    }
 }
