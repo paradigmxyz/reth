@@ -558,6 +558,10 @@ where
                     tx_hash_cursor.delete_current()?;
                 }
             }
+            // rm TxTransitionId
+            self.get_or_take::<tables::TxTransitionIndex, TAKE>(
+                first_transaction..=last_transaction,
+            )?;
         }
 
         // Merge transaction into blocks
@@ -701,6 +705,7 @@ where
         let first_block_number =
             block_transition.first().expect("Check for empty is already done").0;
 
+        // get block transition of parent block.
         let from = self.get_block_transition(first_block_number.saturating_sub(1))?;
         let to = block_transition.last().expect("Check for empty is already done").1;
 
@@ -939,7 +944,9 @@ where
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
         if TAKE {
+            // rm block bodies
             self.get_or_take::<tables::BlockBodies, TAKE>(range)?;
+            // rm transtion transition id.
         }
 
         // return them
@@ -1357,6 +1364,14 @@ where
         }
         Ok(())
     }
+
+    /// Return full table as Vec
+    pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DbError>
+    where
+        T::Key: Default + Ord,
+    {
+        self.cursor_read::<T>()?.walk(Some(T::Key::default()))?.collect::<Result<Vec<_>, DbError>>()
+    }
 }
 
 /// Unwind all history shards. For boundary shard, remove it from database and
@@ -1466,15 +1481,69 @@ mod test {
     use std::{collections::BTreeMap, ops::DerefMut};
 
     use crate::{
-        execution_result::{AccountChangeSet, ExecutionResult, TransactionChangeSet},
+        execution_result::{
+            AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
+        },
         insert_canonical_block, Transaction,
     };
-    use reth_db::mdbx::test_utils::create_test_rw_db;
+    use reth_db::{
+        database::Database, mdbx::test_utils::create_test_rw_db, models::StoredBlockBody, tables,
+        transaction::DbTxMut,
+    };
     use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-        H160, H256, MAINNET, U256,
+        hex_literal::hex, proofs::EMPTY_ROOT, Account, ChainSpecBuilder, Header, Receipt,
+        SealedBlock, SealedBlockWithSenders, H160, H256, MAINNET, U256,
     };
     use reth_rlp::Decodable;
+
+    fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlock) {
+        let n = g.number;
+        let h = H256::zero();
+        // check if all tables are empty
+        assert_eq!(
+            tx.table::<tables::Headers>().unwrap(),
+            vec![(g.number, g.header.clone().unseal())]
+        );
+
+        assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
+        assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
+        assert_eq!(tx.table::<tables::HeaderTD>().unwrap(), vec![(n, g.difficulty.into())]);
+        assert_eq!(
+            tx.table::<tables::BlockBodies>().unwrap(),
+            vec![(0, StoredBlockBody::default())]
+        );
+        assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::TxHashNumber>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::Receipts>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::PlainAccountState>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::AccountHistory>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::StorageHistory>().unwrap(), vec![]);
+        // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::BlockTransitionIndex>().unwrap(), vec![(n, 0)]);
+        assert_eq!(tx.table::<tables::TxTransitionIndex>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::AccountChangeSet>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::StorageChangeSet>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::HashedAccount>().unwrap(), vec![]);
+        assert_eq!(tx.table::<tables::HashedStorage>().unwrap(), vec![]);
+        // AccounsTree leave behind root of previous blocks.
+        assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![(EMPTY_ROOT, vec![0x80])]);
+        assert_eq!(tx.table::<tables::StoragesTrie>().unwrap(), vec![]); //vec![(EMPTY_ROOT,vec![0x30,0x78,0x38,0x30])]);
+        assert_eq!(tx.table::<tables::TxSenders>().unwrap(), vec![]);
+        // SyncStage is not updated in tests
+    }
+
+    fn genesis() -> SealedBlock {
+        SealedBlock {
+            header: Header { number: 0, difficulty: U256::from(1), ..Default::default() }
+                .seal(H256::zero()),
+            body: vec![],
+            ommers: vec![],
+            withdrawals: Some(vec![]),
+        }
+    }
 
     #[test]
     fn insert_get() {
@@ -1488,14 +1557,11 @@ mod test {
             .shanghai_activated()
             .build();
 
-        let genesis = SealedBlock {
-            header: Header { number: 0, difficulty: U256::from(1), ..Default::default() }
-                .seal(H256::zero()),
-            body: vec![],
-            ommers: vec![],
-            withdrawals: Some(vec![]),
-        };
-        insert_canonical_block(tx.deref_mut(), genesis, None, false).unwrap();
+        let genesis = genesis();
+        insert_canonical_block(tx.deref_mut(), genesis.clone(), None, false).unwrap();
+
+        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
+        assert_genesis_block(&tx, genesis.clone());
 
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let mut block = SealedBlock::decode(&mut block_rlp).unwrap();
@@ -1503,11 +1569,15 @@ mod test {
         let mut header = block.header.clone().unseal();
         header.number = 1;
         header.state_root =
-            H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
+            H256(hex!("06f4a8569a52057eae2d92653e0782eac23195f18fd2a29dc789fd7ab5435cc4"));
         block.header = header.seal_slow();
 
         let mut account_changeset = AccountChangeSet::default();
-        account_changeset.storage.insert(U256::from(5), (U256::from(9), U256::from(10)));
+        // storage will be moved
+        account_changeset.account = AccountInfoChangeSet::Created {
+            new: Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+        };
+        account_changeset.storage.insert(U256::from(5), (U256::ZERO, U256::from(10)));
 
         let exec_res = ExecutionResult {
             tx_changesets: vec![TransactionChangeSet {
@@ -1522,8 +1592,9 @@ mod test {
 
         tx.insert_block(block.clone(), &chain_spec, exec_res.clone()).unwrap();
 
-        let out = tx.get_block_and_execution_range::<true>(&chain_spec, 1..2).unwrap();
-
+        // take one block
+        let out = tx.get_block_and_execution_range::<true>(&chain_spec, 1..=1).unwrap();
         assert_eq!(out, vec![(block, exec_res)]);
+        assert_genesis_block(&tx, genesis);
     }
 }

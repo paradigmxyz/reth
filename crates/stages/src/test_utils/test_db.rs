@@ -6,7 +6,7 @@ use reth_db::{
         Env, EnvKind, WriteMap, RW,
     },
     models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
-    table::Table,
+    table::{KeyValue, Table},
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,
@@ -88,9 +88,8 @@ impl TestTransaction {
         })
     }
 
-    #[allow(clippy::type_complexity)]
     /// Return full table as Vec
-    pub fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
+    pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DbError>
     where
         T::Key: Default + Ord,
     {

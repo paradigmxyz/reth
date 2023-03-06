@@ -31,7 +31,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     // total difficulty
     let ttd = if block.number == 0 {
-        U256::ZERO
+        block.difficulty
     } else {
         let parent_block_number = block.number - 1;
         let parent_ttd = tx.get::<tables::HeaderTD>(parent_block_number)?.unwrap_or_default();
