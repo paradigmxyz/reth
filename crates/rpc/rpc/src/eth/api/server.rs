@@ -102,19 +102,19 @@ where
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
     async fn uncle_by_block_hash_and_index(
         &self,
-        _hash: H256,
-        _index: Index,
+        hash: H256,
+        index: Index,
     ) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::ommer_by_block_and_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
     async fn uncle_by_block_number_and_index(
         &self,
-        _number: BlockNumberOrTag,
-        _index: Index,
+        number: BlockNumberOrTag,
+        index: Index,
     ) -> Result<Option<RichBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByHash`
