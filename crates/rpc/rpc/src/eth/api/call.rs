@@ -30,6 +30,7 @@ use revm::{
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
+const MIN_CREATE_GAS: u64 = 53_000u64;
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
@@ -226,11 +227,14 @@ where
         // transaction requires to succeed
         let gas_used = res.result.gas_used();
         // the lowest value is capped by the gas it takes for a transfer
-        let mut lowest_gas_limit = MIN_TRANSACTION_GAS;
+        let mut lowest_gas_limit =
+            if (env.tx.transact_to.is_create()) { MIN_CREATE_GAS } else { MIN_TRANSACTION_GAS };
         let mut highest_gas_limit: u64 = highest_gas_limit.try_into().unwrap_or(u64::MAX);
         // pick a point that's close to the estimated gas
-        let mut mid_gas_limit =
-            std::cmp::min(gas_used * 3, (highest_gas_limit + lowest_gas_limit) / 2);
+        let mut mid_gas_limit = std::cmp::min(
+            gas_used * 3,
+            ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
+        );
 
         let mut last_highest_gas_limit = highest_gas_limit;
 
@@ -245,10 +249,10 @@ where
                     highest_gas_limit = mid_gas_limit;
                     // if last two successful estimations only vary by 10%, we consider this to be
                     // sufficiently accurate
-                    const ACCURACY: u64 = 10;
-                    if (last_highest_gas_limit - highest_gas_limit) * ACCURACY /
-                        last_highest_gas_limit <
-                        1u64
+                    const ACCURACY: u128 = 10;
+                    if (last_highest_gas_limit - highest_gas_limit) as u128 * ACCURACY /
+                        (last_highest_gas_limit as u128) <
+                        1u128
                     {
                         return Ok(U256::from(highest_gas_limit))
                     }
@@ -273,7 +277,7 @@ where
                 }
             }
             // new midpoint
-            mid_gas_limit = (highest_gas_limit + lowest_gas_limit) / 2;
+            mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
         }
 
         Ok(U256::from(highest_gas_limit))
@@ -305,11 +309,11 @@ where
 pub(crate) fn transact<S>(db: S, env: Env) -> EthResult<(ResultAndState, Env)>
 where
     S: Database,
-    <S as Database>::Error: Into<EthApiError>,
+    <S as Database>::Error: Into<EthApiError> + std::fmt::Debug,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
-    let res = evm.transact()?;
+    let res = evm.transact().map_err(|e| e)?;
     Ok((res, evm.env))
 }
 
