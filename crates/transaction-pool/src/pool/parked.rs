@@ -231,7 +231,7 @@ impl<T: PoolTransaction> Ord for BasefeeOrd<T> {
 /// `Queued` transactions are transactions that are currently blocked by other parked (basefee,
 /// queued) or missing transactions.
 ///
-/// The primary order function compares always compares the transaction costs first. In case these
+/// The primary order function always compares the transaction costs first. In case these
 /// are equal, it compares the timestamps when the transactions were created.
 #[derive(Debug)]
 pub(crate) struct QueuedOrd<T: PoolTransaction>(Arc<ValidPoolTransaction<T>>);
