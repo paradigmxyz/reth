@@ -1,14 +1,14 @@
-use crate::execution_result::{
-    AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
-};
-
-use hashbrown::hash_map::Entry;
 use reth_interfaces::executor::{BlockExecutor, Error};
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
     TransactionSigned, H256, U256,
 };
-use reth_provider::StateProvider;
+use reth_provider::{
+    execution_result::{
+        AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
+    },
+    StateProvider,
+};
 use reth_revm::{
     config::{WEI_2ETH, WEI_3ETH, WEI_5ETH},
     database::SubState,
@@ -18,7 +18,10 @@ use reth_revm::{
 use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
 use revm::{
     db::AccountState,
-    primitives::{Account as RevmAccount, AccountInfo, Bytecode, ResultAndState},
+    primitives::{
+        hash_map::{self, Entry},
+        Account as RevmAccount, AccountInfo, Bytecode, ResultAndState,
+    },
     EVM,
 };
 use std::{
@@ -123,7 +126,7 @@ where
     /// BTreeMap is used to have sorted values
     fn commit_changes(
         &mut self,
-        changes: hashbrown::HashMap<Address, RevmAccount>,
+        changes: hash_map::HashMap<Address, RevmAccount>,
     ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
         let db = self.db();
 

@@ -16,9 +16,8 @@ reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
+# revm
 revm = { version = "3.0.0"}
-# remove from reth and reexport from revm
-hashbrown = "0.13"
 
 # common
 async-trait = "0.1.57"
