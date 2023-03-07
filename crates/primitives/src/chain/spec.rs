@@ -147,11 +147,12 @@ impl ChainSpec {
 
         // If shanghai is activated, initialize the header with an empty withdrawals hash, and
         // empty withdrawals list.
-        let withdrawals_root = if self.fork(Hardfork::Shanghai).active_at_timestamp(0) {
-            Some(EMPTY_WITHDRAWALS)
-        } else {
-            None
-        };
+        let withdrawals_root =
+            if self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp) {
+                Some(EMPTY_WITHDRAWALS)
+            } else {
+                None
+            };
 
         Header {
             gas_limit: self.genesis.gas_limit,
