@@ -4,8 +4,9 @@ use ethers_core::types::transaction::eip712::TypedData;
 use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
 use reth_primitives::{Address, Signature, TransactionSigned, U256};
 use reth_rpc_types::TypedTransactionRequest;
-use secp256k1::{hashes::sha256, Message, Secp256k1, SecretKey};
+use secp256k1::{hashes::{sha256, Hash}, Message, Secp256k1, SecretKey};
 use std::collections::HashMap;
+use ethers_core::utils::hash_message;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
@@ -52,7 +53,11 @@ impl EthSigner for DevSigner {
         let secp = Secp256k1::new();
         let secret =
             self.accounts.get(&address).ok_or(RpcError::Custom("No account".to_string()))?;
-        let message = Message::from_hashed_data::<sha256::Hash>(message);
+        // TODO:
+        // Not sure on how to properly handle
+        // this unwrap.
+        // Hash message according to EIP 191.
+        let message = Message::from_slice(hash_message(&message).as_bytes()).unwrap();
         let (rec_id, data) = secp.sign_ecdsa_recoverable(&message, secret).serialize_compact();
         let signature = Signature {
             // TODO:
