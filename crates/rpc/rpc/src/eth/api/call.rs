@@ -300,8 +300,18 @@ where
         let mut db = SubState::new(State::new(state));
 
         let mut inspector = AccessListInspector::default();
-        let (_result, _env) = inspect(&mut db, env, &mut inspector)?;
+        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
 
+        match result.result {
+            ExecutionResult::Halt { reason, .. } => Err(match reason {
+                Halt::NonceOverflow => InvalidTransactionError::NonceMaxValue,
+                halt => InvalidTransactionError::EvmHalt(halt),
+            }),
+            ExecutionResult::Revert { output, .. } => {
+                Err(InvalidTransactionError::Revert(RevertError::new(output)))
+            }
+            ExecutionResult::Success { .. } => Ok(()),
+        }?;
         Ok(inspector.into_access_list())
     }
 }
