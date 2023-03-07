@@ -4,7 +4,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{Address, SealedBlock, TransitionId, U256};
+use reth_primitives::{Address, SealedBlock, TransitionId};
 
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.
 ///
