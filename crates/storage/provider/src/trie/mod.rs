@@ -10,8 +10,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
-    keccak256, proofs::EMPTY_ROOT, Account, Address, StorageEntry, StorageTrieEntry, TransitionId,
-    TrieStageProgress, H256, KECCAK_EMPTY, U256,
+    keccak256, proofs::EMPTY_ROOT, Account, Address, ProofCheckpoint, StorageEntry,
+    StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
@@ -253,7 +253,7 @@ pub enum TrieProgress {
     /// Trie has finished with the passed root.
     Complete(H256),
     /// Trie has hit its commit threshold.
-    InProgress(TrieStageProgress),
+    InProgress(ProofCheckpoint),
 }
 
 impl TrieProgress {
@@ -307,8 +307,8 @@ impl DBTrieLoader {
                     trie.insert(hashed_address.as_bytes().to_vec(), out)?;
 
                     if self.has_hit_threshold() {
-                        return self.save_account_progress(
-                            Default::default(),
+                        return self.save_account_checkpoint(
+                            ProofCheckpoint::default(),
                             H256::from_slice(trie.root()?.as_slice()),
                             hashed_address,
                             tx,
@@ -316,7 +316,7 @@ impl DBTrieLoader {
                     }
                 }
                 TrieProgress::InProgress(in_progress) => {
-                    return self.save_account_progress(
+                    return self.save_account_checkpoint(
                         in_progress,
                         H256::from_slice(trie.root()?.as_slice()),
                         hashed_address,
@@ -327,7 +327,7 @@ impl DBTrieLoader {
         }
 
         // Reset inner stage progress
-        self.save_progress(tx, Default::default())?;
+        self.save_checkpoint(tx, ProofCheckpoint::default())?;
 
         Ok(TrieProgress::Complete(H256::from_slice(trie.root()?.as_slice())))
     }
@@ -364,7 +364,7 @@ impl DBTrieLoader {
             let threshold = self.has_hit_threshold();
             if let Some(current_entry) = current_entry {
                 if threshold {
-                    return Ok(TrieProgress::InProgress(TrieStageProgress {
+                    return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         current_storage_root: Some(H256::from_slice(trie.root()?.as_slice())),
                         next_storage: Some(current_entry.key),
                         ..Default::default()
@@ -427,7 +427,7 @@ impl DBTrieLoader {
             let storage_root = match res {
                 TrieProgress::Complete(root) => root,
                 TrieProgress::InProgress(in_progress) => {
-                    return self.save_account_progress(
+                    return self.save_account_checkpoint(
                         in_progress,
                         H256::from_slice(trie.root()?.as_slice()),
                         hashed_address,
@@ -445,8 +445,8 @@ impl DBTrieLoader {
                 trie.insert(hashed_address.as_bytes().to_vec(), out)?;
 
                 if self.has_hit_threshold() {
-                    return self.save_account_progress(
-                        Default::default(),
+                    return self.save_account_checkpoint(
+                        ProofCheckpoint::default(),
                         H256::from_slice(trie.root()?.as_slice()),
                         hashed_address,
                         tx,
@@ -485,7 +485,7 @@ impl DBTrieLoader {
                 let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes().to_vec(), out)?;
                 if self.has_hit_threshold() {
-                    return Ok(TrieProgress::InProgress(TrieStageProgress {
+                    return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         current_storage_root: Some(H256::from_slice(trie.root()?.as_slice())),
                         next_storage: Some(key),
                         ..Default::default()
@@ -538,9 +538,9 @@ impl DBTrieLoader {
         Ok(hashed_changes)
     }
 
-    fn save_account_progress<DB: Database>(
+    fn save_account_checkpoint<DB: Database>(
         &mut self,
-        mut in_progress: TrieStageProgress,
+        mut in_progress: ProofCheckpoint,
         root: H256,
         hashed_address: H256,
         tx: &Transaction<'_, DB>,
@@ -548,19 +548,19 @@ impl DBTrieLoader {
         in_progress.current_account_root = Some(root);
         in_progress.next_hashed_account = Some(hashed_address);
 
-        self.save_progress(tx, in_progress)?;
+        self.save_checkpoint(tx, in_progress)?;
 
         Ok(TrieProgress::InProgress(in_progress))
     }
 
     /// Saves the trie progress
-    pub fn save_progress<DB: Database>(
+    pub fn save_checkpoint<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
-        progress: TrieStageProgress,
+        checkpoint: ProofCheckpoint,
     ) -> Result<(), TrieError> {
         let mut buf = vec![];
-        progress.to_compact(&mut buf);
+        checkpoint.to_compact(&mut buf);
         Ok(tx.put::<tables::SyncStageProgress>("TrieLoader".into(), buf)?)
     }
 
@@ -568,9 +568,9 @@ impl DBTrieLoader {
     pub fn get_progress<DB: Database>(
         &self,
         tx: &Transaction<'_, DB>,
-    ) -> Result<TrieStageProgress, TrieError> {
+    ) -> Result<ProofCheckpoint, TrieError> {
         let buf = tx.get::<tables::SyncStageProgress>("TrieLoader".into())?.unwrap_or_default();
-        let (progress, _) = TrieStageProgress::from_compact(&buf, buf.len());
+        let (progress, _) = ProofCheckpoint::from_compact(&buf, buf.len());
         Ok(progress)
     }
 

@@ -44,7 +44,7 @@ impl_compression_for_compact!(
     StoredBlockBody,
     StoredBlockOmmers,
     StoredBlockWithdrawals,
-    TrieStageProgress
+    ProofCheckpoint
 );
 impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);
 impl_compression_for_compact!(CompactU256);

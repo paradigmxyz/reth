@@ -34,6 +34,7 @@ mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
+pub use proofs::ProofCheckpoint;
 
 pub use account::Account;
 pub use bits::H512;
@@ -57,7 +58,7 @@ pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
 pub use serde_helper::JsonU256;
-pub use storage::{StorageEntry, StorageTrieEntry, TrieStageProgress};
+pub use storage::{StorageEntry, StorageTrieEntry};
 pub use transaction::{
     AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction, Signature,
     Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,

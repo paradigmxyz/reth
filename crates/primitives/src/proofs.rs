@@ -8,6 +8,7 @@ use bytes::BytesMut;
 use hash_db::Hasher;
 use hex_literal::hex;
 use plain_hasher::PlainHasher;
+use reth_codecs::{main_codec, Compact};
 use reth_rlp::Encodable;
 use triehash::{ordered_trie_root, sec_trie_root};
 
@@ -32,6 +33,20 @@ impl Hasher for KeccakHasher {
     fn hash(x: &[u8]) -> Self::Out {
         keccak256(x)
     }
+}
+
+/// Saves the progress of MerkleStage
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+pub struct ProofCheckpoint {
+    /// The next hashed account to insert into the trie
+    pub next_hashed_account: Option<H256>,
+    /// The next storage entry from an account to insert into the trie
+    pub next_storage: Option<H256>,
+    /// Current intermediate root of `AccountsTrie`
+    pub current_account_root: Option<H256>,
+    /// Current intermediate storage root from an account
+    pub current_storage_root: Option<H256>,
 }
 
 /// Calculate a transaction root.
