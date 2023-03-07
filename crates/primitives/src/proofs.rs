@@ -39,14 +39,14 @@ impl Hasher for KeccakHasher {
 #[main_codec]
 #[derive(Default, Debug, Copy, Clone, PartialEq)]
 pub struct ProofCheckpoint {
-    /// The next hashed account to insert into the trie
-    pub next_hashed_account: Option<H256>,
-    /// The next storage entry from an account to insert into the trie
-    pub next_storage: Option<H256>,
-    /// Current intermediate root of `AccountsTrie`
-    pub current_account_root: Option<H256>,
-    /// Current intermediate storage root from an account
-    pub current_storage_root: Option<H256>,
+    /// The next hashed account to insert into the trie.
+    pub hashed_address: Option<H256>,
+    /// The next storage entry to insert into the trie.
+    pub storage_key: Option<H256>,
+    /// Current intermediate root for `AccountsTrie`.
+    pub account_root: Option<H256>,
+    /// Current intermediate storage root from an account.
+    pub storage_root: Option<H256>,
 }
 
 /// Calculate a transaction root.
