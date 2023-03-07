@@ -77,8 +77,8 @@ pub(crate) enum EthApiError {
 }
 
 impl From<EthApiError> for RpcError {
-    fn from(value: EthApiError) -> Self {
-        match value {
+    fn from(error: EthApiError) -> Self {
+        match error {
             EthApiError::FailedToDecodeSignedTransaction |
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
@@ -86,11 +86,15 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidBlockRange |
             EthApiError::ConflictingRequestGasPrice { .. } |
             EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
-            EthApiError::RequestLegacyGasPriceAndTipSet { .. } => {
-                rpc_err(INVALID_PARAMS_CODE, value.to_string(), None)
+            EthApiError::RequestLegacyGasPriceAndTipSet { .. } |
+            EthApiError::BothStateAndStateDiffInOverride(_) => {
+                rpc_err(INVALID_PARAMS_CODE, error.to_string(), None)
             }
             EthApiError::InvalidTransaction(err) => err.into(),
-            err => internal_rpc_err(err.to_string()),
+            EthApiError::PoolError(_) |
+            EthApiError::PrevrandaoNotSet |
+            EthApiError::InvalidBlockData(_) |
+            EthApiError::Internal(_) => internal_rpc_err(error.to_string()),
         }
     }
 }
