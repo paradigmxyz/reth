@@ -4600,7 +4600,6 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "hash-db",
- "hashbrown 0.13.2",
  "plain_hasher",
  "reth-db",
  "reth-interfaces",
