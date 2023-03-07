@@ -143,7 +143,7 @@ jobs:
         experimental: [true]
       fail-fast: false
     needs: prepare
-    name: run
+    name: ethereum/sync
     runs-on: ubuntu-latest
 
     steps:
