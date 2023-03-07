@@ -179,15 +179,17 @@ pub enum InvalidTransactionError {
     /// Unspecific evm halt error
     #[error("EVM error {0:?}")]
     EvmHalt(Halt),
+    #[error("Invalid chain id")]
+    InvalidChainId,
 }
 
 impl InvalidTransactionError {
     /// Returns the rpc error code for this error.
     fn error_code(&self) -> i32 {
         match self {
-            InvalidTransactionError::GasTooLow | InvalidTransactionError::GasTooHigh => {
-                EthRpcErrorCode::InvalidInput.code()
-            }
+            InvalidTransactionError::InvalidChainId |
+            InvalidTransactionError::GasTooLow |
+            InvalidTransactionError::GasTooHigh => EthRpcErrorCode::InvalidInput.code(),
             InvalidTransactionError::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
@@ -214,6 +216,7 @@ impl From<revm::primitives::InvalidTransaction> for InvalidTransactionError {
     fn from(err: revm::primitives::InvalidTransaction) -> Self {
         use revm::primitives::InvalidTransaction;
         match err {
+            InvalidTransaction::InvalidChainId => InvalidTransactionError::InvalidChainId,
             InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
                 InvalidTransactionError::TipAboveFeeCap
             }
