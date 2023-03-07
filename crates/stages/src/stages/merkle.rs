@@ -170,13 +170,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let block_root = match loader
+        let block_root = loader
             .update_root(tx, current_root, from_transition..to_transition)
-            .map_err(|e| StageError::Fatal(Box::new(e)))?
-        {
-            TrieProgress::Complete(root) => root,
-            TrieProgress::InProgress(_) => unimplemented!(),
-        };
+            .and_then(|e| e.root())
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
         if block_root != target_root {
             let unwind_to = input.unwind_to;
@@ -453,7 +450,10 @@ mod tests {
 
     impl MerkleTestRunner {
         fn state_root(&self) -> Result<H256, TestRunnerError> {
-            Ok(DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap())
+            Ok(DBTrieLoader::default()
+                .calculate_root(&self.tx.inner())
+                .and_then(|e| e.root())
+                .unwrap())
         }
 
         pub(crate) fn generate_initial_trie(
@@ -467,7 +467,10 @@ mod tests {
             let mut loader = DBTrieLoader::default();
 
             let mut tx = self.tx.inner();
-            let root = loader.calculate_root(&tx).expect("couldn't create initial trie");
+            let root = loader
+                .calculate_root(&tx)
+                .and_then(|e| e.root())
+                .expect("couldn't create initial trie");
 
             tx.commit()?;
 
@@ -478,7 +481,10 @@ mod tests {
             if previous_stage_progress != 0 {
                 let block_root =
                     self.tx.inner().get_header(previous_stage_progress).unwrap().state_root;
-                let root = DBTrieLoader::default().calculate_root(&self.tx.inner()).unwrap();
+                let root = DBTrieLoader::default()
+                    .calculate_root(&self.tx.inner())
+                    .and_then(|e| e.root())
+                    .unwrap();
                 assert_eq!(block_root, root);
             }
             Ok(())

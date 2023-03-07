@@ -309,12 +309,7 @@ where
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
             let mut loader = DBTrieLoader::default();
-            let root = match loader.update_root(self, current_root, from..to)? {
-                crate::trie::TrieProgress::Complete(root) => root,
-                crate::trie::TrieProgress::InProgress(_) => {
-                    return Err(TransactionError::Custom("asd"))
-                }
-            };
+            let root = loader.update_root(self, current_root, from..to).and_then(|e| e.root())?;
             if root != block.state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,

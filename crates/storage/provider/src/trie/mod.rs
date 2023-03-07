@@ -36,6 +36,8 @@ pub enum TrieError {
     DatabaseError(#[from] reth_db::Error),
     #[error("{0:?}")]
     DecodeError(#[from] DecodeError),
+    #[error("Trie requires committing a checkpoint.")]
+    UnexpectedCheckpoint,
 }
 
 /// Database wrapper implementing HashDB trait.
@@ -246,12 +248,23 @@ impl Default for DBTrieLoader {
 }
 
 /// Status of the trie calculation.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum TrieProgress {
     /// Trie has finished with the passed root.
     Complete(H256),
     /// Trie has hit its commit threshold.
     InProgress(TrieStageProgress),
+}
+
+impl TrieProgress {
+    /// Consumes the root from its `Complete` variant. If that's not possible, throw
+    /// `TrieError::UnexpectedCheckpoint`.
+    pub fn root(self) -> Result<H256, TrieError> {
+        match self {
+            Self::Complete(root) => Ok(root),
+            _ => Err(TrieError::UnexpectedCheckpoint),
+        }
+    }
 }
 
 impl DBTrieLoader {
@@ -535,7 +548,7 @@ impl DBTrieLoader {
         in_progress.current_account_root = Some(root);
         in_progress.next_hashed_account = Some(hashed_address);
 
-        self.save_progress(tx, in_progress.clone())?;
+        self.save_progress(tx, in_progress)?;
 
         Ok(TrieProgress::InProgress(in_progress))
     }
@@ -584,15 +597,15 @@ mod tests {
 
     #[test]
     fn empty_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
-        assert_matches!(trie.calculate_root(&tx), Ok(got) if got == EMPTY_ROOT);
+        assert_matches!(trie.calculate_root(&tx), Ok(got) if got.root().unwrap() == EMPTY_ROOT);
     }
 
     #[test]
     fn single_account_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
@@ -603,13 +616,13 @@ mod tests {
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, encoded_account)]).0);
         assert_matches!(
             trie.calculate_root(&tx),
-            Ok(got) if got == expected
+            Ok(got) if got.root().unwrap() == expected
         );
     }
 
     #[test]
     fn two_accounts_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -634,13 +647,13 @@ mod tests {
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
         assert_matches!(
             trie.calculate_root(&tx),
-            Ok(got) if got == expected
+            Ok(got) if got.root().unwrap() == expected
         );
     }
 
     #[test]
     fn single_storage_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -661,14 +674,14 @@ mod tests {
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
         assert_matches!(
-            trie.calculate_storage_root(&tx, hashed_address),
-            Ok(got) if got == expected
+            trie.calculate_storage_root(&tx, hashed_address, None, None),
+            Ok(got) if got.root().unwrap() == expected
         );
     }
 
     #[test]
     fn single_account_with_storage_trie() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -710,13 +723,13 @@ mod tests {
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0);
         assert_matches!(
             trie.calculate_root(&tx),
-            Ok(got) if got == expected
+            Ok(got) if got.root().unwrap() == expected
         );
     }
 
     #[test]
     fn verify_genesis() {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
         let ChainSpec { genesis, .. } = MAINNET.clone();
@@ -739,7 +752,7 @@ mod tests {
 
         assert_matches!(
             trie.calculate_root(&tx),
-            Ok(got) if got == state_root
+            Ok(got) if got.root().unwrap() == state_root
         );
     }
 
@@ -788,7 +801,7 @@ mod tests {
     }
 
     fn test_with_accounts(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>) {
-        let trie = DBTrieLoader::default();
+        let mut trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -822,7 +835,7 @@ mod tests {
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
         assert_matches!(
             trie.calculate_root(&tx),
-            Ok(got) if got == expected
+            Ok(got) if got.root().unwrap() == expected
         , "where expected is {expected:?}");
     }
 
