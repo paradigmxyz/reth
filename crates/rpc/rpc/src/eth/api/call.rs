@@ -228,7 +228,7 @@ where
         let gas_used = res.result.gas_used();
         // the lowest value is capped by the gas it takes for a transfer
         let mut lowest_gas_limit =
-            if (env.tx.transact_to.is_create()) { MIN_CREATE_GAS } else { MIN_TRANSACTION_GAS };
+            if env.tx.transact_to.is_create() { MIN_CREATE_GAS } else { MIN_TRANSACTION_GAS };
         let mut highest_gas_limit: u64 = highest_gas_limit.try_into().unwrap_or(u64::MAX);
         // pick a point that's close to the estimated gas
         let mut mid_gas_limit = std::cmp::min(
