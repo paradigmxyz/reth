@@ -22,9 +22,10 @@ use reth_rpc_types::{
 };
 use revm::{
     db::{CacheDB, DatabaseRef},
+    precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{
         ruint::Uint, BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState,
-        TransactTo, TxEnv,
+        SpecId, TransactTo, TxEnv,
     },
     Database, Inspector,
 };
@@ -310,7 +311,8 @@ where
 
         let initial = request.access_list.clone().unwrap_or_default();
 
-        let mut inspector = AccessListInspector::new(initial, from, to, vec![]);
+        let precompiles = get_precompiles(&env.cfg.spec_id);
+        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
         let (result, _env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
@@ -325,6 +327,29 @@ where
         }?;
         Ok(inspector.into_access_list())
     }
+}
+
+/// Returns the addresses of the precompiles corresponding to the SpecId.
+fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
+    let spec = match spec_id {
+        SpecId::FRONTIER | SpecId::FRONTIER_THAWING => return vec![],
+        SpecId::HOMESTEAD | SpecId::DAO_FORK | SpecId::TANGERINE | SpecId::SPURIOUS_DRAGON => {
+            PrecompilesSpecId::HOMESTEAD
+        }
+        SpecId::BYZANTIUM | SpecId::CONSTANTINOPLE | SpecId::PETERSBURG => {
+            PrecompilesSpecId::BYZANTIUM
+        }
+        SpecId::ISTANBUL | SpecId::MUIR_GLACIER => PrecompilesSpecId::ISTANBUL,
+        SpecId::BERLIN |
+        SpecId::LONDON |
+        SpecId::ARROW_GLACIER |
+        SpecId::GRAY_GLACIER |
+        SpecId::MERGE |
+        SpecId::SHANGHAI |
+        SpecId::CANCUN => PrecompilesSpecId::BERLIN,
+        SpecId::LATEST => PrecompilesSpecId::LATEST,
+    };
+    Precompiles::new(spec).addresses().into_iter().map(Address::from).collect()
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
