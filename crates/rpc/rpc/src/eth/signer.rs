@@ -1,12 +1,11 @@
 //! An abstraction over ethereum signers.
 
-use ethers_core::types::transaction::eip712::TypedData;
+use ethers_core::{types::transaction::eip712::TypedData, utils::hash_message};
 use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
 use reth_primitives::{Address, Signature, TransactionSigned, U256};
 use reth_rpc_types::TypedTransactionRequest;
 use secp256k1::{Message, Secp256k1, SecretKey};
 use std::collections::HashMap;
-use ethers_core::utils::hash_message;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
