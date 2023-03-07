@@ -6,6 +6,7 @@ use crate::{
     eth::error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
     EthApi,
 };
+use ethers_core::utils::get_contract_address;
 use reth_primitives::{
     AccessList, AccessListItem, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
     TransactionKind, H256, U128, U256,
@@ -296,10 +297,20 @@ where
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
 
-        let mut env = build_call_evm_env(cfg, block, request)?;
+        let mut env = build_call_evm_env(cfg, block, request.clone())?;
         let mut db = SubState::new(State::new(state));
 
-        let mut inspector = AccessListInspector::default();
+        let from = request.from.unwrap_or_default();
+        let to = if let Some(to) = request.to {
+            to
+        } else {
+            let nonce = db.basic(from)?.unwrap_or_default().nonce;
+            get_contract_address(from, nonce).into()
+        };
+
+        let initial = request.access_list.clone().unwrap_or_default();
+
+        let mut inspector = AccessListInspector::new(initial, from, to, vec![]);
         let (result, _env) = inspect(&mut db, env, &mut inspector)?;
 
         match result.result {
