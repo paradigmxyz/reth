@@ -310,7 +310,7 @@ where
 pub(crate) fn transact<S>(db: S, env: Env) -> EthResult<(ResultAndState, Env)>
 where
     S: Database,
-    <S as Database>::Error: Into<EthApiError> + std::fmt::Debug,
+    <S as Database>::Error: Into<EthApiError>,
 {
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
