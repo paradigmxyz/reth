@@ -83,8 +83,8 @@ pub use crate::{
     config::PoolConfig,
     ordering::TransactionOrdering,
     traits::{
-        BestTransactions, OnNewBlockEvent, PoolTransaction, PropagateKind, PropagatedTransactions,
-        TransactionOrigin, TransactionPool,
+        BestTransactions, OnNewBlockEvent, PoolTransaction, PooledTransaction, PropagateKind,
+        PropagatedTransactions, TransactionOrigin, TransactionPool,
     },
     validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
 };

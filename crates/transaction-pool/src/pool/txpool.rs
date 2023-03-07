@@ -26,9 +26,11 @@ use std::{
     sync::Arc,
 };
 
-/// The minimal value the basefee can decrease to
+/// The minimal value the basefee can decrease to.
 ///
-/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%, once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less than 1.
+/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
+/// Once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less
+/// than 1.
 pub(crate) const MIN_PROTOCOL_BASE_FEE: u128 = 7;
 
 /// A pool that manages transactions.
@@ -66,9 +68,11 @@ pub(crate) const MIN_PROTOCOL_BASE_FEE: u128 = 7;
 ///   new -->  |apply state changes| pool
 /// ```
 pub struct TxPool<T: TransactionOrdering> {
-    /// Contains the currently known info
+    /// Contains the currently known information about the senders.
     sender_info: FnvHashMap<SenderId, SenderInfo>,
     /// pending subpool
+    ///
+    /// Holds transactions that are ready to be executed on the current state.
     pending_pool: PendingPool<T>,
     /// Pool settings to enforce limits etc.
     config: PoolConfig,
@@ -136,7 +140,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.best()
     }
 
-    /// Returns if the transaction for the given hash is already included in this pool
+    /// Returns `true` if the transaction with the given hash is already included in this pool.
     pub(crate) fn contains(&self, tx_hash: &TxHash) -> bool {
         self.all_transactions.contains(tx_hash)
     }
@@ -149,7 +153,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.by_hash.get(tx_hash).cloned()
     }
 
-    /// Returns all transaction for the hashes, if it exists.
+    /// Returns transactions for the multiple given hashes, if they exist.
     pub(crate) fn get_all<'a>(
         &'a self,
         txs: impl IntoIterator<Item = TxHash> + 'a,
@@ -189,21 +193,21 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This pool consists of two three-pools: `Queued`, `Pending` and `BaseFee`.
     ///
     /// The `Queued` pool contains transactions with gaps in its dependency tree: It requires
-    /// additional transaction that are note yet present in the pool. And transactions that the
+    /// additional transactions that are note yet present in the pool. And transactions that the
     /// sender can not afford with the current balance.
     ///
     /// The `Pending` pool contains all transactions that have no nonce gaps, and can be afforded by
     /// the sender. It only contains transactions that are ready to be included in the pending
-    /// block. In the pending pool are all transactions that could be listed currently, but not
+    /// block. The pending pool contains all transactions that could be listed currently, but not
     /// necessarily independently. However, this pool never contains transactions with nonce gaps. A
     /// transaction is considered `ready` when it has the lowest nonce of all transactions from the
     /// same sender. Which is equals to the chain nonce of the sender in the pending pool.
     ///
-    /// The `BaseFee` pool contains transaction that currently can't satisfy the dynamic fee
+    /// The `BaseFee` pool contains transactions that currently can't satisfy the dynamic fee
     /// requirement. With EIP-1559, transactions can become executable or not without any changes to
-    /// the sender's balance or nonce and instead their feeCap determines whether the
+    /// the sender's balance or nonce and instead their `feeCap` determines whether the
     /// transaction is _currently_ (on the current state) ready or needs to be parked until the
-    /// feeCap satisfies the block's baseFee.
+    /// `feeCap` satisfies the block's `baseFee`.
     pub(crate) fn add_transaction(
         &mut self,
         tx: ValidPoolTransaction<T::Transaction>,
@@ -294,11 +298,11 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Moves a transaction from one sub pool to another.
     ///
-    /// This will remove the given transaction from one sub-pool and insert it in the other
+    /// This will remove the given transaction from one sub-pool and insert it into the other
     /// sub-pool.
     fn move_transaction(&mut self, from: SubPool, to: SubPool, id: &TransactionId) {
         if let Some(tx) = self.remove_from_subpool(from, id) {
-            self.add_transaction_to_pool(to, tx);
+            self.add_transaction_to_subpool(to, tx);
         }
     }
 
@@ -372,8 +376,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Removes the transaction from the given pool
-    fn add_transaction_to_pool(
+    /// Inserts the transaction into the given sub-pool.
+    fn add_transaction_to_subpool(
         &mut self,
         pool: SubPool,
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
@@ -391,7 +395,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Inserts the transaction into the given sub-pool
+    /// Inserts the transaction into the given sub-pool.
+    /// Optionally, removes the replacement transaction.
     fn add_new_transaction(
         &mut self,
         transaction: Arc<ValidPoolTransaction<T::Transaction>>,
@@ -403,7 +408,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             self.remove_from_subpool(replaced_pool, replaced.id());
         }
 
-        self.add_transaction_to_pool(pool, transaction)
+        self.add_transaction_to_subpool(pool, transaction)
     }
 
     /// Ensures that the transactions in the sub-pools are within the given bounds.
