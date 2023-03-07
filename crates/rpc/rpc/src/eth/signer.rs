@@ -1,11 +1,10 @@
 //! An abstraction over ethereum signers.
 
 use ethers_core::types::transaction::eip712::TypedData;
-use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{Address, Signature, TransactionSigned, U256, H256};
+use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
+use reth_primitives::{Address, Signature, TransactionSigned, U256};
 use reth_rpc_types::TypedTransactionRequest;
-use secp256k1::{Message, Secp256k1, SecretKey};
-use secp256k1::hashes::sha256;
+use secp256k1::{hashes::sha256, Message, Secp256k1, SecretKey};
 use std::collections::HashMap;
 
 /// An Ethereum Signer used via RPC.
@@ -35,8 +34,8 @@ pub(crate) trait EthSigner: Send + Sync {
 
 /// Holds developer keys
 pub(crate) struct DevSigner {
-    addresses: Vec<Address>,
-    accounts: HashMap<Address, SecretKey>,
+    pub(crate) addresses: Vec<Address>,
+    pub(crate) accounts: HashMap<Address, SecretKey>,
 }
 
 #[async_trait::async_trait]
@@ -50,18 +49,19 @@ impl EthSigner for DevSigner {
     }
 
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature> {
-        let message = H256::from_slice(message);
         let secp = Secp256k1::new();
-        let signer = self.accounts.get(&address).unwrap();
-        let message = Message::from_hashed_data::<sha256::Hash>(b"Hello, World!");
-        let raw_signature = secp.sign_ecdsa_recoverable(&message, signer);
-        let (rec_id, data) = raw_signature.serialize_compact();
+        let secret =
+            self.accounts.get(&address).ok_or(RpcError::Custom("No account".to_string()))?;
+        let message = Message::from_hashed_data::<sha256::Hash>(message);
+        let (rec_id, data) = secp.sign_ecdsa_recoverable(&message, secret).serialize_compact();
         let signature = Signature {
+            // TODO:
+            // Not sure on how to properly handle
+            // this unwraps
             r: U256::try_from_be_slice(&data[..32]).unwrap(),
             s: U256::try_from_be_slice(&data[32..64]).unwrap(),
             odd_y_parity: rec_id.to_i32() != 0,
         };
-        // println!("The signature: {:?}", signature);
         Ok(signature)
     }
 
@@ -80,7 +80,6 @@ impl EthSigner for DevSigner {
 #[cfg(test)]
 mod test {
     use super::*;
-    use reth_primitives::H256;
     use std::str::FromStr;
     #[tokio::test]
     async fn test_signer() {
@@ -89,8 +88,22 @@ mod test {
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
                 .unwrap();
         let accounts = HashMap::from([(Address::default(), secret)]);
-        let signers = DevSigner { addresses, accounts };
-        let message = b"Hello world!";
-        let sig = signers.sign(Address::default(), message).await.unwrap();
+        let signer = DevSigner { addresses, accounts };
+        let message = b"Test message";
+        let sig = signer.sign(Address::default(), message).await.unwrap();
+        let expected = Signature {
+            r: U256::from_str_radix(
+                "bef421631867801a4b2d9c4241fde50aa82fecc020e0bb80c18fd41b6113b063",
+                16,
+            )
+            .unwrap(),
+            s: U256::from_str_radix(
+                "5a83250a694e5255ff1a3a7610204f0e7329c43bd9d1d80c35c1238fc5a570a2",
+                16,
+            )
+            .unwrap(),
+            odd_y_parity: false,
+        };
+        assert_eq!(sig, expected)
     }
 }

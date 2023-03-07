@@ -72,7 +72,7 @@ impl Signature {
     }
 
     /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
-    pub(crate) fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    pub fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
         self.odd_y_parity.encode(out);
         self.r.encode(out);
         self.s.encode(out);

@@ -357,8 +357,8 @@ where
     }
 
     /// Handler for: `eth_sign`
-    async fn sign(&self, _address: Address, _message: Bytes) -> Result<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes> {
+        Ok(EthApi::sign(self, address, message).await.unwrap())
     }
 
     /// Handler for: `eth_signTransaction`

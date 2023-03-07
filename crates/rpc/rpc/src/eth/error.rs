@@ -74,6 +74,8 @@ pub(crate) enum EthApiError {
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
+    #[error("No signer")]
+    NoSigner,
 }
 
 impl From<EthApiError> for RpcError {

@@ -22,6 +22,7 @@ use std::sync::Arc;
 mod block;
 mod call;
 mod server;
+mod sign;
 mod state;
 mod transactions;
 
