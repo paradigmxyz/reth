@@ -152,6 +152,35 @@ impl NewPooledTransactionHashes {
             NewPooledTransactionHashes::Eth68(msg) => msg.hashes.into_iter(),
         }
     }
+
+    /// Shortens the number of hashes in the message, keeping the first `len` hashes and dropping
+    /// the rest. If `len` is greater than the number of hashes, this has no effect.
+    pub fn truncate(&mut self, len: usize) {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.0.truncate(len),
+            NewPooledTransactionHashes::Eth68(msg) => {
+                msg.types.truncate(len);
+                msg.sizes.truncate(len);
+                msg.hashes.truncate(len);
+            }
+        }
+    }
+
+    /// Returns true if the message is empty
+    pub fn is_empty(&self) -> bool {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.0.is_empty(),
+            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.is_empty(),
+        }
+    }
+
+    /// Returns the number of hashes in the message
+    pub fn len(&self) -> usize {
+        match self {
+            NewPooledTransactionHashes::Eth66(msg) => msg.0.len(),
+            NewPooledTransactionHashes::Eth68(msg) => msg.hashes.len(),
+        }
+    }
 }
 
 impl From<NewPooledTransactionHashes> for EthMessage {
