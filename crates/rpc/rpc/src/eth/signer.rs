@@ -4,7 +4,7 @@ use ethers_core::types::transaction::eip712::TypedData;
 use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
 use reth_primitives::{Address, Signature, TransactionSigned, U256};
 use reth_rpc_types::TypedTransactionRequest;
-use secp256k1::{hashes::{sha256, Hash}, Message, Secp256k1, SecretKey};
+use secp256k1::{Message, Secp256k1, SecretKey};
 use std::collections::HashMap;
 use ethers_core::utils::hash_message;
 
@@ -55,6 +55,7 @@ impl EthSigner for DevSigner {
             self.accounts.get(&address).ok_or(RpcError::Custom("No account".to_string()))?;
         // Hash message according to EIP 191:
         // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
+        // TODO: Handle unwrap properly
         let message = Message::from_slice(hash_message(&message).as_bytes()).unwrap();
         let (rec_id, data) = secp.sign_ecdsa_recoverable(&message, secret).serialize_compact();
         let signature = Signature {
@@ -96,16 +97,16 @@ mod test {
         let sig = signer.sign(Address::default(), message).await.unwrap();
         let expected = Signature {
             r: U256::from_str_radix(
-                "bef421631867801a4b2d9c4241fde50aa82fecc020e0bb80c18fd41b6113b063",
+                "54313da7432e4058b8d22491b2e7dbb19c7186c35c24155bec0820a8a2bfe0c1",
                 16,
             )
             .unwrap(),
             s: U256::from_str_radix(
-                "5a83250a694e5255ff1a3a7610204f0e7329c43bd9d1d80c35c1238fc5a570a2",
+                "687250f11a3d4435004c04a4cb60e846bc27997271d67f21c6c8170f17a25e10",
                 16,
             )
             .unwrap(),
-            odd_y_parity: false,
+            odd_y_parity: true,
         };
         assert_eq!(sig, expected)
     }
