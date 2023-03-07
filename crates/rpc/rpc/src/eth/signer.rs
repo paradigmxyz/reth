@@ -53,10 +53,8 @@ impl EthSigner for DevSigner {
         let secp = Secp256k1::new();
         let secret =
             self.accounts.get(&address).ok_or(RpcError::Custom("No account".to_string()))?;
-        // TODO:
-        // Not sure on how to properly handle
-        // this unwrap.
-        // Hash message according to EIP 191.
+        // Hash message according to EIP 191:
+        // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
         let message = Message::from_slice(hash_message(&message).as_bytes()).unwrap();
         let (rec_id, data) = secp.sign_ecdsa_recoverable(&message, secret).serialize_compact();
         let signature = Signature {
