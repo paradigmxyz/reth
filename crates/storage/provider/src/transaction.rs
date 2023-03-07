@@ -760,7 +760,4 @@ pub enum TransactionError {
         /// Block hash
         block_hash: BlockHash,
     },
-    /// Custom transaction error
-    #[error("A custom error occurred: {0}")]
-    Custom(&'static str),
 }
