@@ -12,7 +12,7 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::AccountProvider;
-use std::{fmt, sync::Arc, time::Instant};
+use std::{fmt, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -24,11 +24,11 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         /// Current nonce of the sender.
         state_nonce: u64,
         /// Validated transaction.
-        transaction: Arc<T>,
+        transaction: T,
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
-    Invalid(Arc<T>, PoolError),
+    Invalid(T, PoolError),
 }
 
 /// Provides support for validating transaction at any given state of the chain
@@ -65,7 +65,7 @@ pub trait TransactionValidator: Send + Sync {
     /// `max_init_code_size` should be configurable so this will take it as an argument.
     fn ensure_max_init_code_size(
         &self,
-        transaction: Arc<Self::Transaction>,
+        transaction: Self::Transaction,
         max_init_code_size: usize,
     ) -> Result<(), PoolError> {
         if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
@@ -100,7 +100,7 @@ pub(crate) struct EthTransactionValidatorConfig<Client: AccountProvider> {
 }
 
 #[async_trait::async_trait]
-impl<T: PoolTransaction + AccountProvider> TransactionValidator
+impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
     for EthTransactionValidatorConfig<T>
 {
     type Transaction = T;
@@ -110,8 +110,6 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
-        let transaction = Arc::new(transaction);
-
         // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
@@ -161,14 +159,6 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
                     self.current_max_gas_limit,
                 ),
             ))
-        }
-
-        // Sanity check for extremely large numbers
-        if transaction.max_fee_per_gas() > Some((2 ^ 256) - 1) {
-            return Err(Error::FeeCapVeryHigh)
-        }
-        if transaction.max_priority_fee_per_gas() > Some((2 ^ 256) - 1) {
-            return Err(Error::TipVeryHigh)
         }
 
         // Ensure max_fee_per_gas is greater than or equal to max_priority_fee_per_gas.
@@ -229,7 +219,7 @@ impl<T: PoolTransaction + AccountProvider> TransactionValidator
 /// A valid transaction in the pool.
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
-    pub transaction: Arc<T>,
+    pub transaction: T,
     /// The identifier for this transaction.
     pub transaction_id: TransactionId,
     /// Whether to propagate the transaction.

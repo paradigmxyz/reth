@@ -226,7 +226,22 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx.unwrap())).pop().expect("exists; qed")
+
+        match tx {
+            Ok(TransactionValidationOutcome::Valid {
+                balance: _,
+                state_nonce: _,
+                transaction: _,
+            }) => self
+                .pool
+                .add_transactions(origin, std::iter::once(tx.unwrap()))
+                .pop()
+                .expect("exists; qed"),
+            Ok(TransactionValidationOutcome::Invalid(_transaction, error)) => Err(error),
+            Err(_err) => {
+                unimplemented!()
+            }
+        }
     }
 
     async fn add_transactions(

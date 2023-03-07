@@ -41,7 +41,7 @@ impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
         Ok(TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
-            transaction: Arc::new(transaction),
+            transaction,
         })
     }
 }
