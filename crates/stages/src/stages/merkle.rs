@@ -133,7 +133,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         };
 
         if block_root != trie_root {
-            warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?block_root, expected = ?trie_root, "Block's root state failed verification");
+            warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?trie_root, expected = ?block_root, "Block's root state failed verification");
             return Err(StageError::Validation {
                 block: previous_stage_progress,
                 error: consensus::Error::BodyStateRootDiff { got: trie_root, expected: block_root },
@@ -170,10 +170,17 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let block_root = loader
-            .update_root(tx, current_root, from_transition..to_transition)
-            .and_then(|e| e.root())
-            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+        let block_root = loop {
+            match loader
+                .update_root(tx, current_root, from_transition..to_transition)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?
+            {
+                TrieProgress::Complete(root) => break root,
+                TrieProgress::InProgress(_) => {
+                    tx.commit()?;
+                }
+            }
+        };
 
         if block_root != target_root {
             let unwind_to = input.unwind_to;

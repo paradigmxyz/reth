@@ -280,14 +280,16 @@ impl DBTrieLoader {
             tx.clear::<tables::StoragesTrie>()?;
         }
 
-        let mut trie = PatriciaTrie::new(
-            Arc::new(if let Some(root) = checkpoint.account_root {
-                HashDatabase::from_root(tx, root)?
-            } else {
-                HashDatabase::new(tx)?
-            }),
-            Arc::new(HasherKeccak::new()),
-        );
+        let hasher = Arc::new(HasherKeccak::new());
+        let mut trie = if let Some(root) = checkpoint.account_root {
+            PatriciaTrie::from(
+                Arc::new(HashDatabase::from_root(tx, root)?),
+                hasher,
+                root.as_bytes(),
+            )?
+        } else {
+            PatriciaTrie::new(Arc::new(HashDatabase::new(tx)?), hasher)
+        };
 
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(checkpoint.hashed_address.take())?;
@@ -341,19 +343,26 @@ impl DBTrieLoader {
     ) -> Result<TrieProgress, TrieError> {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
-        let (mut current_entry, db) = if let Some(entry) = next_storage {
+        let hasher = Arc::new(HasherKeccak::new());
+        let (mut current_entry, mut trie) = if let Some(entry) = next_storage {
             (
                 storage_cursor.seek_by_key_subkey(address, entry)?.filter(|e| e.key == entry),
-                DupHashDatabase::from_root(tx, address, current_storage_root.expect("is some"))?,
+                PatriciaTrie::from(
+                    Arc::new(DupHashDatabase::from_root(
+                        tx,
+                        address,
+                        current_storage_root.expect("is some"),
+                    )?),
+                    hasher,
+                    current_storage_root.expect("is some").as_bytes(),
+                )?,
             )
         } else {
             (
                 storage_cursor.seek_by_key_subkey(address, H256::zero())?,
-                DupHashDatabase::new(tx, address)?,
+                PatriciaTrie::new(Arc::new(DupHashDatabase::new(tx, address)?), hasher),
             )
         };
-
-        let mut trie = PatriciaTrie::new(Arc::new(db), Arc::new(HasherKeccak::new()));
 
         while let Some(StorageEntry { key: storage_key, value }) = current_entry {
             let out = encode_fixed_size(&value).to_vec();
@@ -550,6 +559,8 @@ impl DBTrieLoader {
         checkpoint.account_root = Some(root);
         checkpoint.hashed_address = Some(hashed_address);
 
+        debug!(target: "sync::stages::merkle::exec", account = ?hashed_address, storage = ?checkpoint.storage_key, "Saving inner trie checkpoint");
+
         self.save_checkpoint(tx, checkpoint)?;
 
         Ok(TrieProgress::InProgress(checkpoint))
@@ -557,12 +568,16 @@ impl DBTrieLoader {
 
     /// Saves the trie progress
     pub fn save_checkpoint<DB: Database>(
-        &self,
+        &mut self,
         tx: &Transaction<'_, DB>,
         checkpoint: ProofCheckpoint,
     ) -> Result<(), TrieError> {
         let mut buf = vec![];
         checkpoint.to_compact(&mut buf);
+
+        // It allows unwind (which commits), to reuse this instance.
+        self.current = 0;
+
         Ok(tx.put::<tables::SyncStageProgress>("TrieLoader".into(), buf)?)
     }
 
@@ -572,8 +587,18 @@ impl DBTrieLoader {
         tx: &Transaction<'_, DB>,
     ) -> Result<ProofCheckpoint, TrieError> {
         let buf = tx.get::<tables::SyncStageProgress>("TrieLoader".into())?.unwrap_or_default();
-        let (progress, _) = ProofCheckpoint::from_compact(&buf, buf.len());
-        Ok(progress)
+
+        if buf.is_empty() {
+            return Ok(ProofCheckpoint::default())
+        }
+
+        let (checkpoint, _) = ProofCheckpoint::from_compact(&buf, buf.len());
+
+        if checkpoint.account_root.is_some() {
+            debug!(target: "sync::stages::merkle::exec", account = ?checkpoint.hashed_address, storage = ?checkpoint.storage_key, "Continuing inner trie checkpoint");
+        }
+
+        Ok(checkpoint)
     }
 
     fn has_hit_threshold(&mut self) -> bool {
