@@ -1,10 +1,12 @@
 use revm::{
-    inspectors::GasInspector,
     interpreter::{CallInputs, CreateInputs, Gas, InstructionResult, Interpreter},
     primitives::{db::Database, Bytes, B160, B256},
     EVMData, Inspector,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Ref, RefCell},
+    rc::Rc,
+};
 
 /// An [Inspector] that is either owned by an individual [Inspector] or is shared as part of a
 /// series of inspectors in a [InspectorStack](crate::stack::InspectorStack).
@@ -30,6 +32,14 @@ impl<INSP> MaybeOwnedInspector<INSP> {
             MaybeOwnedInspector::Owned(gas) | MaybeOwnedInspector::Stacked(gas) => {
                 MaybeOwnedInspector::Stacked(Rc::clone(gas))
             }
+        }
+    }
+
+    /// Returns a reference to the inspector.
+    pub fn as_ref(&self) -> Ref<'_, INSP> {
+        match self {
+            MaybeOwnedInspector::Owned(insp) => insp.borrow(),
+            MaybeOwnedInspector::Stacked(insp) => insp.borrow(),
         }
     }
 }

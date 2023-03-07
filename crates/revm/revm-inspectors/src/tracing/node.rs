@@ -1,4 +1,4 @@
-use crate::tracing::arena::{CallTrace, LogCallOrder};
+use crate::tracing::{arena::LogCallOrder, call::CallTrace};
 use reth_primitives::{bytes::Bytes, H256};
 
 /// Ethereum log.

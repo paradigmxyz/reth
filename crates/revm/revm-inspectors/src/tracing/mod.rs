@@ -1,11 +1,12 @@
 use crate::{
     stack::MaybeOwnedInspector,
     tracing::{
-        arena::{CallTrace, CallTraceArena, CallTraceStep, LogCallOrder},
+        arena::{CallTraceArena, CallTraceStep, LogCallOrder},
         call::CallKind,
         node::RawLog,
     },
 };
+use call::CallTrace;
 use reth_primitives::{
     bytes::Bytes,
     contract::{create2_address_from_code, create_address},
@@ -20,13 +21,19 @@ use revm::{
     primitives::{CreateScheme, SpecId},
     Database, EVMData, Inspector, JournalEntry,
 };
-use std::{cell::RefCell, rc::Rc};
 
 mod arena;
 mod call;
 mod node;
 
 /// An inspector that collects call traces.
+///
+/// This [Inspector] can be hooked into the [EVM](revm::EVM) which then calls the inspector
+/// functions, such as [Inspector::call] or [Inspector::call_end].
+///
+/// The [TracingInspector] keeps track of everything by:
+///   1. start tracking steps/calls on [Inspector::step] and [Inspector::call]
+///   2. complete steps/calls on [Inspector::step_end] and [Inspector::call_end]
 #[derive(Default, Debug, Clone)]
 pub struct TracingInspector {
     /// Whether to include individual steps [Inspector::step]
@@ -38,27 +45,38 @@ pub struct TracingInspector {
     /// The gas inspector used to track remaining gas.
     ///
     /// This is either owned by this inspector directly or part of a stack of inspectors, in which
-    /// case all delegated functions are noops.
+    /// case all delegated functions are no-ops.
     gas_inspector: MaybeOwnedInspector<GasInspector>,
 }
 
 // === impl TracingInspector ===
 
 impl TracingInspector {
-    /// Enables step recording and uses [GasInspector] to report gas costs for each step.
+    /// Enables step recording and uses the configured [GasInspector] to report gas costs for each
+    /// step.
+    pub fn with_steps_recording(mut self) -> Self {
+        self.record_steps = true;
+        self
+    }
+
+    /// Configures a [GasInspector]
     ///
-    /// Caution: if this inspector is part of a stack, the [MaybeOwnedInspector] should be
-    /// [MaybeOwnedInspector::Stacked].
-    pub fn with_steps_recording(
+    /// If this [TracingInspector] is part of a stack [InspectorStack](crate::stack::InspectorStack)
+    /// which already uses a [GasInspector], it can be reused as [MaybeOwnedInspector::Stacked] in
+    /// which case the `gas_inspector`'s usage will be a no-op within the context of this
+    /// [TracingInspector].
+    pub fn with_stacked_gas_inspector(
         mut self,
         gas_inspector: MaybeOwnedInspector<GasInspector>,
     ) -> Self {
-        self.record_steps = true;
         self.gas_inspector = gas_inspector;
         self
     }
 
-    fn start_trace(
+    /// Starts tracking a new trace.
+    ///
+    /// Invoked on [Inspector::call].
+    fn start_trace_on_call(
         &mut self,
         depth: usize,
         address: Address,
@@ -67,6 +85,7 @@ impl TracingInspector {
         kind: CallKind,
         caller: Address,
     ) {
+        // TODO: check precompiles
         self.trace_stack.push(self.traces.push_trace(
             0,
             CallTrace {
@@ -82,7 +101,14 @@ impl TracingInspector {
         ));
     }
 
-    fn fill_trace(
+    /// Fills the current trace with the outcome of a call.
+    ///
+    /// Invoked on [Inspector::call_end].
+    ///
+    /// # Panics
+    ///
+    /// This expects an existing trace [Self::start_trace_on_call]
+    fn fill_trace_on_call_end(
         &mut self,
         status: InstructionResult,
         cost: u64,
@@ -103,6 +129,14 @@ impl TracingInspector {
         }
     }
 
+    /// Starts tracking a step
+    ///
+    /// Invoked on [Inspector::step]
+    ///
+    /// # Panics
+    ///
+    /// This expects an existing [CallTrace], in other words, this panics if not within the context
+    /// of a call.
     fn start_step<DB: Database>(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) {
         let trace_idx =
             *self.trace_stack.last().expect("can't start step without starting a trace first");
@@ -119,16 +153,20 @@ impl TracingInspector {
             contract: interp.contract.address,
             stack: interp.stack.clone(),
             memory: interp.memory.clone(),
-            gas: 0,
-            // gas: self.gas_inspector.borrow().gas_remaining(),
+            gas: self.gas_inspector.as_ref().gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
+
+            // will be populated end of call
             gas_cost: 0,
             state_diff: None,
-            error: None,
+            status: InstructionResult::Continue,
         });
     }
 
-    fn fill_step<DB: Database>(
+    /// Fills the current trace with the output of a step.
+    ///
+    /// Invoked on [Inspector::step_end].
+    fn fill_step_on_step_end<DB: Database>(
         &mut self,
         interp: &mut Interpreter,
         data: &mut EVMData<'_, DB>,
@@ -146,7 +184,8 @@ impl TracingInspector {
                 .journal
                 .last()
                 // This should always work because revm initializes it as `vec![vec![]]`
-                .unwrap()
+                // See [JournaledState::new](revm::JournaledState)
+                .expect("exists; initialized with vec")
                 .last();
 
             step.state_diff = match (op, journal_entry) {
@@ -154,19 +193,18 @@ impl TracingInspector {
                     opcode::SLOAD | opcode::SSTORE,
                     Some(JournalEntry::StorageChage { address, key, .. }),
                 ) => {
+                    // SAFETY: (Address,key) exists if part if StorageC
                     let value = data.journaled_state.state[address].storage[key].present_value();
                     Some((*key, value))
                 }
                 _ => None,
             };
 
-            // step.gas_cost = step.gas - self.gas_inspector.borrow().gas_remaining();
+            step.gas_cost = step.gas - self.gas_inspector.as_ref().gas_remaining();
         }
 
-        // Error codes only
-        if status as u8 > InstructionResult::OutOfGas as u8 {
-            step.error = Some(format!("{status:?}"));
-        }
+        // set the status
+        step.status = status;
     }
 }
 
@@ -220,7 +258,7 @@ where
     ) -> InstructionResult {
         if self.record_steps {
             self.gas_inspector.step_end(interp, data, is_static, eval);
-            self.fill_step(interp, data, eval);
+            self.fill_step_on_step_end(interp, data, eval);
             return eval
         }
         InstructionResult::Continue
@@ -242,7 +280,7 @@ where
             _ => (inputs.context.caller, inputs.context.address),
         };
 
-        self.start_trace(
+        self.start_trace_on_call(
             data.journaled_state.depth() as usize,
             to,
             inputs.input.clone(),
@@ -265,7 +303,7 @@ where
     ) -> (InstructionResult, Gas, Bytes) {
         self.gas_inspector.call_end(data, inputs, gas, ret, out.clone(), is_static);
 
-        self.fill_trace(
+        self.fill_trace_on_call_end(
             ret,
             gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
             out.clone(),
@@ -284,7 +322,7 @@ where
 
         let _ = data.journaled_state.load_account(inputs.caller, data.db);
         let nonce = data.journaled_state.account(inputs.caller).info.nonce;
-        self.start_trace(
+        self.start_trace_on_call(
             data.journaled_state.depth() as usize,
             get_create_address(inputs, nonce),
             inputs.init_code.clone(),
@@ -321,7 +359,7 @@ where
                 .map_or(vec![], |code| code.bytes()[..code.len()].to_vec()),
             None => vec![],
         };
-        self.fill_trace(
+        self.fill_trace_on_call_end(
             status,
             gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
             code.into(),

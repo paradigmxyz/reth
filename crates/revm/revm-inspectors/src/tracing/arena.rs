@@ -1,14 +1,11 @@
-use crate::tracing::{call::CallKind, node::CallTraceNode};
-use reth_primitives::{
-    bytes::Bytes,
-    hex,
-    rpc::{DefaultFrame, GethDebugTracingOptions, StructLog},
-    Address, U256,
+use crate::tracing::{
+    call::{CallTrace},
+    node::CallTraceNode,
 };
-use revm::interpreter::{CallContext, InstructionResult, Memory, OpCode, Stack};
-use std::fmt::Write;
-
-pub(crate) type Traces = Vec<(TraceKind, CallTraceArena)>;
+use reth_primitives::{hex, Address, U256};
+use reth_rpc_types::trace::{DefaultFrame, GethDebugTracingOptions, StructLog};
+use revm::interpreter::{InstructionResult, Memory, OpCode, Stack};
+use revm::interpreter::instruction_result::SuccessOrHalt;
 
 /// An arena of [CallTraceNode]s
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -148,6 +145,7 @@ pub(crate) enum LogCallOrder {
     Call(usize),
 }
 
+/// Represents a tracked call step during execution
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallTraceStep {
     // Fields filled in `step`
@@ -172,90 +170,51 @@ pub struct CallTraceStep {
     pub gas_cost: u64,
     /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
     pub state_diff: Option<(U256, U256)>,
-    /// Error (if any) after step execution
-    pub error: Option<String>,
+    /// Final status of the call
+    pub status: InstructionResult,
 }
 
-impl From<&CallTraceStep> for StructLog {
-    fn from(_step: &CallTraceStep) -> Self {
-        unimplemented!()
-        // StructLog {
-        //     depth: step.depth,
-        //     error: step.error.clone(),
-        //     gas: step.gas,
-        //     gas_cost: step.gas_cost,
-        //     memory: Some(convert_memory(step.memory.data())),
-        //     op: step.op.to_string(),
-        //     pc: step.pc as u64,
-        //     refund_counter: if step.gas_refund_counter > 0 {
-        //         Some(step.gas_refund_counter)
-        //     } else {
-        //         None
-        //     },
-        //     stack: Some(step.stack.data().clone()),
-        //     // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
-        //     storage: None,
-        // }
+// === impl CallTraceStep ===
+
+impl CallTraceStep {
+    // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
+    pub fn is_error(&self) -> bool {
+        self.status as u8 >= InstructionResult::Revert as u8
     }
-}
 
-/// A trace of a call.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CallTrace {
-    /// The depth of the call
-    pub(crate) depth: usize,
-    /// Whether the call was successful
-    pub(crate) success: bool,
-    /// caller of this call
-    pub(crate) caller: Address,
-    /// The destination address of the call or the address from the created contract
-    pub(crate) address: Address,
-    /// The kind of call this is
-    pub(crate) kind: CallKind,
-    /// The value transferred in the call
-    pub(crate) value: U256,
-    /// The calldata for the call, or the init code for contract creations
-    pub(crate) data: Bytes,
-    /// The return data of the call if this was not a contract creation, otherwise it is the
-    /// runtime bytecode of the created contract
-    pub(crate) output: Bytes,
-    /// The gas cost of the call
-    pub(crate) gas_cost: u64,
-    /// The status of the trace's call
-    pub(crate) status: InstructionResult,
-    /// call context of the runtime
-    pub(crate) call_context: Option<CallContext>,
-    /// Opcode-level execution steps
-    pub(crate) steps: Vec<CallTraceStep>,
-}
-
-// === impl CallTrace ===
-
-impl CallTrace {
-    /// Whether this is a contract creation
-    pub(crate) fn is_created(&self) -> bool {
-        matches!(self.kind, CallKind::Create | CallKind::Create2)
-    }
-}
-
-impl Default for CallTrace {
-    fn default() -> Self {
-        Self {
-            depth: Default::default(),
-            success: Default::default(),
-            caller: Default::default(),
-            address: Default::default(),
-            kind: Default::default(),
-            value: Default::default(),
-            data: Default::default(),
-            output: Default::default(),
-            gas_cost: Default::default(),
-            status: InstructionResult::Continue,
-            call_context: Default::default(),
-            steps: Default::default(),
+    /// Returns the error message if it is an erroneous result.
+    pub fn as_error(&self) -> Option<String> {
+        if self.is_error() {
+            Some(format!("{:?}", self.status))
+        } else {
+            None
         }
     }
 }
+
+impl From<&CallTraceStep> for StructLog {
+    fn from(step: &CallTraceStep) -> Self {
+        StructLog {
+            depth: step.depth,
+            error: step.as_error(),
+            gas: step.gas,
+            gas_cost: step.gas_cost,
+            memory: Some(convert_memory(step.memory.data())),
+            op: step.op.to_string(),
+            pc: step.pc as u64,
+            refund_counter: if step.gas_refund_counter > 0 {
+                Some(step.gas_refund_counter)
+            } else {
+                None
+            },
+            stack: Some(step.stack.data().iter().copied().map(Into::into).collect()),
+            // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
+            storage: None,
+        }
+    }
+}
+
+// === impl CallTrace ===
 
 /// Specifies the kind of trace.
 #[derive(Clone, Debug, PartialEq, Eq)]
