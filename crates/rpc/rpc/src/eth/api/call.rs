@@ -288,7 +288,8 @@ where
         request: CallRequest,
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
-        let (mut cfg, block, at) = self.evm_env_at(at.unwrap_or_default()).await?;
+        let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let (mut cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
         // we want to disable this in eth_call, since this is common practice used by other node

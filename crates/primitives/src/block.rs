@@ -178,12 +178,6 @@ impl BlockId {
     }
 }
 
-impl Default for BlockId {
-    fn default() -> Self {
-        Self::Number(Default::default())
-    }
-}
-
 impl From<u64> for BlockId {
     fn from(num: u64) -> Self {
         BlockNumberOrTag::Number(num).into()
