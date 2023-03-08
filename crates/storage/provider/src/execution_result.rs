@@ -12,23 +12,38 @@ use reth_primitives::{
 use revm_primitives::HashMap;
 use std::collections::BTreeMap;
 
+/// Storage for an account.
+/// TODO: Better docs
 #[derive(Debug, Default, Clone)]
 pub struct Storage {
+    /// Whether the storage was wiped or not.
     pub wiped: bool,
+    /// The storage slots.
     pub storage: BTreeMap<U256, U256>,
 }
 
+/// Storage for an account with the old and new values for each slot.
+/// TODO: Better docs
+/// TODO: Do we actually need (old, new) anymore, or is (old) sufficient? (Check the writes)
+/// If we don't, we can unify this and [Storage].
 #[derive(Debug, Default, Clone)]
 pub struct StorageChangeset {
+    /// Whether the storage was wiped or not.
     pub wiped: bool,
+    /// The storage slots, where each entry is a tuple of the old and new value.
     pub storage: BTreeMap<U256, (U256, U256)>,
 }
 
+/// A set of changes for an account.
 #[derive(Debug, Default, Clone)]
 pub struct ChangeSet {
+    /// The transition ID associated with this changeset.
     pub id: TransitionId,
+    /// The address of the account that was changed.
     pub address: Address,
+    /// The storage slots that were changed.
     pub storage: StorageChangeset,
+    /// The type of change the account info underwent.
     pub account: AccountInfoChangeSet,
 }
 
@@ -36,7 +51,8 @@ pub struct ChangeSet {
 /// and block reward if present
 #[derive(Debug, Default, Clone)]
 pub struct ExecutionResult {
-    next_changeset_id: TransitionId,
+    /// The ID of the next transition.
+    next_transition_id: TransitionId,
     /// The state of all modified accounts after execution
     pub accounts: BTreeMap<Address, Option<Account>>,
     /// The state of all modified storage after execution
@@ -51,18 +67,20 @@ pub struct ExecutionResult {
 
 // TODO: Reduce clones
 impl ExecutionResult {
+    /// Extend this [ExecutionResult] with the changes in another [ExecutionResult].
     pub fn extend(&mut self, other: ExecutionResult) {
         let len = other.changesets.len() as u64;
         for mut changeset in other.changesets {
-            changeset.id = self.next_changeset_id + changeset.id;
+            changeset.id = self.next_transition_id + changeset.id;
             self.apply_changeset(changeset.clone());
             self.changesets.push(changeset);
         }
-        self.next_changeset_id += len;
+        self.next_transition_id += len;
     }
 
+    /// Add a [TransactionChangeSet] to this execution result.
     pub fn push_transaction_changes(&mut self, changeset: TransactionChangeSet) {
-        let changeset_id = self.next_changeset_id;
+        let changeset_id = self.next_transition_id;
         for (address, changes) in changeset.changeset.into_iter() {
             let changes = ChangeSet {
                 id: changeset_id,
@@ -75,20 +93,22 @@ impl ExecutionResult {
         }
         self.receipts.push(changeset.receipt);
         self.bytecode.extend(changeset.new_bytecodes);
-        self.next_changeset_id += 1;
+        self.next_transition_id += 1;
     }
 
+    /// Add block specific account changes.
     pub fn push_block_changes(&mut self, changesets: BTreeMap<Address, AccountInfoChangeSet>) {
-        let changeset_id = self.next_changeset_id;
+        let changeset_id = self.next_transition_id;
         for (address, changes) in changesets {
             let changes =
                 ChangeSet { id: changeset_id, address, account: changes, ..Default::default() };
             self.apply_changeset(changes.clone());
             self.changesets.push(changes);
         }
-        self.next_changeset_id += 1;
+        self.next_transition_id += 1;
     }
 
+    /// Write the execution result to the database.
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         self,
         tx: &TX,
@@ -195,6 +215,7 @@ impl ExecutionResult {
         Ok(())
     }
 
+    /// Internally apply a changeset to update the current state of the accounts and storage values.
     fn apply_changeset(&mut self, changeset: ChangeSet) {
         match changeset.account {
             AccountInfoChangeSet::Destroyed { .. } => {
