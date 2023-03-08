@@ -288,7 +288,9 @@ where
 
         // execution stage
         // TODO: State clear EIP
-        changeset.write_to_db(self.deref_mut(), self.get_block_transition(parent_block_number)?)?;
+        {
+            changeset.write_to_db(&**self, self.get_block_transition(parent_block_number)?)?;
+        }
 
         // storage hashing stage
         {

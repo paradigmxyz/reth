@@ -161,7 +161,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
 
         // put execution results to database
-        // TODO: Transition id
         // TODO: State clear EIP
         let first_transition_id = tx.get_block_transition(last_block)?;
         changesets.write_to_db(&**tx, first_transition_id)?;
