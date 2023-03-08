@@ -9,8 +9,8 @@ use reth_db::{
 };
 use reth_primitives::MAINNET;
 use reth_provider::Transaction;
-use reth_stages::{stages::ExecutionStage, DefaultDB, Stage, StageId, UnwindInput};
-use std::ops::DerefMut;
+use reth_stages::{stages::ExecutionStage, Stage, StageId, UnwindInput};
+use std::{ops::DerefMut, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(
@@ -97,7 +97,10 @@ async fn unwind_and_copy<DB: Database>(
     output_db: &reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
 ) -> eyre::Result<()> {
     let mut unwind_tx = Transaction::new(db_tool.db)?;
-    let mut exec_stage: ExecutionStage<'_, DefaultDB<'_>> = ExecutionStage::from(MAINNET.clone());
+
+    let mut exec_stage = ExecutionStage::new_default_threshold(reth_executor::Factory::new(
+        Arc::new(MAINNET.clone()),
+    ));
 
     exec_stage
         .unwind(
@@ -126,7 +129,9 @@ async fn dry_run(
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
     let mut tx = Transaction::new(&output_db)?;
-    let mut exec_stage: ExecutionStage<'_, DefaultDB<'_>> = ExecutionStage::from(MAINNET.clone());
+    let mut exec_stage = ExecutionStage::new_default_threshold(reth_executor::Factory::new(
+        Arc::new(MAINNET.clone()),
+    ));
 
     exec_stage
         .execute(
