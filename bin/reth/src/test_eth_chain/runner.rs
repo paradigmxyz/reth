@@ -10,8 +10,8 @@ use reth_db::{
     Error as DbError,
 };
 use reth_primitives::{
-    keccak256, Account as RethAccount, Address, ChainSpec, ForkCondition, Hardfork, JsonU256,
-    SealedBlock, SealedHeader, StorageEntry, H256, U256,
+    keccak256, Account as RethAccount, Address, Bytecode, ChainSpec, ForkCondition, Hardfork,
+    JsonU256, SealedBlock, SealedHeader, StorageEntry, H256, U256,
 };
 use reth_provider::Transaction;
 use reth_rlp::Decodable;
@@ -162,7 +162,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
                 },
             )?;
             if let Some(code_hash) = code_hash {
-                tx.put::<tables::Bytecodes>(code_hash, account.code.to_vec())?;
+                tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.0))?;
             }
             account.storage.iter().try_for_each(|(k, v)| {
                 trace!(target: "reth::cli", ?address, key = ?k.0, value = ?v.0, "Update storage");

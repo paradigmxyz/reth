@@ -533,8 +533,8 @@ pub fn verify_receipt<'a>(
 mod tests {
     use super::*;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
-        StorageKey, H256, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, Address, Bytecode, Bytes, ChainSpecBuilder,
+        ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_revm::database::State;
@@ -544,7 +544,7 @@ mod tests {
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-        contracts: HashMap<H256, Bytes>,
+        contracts: HashMap<H256, Bytecode>,
         block_hash: HashMap<U256, H256>,
     }
 
@@ -560,7 +560,7 @@ mod tests {
             if let Some(bytecode) = bytecode {
                 let hash = keccak256(&bytecode);
                 account.bytecode_hash = Some(hash);
-                self.contracts.insert(hash, bytecode);
+                self.contracts.insert(hash, Bytecode::new_raw(bytecode.into()));
             }
             self.accounts.insert(address, (storage, account));
         }
@@ -591,7 +591,7 @@ mod tests {
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytes>> {
+        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
     }
