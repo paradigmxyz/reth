@@ -14,10 +14,9 @@ use reth_db::{
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, Bytecode, ChainSpec, Hardfork, Header,
-    SealedBlock, StorageEntry, TransitionId, TxNumber, H256, U256,
+    keccak256, Account, Address, BlockHash, BlockNumber, Header, SealedBlock, StorageEntry,
+    TransitionId, TxNumber, H256, U256,
 };
-use reth_tracing::tracing::{info, trace};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
@@ -29,7 +28,7 @@ use crate::{
     trie::{DBTrieLoader, TrieError},
 };
 
-use crate::execution_result::{AccountChangeSet, ExecutionResult};
+use crate::execution_result::ExecutionResult;
 
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.
@@ -280,7 +279,6 @@ where
     pub fn insert_block(
         &mut self,
         block: &SealedBlock,
-        chain_spec: &ChainSpec,
         changeset: ExecutionResult,
     ) -> Result<(), TransactionError> {
         // Header, Body, SenderRecovery, TD, TxLookup stages

@@ -9,7 +9,6 @@ use reth_db::{
 use reth_primitives::{
     Account, Address, Bytecode, Receipt, StorageEntry, TransitionId, H256, U256,
 };
-use revm_primitives::HashMap;
 use std::collections::BTreeMap;
 
 /// Storage for an account.
@@ -116,7 +115,7 @@ impl ExecutionResult {
     ) -> Result<(), DbError> {
         // Write account changes
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
-        let mut account_changes: BTreeMap<(TransitionId, Address), AccountInfoChangeSet> = self
+        let account_changes: BTreeMap<(TransitionId, Address), AccountInfoChangeSet> = self
             .changesets
             .iter()
             .map(|changeset| ((changeset.id, changeset.address), changeset.account.clone()))
@@ -132,7 +131,7 @@ impl ExecutionResult {
                         AccountBeforeTx { address, info: Some(old) },
                     )?;
                 }
-                AccountInfoChangeSet::Created { new } => {
+                AccountInfoChangeSet::Created { .. } => {
                     // Ignore account that are created empty and state clear (SpuriousDragon)
                     // hardfork is activated.
                     //if has_state_clear_eip && new.is_empty() {
@@ -233,7 +232,7 @@ impl ExecutionResult {
             entry.storage.clear();
         }
         entry.wiped = changeset.storage.wiped;
-        entry.storage.extend(changeset.storage.storage.iter().map(|(key, (old, new))| (key, new)));
+        entry.storage.extend(changeset.storage.storage.iter().map(|(key, (_, new))| (key, new)));
     }
 }
 
