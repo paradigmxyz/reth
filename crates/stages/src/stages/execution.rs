@@ -110,7 +110,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Create state provider with cached state
 
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
-        //let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
 
         // Fetch transactions, execute them and generate results
         let mut changesets = Vec::with_capacity(block_batch.len());

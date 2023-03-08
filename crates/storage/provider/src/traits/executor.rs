@@ -4,15 +4,15 @@ use crate::{execution_result::ExecutionResult, StateProvider};
 use reth_interfaces::executor::Error;
 use reth_primitives::{Address, Block, ChainSpec, U256};
 
-/// Executor factory that would spawn the EVM with particular state provider.
+/// Executor factory that would create the EVM with particular state provider.
 ///
 /// It can be used to mock executor.
 pub trait ExecutorFactory: Send + Sync + 'static {
-    /// execs
-    type EXEC<T: StateProvider>: BlockExecutor<T>;
+    /// The executor produced by the factory
+    type Executor<T: StateProvider>: BlockExecutor<T>;
 
     /// Executor with [`StateProvider`]
-    fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::EXEC<SP>;
+    fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::Executor<SP>;
 
     /// Return internal chainspec
     fn chain_spec(&self) -> &ChainSpec;

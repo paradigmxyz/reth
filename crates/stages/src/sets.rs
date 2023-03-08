@@ -14,18 +14,27 @@
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
+//! # use reth_executor::Factory;
+//! # use reth_primitives::MAINNET;
+//! # use std::sync::Arc;
+//!
+//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! // Build a pipeline with all offline stages.
 //! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
-//! Pipeline::builder().add_stages(OfflineStages::default()).build();
+//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build();
 //! ```
 //!
 //! ```ignore
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::{StageSet, sets::OfflineStages};
+//! # use reth_executor::Factory;
+//! # use reth_primitives::MAINNET;
+//! # use std::sync::Arc;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
+//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! Pipeline::builder()
 //!     .add_stages(
-//!         OfflineStages::default().builder().add_stage(MyCustomStage)
+//!         OfflineStages::new(factory).builder().add_stage(MyCustomStage)
 //!     )
 //!     .build();
 //! ```

@@ -19,10 +19,10 @@ impl Factory {
 }
 
 impl ExecutorFactory for Factory {
-    type EXEC<SP: StateProvider> = Executor<SP>;
+    type Executor<SP: StateProvider> = Executor<SP>;
 
     /// Executor with [`StateProvider`]
-    fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::EXEC<SP> {
+    fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::Executor<SP> {
         let substate = SubState::new(State::new(sp));
         Executor::new(self.chain_spec.clone(), substate)
     }
