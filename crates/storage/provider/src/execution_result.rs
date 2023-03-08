@@ -68,6 +68,8 @@ pub struct ExecutionResult {
 impl ExecutionResult {
     /// Extend this [ExecutionResult] with the changes in another [ExecutionResult].
     pub fn extend(&mut self, other: ExecutionResult) {
+        self.changesets.reserve(other.changesets.len());
+
         let mut next_transition_id = self.next_transition_id;
         for mut changeset in other.changesets {
             next_transition_id = self.next_transition_id + changeset.id;
@@ -82,6 +84,8 @@ impl ExecutionResult {
 
     /// Add a [TransactionChangeSet] to this execution result.
     pub fn push_transaction_changes(&mut self, changeset: TransactionChangeSet) {
+        self.changesets.reserve(changeset.changeset.len());
+
         let changeset_id = self.next_transition_id;
         for (address, changes) in changeset.changeset.into_iter() {
             let changes = ChangeSet {
@@ -100,6 +104,8 @@ impl ExecutionResult {
 
     /// Add block specific account changes.
     pub fn push_block_changes(&mut self, changesets: BTreeMap<Address, AccountInfoChangeSet>) {
+        self.changesets.reserve(changesets.len());
+
         let changeset_id = self.next_transition_id;
         for (address, changes) in changesets {
             let changes =
@@ -158,11 +164,11 @@ impl ExecutionResult {
                 TransitionIdAddress((first_transition_id + changeset.id, changeset.address));
             if changeset.storage.wiped {
                 // iterate over storage and save them before entry is deleted.
-                storages_cursor.walk_dup(Some(address), None)?.try_for_each(|entry| {
-                    entry.and_then(|(_, old_value)| {
-                        storage_changeset_cursor.append_dup(storage_id, old_value)
-                    })
-                })?;
+                if storages_cursor.seek_exact(address)?.is_some() {
+                    while let Some(entry) = storages_cursor.next_dup_val()? {
+                        storage_changeset_cursor.append_dup(storage_id, entry)?;
+                    }
+                }
             } else {
                 for (key, (old_value, _)) in changeset.storage.storage.iter() {
                     storage_changeset_cursor.append_dup(
