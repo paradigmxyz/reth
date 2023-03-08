@@ -38,6 +38,24 @@ pub(crate) struct DevSigner {
     accounts: HashMap<Address, SecretKey>,
 }
 
+impl DevSigner {
+    fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
+        let secp = Secp256k1::new();
+        let secret =
+            self.accounts.get(&account).ok_or(RpcError::Custom("No account".to_string()))?;
+        // TODO: Handle unwrap properly
+        let ref message = Message::from_slice(&hash.as_bytes()).unwrap();
+        let (rec_id, data) = secp.sign_ecdsa_recoverable(message, secret).serialize_compact();
+        let signature = Signature {
+            // TODO:
+            // Handle unwraps properly
+            r: U256::try_from_be_slice(&data[..32]).unwrap(),
+            s: U256::try_from_be_slice(&data[32..64]).unwrap(),
+            odd_y_parity: rec_id.to_i32() != 0,
+        };
+        Ok(signature)
+    }
+}
 #[async_trait::async_trait]
 impl EthSigner for DevSigner {
     fn accounts(&self) -> Vec<Address> {
@@ -49,23 +67,10 @@ impl EthSigner for DevSigner {
     }
 
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature> {
-        let secp = Secp256k1::new();
-        let secret =
-            self.accounts.get(&address).ok_or(RpcError::Custom("No account".to_string()))?;
         // Hash message according to EIP 191:
         // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
-        // TODO: Handle unwrap properly
-        let message = Message::from_slice(hash_message(message).as_bytes()).unwrap();
-        let (rec_id, data) = secp.sign_ecdsa_recoverable(&message, secret).serialize_compact();
-        let signature = Signature {
-            // TODO:
-            // Not sure on how to properly handle
-            // this unwraps
-            r: U256::try_from_be_slice(&data[..32]).unwrap(),
-            s: U256::try_from_be_slice(&data[32..64]).unwrap(),
-            odd_y_parity: rec_id.to_i32() != 0,
-        };
-        Ok(signature)
+        let hash = hash_message(message).into();
+        self.sign_hash(hash, address)
     }
 
     fn sign_transaction(
@@ -77,21 +82,9 @@ impl EthSigner for DevSigner {
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
-        let secp = Secp256k1::new();
         let encoded: H256 =
             payload.encode_eip712().unwrap().into();
-        let secret =
-            self.accounts.get(&address).ok_or(RpcError::Custom("No account".to_string()))?;
-        let (rec_id, data) = secp.sign_ecdsa_recoverable(&(Message::from_slice(encoded.as_bytes()).unwrap()), secret).serialize_compact();
-        let signature = Signature {
-            // TODO:
-            // Not sure on how to properly handle
-            // this unwraps
-            r: U256::try_from_be_slice(&data[..32]).unwrap(),
-            s: U256::try_from_be_slice(&data[32..64]).unwrap(),
-            odd_y_parity: rec_id.to_i32() != 0,
-        };
-        Ok(signature)
+        self.sign_hash(encoded, address)
     }
 }
 
