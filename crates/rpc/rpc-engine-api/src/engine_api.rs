@@ -6,8 +6,10 @@ use reth_primitives::{
     BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
     H64, U256,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
-use reth_revm::database::{State, SubState};
+use reth_provider::{
+    BlockExecutor, BlockProvider, EvmEnvProvider, ExecutorFactory, HeaderProvider,
+    StateProviderFactory,
+};
 use reth_rlp::Decodable;
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
@@ -305,8 +307,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         let state_provider = self.client.latest()?;
         let total_difficulty = parent_td + block.header.difficulty;
 
-        let mut db = SubState::new(State::new(&state_provider));
-        let mut executor = reth_executor::executor::Executor::new(self.chain_spec.clone(), &mut db);
+        let factory = reth_executor::Factory::new(self.chain_spec.clone());
+        let mut executor = factory.with_sp(&state_provider);
         match executor.execute_and_verify_receipt(&block.unseal(), total_difficulty, None) {
             Ok(_) => Ok(PayloadStatus::new(PayloadStatusEnum::Valid, block_hash)),
             Err(err) => Ok(PayloadStatus::new(
