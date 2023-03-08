@@ -34,8 +34,8 @@ pub(crate) trait EthSigner: Send + Sync {
 
 /// Holds developer keys
 pub(crate) struct DevSigner {
-    pub(crate) addresses: Vec<Address>,
-    pub(crate) accounts: HashMap<Address, SecretKey>,
+    addresses: Vec<Address>,
+    accounts: HashMap<Address, SecretKey>,
 }
 
 #[async_trait::async_trait]
