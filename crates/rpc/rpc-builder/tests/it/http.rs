@@ -76,6 +76,7 @@ where
     EthApiClient::uncle_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::uncle_by_block_number_and_index(client, block_number, index).await.unwrap();
     EthApiClient::sign(client, address, bytes.clone()).await.unwrap_err();
+    EthApiClient::sign_typed_data(client, address, jsonrpsee::core::JsonValue::Null).await.unwrap_err();
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
@@ -121,12 +122,6 @@ where
     ));
     assert!(is_unimplemented(
         EthApiClient::sign_transaction(client, call_request.clone()).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::sign_typed_data(client, address, jsonrpsee::core::JsonValue::Null)
-            .await
-            .err()
-            .unwrap()
     ));
     assert!(is_unimplemented(
         EthApiClient::get_proof(client, address, vec![], None).await.err().unwrap()
