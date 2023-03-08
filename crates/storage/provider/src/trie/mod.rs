@@ -279,6 +279,7 @@ impl DBTrieLoader {
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
         }
+        let previous_root = checkpoint.account_root.unwrap_or(EMPTY_ROOT);
 
         let hasher = Arc::new(HasherKeccak::new());
         let mut trie = if let Some(root) = checkpoint.account_root {
@@ -311,7 +312,7 @@ impl DBTrieLoader {
                     if self.has_hit_threshold() {
                         return self.save_account_checkpoint(
                             ProofCheckpoint::default(),
-                            H256::from_slice(trie.root()?.as_slice()),
+                            self.replace_account_root(tx, &mut trie, previous_root)?,
                             hashed_address,
                             tx,
                         )
@@ -320,7 +321,7 @@ impl DBTrieLoader {
                 TrieProgress::InProgress(checkpoint) => {
                     return self.save_account_checkpoint(
                         checkpoint,
-                        H256::from_slice(trie.root()?.as_slice()),
+                        self.replace_account_root(tx, &mut trie, previous_root)?,
                         hashed_address,
                         tx,
                     )
@@ -331,7 +332,7 @@ impl DBTrieLoader {
         // Reset inner stage progress
         self.save_checkpoint(tx, ProofCheckpoint::default())?;
 
-        Ok(TrieProgress::Complete(H256::from_slice(trie.root()?.as_slice())))
+        Ok(TrieProgress::Complete(self.replace_account_root(tx, &mut trie, previous_root)?))
     }
 
     fn calculate_storage_root<DB: Database>(
@@ -339,7 +340,7 @@ impl DBTrieLoader {
         tx: &Transaction<'_, DB>,
         address: H256,
         next_storage: Option<H256>,
-        current_storage_root: Option<H256>,
+        previous_root: Option<H256>,
     ) -> Result<TrieProgress, TrieError> {
         let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
@@ -351,10 +352,10 @@ impl DBTrieLoader {
                     Arc::new(DupHashDatabase::from_root(
                         tx,
                         address,
-                        current_storage_root.expect("is some"),
+                        previous_root.expect("is some"),
                     )?),
                     hasher,
-                    current_storage_root.expect("is some").as_bytes(),
+                    previous_root.expect("is some").as_bytes(),
                 )?,
             )
         } else {
@@ -363,6 +364,8 @@ impl DBTrieLoader {
                 PatriciaTrie::new(Arc::new(DupHashDatabase::new(tx, address)?), hasher),
             )
         };
+
+        let previous_root = previous_root.unwrap_or(EMPTY_ROOT);
 
         while let Some(StorageEntry { key: storage_key, value }) = current_entry {
             let out = encode_fixed_size(&value).to_vec();
@@ -374,7 +377,12 @@ impl DBTrieLoader {
             if let Some(current_entry) = current_entry {
                 if threshold {
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
-                        storage_root: Some(H256::from_slice(trie.root()?.as_slice())),
+                        storage_root: Some(self.replace_storage_root(
+                            tx,
+                            trie,
+                            address,
+                            previous_root,
+                        )?),
                         storage_key: Some(current_entry.key),
                         ..Default::default()
                     }))
@@ -382,32 +390,32 @@ impl DBTrieLoader {
             }
         }
 
-        Ok(TrieProgress::Complete(H256::from_slice(trie.root()?.as_slice())))
+        Ok(TrieProgress::Complete(self.replace_storage_root(tx, trie, address, previous_root)?))
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
     pub fn update_root<DB: Database>(
         &mut self,
         tx: &Transaction<'_, DB>,
-        mut root: H256,
+        mut previous_root: H256,
         tid_range: Range<TransitionId>,
     ) -> Result<TrieProgress, TrieError> {
-        let mut progress = self.get_checkpoint(tx)?;
+        let mut checkpoint = self.get_checkpoint(tx)?;
 
-        if let Some(account_root) = progress.account_root.take() {
-            root = account_root;
+        if let Some(account_root) = checkpoint.account_root.take() {
+            previous_root = account_root;
         }
 
-        let next_acc = progress.hashed_address.take();
+        let next_acc = checkpoint.hashed_address.take();
         let changed_accounts = self
             .gather_changes(tx, tid_range)?
             .into_iter()
             .skip_while(|(addr, _)| next_acc.is_some() && next_acc.expect("is some") != *addr);
 
         let mut trie = PatriciaTrie::from(
-            Arc::new(HashDatabase::from_root(tx, root)?),
+            Arc::new(HashDatabase::from_root(tx, previous_root)?),
             Arc::new(HasherKeccak::new()),
-            root.as_bytes(),
+            previous_root.as_bytes(),
         )?;
 
         let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
@@ -419,17 +427,17 @@ impl DBTrieLoader {
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
                 self.update_storage_root(
                     tx,
-                    progress.storage_root.take().unwrap_or(storage_root),
+                    checkpoint.storage_root.take().unwrap_or(storage_root),
                     hashed_address,
                     changed_storages,
-                    progress.storage_key.take(),
+                    checkpoint.storage_key.take(),
                 )?
             } else {
                 self.calculate_storage_root(
                     tx,
                     hashed_address,
-                    progress.storage_key.take(),
-                    progress.storage_root.take(),
+                    checkpoint.storage_key.take(),
+                    checkpoint.storage_root.take(),
                 )?
             };
 
@@ -438,7 +446,7 @@ impl DBTrieLoader {
                 TrieProgress::InProgress(checkpoint) => {
                     return self.save_account_checkpoint(
                         checkpoint,
-                        H256::from_slice(trie.root()?.as_slice()),
+                        self.replace_account_root(tx, &mut trie, previous_root)?,
                         hashed_address,
                         tx,
                     )
@@ -456,7 +464,7 @@ impl DBTrieLoader {
                 if self.has_hit_threshold() {
                     return self.save_account_checkpoint(
                         ProofCheckpoint::default(),
-                        H256::from_slice(trie.root()?.as_slice()),
+                        self.replace_account_root(tx, &mut trie, previous_root)?,
                         hashed_address,
                         tx,
                     )
@@ -467,21 +475,21 @@ impl DBTrieLoader {
         // Reset inner stage progress
         self.save_checkpoint(tx, ProofCheckpoint::default())?;
 
-        Ok(TrieProgress::Complete(H256::from_slice(trie.root()?.as_slice())))
+        Ok(TrieProgress::Complete(self.replace_account_root(tx, &mut trie, previous_root)?))
     }
 
     fn update_storage_root<DB: Database>(
         &mut self,
         tx: &Transaction<'_, DB>,
-        root: H256,
+        previous_root: H256,
         address: H256,
         changed_storages: BTreeSet<H256>,
         next_storage: Option<H256>,
     ) -> Result<TrieProgress, TrieError> {
-        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let mut hashed_storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         let mut trie = PatriciaTrie::new(
-            Arc::new(DupHashDatabase::from_root(tx, address, root)?),
+            Arc::new(DupHashDatabase::from_root(tx, address, previous_root)?),
             Arc::new(HasherKeccak::new()),
         );
 
@@ -491,13 +499,18 @@ impl DBTrieLoader {
 
         for key in changed_storages {
             if let Some(StorageEntry { value, .. }) =
-                storage_cursor.seek_by_key_subkey(address, key)?.filter(|e| e.key == key)
+                hashed_storage_cursor.seek_by_key_subkey(address, key)?.filter(|e| e.key == key)
             {
                 let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes().to_vec(), out)?;
                 if self.has_hit_threshold() {
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
-                        storage_root: Some(H256::from_slice(trie.root()?.as_slice())),
+                        storage_root: Some(self.replace_storage_root(
+                            tx,
+                            trie,
+                            address,
+                            previous_root,
+                        )?),
                         storage_key: Some(key),
                         ..Default::default()
                     }))
@@ -507,9 +520,7 @@ impl DBTrieLoader {
             }
         }
 
-        let root = H256::from_slice(trie.root()?.as_slice());
-
-        Ok(TrieProgress::Complete(root))
+        Ok(TrieProgress::Complete(self.replace_storage_root(tx, trie, address, previous_root)?))
     }
 
     fn gather_changes<DB: Database>(
@@ -566,6 +577,11 @@ impl DBTrieLoader {
         Ok(TrieProgress::InProgress(checkpoint))
     }
 
+    fn has_hit_threshold(&mut self) -> bool {
+        self.current += 1;
+        self.current >= self.commit_threshold
+    }
+
     /// Saves the trie progress
     pub fn save_checkpoint<DB: Database>(
         &mut self,
@@ -595,15 +611,58 @@ impl DBTrieLoader {
         let (checkpoint, _) = ProofCheckpoint::from_compact(&buf, buf.len());
 
         if checkpoint.account_root.is_some() {
-            debug!(target: "sync::stages::merkle::exec", account = ?checkpoint.hashed_address, storage = ?checkpoint.storage_key, "Continuing inner trie checkpoint");
+            debug!(target: "sync::stages::merkle::exec", checkpoint = ?checkpoint, "Continuing inner trie checkpoint");
         }
 
         Ok(checkpoint)
     }
 
-    fn has_hit_threshold(&mut self) -> bool {
-        self.current += 1;
-        self.current >= self.commit_threshold
+    /// Finds the most recent account trie root and removes the previous one if applicable.
+    fn replace_account_root<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        trie: &mut PatriciaTrie<HashDatabase<'_, '_, DB>, HasherKeccak>,
+        previous_root: H256,
+    ) -> Result<H256, TrieError> {
+        let new_root = H256::from_slice(trie.root()?.as_slice());
+
+        if new_root != previous_root {
+            let mut cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+            if cursor.seek_exact(previous_root)?.is_some() {
+                cursor.delete_current()?;
+            }
+        }
+
+        Ok(new_root)
+    }
+
+    /// Finds the most recent storage trie root and removes the previous one if applicable.
+    fn replace_storage_root<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+        mut trie: PatriciaTrie<DupHashDatabase<'_, '_, DB>, HasherKeccak>,
+        address: H256,
+        previous_root: H256,
+    ) -> Result<H256, TrieError> {
+        let new_root = H256::from_slice(trie.root()?.as_slice());
+
+        if new_root != previous_root {
+            let mut trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+
+            if trie_cursor
+                .seek_by_key_subkey(address, previous_root)?
+                .filter(|entry| entry.hash == previous_root)
+                .is_some()
+            {
+                trie_cursor.delete_current()?;
+            }
+        }
+
+        if new_root == EMPTY_ROOT {
+            tx.delete::<tables::StoragesTrie>(address, None)?;
+        }
+
+        Ok(new_root)
     }
 }
 

@@ -62,11 +62,7 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
-        if let Some(hash) = self.db.view(|tx| tx.get::<tables::CanonicalHeaders>(num))?? {
-            self.header(&hash)
-        } else {
-            Ok(None)
-        }
+        Ok(self.db.view(|tx| tx.get::<tables::Headers>(num))??)
     }
 
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
