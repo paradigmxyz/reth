@@ -4,10 +4,15 @@ use crate::{
 use fnv::FnvHashMap;
 use std::{cmp::Ordering, collections::BTreeSet, ops::Deref, sync::Arc};
 
-/// A pool of transaction that are currently parked and wait for external changes that eventually
-/// move the transaction into the pending pool.
+/// A pool of transactions that are currently parked and are waiting for external changes (e.g.
+/// basefee, ancestor transactions, balance) that eventually move the transaction into the pending
+/// pool.
 ///
-/// This pool is a bijection: at all times each set contains the same transactions.
+/// This pool is a bijection: at all times each set (`best`, `by_id`) contains the same
+/// transactions.
+///
+/// Note: This type is generic over [ParkedPool] which enforces that the underlying transaction type
+/// is [ValidPoolTransaction] wrapped in an [Arc].
 pub(crate) struct ParkedPool<T: ParkedOrd> {
     /// Keeps track of transactions inserted in the pool.
     ///
