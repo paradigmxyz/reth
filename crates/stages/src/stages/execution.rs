@@ -1,6 +1,6 @@
 use crate::{
-    exec_or_return, DefaultDB, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -9,11 +9,9 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_executor::executor::Executor;
 use reth_interfaces::provider::ProviderError;
-use reth_primitives::{Address, Block, ChainSpec, U256};
-use reth_provider::{LatestStateProviderRef, StateProvider, Transaction};
-use reth_revm::database::{State, SubState};
+use reth_primitives::{Address, Block, U256};
+use reth_provider::{BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction};
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
@@ -49,33 +47,28 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<'a, DB = DefaultDB<'a>>
-where
-    DB: StateProvider,
-{
+pub struct ExecutionStage<EF: ExecutorFactory> {
     /// The stage's internal executor
-    pub executor: Executor<'a, DB>,
+    pub executor_factory: EF,
     /// Commit threshold
     pub commit_threshold: u64,
 }
 
-impl<'a, DB: StateProvider> From<Executor<'a, DB>> for ExecutionStage<'a, DB> {
-    fn from(executor: Executor<'a, DB>) -> Self {
-        Self { executor, commit_threshold: 1_000 }
+impl<EF: ExecutorFactory> ExecutionStage<EF> {
+    /// Create new execution stage with specified config.
+    pub fn new(executor_factory: EF, commit_threshold: u64) -> Self {
+        Self { executor_factory, commit_threshold }
     }
-}
 
-impl<'a, DB: StateProvider> From<ChainSpec> for ExecutionStage<'a, DB> {
-    fn from(chain_spec: ChainSpec) -> Self {
-        let executor = Executor::from(chain_spec);
-        Self::from(executor)
+    /// Create execution stage with executor factory and default commit threshold set to 10_000
+    /// blocks
+    pub fn new_default_threshold(executor_factory: EF) -> Self {
+        Self { executor_factory, commit_threshold: 10_000 }
     }
-}
 
-impl<'a, S: StateProvider> ExecutionStage<'a, S> {
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
-        &mut self,
+        &self,
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
@@ -116,7 +109,7 @@ impl<'a, S: StateProvider> ExecutionStage<'a, S> {
 
         // Create state provider with cached state
 
-        let mut state_provider = SubState::new(State::new(LatestStateProviderRef::new(&**tx)));
+        let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Fetch transactions, execute them and generate results
         let mut changesets = Vec::with_capacity(block_batch.len());
@@ -154,7 +147,6 @@ impl<'a, S: StateProvider> ExecutionStage<'a, S> {
             trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
 
             // Configure the executor to use the current state.
-            let mut executor = self.executor.with_db(&mut state_provider);
             let changeset = executor
                 .execute_and_verify_receipt(
                     &Block { header, body: transactions, ommers, withdrawals },
@@ -166,7 +158,7 @@ impl<'a, S: StateProvider> ExecutionStage<'a, S> {
         }
 
         // put execution results to database
-        tx.insert_execution_result(changesets, &self.executor.chain_spec, last_block)?;
+        tx.insert_execution_result(changesets, self.executor_factory.chain_spec(), last_block)?;
 
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
@@ -174,15 +166,8 @@ impl<'a, S: StateProvider> ExecutionStage<'a, S> {
     }
 }
 
-impl<'a, DB: StateProvider> ExecutionStage<'a, DB> {
-    /// Create new execution stage with specified config.
-    pub fn new(executor: Executor<'a, DB>, commit_threshold: u64) -> Self {
-        Self { executor, commit_threshold }
-    }
-}
-
 #[async_trait::async_trait]
-impl<State: StateProvider, DB: Database> Stage<DB> for ExecutionStage<'_, State> {
+impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
     fn id(&self) -> StageId {
         EXECUTION
@@ -306,13 +291,23 @@ mod tests {
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
+    use reth_executor::Factory;
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, StorageEntry, H160,
-        H256, MAINNET, U256,
+        H256, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
-    use std::ops::{Deref, DerefMut};
+    use std::{
+        ops::{Deref, DerefMut},
+        sync::Arc,
+    };
+
+    fn stage() -> ExecutionStage<Factory> {
+        let factory =
+            Factory::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
+        ExecutionStage::new(factory, 100)
+    }
 
     #[tokio::test]
     async fn sanity_execution_of_block() {
@@ -355,8 +350,7 @@ mod tests {
         db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
         tx.commit().unwrap();
 
-        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
-        let mut execution_stage = ExecutionStage::<DefaultDB<'_>>::from(chain_spec);
+        let mut execution_stage = stage();
         let output = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
         assert_eq!(output, ExecOutput { stage_progress: 1, done: true });
@@ -440,12 +434,12 @@ mod tests {
         tx.commit().unwrap();
 
         // execute
-        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
-        let mut execution_stage = ExecutionStage::<DefaultDB<'_>>::from(chain_spec);
+        let mut execution_stage = stage();
         let _ = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 
-        let o = ExecutionStage::<DefaultDB<'_>>::from(MAINNET.clone())
+        let mut stage = stage();
+        let o = stage
             .unwind(&mut tx, UnwindInput { stage_progress: 1, unwind_to: 0, bad_block: None })
             .await
             .unwrap();
@@ -526,8 +520,7 @@ mod tests {
         tx.commit().unwrap();
 
         // execute
-        let chain_spec = ChainSpecBuilder::mainnet().berlin_activated().build();
-        let mut execution_stage = ExecutionStage::<DefaultDB<'_>>::from(chain_spec);
+        let mut execution_stage = stage();
         let _ = execution_stage.execute(&mut tx, input).await.unwrap();
         tx.commit().unwrap();
 

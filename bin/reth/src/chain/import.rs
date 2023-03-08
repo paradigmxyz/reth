@@ -27,7 +27,6 @@ use reth_staged_sync::{
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
-    DefaultDB,
 };
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -141,6 +140,8 @@ impl ImportCommand {
             .build(file_client.clone(), consensus.clone(), db)
             .into_task();
 
+        let factory = reth_executor::Factory::new(Arc::new(self.chain.clone()));
+
         let mut pipeline = Pipeline::builder()
             .with_sync_state_updater(file_client)
             .add_stages(
@@ -149,6 +150,7 @@ impl ImportCommand {
                     header_downloader,
                     body_downloader,
                     NoopStatusUpdater::default(),
+                    factory.clone(),
                 )
                 .set(TotalDifficultyStage {
                     chain_spec: self.chain.clone(),
@@ -157,12 +159,7 @@ impl ImportCommand {
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })
-                .set({
-                    let mut stage: ExecutionStage<'_, DefaultDB<'_>> =
-                        ExecutionStage::from(self.chain.clone());
-                    stage.commit_threshold = config.stages.execution.commit_threshold;
-                    stage
-                }),
+                .set(ExecutionStage::new(factory, config.stages.execution.commit_threshold)),
             )
             .with_max_block(0)
             .build();

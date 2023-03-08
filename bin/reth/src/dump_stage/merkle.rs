@@ -9,9 +9,9 @@ use reth_primitives::MAINNET;
 use reth_provider::Transaction;
 use reth_stages::{
     stages::{AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage},
-    DefaultDB, Stage, StageId, UnwindInput,
+    Stage, StageId, UnwindInput,
 };
-use std::ops::DerefMut;
+use std::{ops::DerefMut, sync::Arc};
 use tracing::info;
 
 pub(crate) async fn dump_merkle_stage<DB: Database>(
@@ -75,7 +75,10 @@ async fn unwind_and_copy<DB: Database>(
     MerkleStage::default_unwind().unwind(&mut unwind_tx, unwind).await?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
-    let mut exec_stage: ExecutionStage<'_, DefaultDB<'_>> = ExecutionStage::from(MAINNET.clone());
+    let mut exec_stage = ExecutionStage::new_default_threshold(reth_executor::Factory::new(
+        Arc::new(MAINNET.clone()),
+    ));
+
     exec_stage.commit_threshold = u64::MAX;
     exec_stage
         .unwind(
