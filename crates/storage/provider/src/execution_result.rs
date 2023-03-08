@@ -68,13 +68,14 @@ pub struct ExecutionResult {
 impl ExecutionResult {
     /// Extend this [ExecutionResult] with the changes in another [ExecutionResult].
     pub fn extend(&mut self, other: ExecutionResult) {
-        let len = other.changesets.len() as u64;
+        let mut next_transition_id = self.next_transition_id;
         for mut changeset in other.changesets {
-            changeset.id = self.next_transition_id + changeset.id;
+            next_transition_id = self.next_transition_id + changeset.id;
+            changeset.id = next_transition_id;
             self.apply_changeset(changeset.clone());
             self.changesets.push(changeset);
         }
-        self.next_transition_id += len;
+        self.next_transition_id = next_transition_id;
     }
 
     /// Add a [TransactionChangeSet] to this execution result.
