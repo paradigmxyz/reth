@@ -8,8 +8,7 @@ use crate::{
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
-    rpc::transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
-    Header, H256, H64, U256, U64,
+    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, Header, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -190,10 +189,14 @@ where
     /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
-        _request: CallRequest,
-        _block_number: Option<BlockId>,
+        mut request: CallRequest,
+        block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
-        Err(internal_rpc_err("unimplemented"))
+        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let access_list = self.create_access_list_at(request.clone(), block_number).await?;
+        request.access_list = Some(access_list.clone());
+        let gas_used = self.estimate_gas_at(request, block_id).await?;
+        Ok(AccessListWithGasUsed { access_list, gas_used })
     }
 
     /// Handler for: `eth_estimateGas`
