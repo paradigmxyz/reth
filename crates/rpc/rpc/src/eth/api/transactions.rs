@@ -26,20 +26,19 @@ where
         &self,
         hash: H256,
     ) -> EthResult<Option<reth_rpc_types::Transaction>> {
-        let tx_by_hash = match self.client().transaction_by_hash(hash) {
-            Ok(Some(item)) => item,
-            Ok(None) => return Ok(None),
-            Err(_) => return Err(EthApiError::EmptyRawTransactionData),
-        };
+        let tx_by_hash = self.client().transaction_by_hash(hash)
+            .map_err(|_| EthApiError::EmptyRawTransactionData)?
+            .ok_or(EthApiError::EmptyRawTransactionData)?
+            .into_ecrecovered()
+            .ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        let tx: reth_rpc_types::Transaction = Transaction::from_recovered_with_block_context(
-            tx_by_hash.into_ecrecovered().unwrap(),
+        Ok(Some(Transaction::from_recovered_with_block_context(
+            tx_by_hash,
             // this is just stubbed out for now still need to fully implement
             H256::default(),
             u64::default(),
             U256::from(usize::from(Index::default())),
-        );
-        Ok(Some(tx))
+        )))
     }
 
     /// Find a transaction at a specific index in a block, after finding the block by its hash.
@@ -48,23 +47,22 @@ where
         hash: H256,
         index: Index,
     ) -> EthResult<Option<reth_rpc_types::Transaction>> {
-        let block_by_hash = match self.client().block_by_hash(hash) {
-            Ok(item) => item,
-            Err(_) => return Err(EthApiError::UnknownBlockNumber),
-        };
+        let block_by_hash = self.client().block_by_hash(hash)
+            .map_err(|_| EthApiError::UnknownBlockNumber)?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
 
-        if let Some(block) = block_by_hash {
-            let txs = block.body;
-            let tx = txs[usize::from(index)].clone();
-            Ok(Some(Transaction::from_recovered_with_block_context(
-                tx.into_ecrecovered().unwrap(),
-                hash,
-                block.header.number,
-                U256::from(usize::from(index)),
-            )))
-        } else {
-            Ok(None)
-        }
+        let tx = block_by_hash.body[usize::from(index)]
+            .clone()
+            .into_ecrecovered()
+            .ok_or(EthApiError::InvalidTransactionSignature)?;
+
+        Ok(Some(Transaction::from_recovered_with_block_context(
+            tx,
+            hash,
+            block_by_hash.header.number,
+            U256::from(usize::from(index)),
+        )))
+
     }
 
     /// Find a transaction at a specific index in a block, after finging the block by its block
@@ -74,35 +72,24 @@ where
         number: BlockNumberOrTag,
         index: Index,
     ) -> EthResult<Option<reth_rpc_types::Transaction>> {
-        // get the u64 equivalent of the BlockNumber
-        let block_number = match self.client().convert_block_number(number) {
-            Ok(Some(number)) => number,
-            Ok(None) => return Ok(None),
-            Err(_) => return Err(EthApiError::InvalidBlockRange),
-        };
-        // get the Block by number from the client
-        let block_by_number = match self.client().block_by_number(block_number) {
-            Ok(item) => item,
-            Err(_) => return Err(EthApiError::UnknownBlockNumber),
-        };
-        // get the tx from the block
-        let txs = match self.client().transactions_by_block(BlockId::from(number)) {
-            Ok(Some(txs)) => txs,
-            Ok(None) => return Ok(None),
-            Err(_) => return Err(EthApiError::UnknownBlockNumber),
-        };
-        let tx = txs[usize::from(index)].clone();
+        let tx = self.client()
+            .transactions_by_block(BlockId::from(number))
+            .map_err(|_| EthApiError::UnknownBlockNumber)?
+            .ok_or(EthApiError::UnknownBlockNumber)?
+            // index into the txs
+            [usize::from(index)].clone()
+            .into_ecrecovered()
+            .ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        if let Some(block) = block_by_number {
-            Ok(Some(Transaction::from_recovered_with_block_context(
-                tx.into_ecrecovered().unwrap(),
-                BlockId::from(number).as_block_hash().unwrap(),
-                block.header.number,
-                U256::from(usize::from(index)),
-            )))
-        } else {
-            Ok(None)
-        }
+        let block_hash = BlockId::from(number).as_block_hash().unwrap();
+        let block_number = number.as_number().ok_or(EthApiError::UnknownBlockNumber)?;
+
+        Ok(Some(Transaction::from_recovered_with_block_context(
+            tx,
+            block_hash,
+            block_number,
+            U256::from(usize::from(index)),
+        )))
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.
