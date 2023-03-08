@@ -157,6 +157,7 @@ impl ExecutionResult {
                 TransitionIdAddress((first_transition_id + changeset.id, changeset.address));
             if changeset.storage.wiped {
                 // iterate over storage and save them before entry is deleted.
+                // todo: dup walker
                 tx.cursor_read::<tables::PlainStorageState>()?
                     .walk(Some(address))?
                     .take_while(|res| res.as_ref().map(|(k, _)| *k == address).unwrap_or_default())
@@ -177,7 +178,6 @@ impl ExecutionResult {
         // Write new storage state
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage {
-            println!("Storage: {:?}", address);
             if storage.wiped && storages_cursor.seek_exact(address)?.is_some() {
                 storages_cursor.delete_current_duplicates()?;
             }
@@ -199,14 +199,13 @@ impl ExecutionResult {
         // Write new account state
         let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
         for (address, account) in self.accounts {
-            let current = accounts_cursor.seek_exact(address)?;
             if let Some(account) = account {
                 /*if has_state_clear_eip && account.is_empty() {
                     // TODO: seek and then delete
                     continue
                 }*/
                 accounts_cursor.upsert(address, account)?;
-            } else if current.is_some() {
+            } else if accounts_cursor.seek_exact(address)?.is_some() {
                 accounts_cursor.delete_current()?;
             }
         }
