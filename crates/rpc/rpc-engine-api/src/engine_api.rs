@@ -257,6 +257,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
     /// state in the block header, then passes validation data back to Consensus layer, that
     /// adds the block to the head of its own blockchain and attests to it. The block is then
     /// broadcasted over the consensus p2p network in the form of a "Beacon block".
+    ///
+    /// These responses should adhere to the [Engine API Spec for
+    /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
     pub fn new_payload(&mut self, payload: ExecutionPayload) -> EngineApiResult<PayloadStatus> {
         let block = match self.try_construct_block(payload) {
             Ok(b) => b,
@@ -289,6 +292,18 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
 
         // Short circuit the check by passing parent total difficulty.
         if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
+            // This case returns a `latestValidHash` of zero because it is required by the engine
+            // api spec:
+            //
+            // Client software MUST respond to this method call in the following way:
+            // {
+            //     status: INVALID,
+            //     latestValidHash:
+            // 0x0000000000000000000000000000000000000000000000000000000000000000,
+            //     validationError: errorMessage | null
+            // }
+            //
+            // if terminal block conditions are not satisfied
             return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadPreMerge.to_string(),
             })
