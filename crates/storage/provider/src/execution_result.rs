@@ -175,14 +175,17 @@ impl ExecutionResult {
         // Write new storage state
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage {
+            println!("Storage: {:?}", address);
             if storage.wiped && storages_cursor.seek_exact(address)?.is_some() {
                 storages_cursor.delete_current_duplicates()?;
             }
 
             for (key, value) in storage.storage {
                 let key = H256(key.to_be_bytes());
-                if storages_cursor.seek_by_key_subkey(address, key)?.is_some() {
-                    storages_cursor.delete_current()?;
+                if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
+                    if entry.key == key {
+                        storages_cursor.delete_current()?;
+                    }
                 }
 
                 if value != U256::ZERO {
