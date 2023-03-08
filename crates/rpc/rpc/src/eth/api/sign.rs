@@ -13,9 +13,9 @@ where
     pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Signature> {
         let signer = self
             .find_signer(&account)
-            .ok_or(EthApiError::NoSigner)?;
+            .ok_or(EthApiError::UnknownAccount)?;
         let signature =
-            signer.sign(account, &message).await.map_err(|_err| EthApiError::NoSigner)?;
+            signer.sign(account, &message).await.map_err(|_err| EthApiError::UnknownAccount)?;
         Ok(signature)
     }
 

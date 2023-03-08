@@ -1,4 +1,4 @@
-use crate::{transaction::util::secp256k1, Address, H256, U256};
+use crate::{transaction::util::secp256k1, Address, H256, U256, Bytes};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 
@@ -100,7 +100,26 @@ impl Signature {
         secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
     }
 }
+impl From<&Signature> for [u8; 65] {
+    fn from(src: &Signature) -> [u8; 65] {
+        let mut sig = [0u8; 65];
+        let r_bytes: [u8; 32] = src.r.to_be_bytes();
+        let s_bytes: [u8; 32] = src.s.to_be_bytes();
+        sig[..32].copy_from_slice(&r_bytes);
+        sig[32..64].copy_from_slice(&s_bytes);
+        // TODO: What if we try to serialize a signature where
+        // the `v` is not normalized?
 
+        sig[64] = src.odd_y_parity as u8;
+        sig
+    }
+}
+impl From<&Signature> for Bytes {
+    fn from(src: &Signature) -> Bytes {
+        let sig: [u8;65] = src.into();
+        hex::encode(&sig[..]).as_bytes().into()
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
