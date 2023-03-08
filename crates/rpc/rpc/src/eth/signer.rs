@@ -168,14 +168,15 @@ mod test {
             },
             "contents": "Hello, Bob!"
         }
-        }"#);
+        }"#
+        );
         let data: TypedData = serde_json::from_value(eip_712_example).unwrap();
         let signer = build_signer();
         let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
         let expected = Signature {
             r: U256::from_str_radix(
                 "5318aee9942b84885761bb20e768372b76e7ee454fc4d39b59ce07338d15a06c",
-                16
+                16,
             )
             .unwrap(),
             s: U256::from_str_radix(
