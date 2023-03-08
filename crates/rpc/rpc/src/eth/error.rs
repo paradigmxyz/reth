@@ -89,6 +89,7 @@ impl From<EthApiError> for RpcError {
             EthApiError::ConflictingRequestGasPrice { .. } |
             EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
             EthApiError::RequestLegacyGasPriceAndTipSet { .. } |
+            EthApiError::UnknownAccount |
             EthApiError::BothStateAndStateDiffInOverride(_) => {
                 rpc_err(INVALID_PARAMS_CODE, error.to_string(), None)
             }
