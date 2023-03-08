@@ -15,8 +15,8 @@ use reth_db::{
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, Bytecode, ChainSpec, Hardfork, Header,
-    SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered, TransitionId,
-    TxNumber, H256, U256,
+    Receipt, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
+    TransitionId, TxNumber, H256, U256,
 };
 use reth_tracing::tracing::{info, trace};
 use std::{
@@ -164,7 +164,7 @@ where
         block: BlockNumber,
     ) -> Result<(TxNumber, TransitionId), TransactionError> {
         if block == 0 {
-            return Ok((0, 0));
+            return Ok((0, 0))
         }
 
         let prev_number = block - 1;
@@ -216,7 +216,7 @@ where
 
         while let Some(Ok((key, _))) = reverse_walker.next() {
             if selector(key.clone()) <= block {
-                break;
+                break
             }
             self.delete::<T>(key, None)?;
         }
@@ -247,7 +247,7 @@ where
             // delete old shard so new one can be inserted.
             self.delete::<tables::AccountHistory>(shard_key, None)?;
             let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list);
+            return Ok(list)
         }
         Ok(Vec::new())
     }
@@ -265,7 +265,7 @@ where
             // delete old shard so new one can be inserted.
             self.delete::<tables::StorageHistory>(storage_shard_key, None)?;
             let list = list.iter(0).map(|i| i as u64).collect::<Vec<_>>();
-            return Ok(list);
+            return Ok(list)
         }
         Ok(Vec::new())
     }
@@ -488,7 +488,7 @@ where
                     expected: block_state_root,
                     block_number,
                     block_hash,
-                });
+                })
             }
         }
 
@@ -538,7 +538,7 @@ where
         let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
 
         if block_bodies.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // iterate over and get all transaction and signers
@@ -606,7 +606,7 @@ where
 
         let block_headers = self.get_or_take::<tables::Headers, TAKE>(range.clone())?;
         if block_headers.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         let block_header_hashes =
@@ -700,7 +700,7 @@ where
             self.get_or_take::<tables::BlockTransitionIndex, TAKE>(range.clone())?;
 
         if block_transition.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
         // get block transitions
         let first_block_number =
@@ -976,8 +976,8 @@ where
         Ok(self
             .cursor_read::<tables::StorageChangeSet>()?
             .walk_range(
-                TransitionIdAddress((from, Address::zero()))
-                    ..TransitionIdAddress((to, Address::zero())),
+                TransitionIdAddress((from, Address::zero()))..
+                    TransitionIdAddress((to, Address::zero())),
             )?
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
@@ -1388,7 +1388,7 @@ fn unwind_account_history_shards<DB: Database>(
     while let Some((sharded_key, list)) = item {
         // there is no more shard for address
         if sharded_key.key != address {
-            break;
+            break
         }
         cursor.delete_current()?;
         // check first item and if it is more and eq than `transition_id` delete current
@@ -1396,14 +1396,14 @@ fn unwind_account_history_shards<DB: Database>(
         let first = list.iter(0).next().expect("List can't empty");
         if first >= transition_id as usize {
             item = cursor.prev()?;
-            continue;
+            continue
         } else if transition_id <= sharded_key.highest_transition_id {
             // if first element is in scope whole list would be removed.
             // so at least this first element is present.
-            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>());
+            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
         } else {
             let new_list = list.iter(0).collect::<Vec<_>>();
-            return Ok(new_list);
+            return Ok(new_list)
         }
     }
     Ok(Vec::new())
@@ -1425,11 +1425,11 @@ fn unwind_storage_history_shards<DB: Database>(
 
     while let Some((storage_sharded_key, list)) = item {
         // there is no more shard for address
-        if storage_sharded_key.address != address
-            || storage_sharded_key.sharded_key.key != storage_key
+        if storage_sharded_key.address != address ||
+            storage_sharded_key.sharded_key.key != storage_key
         {
             // there is no more shard for address and storage_key.
-            break;
+            break
         }
         cursor.delete_current()?;
         // check first item and if it is more and eq than `transition_id` delete current
@@ -1437,13 +1437,13 @@ fn unwind_storage_history_shards<DB: Database>(
         let first = list.iter(0).next().expect("List can't empty");
         if first >= transition_id as usize {
             item = cursor.prev()?;
-            continue;
+            continue
         } else if transition_id <= storage_sharded_key.sharded_key.highest_transition_id {
             // if first element is in scope whole list would be removed.
             // so at least this first element is present.
-            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>());
+            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
         } else {
-            return Ok(list.iter(0).collect::<Vec<_>>());
+            return Ok(list.iter(0).collect::<Vec<_>>())
         }
     }
     Ok(Vec::new())

@@ -1,4 +1,4 @@
-use reth_primitives::{Bloom, H256,BlockHash,BlockNumber};
+use reth_primitives::{BlockHash, BlockNumber, Bloom, H256};
 use thiserror::Error;
 
 /// BlockExecutor Errors

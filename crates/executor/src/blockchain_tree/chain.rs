@@ -2,16 +2,12 @@
 //! have functions to split, branch and append the chain.
 use crate::{
     execution_result::ExecutionResult,
-    executor::Executor,
     substate::{SubStateData, SubStateWithProvider},
 };
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
-use reth_primitives::{
-    BlockHash, BlockNumber, ChainSpec, SealedBlockWithSenders, SealedHeader, U256,
-};
-use reth_provider::StateProvider;
-use reth_revm::database::{State, SubState};
-use std::{collections::BTreeMap, sync::Arc};
+use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders, SealedHeader, U256};
+use reth_provider::{BlockExecutor, ExecutorFactory, StateProvider};
+use std::collections::BTreeMap;
 
 /// Side chain that contain it state and connect to block found in canonical chain.
 #[derive(Clone, Default)]
@@ -82,13 +78,13 @@ impl Chain {
 
     /// Create new chain that joins canonical block
     /// If parent block is the tip mark chain fork.
-    pub fn new_canonical_fork<PROVIDER: StateProvider, CONSENSUS: Consensus>(
+    pub fn new_canonical_fork<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
         block: &SealedBlockWithSenders,
         parent_header: SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        chain_spec: Arc<ChainSpec>,
-        provider: &PROVIDER,
-        consensus: &CONSENSUS,
+        provider: &SP,
+        consensus: &C,
+        factory: &EF,
     ) -> Result<Self, Error> {
         // verify block against the parent
         consensus.validate_header(block, U256::ZERO)?;
@@ -100,27 +96,33 @@ impl Chain {
         let empty = BTreeMap::new();
 
         let unseal = block.clone().into_components().0.unseal();
-        let provider =
-            SubStateWithProvider::new(&mut substate, provider, &empty, canonical_block_hashes);
-        let mut state_provider = SubState::new(State::new(provider));
 
-        // execute block
-        let changesets = vec![Executor::new(chain_spec, &mut state_provider)
-            .execute_and_verify_receipt(&unseal, U256::MAX, None)?];
+        let changeset = factory
+            .with_sp(SubStateWithProvider::new(
+                &mut substate,
+                provider,
+                &empty,
+                canonical_block_hashes,
+            ))
+            .execute_and_verify_receipt(&unseal, U256::MAX, None)?;
 
-        Ok(Self { substate, changesets, blocks: BTreeMap::from([(block.number, block.clone())]) })
+        Ok(Self {
+            substate,
+            changesets: vec![changeset],
+            blocks: BTreeMap::from([(block.number, block.clone())]),
+        })
     }
 
     /// DONE
     /// Create new chain that branches out from existing side chain.
-    pub fn new_chain_fork<PROVIDER: StateProvider, CONSENSUS: Consensus>(
+    pub fn new_chain_fork<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
         &self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        chain_spec: Arc<ChainSpec>,
-        provider: &PROVIDER,
-        consensus: &CONSENSUS,
+        provider: &SP,
+        consensus: &C,
+        factory: &EF,
     ) -> Result<Self, Error> {
         let parent_nubmer = block.number - 1;
         let parent = self
@@ -140,36 +142,37 @@ impl Chain {
         // Revert changesets to get the state of the parent that we need to apply the change.
         substate.revert(&self.changesets[revert_from..]);
 
-        let provider = SubStateWithProvider::new(
-            &mut substate,
-            provider,
-            &side_chain_block_hashes,
-            canonical_block_hashes,
-        );
-
         let unseal = block.clone().into_components().0.unseal();
-        // Create state provider with cached state
-        let mut state_provider = SubState::new(State::new(provider));
 
         // execute block
-        let changesets = vec![Executor::new(chain_spec, &mut state_provider)
-            .execute_and_verify_receipt(&unseal, U256::MAX, None)?];
+        let changeset = factory
+            .with_sp(SubStateWithProvider::new(
+                &mut substate,
+                provider,
+                &side_chain_block_hashes,
+                canonical_block_hashes,
+            ))
+            .execute_and_verify_receipt(&unseal, U256::MAX, None)?;
 
-        let chain = Self { substate, changesets, blocks: BTreeMap::from([(block.number, block)]) };
+        let chain = Self {
+            substate,
+            changesets: vec![changeset],
+            blocks: BTreeMap::from([(block.number, block)]),
+        };
 
         // if all is okay, return new chain back. Present chain is not modified.
         Ok(chain)
     }
 
     /// Append block to this chain
-    pub fn append_block<PROVIDER: StateProvider, CONSENSUS: Consensus>(
+    pub fn append_block<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        chain_spec: Arc<ChainSpec>,
-        provider: &PROVIDER,
-        consensus: &CONSENSUS,
+        provider: &SP,
+        consensus: &C,
+        factory: &EF,
     ) -> Result<(), Error> {
         let (_, parent) = self.blocks.last_key_value().expect("Chain has at least one block");
 
@@ -177,24 +180,15 @@ impl Chain {
         consensus.pre_validate_header(&block, parent)?;
         consensus.pre_validate_block(&block)?;
 
-        // execute block on block substate
-        let provider = SubStateWithProvider::new(
-            &mut self.substate,
-            provider,
-            &side_chain_block_hashes,
-            canonical_block_hashes,
-        );
-
         let unseal = block.clone().into_components().0.unseal();
-        // Create state provider with cached state
-        let mut state_provider = SubState::new(State::new(provider));
-
-        // execute block
-        let changeset = Executor::new(chain_spec, &mut state_provider).execute_and_verify_receipt(
-            &unseal,
-            U256::MAX,
-            None,
-        )?;
+        let changeset = factory
+            .with_sp(SubStateWithProvider::new(
+                &mut self.substate,
+                provider,
+                &side_chain_block_hashes,
+                canonical_block_hashes,
+            ))
+            .execute_and_verify_receipt(&unseal, U256::MAX, None)?;
 
         self.changesets.push(changeset);
         self.blocks.insert(block.number, block);

@@ -8,7 +8,8 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{BlockHash, BlockNumber, ChainSpec, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{
-    HeaderProvider, ShareableDatabase, StateProvider, StateProviderFactory, Transaction,
+    ExecutorFactory, HeaderProvider, ShareableDatabase, StateProvider, StateProviderFactory,
+    Transaction,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -56,7 +57,7 @@ use self::block_indices::BlockIndices;
 ///   db. If we dont have the block pipeline syncing should start to fetch the blocks from p2p.
 /// *
 /// Do reorg if needed
-pub struct BlockchainTree<DB, CONSENSUS> {
+pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// chains and present data
     pub chains: HashMap<ChainId, Chain>,
     /// Static chain id generator
@@ -68,13 +69,27 @@ pub struct BlockchainTree<DB, CONSENSUS> {
     pub num_of_side_chain_max_size: u64,
     /// Finalization windows. Number of blocks that can be reorged
     pub finalization_window: u64,
+    /// Externals
+    pub externals: Externals<DB, C, EF>,
+}
+
+/// Container for external abstractions.
+pub struct Externals<DB: Database, C: Consensus, EF: ExecutorFactory> {
+    /// Save sidechain, do reorgs and push new block to canonical chain that is inside db.
+    pub db: DB,
+    /// Consensus checks
+    pub consensus: C,
+    /// Create executor to execute blocks.
+    pub executor_factory: EF,
     /// Chain spec
     pub chain_spec: Arc<ChainSpec>,
-    /// Needs db to save sidechain, do reorgs and push new block to canonical chain that is inside
-    /// db.
-    pub db: DB,
-    /// Consensus
-    pub consensus: CONSENSUS,
+}
+
+impl<DB: Database, C: Consensus, EF: ExecutorFactory> Externals<DB, C, EF> {
+    /// Return sharable database helper structure.
+    pub fn sharable_db(&self) -> ShareableDatabase<&DB> {
+        ShareableDatabase::new(&self.db, self.chain_spec.clone())
+    }
 }
 
 /// Helper structure that wraps chains and indices to search for block hash accross the chains.
@@ -85,12 +100,10 @@ pub struct BlockHashes<'a> {
     pub indices: &'a BlockIndices,
 }
 
-impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
+impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> {
     /// New blockchain tree
     pub fn new(
-        db: DB,
-        consensus: CONSENSUS,
-        chain_spec: Arc<ChainSpec>,
+        externals: Externals<DB, C, EF>,
         finalization_window: u64,
         num_of_side_chain_max_size: u64,
         num_of_additional_canonical_block_hashes: u64,
@@ -99,7 +112,8 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
             panic!("Side chain size should be more then finalization window");
         }
 
-        let last_canonical_hashes = db
+        let last_canonical_hashes = externals
+            .db
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
@@ -117,9 +131,7 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
             };
 
         Ok(Self {
-            db,
-            consensus,
-            chain_spec,
+            externals,
             chain_id_generator: 0,
             chains: Default::default(),
             block_indices: BlockIndices::new(
@@ -154,7 +166,7 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
         let (_, canonical_tip_hash) =
             canonical_block_hashes.last_key_value().map(|(i, j)| (*i, *j)).unwrap_or_default();
 
-        let db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let db = self.externals.sharable_db();
         let provider = if canonical_fork.hash == canonical_tip_hash {
             Box::new(db.latest()?) as Box<dyn StateProvider>
         } else {
@@ -167,18 +179,18 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
                 block,
                 block_hashes,
                 canonical_block_hashes,
-                self.chain_spec.clone(),
                 &provider,
-                &self.consensus,
+                &self.externals.consensus,
+                &self.externals.executor_factory,
             )?;
         } else {
             let chain = parent_chain.new_chain_fork(
                 block,
                 block_hashes,
                 canonical_block_hashes,
-                self.chain_spec.clone(),
                 &provider,
-                &self.consensus,
+                &self.externals.consensus,
+                &self.externals.executor_factory,
             )?;
             // release the lifetime with a drop
             drop(provider);
@@ -195,7 +207,7 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
             canonical_block_hashes.last_key_value().map(|(i, j)| (*i, *j)).unwrap_or_default();
 
         // create state provider
-        let db = ShareableDatabase::new(&self.db, self.chain_spec.clone());
+        let db = self.externals.sharable_db();
         let parent_header = db
             .header(&block.parent_hash)?
             .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
@@ -211,9 +223,9 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
             &block,
             parent_header,
             canonical_block_hashes,
-            self.chain_spec.clone(),
             &provider,
-            &self.consensus,
+            &self.externals.consensus,
+            &self.externals.executor_factory,
         )?;
         drop(provider);
         self.insert_chain(chain);
@@ -352,6 +364,7 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
             self.finalization_window + self.block_indices.num_of_additional_canonical_block_hashes;
 
         let last_canonical_hashes = self
+            .externals
             .db
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
@@ -444,14 +457,14 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
 
     /// Commit chain for it to become canonical. Assume we are doing pending operation to db.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
-        let mut tx = Transaction::new(&self.db)?;
+        let mut tx = Transaction::new(&self.externals.db)?;
 
         let new_tip = chain.tip().number;
 
         for item in chain.blocks.into_iter().zip(chain.changesets.into_iter()) {
             let ((_, block), changeset) = item;
 
-            tx.insert_block(block, &self.chain_spec, changeset)
+            tx.insert_block(block, self.externals.chain_spec.as_ref(), changeset)
                 .map_err(|_| ExecError::VerificationFailed)?;
         }
         // update pipeline progress.
@@ -470,11 +483,14 @@ impl<DB: Database, CONSENSUS: Consensus> BlockchainTree<DB, CONSENSUS> {
     fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Chain, Error> {
         // read data that is needed for new sidechain
 
-        let mut tx = Transaction::new(&self.db)?;
+        let mut tx = Transaction::new(&self.externals.db)?;
 
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
-            .get_block_and_execution_range::<true>(self.chain_spec.as_ref(), revert_until + 1..)
+            .get_block_and_execution_range::<true>(
+                self.externals.chain_spec.as_ref(),
+                revert_until + 1..,
+            )
             .map_err(|_| ExecError::VerificationFailed)?;
 
         // update pipeline progress.

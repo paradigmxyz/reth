@@ -1,7 +1,7 @@
 //! Substate for blockchain trees
 
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{Account, Address, BlockHash, BlockNumber, Bytes, H256, U256};
+use reth_primitives::{Account, Address, BlockHash, BlockNumber, Bytecode, H256, U256};
 use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
@@ -14,7 +14,7 @@ pub struct SubStateData {
     /// TANGERINE forks. `code` is always `None`, and bytecode can be found in `contracts`.
     pub accounts: HashMap<Address, AccountSubState>,
     /// New bytecodes
-    pub bytecodes: HashMap<H256, (u32, Bytes)>,
+    pub bytecodes: HashMap<H256, (u32, Bytecode)>,
 }
 
 impl SubStateData {
@@ -31,10 +31,7 @@ impl SubStateData {
                 }
                 // apply bytecodes
                 for (hash, bytecode) in tx_changeset.new_bytecodes.iter() {
-                    self.bytecodes
-                        .entry(*hash)
-                        .or_insert((0, Bytes(bytecode.bytes().clone().split_to(bytecode.len()))))
-                        .0 += 1;
+                    self.bytecodes.entry(*hash).or_insert((0, Bytecode(bytecode.clone()))).0 += 1;
                 }
             }
             // apply block reward
@@ -211,22 +208,22 @@ impl AccountSubState {
 
 /// Wrapper around substate and provider, it decouples the database that can be Latest or historical
 /// with substate changes that happened previously.
-pub struct SubStateWithProvider<'a, PROVIDER: StateProvider> {
+pub struct SubStateWithProvider<'a, SP: StateProvider> {
     /// Substate
     pub substate: &'a mut SubStateData,
     /// Provider
-    pub provider: PROVIDER,
+    pub provider: SP,
     /// side chain block hashes
     pub sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     /// Last N canonical hashes,
     pub canonical_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
 }
 
-impl<'a, PROVIDER: StateProvider> SubStateWithProvider<'a, PROVIDER> {
+impl<'a, SP: StateProvider> SubStateWithProvider<'a, SP> {
     /// Create new substate with provider
     pub fn new(
         substate: &'a mut SubStateData,
-        provider: PROVIDER,
+        provider: SP,
         sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     ) -> Self {
@@ -236,7 +233,7 @@ impl<'a, PROVIDER: StateProvider> SubStateWithProvider<'a, PROVIDER> {
 
 /* Implement StateProvider traits */
 
-impl<'a, PROVIDER: StateProvider> BlockHashProvider for SubStateWithProvider<'a, PROVIDER> {
+impl<'a, SP: StateProvider> BlockHashProvider for SubStateWithProvider<'a, SP> {
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
         // All block numbers fit inside u64 and revm checks if it is last 256 block numbers.
         let block_number = number.as_limbs()[0];
@@ -254,7 +251,7 @@ impl<'a, PROVIDER: StateProvider> BlockHashProvider for SubStateWithProvider<'a,
     }
 }
 
-impl<'a, PROVIDER: StateProvider> AccountProvider for SubStateWithProvider<'a, PROVIDER> {
+impl<'a, SP: StateProvider> AccountProvider for SubStateWithProvider<'a, SP> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         if let Some(account) = self.substate.accounts.get(&address).map(|acc| acc.info) {
             return Ok(Some(account))
@@ -263,7 +260,7 @@ impl<'a, PROVIDER: StateProvider> AccountProvider for SubStateWithProvider<'a, P
     }
 }
 
-impl<'a, PROVIDER: StateProvider> StateProvider for SubStateWithProvider<'a, PROVIDER> {
+impl<'a, SP: StateProvider> StateProvider for SubStateWithProvider<'a, SP> {
     fn storage(
         &self,
         account: Address,
@@ -280,7 +277,7 @@ impl<'a, PROVIDER: StateProvider> StateProvider for SubStateWithProvider<'a, PRO
         self.provider.storage(account, storage_key)
     }
 
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
         if let Some((_, bytecode)) = self.substate.bytecodes.get(&code_hash).cloned() {
             return Ok(Some(bytecode))
         }
