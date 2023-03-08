@@ -150,6 +150,7 @@ impl ExecutionResult {
         }
 
         // Write storage changes
+        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
         for changeset in self.changesets.iter() {
             let address = changeset.address;
@@ -157,14 +158,11 @@ impl ExecutionResult {
                 TransitionIdAddress((first_transition_id + changeset.id, changeset.address));
             if changeset.storage.wiped {
                 // iterate over storage and save them before entry is deleted.
-                // todo: dup walker
-                tx.cursor_read::<tables::PlainStorageState>()?
-                    .walk(Some(address))?
-                    .take_while(|res| res.as_ref().map(|(k, _)| *k == address).unwrap_or_default())
-                    .try_for_each(|entry| {
-                        let (_, old_value) = entry?;
+                storages_cursor.walk_dup(Some(address), None)?.try_for_each(|entry| {
+                    entry.and_then(|(_, old_value)| {
                         storage_changeset_cursor.append_dup(storage_id, old_value)
-                    })?;
+                    })
+                })?;
             } else {
                 for (key, (old_value, _)) in changeset.storage.storage.iter() {
                     storage_changeset_cursor.append_dup(
@@ -176,7 +174,6 @@ impl ExecutionResult {
         }
 
         // Write new storage state
-        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage {
             if storage.wiped && storages_cursor.seek_exact(address)?.is_some() {
                 storages_cursor.delete_current_duplicates()?;
@@ -201,7 +198,7 @@ impl ExecutionResult {
         for (address, account) in self.accounts {
             if let Some(account) = account {
                 /*if has_state_clear_eip && account.is_empty() {
-                    // TODO: seek and then delete
+                    // TODO: seek and then delete?
                     continue
                 }*/
                 accounts_cursor.upsert(address, account)?;
