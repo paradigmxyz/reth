@@ -293,8 +293,8 @@ mod tests {
     };
     use reth_executor::Factory;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, ChainSpecBuilder, SealedBlock, StorageEntry, H160,
-        H256, U256,
+        hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
+        StorageEntry, H160, H256, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
@@ -347,7 +347,7 @@ mod tests {
                 Account { nonce: 0, balance, bytecode_hash: None },
             )
             .unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         tx.commit().unwrap();
 
         let mut execution_stage = stage();
@@ -430,7 +430,7 @@ mod tests {
 
         db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
         db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         tx.commit().unwrap();
 
         // execute
@@ -502,7 +502,7 @@ mod tests {
         // set account
         db_tx.put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
         db_tx.put::<tables::PlainAccountState>(destroyed_address, destroyed_info).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, code.to_vec()).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         // set storage to check when account gets destroyed.
         db_tx
             .put::<tables::PlainStorageState>(

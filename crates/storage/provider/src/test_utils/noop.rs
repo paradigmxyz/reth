@@ -4,8 +4,8 @@ use crate::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytes, ChainInfo, Header, StorageKey,
-    StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
+    Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, ChainInfo, Header,
+    StorageKey, StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
@@ -96,7 +96,7 @@ impl StateProvider for NoopProvider {
         Ok(None)
     }
 
-    fn bytecode_by_hash(&self, _code_hash: H256) -> Result<Option<Bytes>> {
+    fn bytecode_by_hash(&self, _code_hash: H256) -> Result<Option<Bytecode>> {
         Ok(None)
     }
 }

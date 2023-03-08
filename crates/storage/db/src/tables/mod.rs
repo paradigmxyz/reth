@@ -18,7 +18,7 @@ use crate::{
     },
 };
 use reth_primitives::{
-    Account, Address, BlockHash, BlockNumber, Header, IntegerList, Receipt, StorageEntry,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
     StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
@@ -304,6 +304,3 @@ pub type StageId = Vec<u8>;
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait
 //
-
-/// Temporary placeholder type for DB.
-pub type Bytecode = Vec<u8>;
