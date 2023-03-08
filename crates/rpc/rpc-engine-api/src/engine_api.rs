@@ -4,7 +4,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     proofs::{self, EMPTY_LIST_HASH},
     BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock, TransactionSigned,
-    H64, U256,
+    H256, H64, U256,
 };
 use reth_provider::{
     BlockExecutor, BlockProvider, EvmEnvProvider, ExecutorFactory, HeaderProvider,
@@ -291,7 +291,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
             return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadPreMerge.to_string(),
-            }))
+            })
+            .with_latest_valid_hash(H256::zero()))
         }
 
         if block.timestamp <= parent.timestamp {
@@ -646,7 +647,8 @@ mod tests {
 
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadPreMerge.to_string(),
-            });
+            })
+            .with_latest_valid_hash(H256::zero());
             assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
         }
 
