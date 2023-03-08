@@ -75,6 +75,8 @@ impl ExecutionResult {
             self.apply_changeset(changeset.clone());
             self.changesets.push(changeset);
         }
+        self.receipts.extend(other.receipts);
+        self.bytecode.extend(other.bytecode);
         self.next_transition_id = next_transition_id;
     }
 
