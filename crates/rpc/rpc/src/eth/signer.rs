@@ -55,7 +55,7 @@ impl EthSigner for DevSigner {
         // Hash message according to EIP 191:
         // https://ethereum.org/es/developers/docs/apis/json-rpc/#eth_sign
         // TODO: Handle unwrap properly
-        let message = Message::from_slice(hash_message(&message).as_bytes()).unwrap();
+        let message = Message::from_slice(hash_message(message).as_bytes()).unwrap();
         let (rec_id, data) = secp.sign_ecdsa_recoverable(&message, secret).serialize_compact();
         let signature = Signature {
             // TODO:

@@ -1,4 +1,4 @@
-use crate::{transaction::util::secp256k1, Address, H256, U256, Bytes};
+use crate::{transaction::util::secp256k1, Address, Bytes, H256, U256};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 
@@ -72,7 +72,7 @@ impl Signature {
     }
 
     /// Encode the `odd_y_parity`, `r`, `s` values without a RLP header.
-    pub fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
+    pub(crate) fn encode(&self, out: &mut dyn reth_rlp::BufMut) {
         self.odd_y_parity.encode(out);
         self.r.encode(out);
         self.s.encode(out);
@@ -116,7 +116,7 @@ impl From<&Signature> for [u8; 65] {
 }
 impl From<&Signature> for Bytes {
     fn from(src: &Signature) -> Bytes {
-        let sig: [u8;65] = src.into();
+        let sig: [u8; 65] = src.into();
         hex::encode(&sig[..]).as_bytes().into()
     }
 }
