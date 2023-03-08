@@ -27,6 +27,7 @@ pub(crate) fn gas_used(spec: SpecId, spent: u64, refunded: u64) -> u64 {
     let refund_quotient = if SpecId::enabled(spec, SpecId::LONDON) { 5 } else { 2 };
     spent - (refunded).min(spent / refund_quotient)
 }
+
 /// Get the address of a contract creation
 #[inline]
 pub(crate) fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {

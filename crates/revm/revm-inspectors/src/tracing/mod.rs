@@ -1,11 +1,11 @@
 use crate::{
     stack::MaybeOwnedInspector,
     tracing::{
-        arena::CallTraceArena,
         types::{CallKind, LogCallOrder, RawLog},
         utils::{gas_used, get_create_address},
     },
 };
+pub use arena::CallTraceArena;
 use reth_primitives::{bytes::Bytes, Address, H256, U256};
 use revm::{
     inspectors::GasInspector,
@@ -47,6 +47,11 @@ pub struct TracingInspector {
 // === impl TracingInspector ===
 
 impl TracingInspector {
+    /// Consumes the Inspector and returns the recorded.
+    pub fn finalize(self) -> CallTraceArena {
+        self.traces
+    }
+
     /// Enables step recording and uses the configured [GasInspector] to report gas costs for each
     /// step.
     pub fn with_steps_recording(mut self) -> Self {
@@ -105,7 +110,7 @@ impl TracingInspector {
     fn fill_trace_on_call_end(
         &mut self,
         status: InstructionResult,
-        cost: u64,
+        gas_used: u64,
         output: Bytes,
         created_address: Option<Address>,
     ) {
@@ -115,7 +120,7 @@ impl TracingInspector {
         .trace;
         trace.status = status;
         trace.success = success;
-        trace.gas_cost = cost;
+        trace.gas_used = gas_used;
         trace.output = output;
 
         if let Some(address) = created_address {

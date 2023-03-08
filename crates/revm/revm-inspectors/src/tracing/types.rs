@@ -100,22 +100,13 @@ pub(crate) struct CallTrace {
     /// runtime bytecode of the created contract
     pub(crate) output: Bytes,
     /// The gas cost of the call
-    pub(crate) gas_cost: u64,
+    pub(crate) gas_used: u64,
     /// The status of the trace's call
     pub(crate) status: InstructionResult,
     /// call context of the runtime
     pub(crate) call_context: Option<CallContext>,
     /// Opcode-level execution steps
     pub(crate) steps: Vec<CallTraceStep>,
-}
-
-// === impl CallTrace ===
-
-impl CallTrace {
-    /// Whether this is a contract creation
-    pub(crate) fn is_created(&self) -> bool {
-        matches!(self.kind, CallKind::Create | CallKind::Create2)
-    }
 }
 
 impl Default for CallTrace {
@@ -130,7 +121,7 @@ impl Default for CallTrace {
             value: Default::default(),
             data: Default::default(),
             output: Default::default(),
-            gas_cost: Default::default(),
+            gas_used: Default::default(),
             status: InstructionResult::Continue,
             call_context: Default::default(),
             steps: Default::default(),
@@ -171,12 +162,12 @@ impl CallTraceNode {
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 TraceOutput::Call(CallOutput {
-                    gas_used: self.trace.gas_cost.into(),
+                    gas_used: self.trace.gas_used.into(),
                     output: self.trace.output.clone().into(),
                 })
             }
             CallKind::Create | CallKind::Create2 => TraceOutput::Create(CreateOutput {
-                gas_used: self.trace.gas_cost.into(),
+                gas_used: self.trace.gas_used.into(),
                 code: self.trace.output.clone().into(),
                 address: self.trace.address,
             }),
@@ -198,7 +189,7 @@ impl CallTraceNode {
                     from: self.trace.caller,
                     to: self.trace.address,
                     value: self.trace.value,
-                    gas: self.trace.gas_cost.into(),
+                    gas: self.trace.gas_used.into(),
                     input: self.trace.data.clone().into(),
                     call_type: self.kind().into(),
                 })
@@ -206,7 +197,7 @@ impl CallTraceNode {
             CallKind::Create | CallKind::Create2 => Action::Create(CreateAction {
                 from: self.trace.caller,
                 value: self.trace.value,
-                gas: self.trace.gas_cost.into(),
+                gas: self.trace.gas_used.into(),
                 init: self.trace.data.clone().into(),
             }),
         }

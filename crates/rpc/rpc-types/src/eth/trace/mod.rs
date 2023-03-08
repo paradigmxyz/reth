@@ -5,11 +5,14 @@ pub mod parity;
 
 /// Geth tracing types
 pub mod geth {
+    #![allow(missing_docs)]
+
+    use reth_primitives::{Bytes, JsonU256, H256, U256};
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
+
     // re-exported for geth tracing types
     pub use ethers_core::types::GethDebugTracingOptions;
-    use reth_primitives::{Bytes, JsonU256, H256, U256};
 
     // https://github.com/ethereum/go-ethereum/blob/a9ef135e2dd53682d106c6a2aede9187026cc1de/eth/tracers/logger/logger.go#L406-L411
     #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

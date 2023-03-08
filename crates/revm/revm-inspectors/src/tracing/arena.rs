@@ -1,17 +1,47 @@
 use crate::tracing::types::{CallTrace, CallTraceNode, LogCallOrder};
-use reth_primitives::{Address, H256, U256};
-use reth_rpc_types::trace::geth::{DefaultFrame, GethDebugTracingOptions, StructLog};
-use revm::interpreter::opcode;
+use reth_primitives::{Address, JsonU256, H256, U256};
+use reth_rpc_types::trace::{
+    geth::{DefaultFrame, GethDebugTracingOptions, StructLog},
+    parity::{ActionType, TransactionTrace},
+};
+use revm::interpreter::{opcode, InstructionResult};
 use std::collections::{BTreeMap, HashMap};
 
-/// An arena of [CallTraceNode]s
+/// An arena of recorded [CallTraceNode]s
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct CallTraceArena {
+pub struct CallTraceArena {
     /// The arena of recorded trace nodes
     pub(crate) arena: Vec<CallTraceNode>,
 }
 
 impl CallTraceArena {
+    /// Returns the traces of the transaction for `trace_transaction`
+    pub fn parity_traces(&self) -> Vec<TransactionTrace> {
+        let traces = Vec::with_capacity(self.arena.len());
+        for (_idx, node) in self.arena.iter().cloned().enumerate() {
+            let _action = node.parity_action();
+            let _result = node.parity_result();
+
+            let _action_type = if node.status() == InstructionResult::SelfDestruct {
+                ActionType::Selfdestruct
+            } else {
+                node.kind().into()
+            };
+
+            todo!()
+
+            // let trace = TransactionTrace {
+            //     action,
+            //     result: Some(result),
+            //     trace_address: self.info.trace_address(idx),
+            //     subtraces: node.children.len(),
+            // };
+            // traces.push(trace)
+        }
+
+        traces
+    }
+
     /// Pushes a new trace into the arena, returning the trace ID
     pub(crate) fn push_trace(&mut self, entry: usize, new_trace: CallTrace) -> usize {
         match new_trace.depth {
@@ -99,40 +129,30 @@ impl CallTraceArena {
         }
     }
 
-    /// Generate a geth-style trace e.g. for debug_traceTransaction
-    pub(crate) fn geth_trace(
+    /// Generate a geth-style trace e.g. for `debug_traceTransaction`
+    pub fn geth_traces(
         &self,
+        // TODO(mattsse): This should be the total gas used, or gas used by last CallTrace?
         receipt_gas_used: U256,
         opts: GethDebugTracingOptions,
     ) -> DefaultFrame {
         if self.arena.is_empty() {
             return Default::default()
         }
-        let mut storage = HashMap::new();
         // Fetch top-level trace
         let main_trace_node = &self.arena[0];
         let main_trace = &main_trace_node.trace;
 
         let mut struct_logs = Vec::new();
+        let mut storage = HashMap::new();
         self.add_to_geth_trace(&mut storage, main_trace_node, &mut struct_logs, &opts);
 
-        // Start geth trace
-        let acc = DefaultFrame {
+        DefaultFrame {
             // If the top-level trace succeeded, then it was a success
             failed: !main_trace.success,
-            gas: receipt_gas_used.into(),
+            gas: JsonU256(receipt_gas_used),
             return_value: main_trace.output.clone().into(),
             struct_logs,
-        };
-
-        acc
+        }
     }
-}
-
-/// Specifies the kind of trace.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum TraceKind {
-    Deployment,
-    Setup,
-    Execution,
 }
