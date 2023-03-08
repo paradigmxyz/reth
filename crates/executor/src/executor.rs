@@ -1,14 +1,12 @@
 use crate::execution_result::{
     AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
 };
-
-use hashbrown::hash_map::Entry;
-use reth_interfaces::executor::{BlockExecutor, Error};
+use reth_interfaces::executor::Error;
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
     TransactionSigned, H256, U256,
 };
-use reth_provider::StateProvider;
+use reth_provider::{BlockExecutor, StateProvider};
 use reth_revm::{
     config::{WEI_2ETH, WEI_3ETH, WEI_5ETH},
     database::SubState,
@@ -18,7 +16,10 @@ use reth_revm::{
 use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
 use revm::{
     db::AccountState,
-    primitives::{Account as RevmAccount, AccountInfo, Bytecode, ResultAndState},
+    primitives::{
+        hash_map::{self, Entry},
+        Account as RevmAccount, AccountInfo, Bytecode, ResultAndState,
+    },
     EVM,
 };
 use std::{
@@ -27,38 +28,34 @@ use std::{
 };
 
 /// Main block executor
-pub struct Executor<'a, DB>
+pub struct Executor<DB>
 where
     DB: StateProvider,
 {
     /// The configured chain-spec
     pub chain_spec: Arc<ChainSpec>,
-    evm: EVM<&'a mut SubState<DB>>,
+    evm: EVM<SubState<DB>>,
     stack: InspectorStack,
 }
 
-impl<'a, DB> From<ChainSpec> for Executor<'a, DB>
+impl<DB> From<Arc<ChainSpec>> for Executor<DB>
 where
     DB: StateProvider,
 {
     /// Instantiates a new executor from the chainspec. Must call
     /// `with_db` to set the database before executing.
-    fn from(chain_spec: ChainSpec) -> Self {
+    fn from(chain_spec: Arc<ChainSpec>) -> Self {
         let evm = EVM::new();
-        Executor {
-            chain_spec: Arc::new(chain_spec),
-            evm,
-            stack: InspectorStack::new(InspectorStackConfig::default()),
-        }
+        Executor { chain_spec, evm, stack: InspectorStack::new(InspectorStackConfig::default()) }
     }
 }
 
-impl<'a, DB> Executor<'a, DB>
+impl<DB> Executor<DB>
 where
     DB: StateProvider,
 {
     /// Creates a new executor from the given chain spec and database.
-    pub fn new(chain_spec: Arc<ChainSpec>, db: &'a mut SubState<DB>) -> Self {
+    pub fn new(chain_spec: Arc<ChainSpec>, db: SubState<DB>) -> Self {
         let mut evm = EVM::new();
         evm.database(db);
 
@@ -74,16 +71,6 @@ where
     /// Gives a reference to the database
     pub fn db(&mut self) -> &mut SubState<DB> {
         self.evm.db().expect("db to not be moved")
-    }
-
-    /// Overrides the database
-    pub fn with_db<OtherDB: StateProvider>(
-        &self,
-        db: &'a mut SubState<OtherDB>,
-    ) -> Executor<'a, OtherDB> {
-        let mut evm = EVM::new();
-        evm.database(db);
-        Executor { chain_spec: self.chain_spec.clone(), evm, stack: self.stack.clone() }
     }
 
     fn recover_senders(
@@ -123,7 +110,7 @@ where
     /// BTreeMap is used to have sorted values
     fn commit_changes(
         &mut self,
-        changes: hashbrown::HashMap<Address, RevmAccount>,
+        changes: hash_map::HashMap<Address, RevmAccount>,
     ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
         let db = self.db();
 
@@ -373,30 +360,6 @@ where
         }
     }
 
-    /// Execute and verify block
-    pub fn execute_and_verify_receipt(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<ExecutionResult, Error> {
-        let execution_result = self.execute(block, total_difficulty, senders)?;
-
-        let receipts_iter =
-            execution_result.tx_changesets.iter().map(|changeset| &changeset.receipt);
-
-        if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
-            verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
-        }
-
-        // TODO Before Byzantium, receipts contained state root that would mean that expensive
-        // operation as hashing that is needed for state root got calculated in every
-        // transaction This was replaced with is_success flag.
-        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-
-        Ok(execution_result)
-    }
-
     /// Runs a single transaction in the configured environment and proceeds
     /// to return the result and state diff (without applying it).
     ///
@@ -484,7 +447,7 @@ where
     }
 }
 
-impl<'a, DB> BlockExecutor<ExecutionResult> for Executor<'a, DB>
+impl<DB> BlockExecutor<DB> for Executor<DB>
 where
     DB: StateProvider,
 {
@@ -518,6 +481,29 @@ where
 
         Ok(ExecutionResult { tx_changesets, block_changesets })
     }
+
+    fn execute_and_verify_receipt(
+        &mut self,
+        block: &Block,
+        total_difficulty: U256,
+        senders: Option<Vec<Address>>,
+    ) -> Result<ExecutionResult, Error> {
+        let execution_result = self.execute(block, total_difficulty, senders)?;
+
+        let receipts_iter =
+            execution_result.tx_changesets.iter().map(|changeset| &changeset.receipt);
+
+        if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
+            verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
+        }
+
+        // TODO Before Byzantium, receipts contained state root that would mean that expensive
+        // operation as hashing that is needed for state root got calculated in every
+        // transaction This was replaced with is_success flag.
+        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
+
+        Ok(execution_result)
+    }
 }
 
 /// Verify receipts
@@ -547,8 +533,8 @@ pub fn verify_receipt<'a>(
 mod tests {
     use super::*;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytes, ChainSpecBuilder, ForkCondition,
-        StorageKey, H256, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, Address, Bytecode, Bytes, ChainSpecBuilder,
+        ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
     use reth_revm::database::State;
@@ -558,7 +544,7 @@ mod tests {
     #[derive(Debug, Default, Clone, Eq, PartialEq)]
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
-        contracts: HashMap<H256, Bytes>,
+        contracts: HashMap<H256, Bytecode>,
         block_hash: HashMap<U256, H256>,
     }
 
@@ -574,7 +560,7 @@ mod tests {
             if let Some(bytecode) = bytecode {
                 let hash = keccak256(&bytecode);
                 account.bytecode_hash = Some(hash);
-                self.contracts.insert(hash, bytecode);
+                self.contracts.insert(hash, Bytecode::new_raw(bytecode.into()));
             }
             self.accounts.insert(address, (storage, account));
         }
@@ -605,7 +591,7 @@ mod tests {
                 .and_then(|(storage, _)| storage.get(&storage_key).cloned()))
         }
 
-        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytes>> {
+        fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
     }
@@ -658,10 +644,10 @@ mod tests {
         // spec at berlin fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
-        let mut db = SubState::new(State::new(db));
+        let db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(chain_spec, &mut db);
+        let mut executor = Executor::new(chain_spec, db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
@@ -686,6 +672,7 @@ mod tests {
 
         // Check if cache is set
         // account1
+        let db = executor.db();
         let cached_acc1 = db.accounts.get(&account1).unwrap();
         assert_eq!(cached_acc1.info.balance, account1_info.balance);
         assert_eq!(cached_acc1.info.nonce, account1_info.nonce);
@@ -788,9 +775,9 @@ mod tests {
                 .build(),
         );
 
-        let mut db = SubState::new(State::new(db));
+        let db = SubState::new(State::new(db));
         // execute chain and verify receipts
-        let mut executor = Executor::new(chain_spec, &mut db);
+        let mut executor = Executor::new(chain_spec, db);
         let out = executor
             .execute_and_verify_receipt(
                 &Block { header, body: vec![], ommers: vec![], withdrawals: None },
@@ -802,6 +789,7 @@ mod tests {
 
         // Check if cache is set
         // beneficiary
+        let db = executor.db();
         let dao_beneficiary =
             db.accounts.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
 
@@ -878,10 +866,10 @@ mod tests {
         // spec at berlin fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
-        let mut db = SubState::new(State::new(db));
+        let db = SubState::new(State::new(db));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(chain_spec, &mut db);
+        let mut executor = Executor::new(chain_spec, db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
         assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
@@ -927,10 +915,10 @@ mod tests {
         // spec at shanghai fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let mut db = SubState::new(State::new(StateProviderTest::default()));
+        let db = SubState::new(State::new(StateProviderTest::default()));
 
         // execute chain and verify receipts
-        let mut executor = Executor::new(chain_spec, &mut db);
+        let mut executor = Executor::new(chain_spec, db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
         assert_eq!(out.tx_changesets.len(), 0, "No tx");
 

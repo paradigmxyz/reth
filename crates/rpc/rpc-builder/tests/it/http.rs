@@ -79,6 +79,7 @@ where
     EthApiClient::sign_typed_data(client, address, jsonrpsee::core::JsonValue::Null)
         .await
         .unwrap_err();
+    EthApiClient::create_access_list(client, call_request.clone(), None).await.unwrap();
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
@@ -95,9 +96,6 @@ where
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
     assert!(is_unimplemented(
         EthApiClient::call(client, call_request.clone(), None, None).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::create_access_list(client, call_request.clone(), None).await.err().unwrap()
     ));
     assert!(is_unimplemented(
         EthApiClient::estimate_gas(client, call_request.clone(), None).await.err().unwrap()

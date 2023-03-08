@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_db::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_interfaces::Result;
-use reth_primitives::{Account, Address, Bytes, StorageKey, StorageValue, H256, U256};
+use reth_primitives::{Account, Address, Bytecode, StorageKey, StorageValue, H256, U256};
 use std::marker::PhantomData;
 
 /// State provider over latest state that takes tx reference.
@@ -49,8 +49,8 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
-        self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
+        self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
 

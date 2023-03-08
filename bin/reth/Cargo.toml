@@ -17,6 +17,7 @@ reth-stages = { path = "../../crates/stages"}
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../crates/transaction-pool", features = ["test-utils"] }
 reth-consensus = { path = "../../crates/consensus" }
+reth-executor = { path = "../../crates/executor" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }

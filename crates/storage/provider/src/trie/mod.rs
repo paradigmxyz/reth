@@ -290,6 +290,11 @@ impl DBTrieLoader {
 
         let root = H256::from_slice(trie.root()?.as_slice());
 
+        // if root is empty remove it from db
+        if root == EMPTY_ROOT {
+            tx.delete::<tables::StoragesTrie>(address, None)?;
+        }
+
         Ok(root)
     }
 
@@ -329,9 +334,15 @@ impl DBTrieLoader {
             }
         }
 
-        let root = H256::from_slice(trie.root()?.as_slice());
+        let new_root = H256::from_slice(trie.root()?.as_slice());
+        if new_root != root {
+            let mut cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+            if cursor.seek_exact(root)?.is_some() {
+                cursor.delete_current()?;
+            }
+        }
 
-        Ok(root)
+        Ok(new_root)
     }
 
     fn update_storage_root<DB: Database>(
@@ -359,9 +370,24 @@ impl DBTrieLoader {
             }
         }
 
-        let root = H256::from_slice(trie.root()?.as_slice());
+        let new_root = H256::from_slice(trie.root()?.as_slice());
+        if new_root != root {
+            let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+            if cursor
+                .seek_by_key_subkey(address, root)?
+                .filter(|entry| entry.hash == root)
+                .is_some()
+            {
+                cursor.delete_current()?;
+            }
+        }
 
-        Ok(root)
+        // if root is empty remove it from db
+        if new_root == EMPTY_ROOT {
+            tx.delete::<tables::StoragesTrie>(address, None)?;
+        }
+
+        Ok(new_root)
     }
 
     fn gather_changes<DB: Database>(

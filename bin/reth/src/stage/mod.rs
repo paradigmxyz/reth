@@ -17,7 +17,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
-    DefaultDB, ExecInput, Stage, StageId, UnwindInput,
+    ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, sync::Arc};
 use tracing::*;
@@ -171,7 +171,8 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
-                let mut stage = ExecutionStage::<DefaultDB<'_>>::from(self.chain.clone());
+                let factory = reth_executor::Factory::new(Arc::new(self.chain.clone()));
+                let mut stage = ExecutionStage::new(factory, 10_000);
                 stage.commit_threshold = num_blocks;
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;

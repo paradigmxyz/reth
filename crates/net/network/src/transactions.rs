@@ -227,7 +227,7 @@ where
         let max_num_full = (self.peers.len() as f64).sqrt() as usize + 1;
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
-        for (idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
+        for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
             // filter all transactions unknown to the peer
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
             let mut full_transactions = Vec::new();
@@ -237,20 +237,27 @@ where
                     full_transactions.push(Arc::clone(&tx.transaction));
                 }
             }
-            let hashes = hashes.build();
+            let mut new_pooled_hashes = hashes.build();
 
             if !full_transactions.is_empty() {
-                if idx > max_num_full {
-                    for hash in hashes.iter_hashes().copied() {
+                // determine whether to send full tx objects or hashes.
+                if peer_idx > max_num_full {
+                    // enforce tx soft limit per message for the (unlikely) event the number of
+                    // hashes exceeds it
+                    new_pooled_hashes.truncate(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
+
+                    for hash in new_pooled_hashes.iter_hashes().copied() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Hash(*peer_id));
                     }
                     // send hashes of transactions
-                    self.network.send_transactions_hashes(*peer_id, hashes);
+                    self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
+                    // TODO ensure max message size
+
                     // send full transactions
                     self.network.send_transactions(*peer_id, full_transactions);
 
-                    for hash in hashes.into_iter_hashes() {
+                    for hash in new_pooled_hashes.into_iter_hashes() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
                     }
                 }

@@ -15,7 +15,7 @@ where
         let state =
             self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
         let code = state.account_code(address)?.unwrap_or_default();
-        Ok(code)
+        Ok(code.original_bytes().into())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {

@@ -62,11 +62,7 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
     }
 
     fn header_by_number(&self, num: BlockNumber) -> Result<Option<Header>> {
-        if let Some(hash) = self.db.view(|tx| tx.get::<tables::CanonicalHeaders>(num))?? {
-            self.header(&hash)
-        } else {
-            Ok(None)
-        }
+        Ok(self.db.view(|tx| tx.get::<tables::Headers>(num))??)
     }
 
     fn header_td(&self, hash: &BlockHash) -> Result<Option<U256>> {
@@ -302,6 +298,7 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
     type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
     type LatestSP<'a> = LatestStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
+
     /// Storage provider for latest block
     fn latest(&self) -> Result<Self::LatestSP<'_>> {
         Ok(LatestStateProvider::new(self.db.tx()?))
