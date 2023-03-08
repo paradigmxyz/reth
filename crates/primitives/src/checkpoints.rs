@@ -1,15 +1,5 @@
-use crate::{
-    keccak256, Address, Bytes, GenesisAccount, Header, Log, Receipt, TransactionSigned, Withdrawal,
-    H256,
-};
-use bytes::BytesMut;
-use hash_db::Hasher;
-use hex_literal::hex;
-use plain_hasher::PlainHasher;
+use crate::{Address, H256};
 use reth_codecs::{main_codec, Compact};
-use reth_rlp::Encodable;
-use std::collections::HashMap;
-use triehash::{ordered_trie_root, sec_trie_root};
 
 /// Saves the progress of MerkleStage
 #[main_codec]
@@ -31,6 +21,20 @@ pub struct ProofCheckpoint {
 pub struct AccountHashingCheckpoint {
     /// The next account to start hashing from
     pub address: Option<Address>,
+    /// Start transition id
+    pub from: u64,
+    /// Last transition id
+    pub to: u64,
+}
+
+/// Saves the progress of StorageHashing
+#[main_codec]
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+pub struct StorageHashingCheckpoint {
+    /// The next account to start hashing from
+    pub address: Option<Address>,
+    /// The next storage slot to start hashing from
+    pub storage: Option<H256>,
     /// Start transition id
     pub from: u64,
     /// Last transition id

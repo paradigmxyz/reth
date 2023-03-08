@@ -175,7 +175,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
-            let mut checkpoint = self.get_checkpoint(&tx)?;
+            let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
                 checkpoint.to != to_transition ||
