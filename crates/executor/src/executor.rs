@@ -3,8 +3,8 @@ use crate::execution_result::{
 };
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
-    TransactionSigned, H256, U256,
+    bloom::logs_bloom, Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log,
+    Receipt, TransactionSigned, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
 use reth_revm::{
@@ -18,7 +18,7 @@ use revm::{
     db::AccountState,
     primitives::{
         hash_map::{self, Entry},
-        Account as RevmAccount, AccountInfo, Bytecode, ResultAndState,
+        Account as RevmAccount, AccountInfo, ResultAndState,
     },
     EVM,
 };
@@ -153,7 +153,8 @@ where
                         match db.contracts.entry(account.info.code_hash) {
                             Entry::Vacant(entry) => {
                                 entry.insert(code.clone());
-                                new_bytecodes.insert(H256(account.info.code_hash.0), code.clone());
+                                new_bytecodes
+                                    .insert(H256(account.info.code_hash.0), Bytecode(code.clone()));
                             }
                             Entry::Occupied(mut entry) => {
                                 entry.insert(code.clone());
@@ -461,8 +462,13 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<ExecutionResult, Error> {
+        let mut result = ExecutionResult::default();
         let (tx_changesets, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
+
+        for changeset in tx_changesets.into_iter() {
+            result.push_transaction_changes(changeset);
+        }
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
@@ -482,8 +488,9 @@ where
                 block_changesets.insert(address, changeset);
             }
         }
+        result.push_block_changes(block_changesets);
 
-        Ok(ExecutionResult { tx_changesets, block_changesets })
+        Ok(result)
     }
 
     fn execute_and_verify_receipt(
@@ -494,11 +501,12 @@ where
     ) -> Result<ExecutionResult, Error> {
         let execution_result = self.execute(block, total_difficulty, senders)?;
 
-        let receipts_iter =
-            execution_result.tx_changesets.iter().map(|changeset| &changeset.receipt);
-
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
-            verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
+            verify_receipt(
+                block.header.receipts_root,
+                block.header.logs_bloom,
+                execution_result.receipts.iter(),
+            )?;
         }
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive

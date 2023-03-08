@@ -289,7 +289,9 @@ where
         let parent_block_number = block.number - 1;
 
         // execution stage
-        self.insert_execution_result(vec![changeset], chain_spec, parent_block_number)?;
+        // TODO: Transition ID
+        // TODO: State clear EIP
+        changeset.write_to_db(self.deref_mut(), 0)?;
 
         // storage hashing stage
         {
@@ -610,126 +612,6 @@ where
                     TransitionList::new(last_list).expect("Indices are presorted and not empty"),
                 )?
             }
-        }
-        Ok(())
-    }
-
-    /// Used inside execution stage to commit created account storage changesets for transaction or
-    /// block state change.
-    pub fn insert_execution_result(
-        &self,
-        changesets: Vec<ExecutionResult>,
-        chain_spec: &ChainSpec,
-        parent_block_number: u64,
-    ) -> Result<(), TransactionError> {
-        // Get last tx count so that we can know amount of transaction in the block.
-        let mut current_transition_id = self
-            .get::<tables::BlockTransitionIndex>(parent_block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number: parent_block_number })?;
-
-        info!(target: "sync::stages::execution", current_transition_id, blocks = changesets.len(), "Inserting execution results");
-
-        // apply changes to plain database.
-        let mut block_number = parent_block_number;
-        for results in changesets.into_iter() {
-            block_number += 1;
-            let spurious_dragon_active =
-                chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
-            // insert state change set
-            for result in results.tx_changesets.into_iter() {
-                for (address, account_change_set) in result.changeset.into_iter() {
-                    let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
-                    // apply account change to db. Updates AccountChangeSet and PlainAccountState
-                    // tables.
-                    trace!(target: "sync::stages::execution", ?address, current_transition_id, ?account, wipe_storage, "Applying account changeset");
-                    account.apply_to_db(
-                        &**self,
-                        address,
-                        current_transition_id,
-                        spurious_dragon_active,
-                    )?;
-
-                    let storage_id = TransitionIdAddress((current_transition_id, address));
-
-                    // cast key to H256 and trace the change
-                    let storage = storage
-                                .into_iter()
-                                .map(|(key, (old_value,new_value))| {
-                                    let hkey = H256(key.to_be_bytes());
-                                    trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
-                                    (hkey, old_value,new_value)
-                                })
-                                .collect::<Vec<_>>();
-
-                    let mut cursor_storage_changeset =
-                        self.cursor_write::<tables::StorageChangeSet>()?;
-                    cursor_storage_changeset.seek_exact(storage_id)?;
-
-                    if wipe_storage {
-                        // iterate over storage and save them before entry is deleted.
-                        self.cursor_read::<tables::PlainStorageState>()?
-                            .walk(Some(address))?
-                            .take_while(|res| {
-                                res.as_ref().map(|(k, _)| *k == address).unwrap_or_default()
-                            })
-                            .try_for_each(|entry| {
-                                let (_, old_value) = entry?;
-                                cursor_storage_changeset.append(storage_id, old_value)
-                            })?;
-
-                        // delete all entries
-                        self.delete::<tables::PlainStorageState>(address, None)?;
-
-                        // insert storage changeset
-                        for (key, _, new_value) in storage {
-                            // old values are already cleared.
-                            if new_value != U256::ZERO {
-                                self.put::<tables::PlainStorageState>(
-                                    address,
-                                    StorageEntry { key, value: new_value },
-                                )?;
-                            }
-                        }
-                    } else {
-                        // insert storage changeset
-                        for (key, old_value, new_value) in storage {
-                            let old_entry = StorageEntry { key, value: old_value };
-                            let new_entry = StorageEntry { key, value: new_value };
-                            // insert into StorageChangeSet
-                            cursor_storage_changeset.append(storage_id, old_entry)?;
-
-                            // Always delete old value as duplicate table, put will not override it
-                            self.delete::<tables::PlainStorageState>(address, Some(old_entry))?;
-                            if new_value != U256::ZERO {
-                                self.put::<tables::PlainStorageState>(address, new_entry)?;
-                            }
-                        }
-                    }
-                }
-                // insert bytecode
-                for (hash, bytecode) in result.new_bytecodes.into_iter() {
-                    // make different types of bytecode. Checked and maybe even analyzed (needs to
-                    // be packed). Currently save only raw bytes.
-                    let bytes = bytecode.bytes();
-                    trace!(target: "sync::stages::execution", ?hash, ?bytes, len = bytes.len(), "Inserting bytecode");
-                    self.put::<tables::Bytecodes>(hash, Bytecode(bytecode))?;
-                    // NOTE: bytecode bytes are not inserted in change set and can be found in
-                    // separate table
-                }
-                current_transition_id += 1;
-            }
-
-            // If there are any post block changes, we will add account changesets to db.
-            for (address, changeset) in results.block_changesets.into_iter() {
-                trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
-                changeset.apply_to_db(
-                    &**self,
-                    address,
-                    current_transition_id,
-                    spurious_dragon_active,
-                )?;
-            }
-            current_transition_id += 1;
         }
         Ok(())
     }
