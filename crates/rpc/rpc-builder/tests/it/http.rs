@@ -75,6 +75,8 @@ where
     EthApiClient::block_uncles_count_by_number(client, block_number).await.unwrap();
     EthApiClient::uncle_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::uncle_by_block_number_and_index(client, block_number, index).await.unwrap();
+    EthApiClient::create_access_list(client, call_request.clone(), None).await.unwrap();
+
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
@@ -91,9 +93,6 @@ where
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
     assert!(is_unimplemented(
         EthApiClient::call(client, call_request.clone(), None, None).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::create_access_list(client, call_request.clone(), None).await.err().unwrap()
     ));
     assert!(is_unimplemented(
         EthApiClient::estimate_gas(client, call_request.clone(), None).await.err().unwrap()
