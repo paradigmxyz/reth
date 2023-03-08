@@ -294,7 +294,7 @@ mod tests {
     use reth_executor::Factory;
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
-        StorageEntry, H160, H256, MAINNET, U256,
+        StorageEntry, H160, H256, U256,
     };
     use reth_provider::insert_canonical_block;
     use reth_rlp::Decodable;
