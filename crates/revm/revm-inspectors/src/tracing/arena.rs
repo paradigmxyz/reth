@@ -7,7 +7,9 @@ use reth_rpc_types::trace::{
 use revm::interpreter::{opcode, InstructionResult};
 use std::collections::{BTreeMap, HashMap};
 
-/// An arena of recorded [CallTraceNode]s
+/// An arena of recorded traces.
+///
+/// This type will be populated via the [TracingInspector](crate::tracing::TracingInspector).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CallTraceArena {
     /// The arena of recorded trace nodes
