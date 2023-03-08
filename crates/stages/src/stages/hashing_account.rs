@@ -216,13 +216,17 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 accounts.next()?
             };
 
-            if let Some((next_address, _)) = next_address {
-                checkpoint.address = Some(next_address);
+            if let Some((next_address, _)) = &next_address {
+                checkpoint.address = Some(*next_address);
                 checkpoint.from = from_transition;
                 checkpoint.to = to_transition;
             }
 
             self.save_checkpoint(tx, checkpoint)?;
+
+            if next_address.is_some() {
+                return Ok(ExecOutput { stage_progress, done: false })
+            }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
             // changed.

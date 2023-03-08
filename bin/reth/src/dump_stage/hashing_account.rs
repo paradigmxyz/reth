@@ -36,8 +36,7 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
     unwind_and_copy::<DB>(db_tool, from, tip_block_number, &output_db).await?;
 
     if should_run {
-        println!("\n# AccountHashing stage does not support dry run, so it will actually be committing changes.");
-        run(output_db, to, from).await?;
+        dry_run(output_db, to, from).await?;
     }
 
     Ok(())
@@ -69,7 +68,7 @@ async fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage straightaway
-async fn run(
+async fn dry_run(
     output_db: reth_db::mdbx::Env<reth_db::mdbx::WriteMap>,
     to: u64,
     from: u64,
@@ -82,15 +81,21 @@ async fn run(
         ..Default::default()
     };
 
-    exec_stage
-        .execute(
-            &mut tx,
-            reth_stages::ExecInput {
-                previous_stage: Some((StageId("Another"), to)),
-                stage_progress: Some(from),
-            },
-        )
-        .await?;
+    let mut exec_output = false;
+    while !exec_output {
+        exec_output = exec_stage
+            .execute(
+                &mut tx,
+                reth_stages::ExecInput {
+                    previous_stage: Some((StageId("Another"), to)),
+                    stage_progress: Some(from),
+                },
+            )
+            .await?
+            .done;
+    }
+
+    tx.drop()?;
 
     info!(target: "reth::cli", "Success.");
 
