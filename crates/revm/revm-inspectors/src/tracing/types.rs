@@ -82,7 +82,9 @@ pub(crate) struct CallTrace {
     pub(crate) success: bool,
     /// caller of this call
     pub(crate) caller: Address,
-    /// The destination address of the call or the address from the created contract
+    /// The destination address of the call or the address from the created contract.
+    ///
+    /// In other words, this is the callee if the [CallKind::Call] or the address of the created contract if [CallKind::Create].
     pub(crate) address: Address,
     /// The kind of call this is
     pub(crate) kind: CallKind,

@@ -107,7 +107,7 @@ impl TracingInspector {
         status: InstructionResult,
         cost: u64,
         output: Bytes,
-        address: Option<Address>,
+        created_address: Option<Address>,
     ) {
         let success = matches!(status, return_ok!());
         let trace = &mut self.traces.arena
@@ -118,7 +118,8 @@ impl TracingInspector {
         trace.gas_cost = cost;
         trace.output = output;
 
-        if let Some(address) = address {
+        if let Some(address) = created_address {
+            // A new contract was created via CREATE
             trace.address = address;
         }
     }
