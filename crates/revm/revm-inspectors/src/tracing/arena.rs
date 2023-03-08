@@ -1,16 +1,11 @@
-use crate::tracing::{
-    call::{CallTrace},
-    node::CallTraceNode,
-};
-use reth_primitives::{hex, Address, U256};
-use reth_rpc_types::trace::{DefaultFrame, GethDebugTracingOptions, StructLog};
-use revm::interpreter::{InstructionResult, Memory, OpCode, Stack};
-use revm::interpreter::instruction_result::SuccessOrHalt;
+use crate::tracing::types::{CallTrace, CallTraceNode, LogCallOrder};
+use reth_primitives::U256;
+use reth_rpc_types::trace::geth::{DefaultFrame, GethDebugTracingOptions};
 
 /// An arena of [CallTraceNode]s
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct CallTraceArena {
-    /// The arena of nodes
+    /// The arena of recorded trace nodes
     pub(crate) arena: Vec<CallTraceNode>,
 }
 
@@ -135,102 +130,10 @@ impl CallTraceArena {
     }
 }
 
-/// Ordering enum for calls and logs
-///
-/// i.e. if Call 0 occurs before Log 0, it will be pushed into the `CallTraceNode`'s ordering before
-/// the log.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LogCallOrder {
-    Log(usize),
-    Call(usize),
-}
-
-/// Represents a tracked call step during execution
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CallTraceStep {
-    // Fields filled in `step`
-    /// Call depth
-    pub depth: u64,
-    /// Program counter before step execution
-    pub pc: usize,
-    /// Opcode to be executed
-    pub op: OpCode,
-    /// Current contract address
-    pub contract: Address,
-    /// Stack before step execution
-    pub stack: Stack,
-    /// Memory before step execution
-    pub memory: Memory,
-    /// Remaining gas before step execution
-    pub gas: u64,
-    /// Gas refund counter before step execution
-    pub gas_refund_counter: u64,
-    // Fields filled in `step_end`
-    /// Gas cost of step execution
-    pub gas_cost: u64,
-    /// Change of the contract state after step execution (effect of the SLOAD/SSTORE instructions)
-    pub state_diff: Option<(U256, U256)>,
-    /// Final status of the call
-    pub status: InstructionResult,
-}
-
-// === impl CallTraceStep ===
-
-impl CallTraceStep {
-    // Returns true if the status code is an error or revert, See [InstructionResult::Revert]
-    pub fn is_error(&self) -> bool {
-        self.status as u8 >= InstructionResult::Revert as u8
-    }
-
-    /// Returns the error message if it is an erroneous result.
-    pub fn as_error(&self) -> Option<String> {
-        if self.is_error() {
-            Some(format!("{:?}", self.status))
-        } else {
-            None
-        }
-    }
-}
-
-impl From<&CallTraceStep> for StructLog {
-    fn from(step: &CallTraceStep) -> Self {
-        StructLog {
-            depth: step.depth,
-            error: step.as_error(),
-            gas: step.gas,
-            gas_cost: step.gas_cost,
-            memory: Some(convert_memory(step.memory.data())),
-            op: step.op.to_string(),
-            pc: step.pc as u64,
-            refund_counter: if step.gas_refund_counter > 0 {
-                Some(step.gas_refund_counter)
-            } else {
-                None
-            },
-            stack: Some(step.stack.data().iter().copied().map(Into::into).collect()),
-            // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
-            storage: None,
-        }
-    }
-}
-
-// === impl CallTrace ===
-
 /// Specifies the kind of trace.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TraceKind {
     Deployment,
     Setup,
     Execution,
-}
-
-/// creates the memory data in 32byte chunks
-/// see <https://github.com/ethereum/go-ethereum/blob/366d2169fbc0e0f803b68c042b77b6b480836dbc/eth/tracers/logger/logger.go#L450-L452>
-fn convert_memory(data: &[u8]) -> Vec<String> {
-    let mut memory = Vec::with_capacity((data.len() + 31) / 32);
-    for idx in (0..data.len()).step_by(32) {
-        let len = std::cmp::min(idx + 32, data.len());
-        memory.push(hex::encode(&data[idx..len]));
-    }
-    memory
 }

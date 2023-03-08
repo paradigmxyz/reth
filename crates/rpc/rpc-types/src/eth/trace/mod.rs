@@ -3,5 +3,8 @@
 pub mod filter;
 pub mod parity;
 
-// re-exported for geth tracing types
-pub use ethers_core::types::*;
+/// Geth tracing types
+pub mod geth {
+    // re-exported for geth tracing types
+    pub use ethers_core::types::{DefaultFrame, GethDebugTracingOptions, StructLog};
+}

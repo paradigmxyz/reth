@@ -1,30 +1,25 @@
 use crate::{
     stack::MaybeOwnedInspector,
     tracing::{
-        arena::{CallTraceArena, CallTraceStep, LogCallOrder},
-        call::CallKind,
-        node::RawLog,
+        arena::CallTraceArena,
+        types::{CallKind, LogCallOrder, RawLog},
+        utils::{gas_used, get_create_address},
     },
 };
-use call::CallTrace;
-use reth_primitives::{
-    bytes::Bytes,
-    contract::{create2_address_from_code, create_address},
-    Address, H256, U256,
-};
+use reth_primitives::{bytes::Bytes, Address, H256, U256};
 use revm::{
     inspectors::GasInspector,
     interpreter::{
         opcode, return_ok, CallInputs, CallScheme, CreateInputs, Gas, InstructionResult,
         Interpreter, OpCode,
     },
-    primitives::{CreateScheme, SpecId},
     Database, EVMData, Inspector, JournalEntry,
 };
+use types::{CallTrace, CallTraceStep};
 
 mod arena;
-mod call;
-mod node;
+mod types;
+mod utils;
 
 /// An inspector that collects call traces.
 ///
@@ -85,7 +80,6 @@ impl TracingInspector {
         kind: CallKind,
         caller: Address,
     ) {
-        // TODO: check precompiles
         self.trace_stack.push(self.traces.push_trace(
             0,
             CallTrace {
@@ -191,9 +185,9 @@ impl TracingInspector {
             step.state_diff = match (op, journal_entry) {
                 (
                     opcode::SLOAD | opcode::SSTORE,
-                    Some(JournalEntry::StorageChage { address, key, .. }),
+                    Some(JournalEntry::StorageChange { address, key, .. }),
                 ) => {
-                    // SAFETY: (Address,key) exists if part if StorageC
+                    // SAFETY: (Address,key) exists if part if StorageChange
                     let value = data.journaled_state.state[address].storage[key].present_value();
                     Some((*key, value))
                 }
@@ -374,19 +368,4 @@ where
 struct StackStep {
     trace_idx: usize,
     step_idx: usize,
-}
-
-/// Get the gas used, accounting for refunds
-pub fn gas_used(spec: SpecId, spent: u64, refunded: u64) -> u64 {
-    let refund_quotient = if SpecId::enabled(spec, SpecId::LONDON) { 5 } else { 2 };
-    spent - (refunded).min(spent / refund_quotient)
-}
-/// Get the address of a contract creation
-fn get_create_address(call: &CreateInputs, nonce: u64) -> Address {
-    match call.scheme {
-        CreateScheme::Create => create_address(call.caller, nonce),
-        CreateScheme::Create2 { salt } => {
-            create2_address_from_code(call.caller, call.init_code.clone(), salt)
-        }
-    }
 }
