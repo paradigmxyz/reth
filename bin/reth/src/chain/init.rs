@@ -42,15 +42,16 @@ pub struct InitCommand {
 impl InitCommand {
     /// Execute the `init` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        info!(target: "reth::cli", "reth import starting");
+        info!(target: "reth::cli", "reth init starting");
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
         info!(target: "reth::cli", "Database opened");
 
         info!(target: "reth::cli", "Writing genesis block");
-        init_genesis(db, self.chain.clone())?;
+        let hash = init_genesis(db, self.chain.clone())?;
 
+        info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
     }
 }
