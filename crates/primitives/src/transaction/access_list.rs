@@ -3,6 +3,7 @@ use revm_primitives::U256;
 
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use serde::{Deserialize, Serialize};
 
 /// A list of addresses and storage keys that the transaction plans to access.
 /// Accesses outside the list are possible, but become more expensive.
@@ -33,4 +34,14 @@ impl AccessList {
             })
             .collect()
     }
+}
+
+/// Access list with gas used appended.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessListWithGasUsed {
+    /// List with accounts accessed during transaction.
+    pub access_list: AccessList,
+    /// Estimated gas used with access list.
+    pub gas_used: U256,
 }

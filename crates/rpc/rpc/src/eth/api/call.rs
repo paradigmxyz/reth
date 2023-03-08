@@ -6,26 +6,33 @@ use crate::{
     eth::error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
     EthApi,
 };
+use ethers_core::utils::get_contract_address;
 use reth_primitives::{
-    AccessList, Address, BlockId, BlockNumberOrTag, Bytes, TransactionKind, U128, U256,
+    AccessList, AccessListItem, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
+    TransactionKind, H256, U128, U256,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
-use reth_revm::database::{State, SubState};
+use reth_revm::{
+    access_list::AccessListInspector,
+    database::{State, SubState},
+};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     CallRequest,
 };
 use revm::{
     db::{CacheDB, DatabaseRef},
+    precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{
         ruint::Uint, BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState,
-        TransactTo, TxEnv,
+        SpecId, TransactTo, TxEnv,
     },
-    Database,
+    Database, Inspector,
 };
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
+const MIN_CREATE_GAS: u64 = 53_000u64;
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
@@ -222,11 +229,14 @@ where
         // transaction requires to succeed
         let gas_used = res.result.gas_used();
         // the lowest value is capped by the gas it takes for a transfer
-        let mut lowest_gas_limit = MIN_TRANSACTION_GAS;
+        let mut lowest_gas_limit =
+            if env.tx.transact_to.is_create() { MIN_CREATE_GAS } else { MIN_TRANSACTION_GAS };
         let mut highest_gas_limit: u64 = highest_gas_limit.try_into().unwrap_or(u64::MAX);
         // pick a point that's close to the estimated gas
-        let mut mid_gas_limit =
-            std::cmp::min(gas_used * 3, (highest_gas_limit + lowest_gas_limit) / 2);
+        let mut mid_gas_limit = std::cmp::min(
+            gas_used * 3,
+            ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
+        );
 
         let mut last_highest_gas_limit = highest_gas_limit;
 
@@ -241,10 +251,10 @@ where
                     highest_gas_limit = mid_gas_limit;
                     // if last two successful estimations only vary by 10%, we consider this to be
                     // sufficiently accurate
-                    const ACCURACY: u64 = 10;
-                    if (last_highest_gas_limit - highest_gas_limit) * ACCURACY /
-                        last_highest_gas_limit <
-                        1u64
+                    const ACCURACY: u128 = 10;
+                    if (last_highest_gas_limit - highest_gas_limit) as u128 * ACCURACY /
+                        (last_highest_gas_limit as u128) <
+                        1u128
                     {
                         return Ok(U256::from(highest_gas_limit))
                     }
@@ -269,11 +279,77 @@ where
                 }
             }
             // new midpoint
-            mid_gas_limit = (highest_gas_limit + lowest_gas_limit) / 2;
+            mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
         }
 
         Ok(U256::from(highest_gas_limit))
     }
+
+    pub(crate) async fn create_access_list_at(
+        &self,
+        request: CallRequest,
+        at: Option<BlockId>,
+    ) -> EthResult<AccessList> {
+        let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let (mut cfg, block, at) = self.evm_env_at(block_id).await?;
+        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+        // we want to disable this in eth_call, since this is common practice used by other node
+        // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+        cfg.disable_block_gas_limit = true;
+
+        let mut env = build_call_evm_env(cfg, block, request.clone())?;
+        let mut db = SubState::new(State::new(state));
+
+        let from = request.from.unwrap_or_default();
+        let to = if let Some(to) = request.to {
+            to
+        } else {
+            let nonce = db.basic(from)?.unwrap_or_default().nonce;
+            get_contract_address(from, nonce).into()
+        };
+
+        let initial = request.access_list.clone().unwrap_or_default();
+
+        let precompiles = get_precompiles(&env.cfg.spec_id);
+        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
+        let (result, _env) = inspect(&mut db, env, &mut inspector)?;
+
+        match result.result {
+            ExecutionResult::Halt { reason, .. } => Err(match reason {
+                Halt::NonceOverflow => InvalidTransactionError::NonceMaxValue,
+                halt => InvalidTransactionError::EvmHalt(halt),
+            }),
+            ExecutionResult::Revert { output, .. } => {
+                Err(InvalidTransactionError::Revert(RevertError::new(output)))
+            }
+            ExecutionResult::Success { .. } => Ok(()),
+        }?;
+        Ok(inspector.into_access_list())
+    }
+}
+
+/// Returns the addresses of the precompiles corresponding to the SpecId.
+fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
+    let spec = match spec_id {
+        SpecId::FRONTIER | SpecId::FRONTIER_THAWING => return vec![],
+        SpecId::HOMESTEAD | SpecId::DAO_FORK | SpecId::TANGERINE | SpecId::SPURIOUS_DRAGON => {
+            PrecompilesSpecId::HOMESTEAD
+        }
+        SpecId::BYZANTIUM | SpecId::CONSTANTINOPLE | SpecId::PETERSBURG => {
+            PrecompilesSpecId::BYZANTIUM
+        }
+        SpecId::ISTANBUL | SpecId::MUIR_GLACIER => PrecompilesSpecId::ISTANBUL,
+        SpecId::BERLIN |
+        SpecId::LONDON |
+        SpecId::ARROW_GLACIER |
+        SpecId::GRAY_GLACIER |
+        SpecId::MERGE |
+        SpecId::SHANGHAI |
+        SpecId::CANCUN => PrecompilesSpecId::BERLIN,
+        SpecId::LATEST => PrecompilesSpecId::LATEST,
+    };
+    Precompiles::new(spec).addresses().into_iter().map(Address::from).collect()
 }
 
 /// Executes the [Env] against the given [Database] without committing state changes.
@@ -285,6 +361,19 @@ where
     let mut evm = revm::EVM::with_env(env);
     evm.database(db);
     let res = evm.transact()?;
+    Ok((res, evm.env))
+}
+
+/// Executes the [Env] against the given [Database] without committing state changes.
+pub(crate) fn inspect<S, I>(db: S, env: Env, inspector: I) -> EthResult<(ResultAndState, Env)>
+where
+    S: Database,
+    <S as Database>::Error: Into<EthApiError>,
+    I: Inspector<S>,
+{
+    let mut evm = revm::EVM::with_env(env);
+    evm.database(db);
+    let res = evm.inspect(inspector)?;
     Ok((res, evm.env))
 }
 
@@ -317,7 +406,7 @@ fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv
     let CallFees { max_priority_fee_per_gas, gas_price } =
         CallFees::ensure_fees(gas_price, max_fee_per_gas, max_priority_fee_per_gas)?;
 
-    let gas_limit = gas.unwrap_or(block_env.gas_limit);
+    let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
 
     let env = TxEnv {
         gas_limit: gas_limit.try_into().map_err(|_| InvalidTransactionError::GasUintOverflow)?,

@@ -41,6 +41,11 @@ members = [
 exclude = ["crate-template"]
 default-members = ["bin/reth"]
 
+# Like release, but with full debug symbols. Useful for e.g. `perf`.
+[profile.debug-fast]
+inherits = "release"
+debug = true
+
 [patch.crates-io]
 revm = { git = "https://github.com/bluealloy/revm" }
 revm-primitives = { git = "https://github.com/bluealloy/revm" }

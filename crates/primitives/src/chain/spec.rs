@@ -1,7 +1,10 @@
 use crate::{
-    constants::EIP1559_INITIAL_BASE_FEE, forkid::ForkFilterKey, header::Head,
-    proofs::genesis_state_root, BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis,
-    GenesisAccount, Hardfork, Header, H160, H256, U256,
+    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS},
+    forkid::ForkFilterKey,
+    header::Head,
+    proofs::genesis_state_root,
+    BlockNumber, Chain, ForkFilter, ForkHash, ForkId, Genesis, GenesisAccount, Hardfork, Header,
+    H160, H256, U256,
 };
 use ethers_core::utils::Genesis as EthersGenesis;
 use hex_literal::hex;
@@ -142,6 +145,15 @@ impl ChainSpec {
             None
         };
 
+        // If shanghai is activated, initialize the header with an empty withdrawals hash, and
+        // empty withdrawals list.
+        let withdrawals_root =
+            if self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp) {
+                Some(EMPTY_WITHDRAWALS)
+            } else {
+                None
+            };
+
         Header {
             gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
@@ -152,6 +164,7 @@ impl ChainSpec {
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
             base_fee_per_gas,
+            withdrawals_root,
             ..Default::default()
         }
     }
@@ -587,7 +600,9 @@ mod tests {
         AllGenesisFormats, Chain, ChainSpec, ChainSpecBuilder, ForkCondition, ForkHash, ForkId,
         Genesis, Hardfork, Head, GOERLI, H256, MAINNET, SEPOLIA, U256,
     };
+    use bytes::BytesMut;
     use ethers_core::types as EtherType;
+    use reth_rlp::Encodable;
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -1025,6 +1040,37 @@ mod tests {
             chainspec.hardforks.get(&Hardfork::Shanghai).unwrap(),
             &ForkCondition::Timestamp(0)
         );
+
+        // alloc key -> expected rlp mapping
+        let key_rlp = vec![
+            (hex_literal::hex!("658bdf435d810c91414ec09147daa6db62406379"), "f84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+            (hex_literal::hex!("aa00000000000000000000000000000000000000"), "f8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99"),
+            (hex_literal::hex!("bb00000000000000000000000000000000000000"), "f8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2"),
+        ];
+
+        for (key, expected_rlp) in key_rlp {
+            let account = chainspec.genesis.alloc.get(&key.into()).expect("account should exist");
+            let mut account_rlp = BytesMut::new();
+            account.encode(&mut account_rlp);
+            assert_eq!(hex::encode(account_rlp), expected_rlp)
+        }
+
+        assert_eq!(chainspec.genesis_hash, None);
+        let expected_state_root: H256 =
+            hex_literal::hex!("078dc6061b1d8eaa8493384b59c9c65ceb917201221d08b80c4de6770b6ec7e7")
+                .into();
+        assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
+
+        let expected_withdrawals_hash: H256 =
+            hex_literal::hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+                .into();
+        assert_eq!(chainspec.genesis_header().withdrawals_root, Some(expected_withdrawals_hash));
+
+        let expected_hash: H256 =
+            hex_literal::hex!("1fc027d65f820d3eef441ebeec139ebe09e471cf98516dce7b5643ccb27f418c")
+                .into();
+        let hash = chainspec.genesis_hash();
+        assert_eq!(hash, expected_hash);
     }
 
     #[test]

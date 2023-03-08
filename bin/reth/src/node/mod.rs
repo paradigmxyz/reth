@@ -50,7 +50,6 @@ use reth_staged_sync::{
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
-    DefaultDB,
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -444,23 +443,25 @@ impl Command {
             builder = builder.with_max_block(max_block)
         }
 
+        let factory = reth_executor::Factory::new(Arc::new(self.chain.clone()));
         let pipeline = builder
             .with_sync_state_updater(updater.clone())
             .add_stages(
-                DefaultStages::new(consensus.clone(), header_downloader, body_downloader, updater)
-                    .set(TotalDifficultyStage {
-                        chain_spec: self.chain.clone(),
-                        commit_threshold: stage_conf.total_difficulty.commit_threshold,
-                    })
-                    .set(SenderRecoveryStage {
-                        commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                    })
-                    .set({
-                        let mut stage: ExecutionStage<'_, DefaultDB<'_>> =
-                            ExecutionStage::from(self.chain.clone());
-                        stage.commit_threshold = stage_conf.execution.commit_threshold;
-                        stage
-                    }),
+                DefaultStages::new(
+                    consensus.clone(),
+                    header_downloader,
+                    body_downloader,
+                    updater,
+                    factory.clone(),
+                )
+                .set(TotalDifficultyStage {
+                    chain_spec: self.chain.clone(),
+                    commit_threshold: stage_conf.total_difficulty.commit_threshold,
+                })
+                .set(SenderRecoveryStage {
+                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
+                })
+                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold)),
             )
             .build();
 

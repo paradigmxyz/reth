@@ -15,3 +15,7 @@ pub use reth_provider::execution_result;
 pub mod blockchain_tree;
 /// Executor
 pub mod executor;
+
+/// ExecutorFactory impl
+pub mod factory;
+pub use factory::Factory;
