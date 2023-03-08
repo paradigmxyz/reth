@@ -15,6 +15,12 @@ impl From<JsonU256> for U256 {
     }
 }
 
+impl From<U256> for JsonU256 {
+    fn from(value: U256) -> Self {
+        JsonU256(value)
+    }
+}
+
 impl Serialize for JsonU256 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
