@@ -10,15 +10,13 @@ use reth_primitives::{Address, Bytes, Signature};
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
 {
-    pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Bytes> {
+    pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Signature> {
         let signer = self
             .find_signer(&account)
             .ok_or(EthApiError::NoSigner)?;
         let signature =
             signer.sign(account, &message).await.map_err(|_err| EthApiError::NoSigner)?;
-        let mut buff = vec![];
-        Signature::encode(&signature, &mut buff);
-        Ok(buff.into())
+        Ok(signature)
     }
 
     pub(crate) fn find_signer(&self, account: &Address) -> Option<&Box<(dyn EthSigner + 'static)>> {

@@ -1,7 +1,7 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{
     rpc::transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
-    H256, H64, U256, U64,
+    H256, H64, U256, U64, Signature
 };
 use reth_rpc_types::{
     state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
@@ -228,7 +228,7 @@ pub trait EthApi {
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).
     #[method(name = "eth_sign")]
-    async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes>;
+    async fn sign(&self, address: Address, message: Bytes) -> Result<Signature>;
 
     /// Signs a transaction that can be submitted to the network at a later time using with
     /// `eth_sendRawTransaction.`

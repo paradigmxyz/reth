@@ -9,7 +9,7 @@ use crate::{
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
     rpc::transaction::eip2930::AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
-    Header, H256, H64, U256, U64,
+    Header, H256, H64, U256, U64, Signature,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -357,8 +357,8 @@ where
     }
 
     /// Handler for: `eth_sign`
-    async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes> {
-        Ok(EthApi::sign(self, address, message).await.unwrap())
+    async fn sign(&self, address: Address, message: Bytes) -> Result<Signature> {
+        Ok(EthApi::sign(self, address, message).await?)
     }
 
     /// Handler for: `eth_signTransaction`
