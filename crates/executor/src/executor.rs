@@ -16,7 +16,6 @@ use reth_revm::{
 use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
 use revm::{
     db::AccountState,
-    interpreter::analysis::to_analysed,
     primitives::{
         hash_map::{self, Entry},
         Account as RevmAccount, AccountInfo, Bytecode, ResultAndState,
@@ -154,13 +153,7 @@ where
                         match db.contracts.entry(account.info.code_hash) {
                             Entry::Vacant(entry) => {
                                 entry.insert(code.clone());
-                                new_bytecodes.insert(
-                                    H256(account.info.code_hash.0),
-                                    // TODO: We have to analyse the bytecode again here, leading to
-                                    // double analysis since revm does not propagate analysed
-                                    // bytecode up to the database.
-                                    to_analysed(code.clone()),
-                                );
+                                new_bytecodes.insert(H256(account.info.code_hash.0), code.clone());
                             }
                             Entry::Occupied(mut entry) => {
                                 entry.insert(code.clone());
