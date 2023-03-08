@@ -162,10 +162,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
                 },
             )?;
             if let Some(code_hash) = code_hash {
-                tx.put::<tables::Bytecodes>(
-                    code_hash,
-                    Bytecode::new_raw(account.code.to_vec().into()),
-                )?;
+                tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.0))?;
             }
             account.storage.iter().try_for_each(|(k, v)| {
                 trace!(target: "reth::cli", ?address, key = ?k.0, value = ?v.0, "Update storage");
