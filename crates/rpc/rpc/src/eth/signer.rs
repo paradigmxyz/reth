@@ -103,6 +103,92 @@ mod test {
         DevSigner { addresses, accounts }
     }
     #[tokio::test]
+    async fn test_sign_type_data() {
+        let eip_712_example = serde_json::json!(
+            r#"{
+            "types": {
+            "EIP712Domain": [
+                {
+                    "name": "name",
+                    "type": "string"
+                },
+                {
+                    "name": "version",
+                    "type": "string"
+                },
+                {
+                    "name": "chainId",
+                    "type": "uint256"
+                },
+                {
+                    "name": "verifyingContract",
+                    "type": "address"
+                }
+            ],
+            "Person": [
+                {
+                    "name": "name",
+                    "type": "string"
+                },
+                {
+                    "name": "wallet",
+                    "type": "address"
+                }
+            ],
+            "Mail": [
+                {
+                    "name": "from",
+                    "type": "Person"
+                },
+                {
+                    "name": "to",
+                    "type": "Person"
+                },
+                {
+                    "name": "contents",
+                    "type": "string"
+                }
+            ]
+        },
+        "primaryType": "Mail",
+        "domain": {
+            "name": "Ether Mail",
+            "version": "1",
+            "chainId": 1,
+            "verifyingContract": "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC"
+        },
+        "message": {
+            "from": {
+                "name": "Cow",
+                "wallet": "0xCD2a3d9F938E13CD947Ec05AbC7FE734Df8DD826"
+            },
+            "to": {
+                "name": "Bob",
+                "wallet": "0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB"
+            },
+            "contents": "Hello, Bob!"
+        }
+        }"#);
+        let data: TypedData = serde_json::from_value(eip_712_example).unwrap();
+        let signer = build_signer();
+        let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
+        let expected = Signature {
+            r: U256::from_str_radix(
+                "5318aee9942b84885761bb20e768372b76e7ee454fc4d39b59ce07338d15a06c",
+                16
+            )
+            .unwrap(),
+            s: U256::from_str_radix(
+                "5e585a2f4882ec3228a9303244798b47a9102e4be72f48159d890c73e4511d79",
+                16,
+            )
+            .unwrap(),
+            odd_y_parity: false,
+        };
+        assert_eq!(sig, expected)
+    }
+
+    #[tokio::test]
     async fn test_signer() {
         let message = b"Test message";
         let signer = build_signer();
