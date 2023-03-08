@@ -5091,6 +5091,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "rayon",
+ "reth-codecs",
  "reth-db",
  "reth-downloaders",
  "reth-eth-wire",

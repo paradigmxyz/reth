@@ -21,6 +21,7 @@ reth-executor = { path = "../executor" }
 reth-revm = { path = "../revm" }
 reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
+reth-codecs = { path = "../storage/codecs" }
 reth-provider = { path = "../storage/provider" }
 reth-metrics-derive = { path = "../metrics/metrics-derive" }
 
