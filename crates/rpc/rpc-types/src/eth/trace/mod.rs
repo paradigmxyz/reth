@@ -14,7 +14,9 @@ pub mod geth {
     // re-exported for geth tracing types
     pub use ethers_core::types::GethDebugTracingOptions;
 
-    // https://github.com/ethereum/go-ethereum/blob/a9ef135e2dd53682d106c6a2aede9187026cc1de/eth/tracers/logger/logger.go#L406-L411
+    /// Geth Default trace frame
+    ///
+    /// <https://github.com/ethereum/go-ethereum/blob/a9ef135e2dd53682d106c6a2aede9187026cc1de/eth/tracers/logger/logger.go#L406-L411>
     #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(rename_all = "camelCase")]
     pub struct DefaultFrame {
@@ -26,7 +28,7 @@ pub mod geth {
 
     /// Represents a struct log entry in a trace
     ///
-    /// https://github.com/ethereum/go-ethereum/blob/366d2169fbc0e0f803b68c042b77b6b480836dbc/eth/tracers/logger/logger.go#L413-L426
+    /// <https://github.com/ethereum/go-ethereum/blob/366d2169fbc0e0f803b68c042b77b6b480836dbc/eth/tracers/logger/logger.go#L413-L426>
     #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
     pub struct StructLog {
         pub depth: u64,
