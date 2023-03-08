@@ -347,7 +347,7 @@ mod tests {
                 Account { nonce: 0, balance, bytecode_hash: None },
             )
             .unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.0)).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         tx.commit().unwrap();
 
         let mut execution_stage = stage();
@@ -430,7 +430,7 @@ mod tests {
 
         db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
         db_tx.put::<tables::PlainAccountState>(acc2, acc2_info).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.0)).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         tx.commit().unwrap();
 
         // execute
@@ -502,7 +502,7 @@ mod tests {
         // set account
         db_tx.put::<tables::PlainAccountState>(caller_address, caller_info).unwrap();
         db_tx.put::<tables::PlainAccountState>(destroyed_address, destroyed_info).unwrap();
-        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.0)).unwrap();
+        db_tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(code.to_vec().into())).unwrap();
         // set storage to check when account gets destroyed.
         db_tx
             .put::<tables::PlainStorageState>(
