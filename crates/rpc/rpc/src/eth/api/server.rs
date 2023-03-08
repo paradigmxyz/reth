@@ -368,7 +368,7 @@ where
 
     /// Handler for: `eth_signTypedData`
     async fn sign_typed_data(&self, address: Address, data: Value) -> Result<Bytes> {
-        Ok((&(EthApi::sign_typed_data(&self, data, address).await?)).into())
+        Ok((&(EthApi::sign_typed_data(self, data, address).await?)).into())
     }
 
     /// Handler for: `eth_getProof`

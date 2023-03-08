@@ -44,7 +44,7 @@ impl DevSigner {
         let secret =
             self.accounts.get(&account).ok_or(RpcError::Custom("No account".to_string()))?;
         // TODO: Handle unwrap properly
-        let ref message = Message::from_slice(&hash.as_bytes()).unwrap();
+        let message = &Message::from_slice(hash.as_bytes()).unwrap();
         let (rec_id, data) = secp.sign_ecdsa_recoverable(message, secret).serialize_compact();
         let signature = Signature {
             // TODO:
@@ -92,15 +92,18 @@ impl EthSigner for DevSigner {
 mod test {
     use super::*;
     use std::str::FromStr;
-    #[tokio::test]
-    async fn test_signer() {
+    fn build_signer () -> DevSigner {
         let addresses = vec![];
         let secret =
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
-                .unwrap();
+            .unwrap();
         let accounts = HashMap::from([(Address::default(), secret)]);
-        let signer = DevSigner { addresses, accounts };
+        DevSigner { addresses, accounts }
+    }
+    #[tokio::test]
+    async fn test_signer() {
         let message = b"Test message";
+        let signer = build_signer();
         let sig = signer.sign(Address::default(), message).await.unwrap();
         let expected = Signature {
             r: U256::from_str_radix(
