@@ -165,7 +165,7 @@ impl Encodable for GenesisAccount {
                     return EMPTY_ROOT
                 }
                 let storage_values =
-                    storage.iter().filter(|(_k, &v)| v != KECCAK_EMPTY).map(|(&k, v)| {
+                    storage.iter().filter(|(_k, &v)| v != H256::zero()).map(|(&k, v)| {
                         let value = U256::from_be_bytes(**v);
                         (k, encode_fixed_size(&value))
                     });
