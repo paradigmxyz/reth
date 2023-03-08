@@ -84,8 +84,12 @@ pub(crate) struct CallTrace {
     pub(crate) caller: Address,
     /// The destination address of the call or the address from the created contract.
     ///
-    /// In other words, this is the callee if the [CallKind::Call] or the address of the created contract if [CallKind::Create].
+    /// In other words, this is the callee if the [CallKind::Call] or the address of the created
+    /// contract if [CallKind::Create].
     pub(crate) address: Address,
+    /// Holds the target for the selfdestruct refund target if `status` is
+    /// [InstructionResult::SelfDestruct]
+    pub(crate) selfdestruct_refund_target: Option<Address>,
     /// The kind of call this is
     pub(crate) kind: CallKind,
     /// The value transferred in the call
@@ -121,6 +125,7 @@ impl Default for CallTrace {
             success: Default::default(),
             caller: Default::default(),
             address: Default::default(),
+            selfdestruct_refund_target: None,
             kind: Default::default(),
             value: Default::default(),
             data: Default::default(),
@@ -183,8 +188,7 @@ impl CallTraceNode {
         if self.status() == InstructionResult::SelfDestruct {
             return Action::Selfdestruct(SelfdestructAction {
                 address: self.trace.address,
-                // TODO deserialize from calldata here?
-                refund_address: Default::default(),
+                refund_address: self.trace.selfdestruct_refund_target.unwrap_or_default(),
                 balance: self.trace.value,
             })
         }
@@ -290,7 +294,7 @@ impl From<&CallTraceStep> for StructLog {
             } else {
                 None
             },
-            stack: Some(step.stack.data().iter().copied().map(Into::into).collect()),
+            stack: Some(step.stack.data().clone()),
             // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
             storage: None,
         }
