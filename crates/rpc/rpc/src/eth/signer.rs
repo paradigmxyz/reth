@@ -1,8 +1,11 @@
 //! An abstraction over ethereum signers.
 
-use ethers_core::{types::transaction::eip712::{TypedData, Eip712}, utils::hash_message};
+use ethers_core::{
+    types::transaction::eip712::{Eip712, TypedData},
+    utils::hash_message,
+};
 use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
-use reth_primitives::{Address, Signature, TransactionSigned, U256, H256};
+use reth_primitives::{Address, Signature, TransactionSigned, H256, U256};
 use reth_rpc_types::TypedTransactionRequest;
 use secp256k1::{Message, Secp256k1, SecretKey};
 use std::collections::HashMap;
@@ -82,8 +85,7 @@ impl EthSigner for DevSigner {
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
-        let encoded: H256 =
-            payload.encode_eip712().unwrap().into();
+        let encoded: H256 = payload.encode_eip712().unwrap().into();
         self.sign_hash(encoded, address)
     }
 }
@@ -92,11 +94,11 @@ impl EthSigner for DevSigner {
 mod test {
     use super::*;
     use std::str::FromStr;
-    fn build_signer () -> DevSigner {
+    fn build_signer() -> DevSigner {
         let addresses = vec![];
         let secret =
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
-            .unwrap();
+                .unwrap();
         let accounts = HashMap::from([(Address::default(), secret)]);
         DevSigner { addresses, accounts }
     }
