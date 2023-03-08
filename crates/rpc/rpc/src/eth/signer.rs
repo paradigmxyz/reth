@@ -1,8 +1,8 @@
 //! An abstraction over ethereum signers.
 
-use ethers_core::{types::transaction::eip712::TypedData, utils::hash_message};
+use ethers_core::{types::transaction::eip712::{TypedData, Eip712}, utils::hash_message};
 use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
-use reth_primitives::{Address, Signature, TransactionSigned, U256};
+use reth_primitives::{Address, Signature, TransactionSigned, U256, H256};
 use reth_rpc_types::TypedTransactionRequest;
 use secp256k1::{Message, Secp256k1, SecretKey};
 use std::collections::HashMap;
@@ -75,8 +75,23 @@ impl EthSigner for DevSigner {
     ) -> Result<TransactionSigned> {
         todo!()
     }
-    fn sign_typed_data(&self, _address: Address, _payload: &TypedData) -> Result<Signature> {
-        todo!()
+
+    fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
+        let secp = Secp256k1::new();
+        let encoded: H256 =
+            payload.encode_eip712().unwrap().into();
+        let secret =
+            self.accounts.get(&address).ok_or(RpcError::Custom("No account".to_string()))?;
+        let (rec_id, data) = secp.sign_ecdsa_recoverable(&(Message::from_slice(encoded.as_bytes()).unwrap()), secret).serialize_compact();
+        let signature = Signature {
+            // TODO:
+            // Not sure on how to properly handle
+            // this unwraps
+            r: U256::try_from_be_slice(&data[..32]).unwrap(),
+            s: U256::try_from_be_slice(&data[32..64]).unwrap(),
+            odd_y_parity: rec_id.to_i32() != 0,
+        };
+        Ok(signature)
     }
 }
 

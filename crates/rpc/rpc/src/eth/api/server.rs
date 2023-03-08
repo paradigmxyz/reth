@@ -367,8 +367,8 @@ where
     }
 
     /// Handler for: `eth_signTypedData`
-    async fn sign_typed_data(&self, _address: Address, _data: Value) -> Result<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn sign_typed_data(&self, address: Address, data: Value) -> Result<Bytes> {
+        Ok((&(EthApi::sign_typed_data(&self, data, address).await?)).into())
     }
 
     /// Handler for: `eth_getProof`
