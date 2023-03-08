@@ -287,9 +287,8 @@ where
         let parent_block_number = block.number - 1;
 
         // execution stage
-        // TODO: Transition ID
         // TODO: State clear EIP
-        changeset.write_to_db(self.deref_mut(), 0)?;
+        changeset.write_to_db(self.deref_mut(), self.get_block_transition(parent_block_number)?)?;
 
         // storage hashing stage
         {
