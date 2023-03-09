@@ -1020,15 +1020,15 @@ mod tests {
             let (handle, api) = setup_engine_api();
             tokio::spawn(api);
 
-            // just ensure it is > 0 just in case
-            let ttd = handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap();
-            assert!(ttd > U256::ZERO);
-
             let finalized = random_header(90, None);
             let mut head = random_header(100, None).unseal();
 
+            // ensure we don't mess up when subtracting just in case
+            let ttd = handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap();
+            assert!(ttd > finalized.difficulty + U256::from(1));
+
             // set the difficulty so we know it is post-merge
-            head.difficulty = U256::ZERO;
+            head.difficulty = ttd - U256::from(1) - finalized.difficulty;
             let head = head.seal_slow();
             handle.client.extend_headers([
                 (head.hash(), head.clone().unseal()),
