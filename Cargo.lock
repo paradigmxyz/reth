@@ -5100,16 +5100,13 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
- "reth-revm",
  "reth-rlp",
- "reth-staged-sync",
  "serde",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
- "triehash",
 ]
 
 [[package]]
