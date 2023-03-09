@@ -3,7 +3,7 @@
 use crate::result::{internal_rpc_err, rpc_err};
 use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
 use reth_primitives::{constants::SELECTOR_LEN, Address, U128, U256};
-use reth_rpc_types::{er, error::EthRpcErrorCode, BlockError};
+use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::PoolError;
 use revm::primitives::{EVMError, Halt};
 
