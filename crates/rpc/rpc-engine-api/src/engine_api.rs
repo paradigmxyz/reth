@@ -1025,7 +1025,7 @@ mod tests {
 
             // ensure we don't mess up when subtracting just in case
             let ttd = handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap();
-            assert!(ttd > finalized.difficulty + U256::from(1));
+            assert!(ttd > finalized.difficulty);
 
             // set the difficulty so we know it is post-merge
             head.difficulty = ttd - U256::from(1) - finalized.difficulty;
