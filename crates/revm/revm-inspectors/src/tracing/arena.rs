@@ -17,33 +17,6 @@ pub struct CallTraceArena {
 }
 
 impl CallTraceArena {
-    /// Returns the traces of the transaction for `trace_transaction`
-    pub fn parity_traces(&self) -> Vec<TransactionTrace> {
-        let traces = Vec::with_capacity(self.arena.len());
-        for (_idx, node) in self.arena.iter().cloned().enumerate() {
-            let _action = node.parity_action();
-            let _result = node.parity_result();
-
-            let _action_type = if node.status() == InstructionResult::SelfDestruct {
-                ActionType::Selfdestruct
-            } else {
-                node.kind().into()
-            };
-
-            todo!()
-
-            // let trace = TransactionTrace {
-            //     action,
-            //     result: Some(result),
-            //     trace_address: self.info.trace_address(idx),
-            //     subtraces: node.children.len(),
-            // };
-            // traces.push(trace)
-        }
-
-        traces
-    }
-
     /// Pushes a new trace into the arena, returning the trace ID
     pub(crate) fn push_trace(&mut self, entry: usize, new_trace: CallTrace) -> usize {
         match new_trace.depth {
@@ -75,6 +48,33 @@ impl CallTraceArena {
                 new_trace,
             ),
         }
+    }
+
+    /// Returns the traces of the transaction for `trace_transaction`
+    pub fn parity_traces(&self) -> Vec<TransactionTrace> {
+        let traces = Vec::with_capacity(self.arena.len());
+        for (_idx, node) in self.arena.iter().cloned().enumerate() {
+            let _action = node.parity_action();
+            let _result = node.parity_result();
+
+            let _action_type = if node.status() == InstructionResult::SelfDestruct {
+                ActionType::Selfdestruct
+            } else {
+                node.kind().into()
+            };
+
+            todo!()
+
+            // let trace = TransactionTrace {
+            //     action,
+            //     result: Some(result),
+            //     trace_address: self.info.trace_address(idx),
+            //     subtraces: node.children.len(),
+            // };
+            // traces.push(trace)
+        }
+
+        traces
     }
 
     /// Recursively fill in the geth trace by going through the traces

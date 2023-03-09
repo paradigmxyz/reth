@@ -198,9 +198,11 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self) {
+    fn selfdestruct(&mut self, contract: B160, target: B160) {
         match self {
-            MaybeOwnedInspector::Owned(insp) => return insp.borrow_mut().selfdestruct(),
+            MaybeOwnedInspector::Owned(insp) => {
+                return insp.borrow_mut().selfdestruct(contract, target)
+            }
             MaybeOwnedInspector::Stacked(_) => {}
         }
     }

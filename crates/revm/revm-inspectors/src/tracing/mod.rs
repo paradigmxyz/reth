@@ -73,6 +73,28 @@ impl TracingInspector {
         self
     }
 
+    /// Returns the last trace [CallTrace] index from the stack.
+    ///
+    /// # Panics
+    ///
+    /// If no [CallTrace] was pushed
+    #[track_caller]
+    #[inline]
+    fn last_trace_idx(&self) -> usize {
+        self.trace_stack.last().copied().expect("can't start step without starting a trace first")
+    }
+
+    /// _Removes_ the last trace [CallTrace] index from the stack.
+    ///
+    /// # Panics
+    ///
+    /// If no [CallTrace] was pushed
+    #[track_caller]
+    #[inline]
+    fn pop_trace_idx(&mut self) -> usize {
+        self.trace_stack.pop().expect("more traces were filled than started")
+    }
+
     /// Starts tracking a new trace.
     ///
     /// Invoked on [Inspector::call].
@@ -114,10 +136,10 @@ impl TracingInspector {
         output: Bytes,
         created_address: Option<Address>,
     ) {
+        let trace_idx = self.pop_trace_idx();
+        let trace = &mut self.traces.arena[trace_idx].trace;
+
         let success = matches!(status, return_ok!());
-        let trace = &mut self.traces.arena
-            [self.trace_stack.pop().expect("more traces were filled than started")]
-        .trace;
         trace.status = status;
         trace.success = success;
         trace.gas_used = gas_used;
@@ -138,8 +160,7 @@ impl TracingInspector {
     /// This expects an existing [CallTrace], in other words, this panics if not within the context
     /// of a call.
     fn start_step<DB: Database>(&mut self, interp: &mut Interpreter, data: &mut EVMData<'_, DB>) {
-        let trace_idx =
-            *self.trace_stack.last().expect("can't start step without starting a trace first");
+        let trace_idx = self.last_trace_idx();
         let trace = &mut self.traces.arena[trace_idx];
 
         self.step_stack.push(StackStep { trace_idx, step_idx: trace.trace.steps.len() });
@@ -149,14 +170,15 @@ impl TracingInspector {
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
             pc,
-            op: OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc]).expect("is opcode"),
+            op: OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
+                .expect("is valid opcode;"),
             contract: interp.contract.address,
             stack: interp.stack.clone(),
             memory: interp.memory.clone(),
             gas: self.gas_inspector.as_ref().gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
-            // will be populated end of call
+            // fields will be populated end of call
             gas_cost: 0,
             state_diff: None,
             status: InstructionResult::Continue,
@@ -244,9 +266,10 @@ where
     ) {
         self.gas_inspector.log(evm_data, address, topics, data);
 
-        let node = &mut self.traces.arena[*self.trace_stack.last().expect("no ongoing trace")];
-        node.ordering.push(LogCallOrder::Log(node.logs.len()));
-        node.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
+        let trace_idx = self.last_trace_idx();
+        let trace = &mut self.traces.arena[trace_idx];
+        trace.ordering.push(LogCallOrder::Log(trace.logs.len()));
+        trace.logs.push(RawLog { topics: topics.to_vec(), data: data.clone() });
     }
 
     fn step_end(
@@ -349,16 +372,18 @@ where
     ) -> (InstructionResult, Option<Address>, Gas, Bytes) {
         self.gas_inspector.create_end(data, inputs, status, address, gas, retdata.clone());
 
-        let code = match address {
-            Some(address) => data
-                .journaled_state
-                .account(address)
-                .info
-                .code
-                .as_ref()
-                .map_or(vec![], |code| code.bytes()[..code.len()].to_vec()),
-            None => vec![],
-        };
+        // get the code of the created contract
+        let code = address
+            .and_then(|address| {
+                data.journaled_state
+                    .account(address)
+                    .info
+                    .code
+                    .as_ref()
+                    .map(|code| code.bytes()[..code.len()].to_vec())
+            })
+            .unwrap_or_default();
+
         self.fill_trace_on_call_end(
             status,
             gas_used(data.env.cfg.spec_id, gas.spend(), gas.refunded() as u64),
@@ -367,6 +392,12 @@ where
         );
 
         (status, address, gas, retdata)
+    }
+
+    fn selfdestruct(&mut self, _contract: Address, target: Address) {
+        let trace_idx = self.last_trace_idx();
+        let trace = &mut self.traces.arena[trace_idx].trace;
+        trace.selfdestruct_refund_target = Some(target)
     }
 }
 
