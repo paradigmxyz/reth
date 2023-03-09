@@ -44,6 +44,7 @@ impl_compression_for_compact!(
     StoredBlockBody,
     StoredBlockOmmers,
     StoredBlockWithdrawals,
+    Bytecode,
     ProofCheckpoint
 );
 impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);

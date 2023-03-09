@@ -47,6 +47,7 @@ where
 
 /// Sets up a clear database at `bench_db_path`.
 #[allow(clippy::ptr_arg)]
+#[allow(unused)]
 fn set_up_db<T>(
     bench_db_path: &Path,
     pair: &Vec<(<T as Table>::Key, bytes::Bytes, <T as Table>::Value, bytes::Bytes)>,

@@ -14,8 +14,8 @@ use reth_db::{
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    StorageEntry, TransitionId, TxNumber, H256, U256,
+    keccak256, Account, Address, BlockHash, BlockNumber, Bytecode, ChainSpec, Hardfork, Header,
+    SealedBlock, StorageEntry, TransitionId, TxNumber, H256, U256,
 };
 use reth_tracing::tracing::{info, trace};
 use std::{
@@ -710,10 +710,9 @@ where
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
                     // make different types of bytecode. Checked and maybe even analyzed (needs to
                     // be packed). Currently save only raw bytes.
-                    let bytecode = bytecode.bytes();
-                    trace!(target: "sync::stages::execution", ?hash, ?bytecode, len = bytecode.len(), "Inserting bytecode");
-                    self.put::<tables::Bytecodes>(hash, bytecode[..bytecode.len()].to_vec())?;
-
+                    let bytes = bytecode.bytes();
+                    trace!(target: "sync::stages::execution", ?hash, ?bytes, len = bytes.len(), "Inserting bytecode");
+                    self.put::<tables::Bytecodes>(hash, Bytecode(bytecode))?;
                     // NOTE: bytecode bytes are not inserted in change set and can be found in
                     // separate table
                 }

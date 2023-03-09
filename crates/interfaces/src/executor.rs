@@ -1,25 +1,5 @@
-use async_trait::async_trait;
-use reth_primitives::{Address, Block, Bloom, H256, U256};
+use reth_primitives::{Bloom, H256};
 use thiserror::Error;
-
-/// An executor capable of executing a block.
-#[async_trait]
-pub trait BlockExecutor<T> {
-    /// Execute a block.
-    ///
-    /// The number of `senders` should be equal to the number of transactions in the block.
-    ///
-    /// If no senders are specified, the `execute` function MUST recover the senders for the
-    /// provided block's transactions internally. We use this to allow for calculating senders in
-    /// parallel in e.g. staged sync, so that execution can happen without paying for sender
-    /// recovery costs.
-    fn execute(
-        &mut self,
-        block: &Block,
-        total_difficulty: U256,
-        senders: Option<Vec<Address>>,
-    ) -> Result<T, Error>;
-}
 
 /// BlockExecutor Errors
 #[allow(missing_docs)]
