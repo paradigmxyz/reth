@@ -28,7 +28,7 @@ use crate::{
     trie::{DBTrieLoader, TrieError},
 };
 
-use crate::execution_result::ExecutionResult;
+use crate::execution_result::PostState;
 
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.
@@ -279,7 +279,7 @@ where
     pub fn insert_block(
         &mut self,
         block: &SealedBlock,
-        changeset: ExecutionResult,
+        changeset: PostState,
     ) -> Result<(), TransactionError> {
         // Header, Body, SenderRecovery, TD, TxLookup stages
         let (from, to) = insert_canonical_block(self.deref_mut(), block, false).unwrap();

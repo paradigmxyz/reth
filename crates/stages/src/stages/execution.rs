@@ -12,7 +12,7 @@ use reth_db::{
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{Address, Block, U256};
 use reth_provider::{
-    execution_result::ExecutionResult, BlockExecutor, ExecutorFactory, LatestStateProviderRef,
+    execution_result::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef,
     Transaction,
 };
 use tracing::*;
@@ -115,7 +115,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Fetch transactions, execute them and generate results
-        let mut changesets = ExecutionResult::default();
+        let mut changesets = PostState::default();
         for (header, td, body, ommers, withdrawals) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
