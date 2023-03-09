@@ -1,7 +1,8 @@
-use crate::result::internal_rpc_err;
+use crate::{eth::cache::EthStateCache, result::internal_rpc_err};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, Bytes, H256};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
@@ -12,22 +13,28 @@ use std::collections::HashSet;
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
-#[non_exhaustive]
-pub struct TraceApi {}
+#[derive(Clone)]
+pub struct TraceApi<Client> {
+    /// The client that can interact with the chain.
+    client: Client,
+    /// The async cache frontend for eth related data
+    eth_cache: EthStateCache,
+}
 
 // === impl TraceApi ===
 
-impl TraceApi {
+impl<Client> TraceApi<Client> {
     /// Create a new instance of the [TraceApi]
-    #[allow(clippy::new_without_default)]
-    // TODO add necessary types
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(client: Client, eth_cache: EthStateCache) -> Self {
+        Self { client, eth_cache }
     }
 }
 
 #[async_trait]
-impl TraceApiServer for TraceApi {
+impl<Client> TraceApiServer for TraceApi<Client>
+where
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+{
     async fn call(
         &self,
         _call: CallRequest,
@@ -91,7 +98,7 @@ impl TraceApiServer for TraceApi {
     }
 }
 
-impl std::fmt::Debug for TraceApi {
+impl<Client> std::fmt::Debug for TraceApi<Client> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceApi").finish_non_exhaustive()
     }
