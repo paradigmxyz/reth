@@ -19,7 +19,7 @@ impl Serialize for Index {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&format!("{:x}", self.0))
+        serializer.serialize_str(&format!("0x{:x}", self.0))
     }
 }
 
@@ -69,5 +69,22 @@ impl<'a> Deserialize<'a> for Index {
         }
 
         deserializer.deserialize_any(IndexVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::{thread_rng, Rng};
+
+    #[test]
+    fn test_serde_index_rand() {
+        let mut rng = thread_rng();
+        for _ in 0..100 {
+            let index = Index(rng.gen());
+            let val = serde_json::to_string(&index).unwrap();
+            let de: Index = serde_json::from_str(&val).unwrap();
+            assert_eq!(index, de);
+        }
     }
 }
