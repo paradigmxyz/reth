@@ -1,3 +1,4 @@
+pub mod blocks;
 mod mock;
 mod noop;
 

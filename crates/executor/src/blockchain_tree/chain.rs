@@ -10,7 +10,7 @@ use reth_provider::{BlockExecutor, ExecutorFactory, StateProvider};
 use std::collections::BTreeMap;
 
 /// Side chain that contain it state and connect to block found in canonical chain.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
     /// Chain substate
     pub substate: SubStateData,
@@ -211,7 +211,7 @@ impl Chain {
 
     /// Iterate over block to find block with the cache that we want to split on.
     /// Given block cache will be contained in first split. If block with hash
-    /// is not found fn would return None.
+    /// is not found first option would be None.
     /// NOTE: Database state will only be found in second chain.
     pub fn split_at_block_hash(self, block_hash: &BlockHash) -> (Option<Chain>, Option<Chain>) {
         let block_number = self.blocks.iter().find_map(|(num, block)| {
@@ -233,20 +233,92 @@ impl Chain {
     /// NOTE: Subtate state will be only found in second chain. First change substate will be
     /// invalid.
     pub fn split_at_number(mut self, block_number: BlockNumber) -> (Option<Chain>, Option<Chain>) {
-        let first_blocks = self.blocks.split_off(&(block_number + 1));
-        let (first_changesets, second_changeset) = self.changesets.split_at(first_blocks.len());
+        if block_number >= *self.blocks.last_entry().unwrap().key() {
+            return (Some(self), None)
+        }
+        if block_number < *self.blocks.first_entry().unwrap().key() {
+            return (None, Some(self))
+        }
+        let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
+        let (first_changesets, second_changeset) = self.changesets.split_at(self.blocks.len());
 
         (
             Some(Chain {
                 substate: SubStateData::default(),
                 changesets: first_changesets.to_vec(),
-                blocks: first_blocks,
+                blocks: self.blocks,
             }),
             Some(Chain {
                 substate: self.substate,
                 changesets: second_changeset.to_vec(),
-                blocks: self.blocks,
+                blocks: higher_number_blocks,
             }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::substate::AccountSubState;
+    use reth_primitives::{H160, H256};
+    use reth_provider::execution_result::AccountInfoChangeSet;
+
+    #[test]
+    fn test_number_split() {
+        let mut substate = SubStateData::default();
+        let mut account = AccountSubState::default();
+        account.info.nonce = 10;
+        substate.accounts.insert(H160([1; 20]), account);
+
+        let mut exec1 = ExecutionResult::default();
+        exec1.block_changesets.insert(H160([2; 20]), AccountInfoChangeSet::default());
+        let mut exec2 = ExecutionResult::default();
+        exec2.block_changesets.insert(H160([3; 20]), AccountInfoChangeSet::default());
+
+        let mut block1 = SealedBlockWithSenders::default();
+        let block1_hash = H256([15; 32]);
+        block1.block.header.hash = block1_hash;
+        block1.senders.push(H160([4; 20]));
+
+        let mut block2 = SealedBlockWithSenders::default();
+        let block2_hash = H256([16; 32]);
+        block2.block.header.hash = block2_hash;
+        block2.senders.push(H160([4; 20]));
+
+        let chain = Chain {
+            substate: substate.clone(),
+            changesets: vec![exec1.clone(), exec2.clone()],
+            blocks: BTreeMap::from([(1, block1.clone()), (2, block2.clone())]),
+        };
+
+        let chain_split1 = Chain {
+            substate: SubStateData::default(),
+            changesets: vec![exec1],
+            blocks: BTreeMap::from([(1, block1.clone())]),
+        };
+
+        let chain_split2 = Chain {
+            substate,
+            changesets: vec![exec2.clone()],
+            blocks: BTreeMap::from([(2, block2.clone())]),
+        };
+
+        // split in two
+        assert_eq!(
+            chain.clone().split_at_block_hash(&block1_hash),
+            (Some(chain_split1), Some(chain_split2))
+        );
+
+        // split at unknown block hash
+        assert_eq!(
+            chain.clone().split_at_block_hash(&H256([100; 32])),
+            (None, Some(chain.clone()))
+        );
+
+        // split at higher number
+        assert_eq!(chain.clone().split_at_number(10), (Some(chain.clone()), None));
+        // split at lower number
+        assert_eq!(chain.clone().split_at_number(0), (None, Some(chain.clone())));
     }
 }

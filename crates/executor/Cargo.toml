@@ -9,7 +9,7 @@ readme = "README.md"
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
-    "aquamarine"
+    "aquamarine",
 ]
 
 [dependencies]
@@ -23,7 +23,7 @@ reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
 # revm
-revm = { version = "3.0.0"}
+revm = { version = "3.0.0" }
 
 # common
 async-trait = "0.1.57"
@@ -47,3 +47,6 @@ sha3 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
+reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
+parking_lot = "0.12"

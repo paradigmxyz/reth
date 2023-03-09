@@ -8,7 +8,7 @@ use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 use crate::execution_result::{AccountInfoChangeSet, ExecutionResult};
 
 /// Memory backend, storing all state values in a `Map` in memory.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SubStateData {
     /// Account info where None means it is not existing. Not existing state is needed for Pre
     /// TANGERINE forks. `code` is always `None`, and bytecode can be found in `contracts`.
@@ -168,7 +168,7 @@ impl SubStateData {
     }
 }
 /// Account changes in substate
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct AccountSubState {
     /// New account state
     pub info: Account,
@@ -210,7 +210,7 @@ impl AccountSubState {
 /// with substate changes that happened previously.
 pub struct SubStateWithProvider<'a, SP: StateProvider> {
     /// Substate
-    pub substate: &'a mut SubStateData,
+    pub substate: &'a SubStateData,
     /// Provider
     pub provider: SP,
     /// side chain block hashes
@@ -222,7 +222,7 @@ pub struct SubStateWithProvider<'a, SP: StateProvider> {
 impl<'a, SP: StateProvider> SubStateWithProvider<'a, SP> {
     /// Create new substate with provider
     pub fn new(
-        substate: &'a mut SubStateData,
+        substate: &'a SubStateData,
         provider: SP,
         sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,

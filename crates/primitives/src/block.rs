@@ -1,6 +1,6 @@
 use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256};
 use ethers_core::types::BlockNumber;
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
     de::{MapAccess, Visitor},
@@ -18,29 +18,14 @@ use std::{fmt, fmt::Formatter, ops::Deref, str::FromStr};
 #[derive_arbitrary(rlp, 25)]
 #[rlp(trailing)]
 pub struct Block {
+    /// Block header.
+    pub header: Header,
     /// Transactions in this block.
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header.
     pub ommers: Vec<Header>,
-    /// Block header.
-    pub header: Header,
     /// Block withdrawals.
     pub withdrawals: Option<Vec<Withdrawal>>,
-}
-
-/// TODO allow either to move `Option` at the end fpr rlp decoding or `Header` (that has Bytes)
-/// requirement to be on last place.
-impl Compact for Block {
-    fn to_compact(self, _buf: &mut impl bytes::BufMut) -> usize {
-        0
-    }
-
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
-    where
-        Self: Sized,
-    {
-        (Block::default(), buf)
-    }
 }
 
 impl Block {

@@ -108,7 +108,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         num_of_side_chain_max_size: u64,
         num_of_additional_canonical_block_hashes: u64,
     ) -> Result<Self, Error> {
-        if num_of_side_chain_max_size > finalization_window {
+        if finalization_window > num_of_side_chain_max_size {
             panic!("Side chain size should be more then finalization window");
         }
 
@@ -137,6 +137,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             block_indices: BlockIndices::new(
                 last_finalized_block_number,
                 num_of_additional_canonical_block_hashes,
+                BTreeMap::from_iter(last_canonical_hashes.into_iter()),
             ),
             num_of_side_chain_max_size,
             finalization_window,
@@ -322,6 +323,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .into())
         }
 
+        // check if block is already inside Tree
+        if self.block_indices.contains_block_hash(block.hash()) {
+            // block is known return that is inserted
+            return Ok(true)
+        }
+
+        // check if block is part of canonical chain
+        if self.block_indices.canonical_hash(&block.number) == Some(block.hash()) {
+            // block is part of canonical chain
+            return Ok(true)
+        }
+
         // check if block parent can be found in Tree
         if let Some(parent_chain) = self.block_indices.get_blocks_chain_id(&block.parent_hash) {
             self.fork_side_chain(block.clone(), parent_chain)?;
@@ -385,18 +398,24 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Make block and its parent canonical. Unwind chains to database if necessary.
+    ///
+    /// If block is alreadt
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
-        let chain_id = self
-            .block_indices
-            .get_blocks_chain_id(block_hash)
-            .ok_or(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash })?;
+        let chain_id = if let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) {
+            chain_id
+        } else {
+            if self.block_indices.is_block_hash_canonical(block_hash) {
+                // If block is already canonical don't return error.
+                return Ok(())
+            }
+            return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
+        };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 
         // we are spliting chain as there is possibility that only part of chain get canonicalized.
         let (canonical, pending) = chain.split_at_block_hash(block_hash);
         let canonical = canonical.expect("Canonical chain is present");
 
-        //
         if let Some(pending) = pending {
             // fork is now canonical and latest.
             self.chains.insert(chain_id, pending);
@@ -464,8 +483,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         for item in chain.blocks.into_iter().zip(chain.changesets.into_iter()) {
             let ((_, block), changeset) = item;
 
-            tx.insert_block(block, self.externals.chain_spec.as_ref(), changeset)
-                .map_err(|_| ExecError::VerificationFailed)?;
+            tx.insert_block(block, self.externals.chain_spec.as_ref(), changeset).map_err(|e| {
+                println!("commit error:{e:?}");
+                ExecError::VerificationFailed
+            })?;
         }
         // update pipeline progress.
         tx.update_pipeline_stages(new_tip).map_err(|_| ExecError::VerificationFailed)?;
@@ -491,7 +512,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 self.externals.chain_spec.as_ref(),
                 revert_until + 1..,
             )
-            .map_err(|_| ExecError::VerificationFailed)?;
+            .map_err(|e| {
+                println!("revert error:{e:?}");
+                ExecError::VerificationFailed
+            })?;
 
         // update pipeline progress.
         tx.update_pipeline_stages(revert_until).map_err(|_| ExecError::VerificationFailed)?;
@@ -502,5 +526,160 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let chain = Chain::new(blocks_and_execution);
 
         Ok(chain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parking_lot::Mutex;
+    use reth_db::{
+        mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
+        transaction::DbTxMut,
+    };
+    use reth_interfaces::test_utils::TestConsensus;
+    use reth_primitives::{hex_literal::hex, proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
+    use reth_provider::{
+        execution_result::ExecutionResult, insert_block, test_utils::blocks, BlockExecutor,
+    };
+
+    struct TestFactory {
+        exec_result: Arc<Mutex<Vec<ExecutionResult>>>,
+        chain_spec: Arc<ChainSpec>,
+    }
+
+    impl TestFactory {
+        fn new(chain_spec: Arc<ChainSpec>) -> Self {
+            Self { exec_result: Arc::new(Mutex::new(Vec::new())), chain_spec }
+        }
+
+        fn extend(&self, exec_res: Vec<ExecutionResult>) {
+            self.exec_result.lock().extend(exec_res.into_iter());
+        }
+    }
+
+    struct TestExecutor(Option<ExecutionResult>);
+
+    impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
+        fn execute(
+            &mut self,
+            _block: &reth_primitives::Block,
+            _total_difficulty: reth_primitives::U256,
+            _senders: Option<Vec<reth_primitives::Address>>,
+        ) -> Result<ExecutionResult, ExecError> {
+            self.0.clone().ok_or(ExecError::VerificationFailed)
+        }
+
+        fn execute_and_verify_receipt(
+            &mut self,
+            _block: &reth_primitives::Block,
+            _total_difficulty: reth_primitives::U256,
+            _senders: Option<Vec<reth_primitives::Address>>,
+        ) -> Result<ExecutionResult, ExecError> {
+            self.0.clone().ok_or(ExecError::VerificationFailed)
+        }
+    }
+
+    impl ExecutorFactory for TestFactory {
+        type Executor<T: StateProvider> = TestExecutor;
+
+        fn with_sp<SP: StateProvider>(&self, _sp: SP) -> Self::Executor<SP> {
+            let exec_res = self.exec_result.lock().pop();
+            TestExecutor(exec_res)
+        }
+
+        fn chain_spec(&self) -> &ChainSpec {
+            self.chain_spec.as_ref()
+        }
+    }
+
+    type TestExternals = Externals<Arc<Env<WriteMap>>, TestConsensus, TestFactory>;
+
+    fn externals(exec_res: Vec<ExecutionResult>) -> TestExternals {
+        let db = create_test_rw_db();
+        let consensus = TestConsensus::default();
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .shanghai_activated()
+                .build(),
+        );
+        let executor_factory = TestFactory::new(chain_spec.clone());
+        executor_factory.extend(exec_res);
+
+        Externals { db, consensus, executor_factory, chain_spec }
+    }
+
+    fn setup(externals: &TestExternals) {
+        // insert genesis to db.
+
+        let mut genesis = blocks::genesis();
+        genesis.header.header.number = 10;
+        genesis.header.header.state_root = EMPTY_ROOT;
+        let tx_mut = externals.db.tx_mut().unwrap();
+
+        tx_mut.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
+        insert_block(&tx_mut, genesis.clone(), None, false, Some((0, 0))).unwrap();
+
+        // insert first 10 blocks
+        for i in 0..10 {
+            tx_mut.put::<tables::CanonicalHeaders>(i, H256([100 + i as u8; 32])).unwrap();
+        }
+        tx_mut.commit().unwrap();
+    }
+
+    #[test]
+    fn sanity_test() {
+        //let genesis
+        let (mut block1, exec1) = blocks::block1();
+        block1.block.header.header.number = 11;
+        block1.block.header.header.state_root =
+            H256(hex!("a7ec6568be312e65e4c0e6a72e7eedda4c856de09ee5aea75b484f4bc0af20ca"));
+        let (mut block2, exec2) = blocks::block2();
+        block2.block.header.header.number = 12;
+        //block2.block.header.header.parent_hash =
+        block2.block.header.header.state_root =
+            H256(hex!("f7c6a43dd9551fb93b1b72e47c1a16d6f3ea9e87d6088aa56514ffddf53c65d3"));
+
+        let externals = externals(vec![exec1.clone(), exec2.clone()]);
+
+        setup(&externals);
+        // last finalized block would be number 9.
+        let mut tree = BlockchainTree::new(externals, 1, 2, 3).unwrap();
+
+        // genesis block 10 is already canonical
+        assert_eq!(tree.make_canonical(&H256::zero()), Ok(()));
+
+        // insert block2 hits max chain size
+        assert_eq!(
+            tree.insert_block_with_senders(&block2),
+            Err(ExecError::PendingBlockIsInFuture {
+                block_number: block2.number,
+                block_hash: block2.hash(),
+                last_finalized: 9,
+            }
+            .into())
+        );
+
+        // make genesis block 10 as finalized
+        tree.finalize_block(10);
+
+        // block 2 parent is not known.
+        assert_eq!(tree.insert_block_with_senders(&block2), Ok(false));
+
+        // insert block1
+        assert_eq!(tree.insert_block_with_senders(&block1), Ok(true));
+        // already inserted block will return true.
+        assert_eq!(tree.insert_block_with_senders(&block1), Ok(true));
+
+        // insert block2
+        assert_eq!(tree.insert_block_with_senders(&block2), Ok(true));
+
+        // make block1 canonical
+        assert_eq!(tree.make_canonical(&block1.hash()), Ok(()));
+
+        // make block2 canonical
+        assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
     }
 }

@@ -284,9 +284,9 @@ impl Decodable for Header {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SealedHeader {
     /// Locked Header fields.
-    header: Header,
+    pub header: Header,
     /// Locked Header hash.
-    hash: BlockHash,
+    pub hash: BlockHash,
 }
 
 impl SealedHeader {

@@ -32,15 +32,29 @@ impl BlockIndices {
     pub fn new(
         last_finalized_block: BlockNumber,
         num_of_additional_canonical_block_hashes: u64,
+        canonical_chain: BTreeMap<BlockNumber, BlockHash>,
     ) -> Self {
         Self {
             last_finalized_block,
             num_of_additional_canonical_block_hashes,
             fork_to_child: Default::default(),
-            canonical_chain: Default::default(),
+            canonical_chain,
             blocks_to_chain: Default::default(),
             index_number_to_block: Default::default(),
         }
+    }
+
+    /// Returns `true` if the Tree knowns the block hash.
+    pub fn contains_block_hash(&self, block_hash: BlockHash) -> bool {
+        self.blocks_to_chain.contains_key(&block_hash)
+    }
+
+    /// Check if block hash belongs to canonical chain.
+    pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
+        self.canonical_chain
+            .range(self.last_finalized_block..)
+            .find(|(_, &h)| h == *block_hash)
+            .is_some()
     }
 
     /// Last finalized block
