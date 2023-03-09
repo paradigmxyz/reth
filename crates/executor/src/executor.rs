@@ -195,7 +195,7 @@ where
                 new_account.account_state = if account.storage_cleared {
                     new_account.storage.clear();
                     AccountState::StorageCleared
-                } else if matches!(new_account.account_state, AccountState::StorageCleared) {
+                } else if new_account.account_state.is_storage_cleared() {
                     // the account already exists and its storage was cleared, preserve its previous
                     // state
                     AccountState::StorageCleared
