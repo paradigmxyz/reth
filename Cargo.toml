@@ -47,7 +47,7 @@ inherits = "release"
 debug = true
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm" }
-revm-primitives = { git = "https://github.com/bluealloy/revm" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "b1208fee" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "b1208fee" }
 # patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
 ruint = { git = "https://github.com/paradigmxyz/uint" }
