@@ -51,10 +51,7 @@ impl BlockIndices {
 
     /// Check if block hash belongs to canonical chain.
     pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
-        self.canonical_chain
-            .range(self.last_finalized_block..)
-            .find(|(_, &h)| h == *block_hash)
-            .is_some()
+        self.canonical_chain.range(self.last_finalized_block..).any(|(_, &h)| h == *block_hash)
     }
 
     /// Last finalized block
@@ -179,19 +176,27 @@ impl BlockIndices {
         if blocks.is_empty() {
             return
         }
+
+        // Remove all blocks from canonical chain
         let first_number = *blocks.first_key_value().unwrap().0;
-        // this will return second half of blocks including the key
+
+        // this will remove all blocks numbers that are going to be replaced.
         self.canonical_chain.retain(|num, _| *num < first_number);
 
         // remove them from block to chain_id index
-        blocks.iter().map(|(_, b)| (b.number, b.hash())).for_each(|(number, hash)| {
-            // rm block -> chain_id
-            self.blocks_to_chain.remove(&hash);
-            // rm number -> block
-            if let Some(set) = self.index_number_to_block.get_mut(&number) {
-                set.remove(&hash);
-            }
-        });
+        blocks.iter().map(|(_, b)| (b.number, b.hash(), b.parent_hash)).for_each(
+            |(number, hash, parent_hash)| {
+                // rm block -> chain_id
+                self.blocks_to_chain.remove(&hash);
+                // rm number -> block
+                if let Some(set) = self.index_number_to_block.get_mut(&number) {
+                    set.remove(&hash);
+                }
+                if let Some(set) = self.fork_to_child.get_mut(&parent_hash) {
+                    set.remove(&hash);
+                }
+            },
+        );
 
         // insert new canonical
         self.canonical_chain.extend(blocks.iter().map(|(number, block)| (*number, block.hash())))

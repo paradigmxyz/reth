@@ -92,18 +92,13 @@ impl Chain {
         consensus.pre_validate_block(block)?;
 
         // substate
-        let mut substate = SubStateData::default();
+        let substate = SubStateData::default();
         let empty = BTreeMap::new();
 
         let unseal = block.clone().into_components().0.unseal();
 
         let changeset = factory
-            .with_sp(SubStateWithProvider::new(
-                &mut substate,
-                provider,
-                &empty,
-                canonical_block_hashes,
-            ))
+            .with_sp(SubStateWithProvider::new(&substate, provider, &empty, canonical_block_hashes))
             .execute_and_verify_receipt(&unseal, U256::MAX, None)?;
 
         Ok(Self {
@@ -147,7 +142,7 @@ impl Chain {
         // execute block
         let changeset = factory
             .with_sp(SubStateWithProvider::new(
-                &mut substate,
+                &substate,
                 provider,
                 &side_chain_block_hashes,
                 canonical_block_hashes,
@@ -183,7 +178,7 @@ impl Chain {
         let unseal = block.clone().into_components().0.unseal();
         let changeset = factory
             .with_sp(SubStateWithProvider::new(
-                &mut self.substate,
+                &self.substate,
                 provider,
                 &side_chain_block_hashes,
                 canonical_block_hashes,

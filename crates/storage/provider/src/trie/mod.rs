@@ -30,7 +30,9 @@ pub enum TrieError {
     #[error("Some error occurred: {0}")]
     InternalError(#[from] cita_trie::TrieError),
     #[error("The root node wasn't found in the DB")]
-    MissingRoot(H256),
+    MissingAccountRoot(H256),
+    #[error("The storage root node wasn't found in the DB")]
+    MissingStorageRoot(H256),
     #[error("{0:?}")]
     DatabaseError(#[from] reth_db::Error),
     #[error("{0:?}")]
@@ -103,7 +105,7 @@ impl<'tx, 'itx, DB: Database> HashDatabase<'tx, 'itx, DB> {
         if root == EMPTY_ROOT {
             return Self::new(tx)
         }
-        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
+        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingAccountRoot(root))?;
         Ok(Self { tx })
     }
 }
@@ -192,7 +194,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabase<'tx, 'itx, DB> {
         tx.cursor_dup_read::<tables::StoragesTrie>()?
             .seek_by_key_subkey(key, root)?
             .filter(|entry| entry.hash == root)
-            .ok_or(TrieError::MissingRoot(root))?;
+            .ok_or(TrieError::MissingStorageRoot(root))?;
         Ok(Self { tx, key })
     }
 }
@@ -335,6 +337,7 @@ impl DBTrieLoader {
         }
 
         let new_root = H256::from_slice(trie.root()?.as_slice());
+        println!("NEW ROOT:{new_root:?}");
         if new_root != root {
             let mut cursor = tx.cursor_write::<tables::AccountsTrie>()?;
             if cursor.seek_exact(root)?.is_some() {

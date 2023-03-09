@@ -1,21 +1,20 @@
-use std::{collections::BTreeMap, ops::DerefMut};
+//! Dummy blocks and data for tests
 
 use crate::{
     execution_result::{
         AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
     },
-    insert_canonical_block, Transaction,
+    Transaction,
 };
-use reth_db::{
-    database::Database, mdbx::test_utils::create_test_rw_db, models::StoredBlockBody, tables,
-    transaction::DbTxMut,
-};
+use reth_db::{database::Database, models::StoredBlockBody, tables};
 use reth_primitives::{
-    hex_literal::hex, proofs::EMPTY_ROOT, Account, ChainSpecBuilder, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, Withdrawal, H160, H256, MAINNET, U256,
+    hex_literal::hex, proofs::EMPTY_ROOT, Account, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, Withdrawal, H160, H256, U256,
 };
 use reth_rlp::Decodable;
+use std::collections::BTreeMap;
 
+/// Assert genesis block
 pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlock) {
     let n = g.number;
     let h = H256::zero();
@@ -48,6 +47,7 @@ pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlo
     // SyncStage is not updated in tests
 }
 
+/// Genesis block
 pub fn genesis() -> SealedBlock {
     SealedBlock {
         header: Header { number: 0, difficulty: U256::from(1), ..Default::default() }
@@ -58,6 +58,7 @@ pub fn genesis() -> SealedBlock {
     }
 }
 
+/// Block one that points to genesis
 pub fn block1() -> (SealedBlockWithSenders, ExecutionResult) {
     let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
     let mut block = SealedBlock::decode(&mut block_rlp).unwrap();
@@ -69,10 +70,11 @@ pub fn block1() -> (SealedBlockWithSenders, ExecutionResult) {
     header.parent_hash = H256::zero();
     block.header = header.seal_slow();
 
-    let mut account_changeset = AccountChangeSet::default();
-    // storage will be moved
-    account_changeset.account = AccountInfoChangeSet::Created {
-        new: Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+    let mut account_changeset = AccountChangeSet {
+        account: AccountInfoChangeSet::Created {
+            new: Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
+        },
+        ..Default::default()
     };
     account_changeset.storage.insert(U256::from(5), (U256::ZERO, U256::from(10)));
 
@@ -88,6 +90,7 @@ pub fn block1() -> (SealedBlockWithSenders, ExecutionResult) {
     (SealedBlockWithSenders { block, senders: vec![H160([3; 20])] }, exec_res)
 }
 
+/// Block two that points to block 1
 pub fn block2() -> (SealedBlockWithSenders, ExecutionResult) {
     let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
     let mut block = SealedBlock::decode(&mut block_rlp).unwrap();
@@ -107,7 +110,7 @@ pub fn block2() -> (SealedBlockWithSenders, ExecutionResult) {
         old: Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
         new: Account { nonce: 2, balance: U256::from(15), bytecode_hash: None },
     };
-    account_changeset.account = info_changeset.clone();
+    account_changeset.account = info_changeset;
     account_changeset.storage.insert(U256::from(5), (U256::from(10), U256::from(15)));
 
     let block_changeset = AccountInfoChangeSet::Changed {

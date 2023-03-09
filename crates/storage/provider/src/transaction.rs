@@ -480,6 +480,7 @@ where
         // merkle tree
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
+            println!("block n:{:?} On insert root:{current_root:?}", parent_block_number);
             let loader = DBTrieLoader::default();
             let root = loader.update_root(self, current_root, from..to)?;
             if root != block_state_root {
@@ -915,7 +916,11 @@ where
                 Bound::Unbounded => TransitionId::MAX,
             };
 
+            println!("START range:{:?}", range.start_bound());
+            println!("END range:{:?}", range.end_bound());
+
             let transition_range = from_transition..to_transition;
+            println!("TRANSITION RANGE:{transition_range:?}");
             let zero = Address::zero();
             let transition_storage_range =
                 (from_transition, zero).into()..(to_transition, zero).into();
@@ -930,6 +935,7 @@ where
                 let (tip_number, _) =
                     self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
                 let current_root = self.get_header(tip_number)?.state_root;
+                println!("Current root {current_root:?}");
                 let loader = DBTrieLoader::default();
                 let _block_root = loader.update_root(self, current_root, transition_range)?;
             }
@@ -1477,25 +1483,10 @@ pub enum TransactionError {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::BTreeMap, ops::DerefMut};
-
-    use crate::{
-        execution_result::{
-            AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
-        },
-        insert_canonical_block,
-        test_utils::blocks::*,
-        Transaction,
-    };
-    use reth_db::{
-        database::Database, mdbx::test_utils::create_test_rw_db, models::StoredBlockBody, tables,
-        transaction::DbTxMut,
-    };
-    use reth_primitives::{
-        hex_literal::hex, proofs::EMPTY_ROOT, Account, ChainSpecBuilder, Header, Receipt,
-        SealedBlock, SealedBlockWithSenders, Withdrawal, H160, H256, MAINNET, U256,
-    };
-    use reth_rlp::Decodable;
+    use crate::{insert_canonical_block, test_utils::blocks::*, Transaction};
+    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, MAINNET};
+    use std::ops::DerefMut;
 
     #[test]
     fn insert_get_take() {

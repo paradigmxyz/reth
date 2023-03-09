@@ -18,8 +18,8 @@ use crate::{
     },
 };
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt,
-    StorageEntry, StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
+    StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
