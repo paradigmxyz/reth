@@ -75,11 +75,26 @@ pub enum Action {
     Reward(RewardAction),
 }
 
+/// An external action type.
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionType {
+    /// Contract call.
+    Call,
+    /// Contract creation.
+    Create,
+    /// Contract suicide/selfdestruct.
+    Selfdestruct,
+    /// A block reward.
+    Reward,
+}
+
 /// Call type.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CallType {
     /// None
+    #[default]
     None,
     /// Call
     Call,
