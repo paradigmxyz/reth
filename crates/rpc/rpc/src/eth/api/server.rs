@@ -127,7 +127,7 @@ where
         hash: H256,
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
-        Ok(EthApi::transaction_by_block_hash_and_index(self, hash, index).await?)
+        Ok(EthApi::transaction_by_block_and_tx_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
@@ -136,7 +136,7 @@ where
         number: BlockNumberOrTag,
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
-        Ok(EthApi::transaction_by_block_number_and_index(self, number, index).await?)
+        Ok(EthApi::transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`

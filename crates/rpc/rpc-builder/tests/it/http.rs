@@ -75,10 +75,9 @@ where
     EthApiClient::block_transaction_count_by_hash(client, hash).await.unwrap();
     EthApiClient::block_uncles_count_by_hash(client, hash).await.unwrap();
     EthApiClient::block_uncles_count_by_number(client, block_number).await.unwrap();
-    // using temp unwrap_or_default because errors aren't getting handled here
-    EthApiClient::transaction_by_hash(client, tx_hash).await.unwrap_or_default();
-    EthApiClient::transaction_by_block_hash_and_index(client, hash, index).await.unwrap_or_default();
-    EthApiClient::transaction_by_block_number_and_index(client, block_number, index).await.unwrap_or_default();
+    EthApiClient::transaction_by_hash(client, tx_hash).await.unwrap();
+    EthApiClient::transaction_by_block_hash_and_index(client, hash, index).await.unwrap();
+    EthApiClient::transaction_by_block_number_and_index(client, block_number, index).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
