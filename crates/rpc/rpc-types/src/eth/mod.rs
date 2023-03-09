@@ -4,6 +4,7 @@ mod account;
 mod block;
 mod call;
 pub mod engine;
+pub mod error;
 mod fee;
 mod filter;
 mod index;
