@@ -232,9 +232,9 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self) {
+    fn selfdestruct(&mut self, contract: Address, target: Address) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            Inspector::<DB>::selfdestruct(inspector);
+            Inspector::<DB>::selfdestruct(inspector, contract, target);
         });
     }
 }
