@@ -361,7 +361,7 @@ where
 
     /// Handler for: `eth_sign`
     async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes> {
-        Ok((&EthApi::sign(self, address, message).await?).into())
+        Ok((&EthApi::sign(self, address, message).await?).to_bytes())
     }
 
     /// Handler for: `eth_signTransaction`
@@ -371,7 +371,7 @@ where
 
     /// Handler for: `eth_signTypedData`
     async fn sign_typed_data(&self, address: Address, data: Value) -> Result<Bytes> {
-        Ok((&(EthApi::sign_typed_data(self, data, address).await?)).into())
+        Ok((&(EthApi::sign_typed_data(self, data, address).await?)).to_bytes())
     }
 
     /// Handler for: `eth_getProof`
