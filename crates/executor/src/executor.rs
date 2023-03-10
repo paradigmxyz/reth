@@ -103,6 +103,7 @@ where
     fn commit_changes(
         &mut self,
         changes: hash_map::HashMap<Address, RevmAccount>,
+        has_state_clear_eip: bool,
         post_state: &mut PostState,
     ) {
         let db = self.db();
@@ -146,14 +147,20 @@ where
                         let entry = entry.insert(Default::default());
                         entry.info = account.info.clone();
 
-                        post_state.create_account(address, to_reth_acc(&entry.info));
+                        let account = to_reth_acc(&entry.info);
+                        if !(has_state_clear_eip && account.is_empty()) {
+                            post_state.create_account(address, account);
+                        }
                         entry
                     }
                     Entry::Occupied(entry) => {
                         let entry = entry.into_mut();
 
                         if matches!(entry.account_state, AccountState::NotExisting) {
-                            post_state.create_account(address, to_reth_acc(&account.info));
+                            let account = to_reth_acc(&account.info);
+                            if !(has_state_clear_eip && account.is_empty()) {
+                                post_state.create_account(address, account);
+                            }
                         } else if entry.info != account.info {
                             post_state.change_account(
                                 address,
@@ -388,7 +395,11 @@ where
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
             // commit changes
-            self.commit_changes(state, &mut post_state);
+            self.commit_changes(
+                state,
+                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
+                &mut post_state,
+            );
 
             // append gas used
             cumulative_gas_used += result.gas_used();

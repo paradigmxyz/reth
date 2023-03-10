@@ -449,10 +449,6 @@ impl PostState {
         let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
         for (address, account) in self.accounts.into_iter() {
             if let Some(account) = account {
-                /*if has_state_clear_eip && account.is_empty() {
-                    // TODO: seek and then delete?
-                    continue
-                }*/
                 accounts_cursor.upsert(address, account)?;
             } else if accounts_cursor.seek_exact(address)?.is_some() {
                 accounts_cursor.delete_current()?;
