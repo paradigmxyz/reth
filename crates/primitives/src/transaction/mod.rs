@@ -557,7 +557,7 @@ impl TransactionSigned {
 
     /// Devour Self, recover signer and return [`TransactionSignedEcRecovered`]
     ///
-    /// Returns `None` if the transaction's signature is invalid.
+    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
