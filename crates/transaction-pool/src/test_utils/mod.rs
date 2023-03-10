@@ -37,12 +37,12 @@ impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
-        Ok(TransactionValidationOutcome::Valid {
+    ) -> TransactionValidationOutcome<Self::Transaction>> {
+        TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
             transaction,
-        })
+        }
     }
 }
 
