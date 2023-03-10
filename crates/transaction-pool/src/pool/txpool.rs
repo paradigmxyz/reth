@@ -1,7 +1,7 @@
 //! The internal transaction pool implementation.
 use crate::{
     config::MAX_ACCOUNT_SLOTS_PER_SENDER,
-    error::PoolError,
+    error::{InvalidPoolTransactionError, PoolError},
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
     pool::{
@@ -220,8 +220,6 @@ impl<T: TransactionOrdering> TxPool<T> {
             .or_default()
             .update(on_chain_nonce, on_chain_balance);
 
-        let _hash = *tx.hash();
-
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
                 self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
@@ -263,10 +261,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                         transaction,
                         block_gas_limit,
                         tx_gas_limit,
-                    } => Err(PoolError::TxExceedsGasLimit(
+                    } => Err(PoolError::InvalidTransaction(
                         *transaction.hash(),
-                        block_gas_limit,
-                        tx_gas_limit,
+                        InvalidPoolTransactionError::ExceedsGasLimit(block_gas_limit, tx_gas_limit),
                     )),
                 }
             }

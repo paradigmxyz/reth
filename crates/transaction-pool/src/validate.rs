@@ -1,16 +1,17 @@
 //! Transaction validation abstractions.
 
 use crate::{
-    error::PoolError,
+    error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
     MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
-use reth_interfaces::consensus::Error;
-use reth_primitives::{Address, TransactionKind, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256, InvalidTransactionError};
+use reth_primitives::{
+    Address, InvalidTransactionError, TransactionKind, TxHash, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+};
 use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
-use reth_primitives::rpc::transaction;
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -26,9 +27,9 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
-    Invalid(T, InvalidTransactionError),
+    Invalid(T, InvalidPoolTransactionError),
     /// An error occurred while trying to validate the transaction
-    Error(T, Box<dyn std::error::Error + Send + Sync>)
+    Error(T, Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Provides support for validating transaction at any given state of the chain
@@ -67,11 +68,10 @@ pub trait TransactionValidator: Send + Sync {
         &self,
         transaction: Self::Transaction,
         max_init_code_size: usize,
-    ) -> Result<(), PoolError> {
+    ) -> Result<(), InvalidPoolTransactionError> {
         if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
         {
-            Err(PoolError::TxExceedsMaxInitCodeSize(
-                *transaction.hash(),
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
                 transaction.size(),
                 max_init_code_size,
             ))
@@ -120,31 +120,44 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
             EIP2930_TX_TYPE_ID => {
                 // Accept only legacy transactions until EIP-2718/2930 activates
                 if !self.eip2718 {
-                    return TransactionValidationOutcome::Invalid(transaction, PoolError::TransactionEip1559Disabled)
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::Eip1559Disabled.into(),
+                    )
                 }
             }
 
             EIP1559_TX_TYPE_ID => {
                 // Reject dynamic fee transactions until EIP-1559 activates.
                 if !self.eip1559 {
-                     return TransactionValidationOutcome::Invalid(transaction, PoolError::TransactionEip1559Disabled)
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::Eip1559Disabled.into(),
+                    )
                 }
             }
 
-            _ =>  return TransactionValidationOutcome::Invalid(transaction, PoolError::TxTypeNotSupported),
+            _ => {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
         };
 
         // Reject transactions over defined size to prevent DOS attacks
         if transaction.size() > TX_MAX_SIZE {
             return TransactionValidationOutcome::Invalid(
                 transaction.clone(),
-                PoolError::OversizedData(*transaction.hash(), transaction.size(), TX_MAX_SIZE),
+                InvalidPoolTransactionError::OversizedData(transaction.size(), TX_MAX_SIZE),
             )
         }
 
         // Check whether the init code size has been exceeded.
         if self.shanghai {
-            if let Err(err) =  self.ensure_max_init_code_size(transaction.clone(), MAX_INIT_CODE_SIZE) {
+            if let Err(err) =
+                self.ensure_max_init_code_size(transaction.clone(), MAX_INIT_CODE_SIZE)
+            {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
@@ -153,8 +166,7 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
         if transaction.gas_limit() > self.current_max_gas_limit {
             return TransactionValidationOutcome::Invalid(
                 transaction.clone(),
-                PoolError::TxExceedsGasLimit(
-                    *transaction.hash(),
+                InvalidPoolTransactionError::ExceedsGasLimit(
                     transaction.gas_limit(),
                     self.current_max_gas_limit,
                 ),
@@ -163,24 +175,31 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
 
         // Ensure max_fee_per_gas is greater than or equal to max_priority_fee_per_gas.
         if transaction.max_fee_per_gas() <= transaction.max_priority_fee_per_gas() {
-             return TransactionValidationOutcome::Invalid(transaction, PoolError::TipAboveFeeCap)
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TipAboveFeeCap.into(),
+            )
         }
 
         // Drop non-local transactions under our own minimal accepted gas price or tip
         if !origin.is_local() && transaction.max_fee_per_gas() < self.gas_price {
-             return TransactionValidationOutcome::Invalid(transaction, PoolError::TransactionMaxFeeLessThenBaseFee)
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::MaxFeeLessThenBaseFee.into(),
+            )
         }
 
         // Checks for chainid
         if transaction.chain_id() != Some(self.chain_id) {
-             return TransactionValidationOutcome::Invalid(transaction, PoolError::TransactionChainId)
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::ChainIdMismatch.into(),
+            )
         }
 
         let account = match self.client.basic_account(transaction.sender()) {
-            Ok(account) => {account}
-            Err(err) => {
-                return TransactionValidationOutcome::Error(transaction, Box::new(err))
-            }
+            Ok(account) => account,
+            Err(err) => return TransactionValidationOutcome::Error(transaction, Box::new(err)),
         };
 
         let account = match account {
@@ -188,30 +207,41 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
                 // Signer account shouldn't have bytecode. Presence of bytecode means this is a
                 // smartcontract.
                 if account.has_bytecode() {
-                     return TransactionValidationOutcome::Invalid(transaction, PoolError::SignerAccountHasBytecode)
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::SignerAccountHasBytecode.into(),
+                    )
                 } else {
                     account
                 }
             }
             None => {
                 return TransactionValidationOutcome::Invalid(
-                    transaction.clone(),
-                    PoolError::AccountNotFound(*transaction.hash()),
+                    transaction,
+                    InvalidPoolTransactionError::AccountNotFound,
                 )
             }
         };
 
         // Checks for nonce
         if transaction.nonce() < account.nonce {
-             return TransactionValidationOutcome::Invalid(transaction, PoolError::TransactionNonceNotConsistent)
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::NonceNotConsistent.into(),
+            )
         }
 
         // Checks for max cost
         if transaction.cost() > account.balance {
-             return TransactionValidationOutcome::Invalid(transaction, PoolError::InsufficientFunds {
-                max_fee: transaction.max_fee_per_gas().unwrap_or_default(),
-                available_funds: account.balance,
-            })
+            let max_fee = transaction.max_fee_per_gas().unwrap_or_default();
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::InsufficientFunds {
+                    max_fee,
+                    available_funds: account.balance,
+                }
+                .into(),
+            )
         }
 
         // Return the valid transaction
