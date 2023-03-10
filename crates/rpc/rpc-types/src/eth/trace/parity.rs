@@ -7,6 +7,9 @@ use reth_primitives::{Address, Bytes, H256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Result type for parity style transaction trace
+pub type TraceResult = crate::trace::common::TraceResult<TraceOutput, String>;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TraceType {
@@ -169,13 +172,6 @@ pub struct CreateOutput {
 pub enum TraceOutput {
     Call(CallOutput),
     Create(CreateOutput),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum TraceResult {
-    Success { result: TraceOutput },
-    Error { error: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
