@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedHeader, H256, U256};
+use reth_primitives::{
+    BlockHash, BlockNumber, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256,
+};
 use std::fmt::Debug;
 use tokio::sync::watch::Receiver;
 
@@ -23,13 +25,17 @@ pub trait Consensus: Debug + Send + Sync {
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
-    ) -> Result<(), Error>;
+    ) -> Result<(), ConsensusError>;
 
     /// Validate if the header is correct and follows the consensus specification, including
     /// computed properties (like total difficulty).
     ///
     /// Some consensus engines may want to do additional checks here.
-    fn validate_header(&self, header: &SealedHeader, total_difficulty: U256) -> Result<(), Error>;
+    fn validate_header(
+        &self,
+        header: &SealedHeader,
+        total_difficulty: U256,
+    ) -> Result<(), ConsensusError>;
 
     /// Validate a block disregarding world state, i.e. things that can be checked before sender
     /// recovery and execution.
@@ -38,7 +44,7 @@ pub trait Consensus: Debug + Send + Sync {
     /// 11.1 "Ommer Validation".
     ///
     /// **This should not be called for the genesis block**.
-    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), Error>;
+    fn pre_validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
 
     /// After the Merge (aka Paris) block rewards became obsolete.
     ///
@@ -51,7 +57,7 @@ pub trait Consensus: Debug + Send + Sync {
 /// Consensus Errors
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
-pub enum Error {
+pub enum ConsensusError {
     #[error("Block used gas ({gas_used:?}) is greater than gas limit ({gas_limit:?}).")]
     HeaderGasUsedExceedsGasLimit { gas_used: u64, gas_limit: u64 },
     #[error("Block ommer hash ({got:?}) is different from expected: ({expected:?})")]
@@ -71,7 +77,7 @@ pub enum Error {
     #[error("Block number {block_number:?} is mismatch with parent block number {parent_block_number:?}")]
     ParentBlockNumberMismatch { parent_block_number: BlockNumber, block_number: BlockNumber },
     #[error(
-        "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}."
+    "Block timestamp {timestamp:?} is in past in comparison with parent timestamp {parent_timestamp:?}."
     )]
     TimestampIsInPast { parent_timestamp: u64, timestamp: u64 },
     #[error("Block timestamp {timestamp:?} is in future in comparison of our clock time {present_timestamp:?}.")]
@@ -84,26 +90,6 @@ pub enum Error {
     BaseFeeMissing,
     #[error("Block base fee ({got:?}) is different then expected: ({expected:?}).")]
     BaseFeeDiff { expected: u64, got: u64 },
-    #[error("Transaction eip1559 priority fee is more then max fee.")]
-    TransactionPriorityFeeMoreThenMaxFee,
-    #[error("Transaction chain_id does not match.")]
-    TransactionChainId,
-    #[error("Transaction max fee is less them block base fee.")]
-    TransactionMaxFeeLessThenBaseFee,
-    #[error("Transaction signer does not have account.")]
-    SignerAccountNotExisting,
-    #[error("Transaction signer has bytecode set.")]
-    SignerAccountHasBytecode,
-    #[error("Transaction nonce is not consistent.")]
-    TransactionNonceNotConsistent,
-    #[error("Account does not have enough funds ({available_funds:?}) to cover transaction max fee: {max_fee:?}.")]
-    InsufficientFunds { max_fee: u128, available_funds: U256 },
-    #[error("Eip2930 transaction is enabled after berlin hardfork.")]
-    TransactionEip2930Disabled,
-    #[error("Old legacy transaction before Spurious Dragon should not have chain_id.")]
-    TransactionOldLegacyChainId,
-    #[error("Eip2930 transaction is enabled after london hardfork.")]
-    TransactionEip1559Disabled,
     #[error("Transaction signer recovery error.")]
     TransactionSignerRecoveryError,
     #[error(
@@ -130,39 +116,7 @@ pub enum Error {
     WithdrawalIndexInvalid { got: u64, expected: u64 },
     #[error("Missing withdrawals")]
     BodyWithdrawalsMissing,
-    /// Thrown when calculating gas usage
-    #[error("gas uint64 overflow")]
-    GasUintOverflow,
-    /// returned if the transaction is specified to use less gas than required to start the
-    /// invocation.
-    #[error("intrinsic gas too low")]
-    GasTooLow,
-    /// returned if the transaction gas exceeds the limit
-    #[error("intrinsic gas too high")]
-    GasTooHigh,
-    /// thrown if a transaction is not supported in the current network configuration.
-    #[error("transaction type not supported")]
-    TxTypeNotSupported,
-    /// Thrown to ensure no one is able to specify a transaction with a tip higher than the total
-    /// fee cap.
-    #[error("max priority fee per gas higher than max fee per gas")]
-    TipAboveFeeCap,
-    /// A sanity error to avoid huge numbers specified in the tip field.
-    #[error("max priority fee per gas higher than 2^256-1")]
-    TipVeryHigh,
-    /// A sanity error to avoid huge numbers specified in the fee cap field.
-    #[error("max fee per gas higher than 2^256-1")]
-    FeeCapVeryHigh,
-    /// Thrown post London if the transaction's fee is less than the base fee of the block
-    #[error("max fee per gas less than block base fee")]
-    FeeCapTooLow,
-    /// Thrown if the sender of a transaction is a contract.
-    #[error("sender not an eoa")]
-    SenderNoEOA,
-}
-
-impl From<crate::error::Error> for Error {
-    fn from(_: crate::error::Error) -> Self {
-        Error::TransactionSignerRecoveryError
-    }
+    /// Error for a transaction that violates consensus.
+    #[error(transparent)]
+    InvalidTransaction(#[from] InvalidTransactionError),
 }

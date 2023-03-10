@@ -61,9 +61,9 @@ pub use serde_helper::JsonU256;
 pub use storage::{StorageEntry, StorageTrieEntry};
 pub use transaction::{
     AccessList, AccessListItem, AccessListWithGasUsed, FromRecoveredTransaction,
-    IntoRecoveredTransaction, Signature, Transaction, TransactionKind, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    IntoRecoveredTransaction, InvalidTransactionError, Signature, Transaction, TransactionKind,
+    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, TxType,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
 
