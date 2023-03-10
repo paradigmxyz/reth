@@ -422,19 +422,12 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
     discarded: Vec<TxHash>,
-    /// Transactions removed from the Ready pool
-    removed: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Create a new, empty transaction.
     fn new(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
-        Self {
-            transaction,
-            promoted: Default::default(),
-            discarded: Default::default(),
-            removed: Default::default(),
-        }
+        Self { transaction, promoted: Default::default(), discarded: Default::default() }
     }
 }
 

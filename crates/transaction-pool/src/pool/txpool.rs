@@ -178,7 +178,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             self.all_transactions.update(event.pending_block_base_fee, &event.state_changes);
 
         // Process the sub-pool updates
-        let UpdateOutcome { promoted, discarded, .. } = self.process_updates(updates);
+        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
         OnNewBlockOutcome {
             block_hash: event.hash,
@@ -225,7 +225,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 self.add_new_transaction(transaction.clone(), replaced_tx, move_to);
                 // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
-                let UpdateOutcome { promoted, discarded, removed } = self.process_updates(updates);
+                let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
                 // This transaction was moved to the pending pool.
                 let res = if move_to.is_pending() {
@@ -233,7 +233,6 @@ impl<T: TransactionOrdering> TxPool<T> {
                         transaction,
                         promoted,
                         discarded,
-                        removed,
                     })
                 } else {
                     AddedTransaction::Parked { transaction, subpool: move_to }
@@ -273,10 +272,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Maintenance task to apply a series of updates.
     ///
     /// This will move/discard the given transaction according to the `PoolUpdate`
-    fn process_updates(
-        &mut self,
-        updates: impl IntoIterator<Item = PoolUpdate>,
-    ) -> UpdateOutcome<T::Transaction> {
+    fn process_updates(&mut self, updates: impl IntoIterator<Item = PoolUpdate>) -> UpdateOutcome {
         let mut outcome = UpdateOutcome::default();
         for update in updates {
             let PoolUpdate { id, hash, current, destination } = update;
@@ -1083,27 +1079,19 @@ impl<T: PoolTransaction> PoolInternalTransaction<T> {
 }
 
 /// Tracks the result after updating the pool
-#[derive(Debug)]
-pub struct UpdateOutcome<T: PoolTransaction> {
+#[derive(Default, Debug)]
+pub struct UpdateOutcome {
     /// transactions promoted to the ready queue
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
     discarded: Vec<TxHash>,
-    /// Transactions removed from the Ready pool
-    removed: Vec<Arc<ValidPoolTransaction<T>>>,
-}
-
-impl<T: PoolTransaction> Default for UpdateOutcome<T> {
-    fn default() -> Self {
-        Self { promoted: vec![], discarded: vec![], removed: vec![] }
-    }
 }
 
 /// Represents the outcome of a prune
 pub struct PruneResult<T: PoolTransaction> {
     /// A list of added transactions that a pruned marker satisfied
     pub promoted: Vec<AddedTransaction<T>>,
-    /// all transactions that  failed to be promoted and now are discarded
+    /// all transactions that failed to be promoted and now are discarded
     pub failed: Vec<TxHash>,
     /// all transactions that were pruned from the ready pool
     pub pruned: Vec<Arc<ValidPoolTransaction<T>>>,
