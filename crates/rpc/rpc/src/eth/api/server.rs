@@ -381,7 +381,9 @@ where
         let res = EthApi::get_proof(self, address, keys, block_number);
 
         Ok(res.map_err(|e| match e {
-            EthApiError::InvalidBlockRange => internal_rpc_err("unimplemented"),
+            EthApiError::InvalidBlockRange => {
+                internal_rpc_err("eth_getProof is unimplemented for historical blocks")
+            }
             _ => e.into(),
         })?)
     }

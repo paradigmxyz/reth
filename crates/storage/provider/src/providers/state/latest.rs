@@ -71,16 +71,16 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .ok_or(ProviderError::Header { number: 0 })?
             .1
             .state_root;
-        let (acc_proof, stg_root) = loader
+        let (account_proof, storage_root) = loader
             .generate_acount_proof(self.db, root, hashed_address)
             .map_err(|_| ProviderError::StateTree)?;
-        let stg_proof = loader
-            .generate_storage_proofs(self.db, stg_root, hashed_address, keys)
+        let storage_proof = loader
+            .generate_storage_proofs(self.db, storage_root, hashed_address, keys)
             .map_err(|_| ProviderError::StateTree)?;
         Ok((
-            acc_proof.into_iter().map(Bytes::from).collect(),
-            stg_root,
-            stg_proof.into_iter().map(|v| v.into_iter().map(Bytes::from).collect()).collect(),
+            account_proof.into_iter().map(Bytes::from).collect(),
+            storage_root,
+            storage_proof.into_iter().map(|v| v.into_iter().map(Bytes::from).collect()).collect(),
         ))
     }
 }
