@@ -85,15 +85,6 @@ where
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
-    assert!(is_unimplemented(
-        EthApiClient::uncle_by_block_hash_and_index(client, hash, index).await.err().unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::uncle_by_block_number_and_index(client, block_number, index)
-            .await
-            .err()
-            .unwrap()
-    ));
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
     assert!(is_unimplemented(
         EthApiClient::call(client, call_request.clone(), None, None).await.err().unwrap()
