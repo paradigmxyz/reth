@@ -321,6 +321,10 @@ impl EthAccount {
     }
 }
 
+/// A merkle proof of existence (or nonexistence) of a leaf value. Consists
+/// of a the encoded nodes in the path from the root of the tree to the leaf.
+pub type MerkleProof = Vec<Vec<u8>>;
+
 /// Helper struct that interacts with a Merkle Patricia Tree persisted
 /// in the database.
 #[derive(Debug, Default)]
@@ -527,7 +531,7 @@ impl DBTrieLoader {
         tx: &'tx impl DbTx<'itx>,
         root: H256,
         address: H256,
-    ) -> Result<(Vec<Vec<u8>>, H256), TrieError> {
+    ) -> Result<(MerkleProof, H256), TrieError> {
         let db = Arc::new(HashDatabase::from_root(tx, root)?);
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -548,7 +552,7 @@ impl DBTrieLoader {
         storage_root: H256,
         address: H256,
         keys: &[H256],
-    ) -> Result<Vec<Vec<Vec<u8>>>, TrieError> {
+    ) -> Result<Vec<MerkleProof>, TrieError> {
         let db = Arc::new(DupHashDatabase::from_root(tx, address, storage_root)?);
         let hasher = Arc::new(HasherKeccak::new());
 
