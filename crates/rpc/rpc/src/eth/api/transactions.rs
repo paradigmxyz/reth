@@ -3,7 +3,7 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{BlockId, Bytes, FromRecoveredTransaction, TransactionSigned, H256, U256};
+use reth_primitives::{BlockId, Bytes, FromRecoveredTransaction, TransactionSigned, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
 use reth_rpc_types::{Index, Transaction, TransactionRequest};
@@ -22,9 +22,9 @@ where
     /// Finds a given [Transaction] by its hash.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
-    pub async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<Transaction>> {
+    pub(crate) async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<Transaction>> {
         match self.client().transaction_by_hash(hash)? {
-            None => return Ok(None),
+            None => Ok(None),
             Some(tx) => {
                 let tx = tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
@@ -44,7 +44,7 @@ where
     /// Get Transaction by [BlockId] and the index of the transaction within that Block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
-    pub async fn transaction_by_block_and_tx_index(
+    pub(crate) async fn transaction_by_block_and_tx_index(
         &self,
         block_id: impl Into<BlockId>,
         index: Index,
