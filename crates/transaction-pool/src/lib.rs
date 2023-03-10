@@ -93,6 +93,8 @@ use crate::{
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
+
+use reth_interfaces::consensus::Error;
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -109,6 +111,24 @@ mod validate;
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking A pool
 pub mod test_utils;
+
+// TX_SLOT_SIZE is used to calculate how many data slots a single transaction
+// takes up based on its size. The slots are used as DoS protection, ensuring
+// that validating a new transaction remains a constant operation (in reality
+// O(maxslots), where max slots are 4 currently).
+pub(crate) const TX_SLOT_SIZE: usize = 32 * 1024;
+
+// TX_MAX_SIZE is the maximum size a single transaction can have. This field has
+// non-trivial consequences: larger transactions are significantly harder and
+// more expensive to propagate; larger transactions also take more resources
+// to validate whether they fit into the pool or not.
+pub(crate) const TX_MAX_SIZE: usize = 4 * TX_SLOT_SIZE; //128KB
+
+// Maximum bytecode to permit for a contract
+pub(crate) const MAX_CODE_SIZE: usize = 24576;
+
+// Maximum initcode to permit in a creation transaction and create instructions
+pub(crate) const MAX_INIT_CODE_SIZE: usize = 2 * MAX_CODE_SIZE;
 
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
@@ -144,7 +164,8 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
+    ) -> PoolResult<HashMap<TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>>>
+    {
         let outcome = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
@@ -160,10 +181,12 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
+    ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>) {
         let hash = *transaction.hash();
+
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
+
         let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
 
         (hash, outcome)
@@ -203,7 +226,22 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+
+        match tx {
+            Ok(TransactionValidationOutcome::Valid {
+                balance: _,
+                state_nonce: _,
+                transaction: _,
+            }) => self
+                .pool
+                .add_transactions(origin, std::iter::once(tx.unwrap()))
+                .pop()
+                .expect("exists; qed"),
+            Ok(TransactionValidationOutcome::Invalid(_transaction, error)) => Err(error),
+            Err(_err) => {
+                unimplemented!()
+            }
+        }
     }
 
     async fn add_transactions(
@@ -212,7 +250,9 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(origin, transactions).await?;
-        let transactions = self.pool.add_transactions(origin, validated.into_values());
+
+        let transactions =
+            self.pool.add_transactions(origin, validated.into_values().map(|x| x.unwrap()));
         Ok(transactions)
     }
 
