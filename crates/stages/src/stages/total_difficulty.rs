@@ -8,9 +8,10 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{consensus::ConsensusError, provider::ProviderError};
-use reth_primitives::{ChainSpec, Hardfork, EMPTY_OMMER_ROOT, MAINNET, U256};
+use reth_interfaces::{consensus::Consensus, provider::ProviderError};
+use reth_primitives::U256;
 use reth_provider::Transaction;
+use std::sync::Arc;
 use tracing::*;
 
 /// The [`StageId`] of the total difficulty stage.
@@ -23,15 +24,22 @@ pub const TOTAL_DIFFICULTY: StageId = StageId("TotalDifficulty");
 /// table.
 #[derive(Debug, Clone)]
 pub struct TotalDifficultyStage {
-    /// The chain specification.
-    pub chain_spec: ChainSpec,
+    /// Consensus client implementation
+    consensus: Arc<dyn Consensus>,
     /// The number of table entries to commit at once
-    pub commit_threshold: u64,
+    commit_threshold: u64,
 }
 
-impl Default for TotalDifficultyStage {
-    fn default() -> Self {
-        Self { chain_spec: MAINNET.clone(), commit_threshold: 100_000 }
+impl TotalDifficultyStage {
+    /// Create a new total difficulty stage
+    pub fn new(consensus: Arc<dyn Consensus>) -> Self {
+        Self { consensus, commit_threshold: 100_000 }
+    }
+
+    /// Set a commit threshold on total difficulty stage
+    pub fn with_commit_threshold(mut self, commit_threshold: u64) -> Self {
+        self.commit_threshold = commit_threshold;
+        self
     }
 }
 
@@ -55,6 +63,7 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 
         // Acquire cursor over total difficulty and headers tables
         let mut cursor_td = tx.cursor_write::<tables::HeaderTD>()?;
+        let mut cursor_canonical = tx.cursor_read::<tables::CanonicalHeaders>()?;
         let mut cursor_headers = tx.cursor_read::<tables::Headers>()?;
 
         // Get latest total difficulty
@@ -66,38 +75,22 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
         let mut td: U256 = last_entry.1.into();
         debug!(target: "sync::stages::total_difficulty", ?td, block_number = last_header_number, "Last total difficulty entry");
 
-        let walker = cursor_headers
-            .walk(Some(start_block))?
-            .take_while(|e| e.as_ref().map(|(_, h)| h.number <= end_block).unwrap_or_default());
+        // Acquire canonical walker
+        let walker = cursor_canonical.walk_range(start_block..=end_block)?;
+
         // Walk over newly inserted headers, update & insert td
         for entry in walker {
-            let (key, header) = entry?;
+            let (number, hash) = entry?;
+            let (_, header) =
+                cursor_headers.seek_exact(number)?.ok_or(ProviderError::Header { number })?;
+            let header = header.seal(hash);
             td += header.difficulty;
 
-            if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, header.difficulty) {
-                if header.difficulty != U256::ZERO {
-                    return Err(StageError::Validation {
-                        block: header.number,
-                        error: ConsensusError::TheMergeDifficultyIsNotZero,
-                    })
-                }
+            self.consensus
+                .validate_header(&header, td)
+                .map_err(|error| StageError::Validation { block: header.number, error })?;
 
-                if header.nonce != 0 {
-                    return Err(StageError::Validation {
-                        block: header.number,
-                        error: ConsensusError::TheMergeNonceIsNotZero,
-                    })
-                }
-
-                if header.ommers_hash != EMPTY_OMMER_ROOT {
-                    return Err(StageError::Validation {
-                        block: header.number,
-                        error: ConsensusError::TheMergeOmmerRootIsNotEmpty,
-                    })
-                }
-            }
-
-            cursor_td.append(key, td.into())?;
+            cursor_td.append(number, td.into())?;
         }
 
         let done = !capped;
@@ -120,8 +113,11 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
 #[cfg(test)]
 mod tests {
     use reth_db::transaction::DbTx;
-    use reth_interfaces::test_utils::generators::{random_header, random_header_range};
-    use reth_primitives::{BlockNumber, SealedHeader, MAINNET};
+    use reth_interfaces::test_utils::{
+        generators::{random_header, random_header_range},
+        TestConsensus,
+    };
+    use reth_primitives::{BlockNumber, SealedHeader};
 
     use super::*;
     use crate::test_utils::{
@@ -173,12 +169,17 @@ mod tests {
 
     struct TotalDifficultyTestRunner {
         tx: TestTransaction,
+        consensus: Arc<TestConsensus>,
         commit_threshold: u64,
     }
 
     impl Default for TotalDifficultyTestRunner {
         fn default() -> Self {
-            Self { tx: Default::default(), commit_threshold: 500 }
+            Self {
+                tx: Default::default(),
+                consensus: Arc::new(TestConsensus::default()),
+                commit_threshold: 500,
+            }
         }
     }
 
@@ -191,7 +192,7 @@ mod tests {
 
         fn stage(&self) -> Self::S {
             TotalDifficultyStage {
-                chain_spec: MAINNET.clone(),
+                consensus: self.consensus.clone(),
                 commit_threshold: self.commit_threshold,
             }
         }
