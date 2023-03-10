@@ -11,6 +11,7 @@ use crate::{
 use ethers_core::types::transaction::eip712::TypedData;
 use reth_primitives::{Address, Bytes, Signature};
 use serde_json::Value;
+
 impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     pub(crate) async fn sign(&self, account: Address, message: Bytes) -> EthResult<Signature> {
         let signer = self.find_signer(&account).ok_or(EthApiError::UnknownAccount)?;
