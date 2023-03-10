@@ -178,7 +178,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             self.all_transactions.update(event.pending_block_base_fee, &event.state_changes);
 
         // Process the sub-pool updates
-        let UpdateOutcome { promoted, discarded, .. } = self.process_updates(updates);
+        let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
 
         OnNewBlockOutcome {
             block_hash: event.hash,
