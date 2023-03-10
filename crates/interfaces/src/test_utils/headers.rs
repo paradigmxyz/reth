@@ -1,6 +1,6 @@
 //! Testing support for headers related interfaces.
 use crate::{
-    consensus::{self, Consensus, Error},
+    consensus::{self, Consensus, ConsensusError},
     p2p::{
         download::DownloadClient,
         error::{DownloadError, DownloadResult, PeerRequestResult, RequestError},
@@ -331,25 +331,29 @@ impl Consensus for TestConsensus {
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
-    ) -> Result<(), Error> {
+    ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
-            Err(consensus::Error::BaseFeeMissing)
+            Err(consensus::ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }
     }
 
-    fn validate_header(&self, header: &SealedHeader, total_difficulty: U256) -> Result<(), Error> {
+    fn validate_header(
+        &self,
+        header: &SealedHeader,
+        total_difficulty: U256,
+    ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
-            Err(consensus::Error::BaseFeeMissing)
+            Err(consensus::ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }
     }
 
-    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::Error> {
+    fn pre_validate_block(&self, _block: &SealedBlock) -> Result<(), consensus::ConsensusError> {
         if self.fail_validation() {
-            Err(consensus::Error::BaseFeeMissing)
+            Err(consensus::ConsensusError::BaseFeeMissing)
         } else {
             Ok(())
         }

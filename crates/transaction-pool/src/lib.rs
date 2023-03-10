@@ -94,7 +94,7 @@ use crate::{
     traits::{NewTransactionEvent, PoolSize},
 };
 
-use reth_interfaces::consensus::Error;
+use reth_interfaces::consensus::ConsensusError;
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -164,8 +164,9 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<HashMap<TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>>>
-    {
+    ) -> PoolResult<
+        HashMap<TxHash, Result<TransactionValidationOutcome<V::Transaction>, ConsensusError>>,
+    > {
         let outcome = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
@@ -181,7 +182,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, Error>) {
+    ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, ConsensusError>) {
         let hash = *transaction.hash();
 
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
