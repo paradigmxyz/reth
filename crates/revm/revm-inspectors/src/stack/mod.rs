@@ -6,6 +6,10 @@ use revm::{
     Database, EVMData, Inspector,
 };
 
+/// A wrapped [Inspector](revm::Inspector) that can be reused in the stack
+mod maybe_owned;
+pub use maybe_owned::MaybeOwnedInspector;
+
 /// One can hook on inspector execution in 3 ways:
 /// - Block: Hook on block execution
 /// - BlockWithIndex: Hook on block execution transaction index
@@ -232,9 +236,9 @@ where
         (ret, address, remaining_gas, out)
     }
 
-    fn selfdestruct(&mut self) {
+    fn selfdestruct(&mut self, contract: Address, target: Address) {
         call_inspectors!(inspector, [&mut self.custom_print_tracer], {
-            Inspector::<DB>::selfdestruct(inspector);
+            Inspector::<DB>::selfdestruct(inspector, contract, target);
         });
     }
 }

@@ -195,6 +195,10 @@ where
                 new_account.account_state = if account.storage_cleared {
                     new_account.storage.clear();
                     AccountState::StorageCleared
+                } else if new_account.account_state.is_storage_cleared() {
+                    // the account already exists and its storage was cleared, preserve its previous
+                    // state
+                    AccountState::StorageCleared
                 } else {
                     AccountState::Touched
                 };
@@ -952,5 +956,49 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn test_account_state_preserved() {
+        let account = Address::from_str("c94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap();
+
+        let mut db = StateProviderTest::default();
+        db.insert_account(account, Account::default(), None, HashMap::default());
+
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().istanbul_activated().build());
+        let db = SubState::new(State::new(db));
+
+        let default_acc = RevmAccount {
+            info: AccountInfo::default(),
+            storage: hash_map::HashMap::default(),
+            is_destroyed: false,
+            is_touched: false,
+            storage_cleared: false,
+            is_not_existing: false,
+        };
+        let mut executor = Executor::new(chain_spec, db);
+        // touch account
+        executor.commit_changes(hash_map::HashMap::from([(
+            account,
+            RevmAccount { ..default_acc.clone() },
+        )]));
+        // destroy account
+        executor.commit_changes(hash_map::HashMap::from([(
+            account,
+            RevmAccount { is_destroyed: true, is_touched: true, ..default_acc.clone() },
+        )]));
+        // re-create account
+        executor.commit_changes(hash_map::HashMap::from([(
+            account,
+            RevmAccount { is_touched: true, storage_cleared: true, ..default_acc.clone() },
+        )]));
+        // touch account
+        executor
+            .commit_changes(hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]));
+
+        let db = executor.db();
+
+        let account = db.load_account(account).unwrap();
+        assert_eq!(account.account_state, AccountState::StorageCleared);
     }
 }
