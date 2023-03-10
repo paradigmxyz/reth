@@ -35,7 +35,7 @@ mod withdrawal;
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
 
-pub use account::Account;
+pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock};
 pub use bloom::Bloom;
@@ -56,12 +56,14 @@ pub use log::Log;
 pub use net::NodeRecord;
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
+pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::{StorageEntry, StorageTrieEntry};
 pub use transaction::{
-    AccessList, AccessListItem, FromRecoveredTransaction, IntoRecoveredTransaction, Signature,
-    Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
-    TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    AccessList, AccessListItem, AccessListWithGasUsed, FromRecoveredTransaction,
+    IntoRecoveredTransaction, Signature, Transaction, TransactionKind, TransactionSigned,
+    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
 

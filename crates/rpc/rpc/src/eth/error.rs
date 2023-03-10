@@ -1,36 +1,14 @@
-//! Error variants for the `eth_` namespace.
+//! Implementation specific Errors for the `eth_` namespace.
 
 use crate::result::{internal_rpc_err, rpc_err};
 use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
 use reth_primitives::{constants::SELECTOR_LEN, Address, U128, U256};
-use reth_rpc_types::BlockError;
+use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::PoolError;
 use revm::primitives::{EVMError, Halt};
 
 /// Result alias
 pub(crate) type EthResult<T> = Result<T, EthApiError>;
-
-/// List of JSON-RPC error codes
-#[derive(Debug, Copy, PartialEq, Eq, Clone)]
-pub(crate) enum EthRpcErrorCode {
-    /// Failed to send transaction, See also <https://github.com/MetaMask/eth-rpc-errors/blob/main/src/error-constants.ts>
-    TransactionRejected,
-    /// Custom geth error code, <https://github.com/vapory-legacy/wiki/blob/master/JSON-RPC-Error-Codes-Improvement-Proposal.md>
-    ExecutionError,
-    /// <https://eips.ethereum.org/EIPS/eip-1898>
-    InvalidInput,
-}
-
-impl EthRpcErrorCode {
-    /// Returns the error code as `i32`
-    pub(crate) const fn code(&self) -> i32 {
-        match *self {
-            EthRpcErrorCode::TransactionRejected => -32003,
-            EthRpcErrorCode::ExecutionError => 3,
-            EthRpcErrorCode::InvalidInput => -32000,
-        }
-    }
-}
 
 /// Errors that can occur when interacting with the `eth_` namespace
 #[derive(Debug, thiserror::Error)]

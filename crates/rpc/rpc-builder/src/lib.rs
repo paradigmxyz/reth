@@ -559,6 +559,7 @@ where
         namespaces: impl Iterator<Item = RethRpcModule>,
     ) -> Vec<Methods> {
         let eth_api = self.eth_api();
+        let eth_cache = self.eth_cache();
         namespaces
             .map(|namespace| {
                 self.modules
@@ -572,7 +573,9 @@ where
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Trace => TraceApi::new().into_rpc().into(),
+                        RethRpcModule::Trace => {
+                            TraceApi::new(self.client.clone(), eth_cache.clone()).into_rpc().into()
+                        }
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                     })
                     .clone()

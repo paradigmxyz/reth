@@ -13,3 +13,7 @@ pub mod eth_dao_fork;
 pub use reth_provider::execution_result;
 /// Executor
 pub mod executor;
+
+/// ExecutorFactory impl
+pub mod factory;
+pub use factory::Factory;

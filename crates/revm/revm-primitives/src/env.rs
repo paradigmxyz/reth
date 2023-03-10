@@ -39,7 +39,7 @@ pub fn fill_cfg_env(
     cfg_env.chain_id = U256::from(chain_spec.chain().id());
     cfg_env.spec_id = spec_id;
     cfg_env.perf_all_precompiles_have_balance = false;
-    cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Raw;
+    cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 }
 /// Fill block environment from Block.
 pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
