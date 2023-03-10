@@ -81,13 +81,13 @@ pub fn block1() -> (SealedBlockWithSenders, ExecutionResult) {
     let exec_res = ExecutionResult {
         tx_changesets: vec![TransactionChangeSet {
             receipt: Receipt::default(), /* receipts are not saved. */
-            changeset: BTreeMap::from([(H160([50; 20]), account_changeset.clone())]),
+            changeset: BTreeMap::from([(H160([0x60; 20]), account_changeset.clone())]),
             new_bytecodes: BTreeMap::from([]),
         }],
-        block_changesets: BTreeMap::from([(H160([51; 20]), account_changeset.account)]),
+        block_changesets: BTreeMap::from([(H160([0x61; 20]), account_changeset.account)]),
     };
 
-    (SealedBlockWithSenders { block, senders: vec![H160([3; 20])] }, exec_res)
+    (SealedBlockWithSenders { block, senders: vec![H160([0x30; 20])] }, exec_res)
 }
 
 /// Block two that points to block 1
@@ -120,11 +120,11 @@ pub fn block2() -> (SealedBlockWithSenders, ExecutionResult) {
     let exec_res = ExecutionResult {
         tx_changesets: vec![TransactionChangeSet {
             receipt: Receipt::default(), /* receipts are not saved. */
-            changeset: BTreeMap::from([(H160([50; 20]), account_changeset.clone())]),
+            changeset: BTreeMap::from([(H160([0x60; 20]), account_changeset.clone())]),
             new_bytecodes: BTreeMap::from([]),
         }],
-        block_changesets: BTreeMap::from([(H160([50; 20]), block_changeset)]),
+        block_changesets: BTreeMap::from([(H160([0x60; 20]), block_changeset)]),
     };
 
-    (SealedBlockWithSenders { block, senders: vec![H160([3; 20])] }, exec_res)
+    (SealedBlockWithSenders { block, senders: vec![H160([0x31; 20])] }, exec_res)
 }

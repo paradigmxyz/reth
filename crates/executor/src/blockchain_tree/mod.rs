@@ -290,8 +290,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         chain_id
     }
 
-    /// Insert block inside tree. recover transaction signers and call [`insert_block_with_senders`]
-    /// fn.
+    /// Insert block inside tree. recover transaction signers and
+    /// internaly call [`BlockchainTree::insert_block_with_senders`] fn.
     pub fn insert_block(&mut self, block: SealedBlock) -> Result<bool, Error> {
         let senders = block.senders().ok_or(ExecError::SenderRecoveryError)?;
         let block = SealedBlockWithSenders::new(block, senders).unwrap();
@@ -360,8 +360,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     pub fn finalize_block(&mut self, finalized_block: BlockNumber) {
         let mut remove_chains = self.block_indices.finalize_canonical_blocks(finalized_block);
 
-        while let Some(chain_id) = remove_chains.first() {
-            if let Some(chain) = self.chains.remove(chain_id) {
+        while let Some(chain_id) = remove_chains.pop_first() {
+            if let Some(chain) = self.chains.remove(&chain_id) {
                 remove_chains.extend(self.block_indices.remove_chain(&chain));
             }
         }
@@ -468,11 +468,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             // revert `N` blocks from current canonical chain and put them inside BlockchanTree
             // This is main reorgs on tables.
             let old_canon_chain = self.revert_canonical(canon_fork.number)?;
-            println!("old_canon_chain:{old_canon_chain:?}");
             self.commit_canonical(new_canon_chain)?;
 
             // insert old canonical chain to BlockchainTree.
-            //TODO check if there there is chains that can be merged.
+            // TODO check if there there is chains that can be merged.
             self.insert_chain(old_canon_chain);
         }
 
@@ -641,13 +640,14 @@ mod tests {
         let (mut block1, exec1) = blocks::block1();
         block1.block.header.header.number = 11;
         block1.block.header.header.state_root =
-            H256(hex!("a7ec6568be312e65e4c0e6a72e7eedda4c856de09ee5aea75b484f4bc0af20ca"));
+            H256(hex!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd"));
         let (mut block2, exec2) = blocks::block2();
         block2.block.header.header.number = 12;
         block2.block.header.header.state_root =
-            H256(hex!("f7c6a43dd9551fb93b1b72e47c1a16d6f3ea9e87d6088aa56514ffddf53c65d3"));
+            H256(hex!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8"));
 
-        let externals = externals(vec![exec1.clone(), exec2.clone(), exec1.clone(), exec2.clone()]);
+        // test pops execution results from vector, so order is from last to first.ß
+        let externals = externals(vec![exec2.clone(), exec1.clone(), exec2.clone(), exec1.clone()]);
 
         setup(&externals);
         // last finalized block would be number 9.
@@ -692,9 +692,7 @@ mod tests {
         // |
 
         // make block1 canonical
-        println!("b1 canonical");
         assert_eq!(tree.make_canonical(&block1.hash()), Ok(()));
-        println!("b2 canonical");
         // make block2 canonical
         assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
 
@@ -741,7 +739,6 @@ mod tests {
             ])
         );
 
-        println!("b2a canonical, revert");
         // make b2a canonical
         assert_eq!(tree.make_canonical(&block2a_hash), Ok(()));
         // Trie state:
@@ -762,6 +759,52 @@ mod tests {
         // b1a  b1 (side chain)
         // |  /
         // |/
+        // g1 (10)
+        // |
+
+        assert_eq!(tree.chains.len(), 2);
+        assert_eq!(
+            tree.block_indices.blocks_to_chain,
+            HashMap::from([(block1.hash(), 4), (block2a_hash, 4), (block2.hash(), 3)])
+        );
+        assert_eq!(
+            tree.block_indices.fork_to_child,
+            HashMap::from([
+                (block1.parent_hash, HashSet::from([block1.hash()])),
+                (block1.hash(), HashSet::from([block2.hash()]))
+            ])
+        );
+
+        // make b2 canonical
+        assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
+        // Trie state:
+        // b2   b2a (side chain)
+        // |   /
+        // | /
+        // b1  b1a (side chain)
+        // |  /
+        // |/
+        // g1 (10)
+        // |
+
+        // finalize b1 that would make b1a removed from tree
+        tree.finalize_block(11);
+        // Trie state:
+        // b2   b2a (side chain)
+        // |   /
+        // | /
+        // b1 (canon)
+        // |
+        // g1 (10)
+        // |
+
+        // update canonical block to b2, this would make b2a be removed
+        assert_eq!(tree.update_canonical_hashes(12), Ok(()));
+        // Trie state:
+        // b2 (canon)
+        // |
+        // b1 (canon)
+        // |
         // g1 (10)
         // |
     }

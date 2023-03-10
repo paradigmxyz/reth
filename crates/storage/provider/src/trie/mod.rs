@@ -337,7 +337,6 @@ impl DBTrieLoader {
         }
 
         let new_root = H256::from_slice(trie.root()?.as_slice());
-        println!("NEW ROOT:{new_root:?}");
         if new_root != root {
             let mut cursor = tx.cursor_write::<tables::AccountsTrie>()?;
             if cursor.seek_exact(root)?.is_some() {

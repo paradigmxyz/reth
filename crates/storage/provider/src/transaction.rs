@@ -480,7 +480,6 @@ where
         // merkle tree
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
-            println!("block n:{:?} On insert root:{current_root:?}", parent_block_number);
             let loader = DBTrieLoader::default();
             let root = loader.update_root(self, current_root, from..to)?;
             if root != block_state_root {
@@ -916,11 +915,7 @@ where
                 Bound::Unbounded => TransitionId::MAX,
             };
 
-            println!("START range:{:?}", range.start_bound());
-            println!("END range:{:?}", range.end_bound());
-
             let transition_range = from_transition..to_transition;
-            println!("TRANSITION RANGE:{transition_range:?}");
             let zero = Address::zero();
             let transition_storage_range =
                 (from_transition, zero).into()..(to_transition, zero).into();
@@ -935,7 +930,6 @@ where
                 let (tip_number, _) =
                     self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
                 let current_root = self.get_header(tip_number)?.state_root;
-                println!("Current root {current_root:?}");
                 let loader = DBTrieLoader::default();
                 let _block_root = loader.update_root(self, current_root, transition_range)?;
             }
