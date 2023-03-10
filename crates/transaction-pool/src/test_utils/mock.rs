@@ -356,6 +356,10 @@ impl PoolTransaction for MockTransaction {
     fn encoded_length(&self) -> usize {
         0
     }
+
+    fn chain_id(&self) -> Option<u64> {
+        Some(1)
+    }
 }
 
 impl FromRecoveredTransaction for MockTransaction {

@@ -1,7 +1,7 @@
 //! Transaction Pool internals.
 //!
-//! Incoming transactions are before they enter the pool first. The validation outcome can have 3
-//! states:
+//! Incoming transactions validated are before they enter the pool first. The validation outcome can
+//! have 3 states:
 //!
 //!  1. Transaction can _never_ be valid
 //!  2. Transaction is _currently_ valid

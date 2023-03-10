@@ -9,6 +9,7 @@ use crate::{
 };
 use async_trait::async_trait;
 pub use mock::*;
+use reth_interfaces::consensus::Error;
 use std::{marker::PhantomData, sync::Arc};
 
 /// A [Pool] used for testing
@@ -36,12 +37,12 @@ impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> TransactionValidationOutcome<Self::Transaction> {
-        TransactionValidationOutcome::Valid {
+    ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
+        Ok(TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
             transaction,
-        }
+        })
     }
 }
 
