@@ -8,7 +8,9 @@ use reth_db::{
     transaction::DbTx,
 };
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{keccak256, Account, Address, Bytes, StorageKey, StorageValue, H256, U256};
+use reth_primitives::{
+    keccak256, Account, Address, Bytecode, Bytes, StorageKey, StorageValue, H256, U256,
+};
 use std::marker::PhantomData;
 
 /// State provider over latest state that takes tx reference.
@@ -53,8 +55,8 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
-        self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into).map(|r| r.map(Bytes::from))
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
+        self.db.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
     fn proof(

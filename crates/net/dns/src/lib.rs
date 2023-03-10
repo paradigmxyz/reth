@@ -16,8 +16,8 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use lru::LruCache;
 use reth_primitives::{ForkId, NodeRecord, PeerId};
+use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -95,7 +95,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     /// All queries currently in progress
     queries: QueryPool<R, SecretKey>,
     /// Cached dns records
-    dns_record_cache: LruCache<String, DnsEntry<SecretKey>>,
+    dns_record_cache: LruMap<String, DnsEntry<SecretKey>>,
     /// all buffered events
     queued_events: VecDeque<DnsDiscoveryEvent>,
     /// The rate at which trees should be updated.
@@ -133,7 +133,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             node_record_listeners: Default::default(),
             trees: Default::default(),
             queries,
-            dns_record_cache: LruCache::new(dns_record_cache_limit),
+            dns_record_cache: LruMap::new(ByLength::new(dns_record_cache_limit.get())),
             queued_events: Default::default(),
             recheck_interval,
             bootstrap_dns_networks: bootstrap_dns_networks.unwrap_or_default(),
@@ -250,7 +250,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
             }
             Some(Ok(entry)) => {
                 // cache entry
-                self.dns_record_cache.push(hash.clone(), entry.clone());
+                self.dns_record_cache.insert(hash.clone(), entry.clone());
 
                 match entry {
                     DnsEntry::Root(root) => {

@@ -90,8 +90,6 @@ where
         P2PMessage::Hello(hello.clone()).encode(&mut raw_hello_bytes);
         self.inner.send(raw_hello_bytes.into()).await?;
 
-        tracing::trace!("waiting for p2p hello from peer");
-
         let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next())
             .await
             .or(Err(P2PStreamError::HandshakeError(P2PHandshakeError::Timeout)))?

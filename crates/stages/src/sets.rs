@@ -14,18 +14,27 @@
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::{OfflineStages};
+//! # use reth_executor::Factory;
+//! # use reth_primitives::MAINNET;
+//! # use std::sync::Arc;
+//!
+//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! // Build a pipeline with all offline stages.
 //! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
-//! Pipeline::builder().add_stages(OfflineStages::default()).build();
+//! Pipeline::builder().add_stages(OfflineStages::new(factory)).build();
 //! ```
 //!
 //! ```ignore
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::{StageSet, sets::OfflineStages};
+//! # use reth_executor::Factory;
+//! # use reth_primitives::MAINNET;
+//! # use std::sync::Arc;
 //! // Build a pipeline with all offline stages and a custom stage at the end.
+//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! Pipeline::builder()
 //!     .add_stages(
-//!         OfflineStages::default().builder().add_stage(MyCustomStage)
+//!         OfflineStages::new(factory).builder().add_stage(MyCustomStage)
 //!     )
 //!     .build();
 //! ```
@@ -45,7 +54,7 @@ use reth_interfaces::{
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
 };
-use reth_primitives::ChainSpec;
+use reth_provider::ExecutorFactory;
 use std::sync::Arc;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -56,39 +65,47 @@ use std::sync::Arc;
 /// - [`OfflineStages`]
 /// - [`FinishStage`]
 #[derive(Debug)]
-pub struct DefaultStages<H, B, S> {
+pub struct DefaultStages<H, B, S, EF> {
     /// Configuration for the online stages
     online: OnlineStages<H, B>,
+    /// Executor factory needs for execution stage
+    executor_factory: EF,
     /// Configuration for the [`FinishStage`] stage.
     status_updater: S,
 }
 
-impl<H, B, S> DefaultStages<H, B, S> {
+impl<H, B, S, EF> DefaultStages<H, B, S, EF> {
     /// Create a new set of default stages with default values.
     pub fn new(
         consensus: Arc<dyn Consensus>,
         header_downloader: H,
         body_downloader: B,
         status_updater: S,
-    ) -> Self {
+        executor_factory: EF,
+    ) -> Self
+    where
+        EF: ExecutorFactory,
+    {
         Self {
             online: OnlineStages::new(consensus, header_downloader, body_downloader),
+            executor_factory,
             status_updater,
         }
     }
 }
 
-impl<DB, H, B, S> StageSet<DB> for DefaultStages<H, B, S>
+impl<DB, H, B, S, EF> StageSet<DB> for DefaultStages<H, B, S, EF>
 where
     DB: Database,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     S: StatusUpdater + 'static,
+    EF: ExecutorFactory,
 {
     fn builder(self) -> StageSetBuilder<DB> {
         self.online
             .builder()
-            .add_set(OfflineStages)
+            .add_set(OfflineStages::new(self.executor_factory))
             .add_stage(FinishStage::new(self.status_updater))
     }
 }
@@ -137,40 +154,47 @@ where
 /// - [`HistoryIndexingStages`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct OfflineStages;
+pub struct OfflineStages<EF: ExecutorFactory> {
+    /// Executor factory needs for execution stage
+    pub executor_factory: EF,
+}
 
-impl<DB: Database> StageSet<DB> for OfflineStages {
+impl<EF: ExecutorFactory> OfflineStages<EF> {
+    /// Create a new set of ofline stages with default values.
+    pub fn new(executor_factory: EF) -> Self {
+        Self { executor_factory }
+    }
+}
+
+impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for OfflineStages<EF> {
     fn builder(self) -> StageSetBuilder<DB> {
-        ExecutionStages::default().builder().add_set(HashingStages).add_set(HistoryIndexingStages)
+        ExecutionStages::new(self.executor_factory)
+            .builder()
+            .add_set(HashingStages)
+            .add_set(HistoryIndexingStages)
     }
 }
 
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ExecutionStages {
-    /// The chain specification to use for execution.
-    chain_spec: ChainSpec,
+pub struct ExecutionStages<EF: ExecutorFactory> {
+    /// Executor factory that will create executors.
+    executor_factory: EF,
 }
 
-impl Default for ExecutionStages {
-    fn default() -> Self {
-        Self { chain_spec: reth_primitives::MAINNET.clone() }
-    }
-}
-
-impl ExecutionStages {
+impl<EF: ExecutorFactory + 'static> ExecutionStages<EF> {
     /// Create a new set of execution stages with default values.
-    pub fn new(chain_spec: ChainSpec) -> Self {
-        Self { chain_spec }
+    pub fn new(executor_factory: EF) -> Self {
+        Self { executor_factory }
     }
 }
 
-impl<DB: Database> StageSet<DB> for ExecutionStages {
+impl<EF: ExecutorFactory, DB: Database> StageSet<DB> for ExecutionStages<EF> {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::default())
-            .add_stage(ExecutionStage::<crate::DefaultDB<'_>>::from(self.chain_spec))
+            .add_stage(ExecutionStage::new(self.executor_factory, 10_000))
     }
 }
 

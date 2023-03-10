@@ -31,7 +31,6 @@ pub struct Log {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[test]
     fn serde_log() {

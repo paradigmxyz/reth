@@ -9,7 +9,7 @@ pub enum Error {
     Execution(#[from] crate::executor::Error),
 
     #[error(transparent)]
-    Consensus(#[from] crate::consensus::Error),
+    Consensus(#[from] crate::consensus::ConsensusError),
 
     #[error(transparent)]
     Database(#[from] crate::db::Error),
