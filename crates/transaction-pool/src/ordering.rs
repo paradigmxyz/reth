@@ -1,4 +1,5 @@
-use crate::traits::PoolTransaction;
+use crate::{traits::PoolTransaction, PooledTransaction};
+use reth_primitives::U256;
 use std::fmt;
 
 /// Transaction ordering trait to determine the order of transactions.
@@ -17,4 +18,21 @@ pub trait TransactionOrdering: Send + Sync + 'static {
 
     /// Returns the priority score for the given transaction.
     fn priority(&self, transaction: &Self::Transaction) -> Self::Priority;
+}
+
+/// Default ordering for the pool.
+///
+/// The transactions are ordered by their cost. The higher the cost,
+/// the higher the priority of this transaction is.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub struct CostOrdering;
+
+impl TransactionOrdering for CostOrdering {
+    type Priority = U256;
+    type Transaction = PooledTransaction;
+
+    fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
+        transaction.cost()
+    }
 }
