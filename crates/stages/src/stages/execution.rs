@@ -12,8 +12,7 @@ use reth_db::{
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{Address, Block, U256};
 use reth_provider::{
-    execution_result::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef,
-    Transaction,
+    post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
 use tracing::*;
 

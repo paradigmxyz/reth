@@ -10,7 +10,7 @@
 pub mod eth_dao_fork;
 
 /// Execution result types.
-pub use reth_provider::execution_result;
+pub use reth_provider::post_state;
 /// Executor
 pub mod executor;
 

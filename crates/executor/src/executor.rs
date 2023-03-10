@@ -1,4 +1,4 @@
-use crate::execution_result::PostState;
+use crate::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     bloom::logs_bloom, Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log,
@@ -504,7 +504,7 @@ mod tests {
         ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
-        execution_result::{Change, Storage},
+        post_state::{Change, Storage},
         AccountProvider, BlockHashProvider, StateProvider,
     };
     use reth_revm::database::State;

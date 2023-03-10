@@ -1,6 +1,6 @@
 //! Executor Factory
 
-use crate::{execution_result::PostState, StateProvider};
+use crate::{post_state::PostState, StateProvider};
 use reth_interfaces::executor::Error;
 use reth_primitives::{Address, Block, ChainSpec, U256};
 

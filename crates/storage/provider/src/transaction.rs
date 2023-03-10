@@ -28,7 +28,7 @@ use crate::{
     trie::{DBTrieLoader, TrieError},
 };
 
-use crate::execution_result::PostState;
+use crate::post_state::PostState;
 
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.
