@@ -73,11 +73,14 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .ok_or(ProviderError::Header { number: 0 })?
             .1
             .state_root;
+
         let (account_proof, storage_root) = loader
             .generate_acount_proof(self.db, root, hashed_address)
             .map_err(|_| ProviderError::StateTree)?;
+
+        let hashed_keys: Vec<H256> = keys.iter().map(keccak256).collect();
         let storage_proof = loader
-            .generate_storage_proofs(self.db, storage_root, hashed_address, keys)
+            .generate_storage_proofs(self.db, storage_root, hashed_address, &hashed_keys)
             .map_err(|_| ProviderError::StateTree)?;
         Ok((
             account_proof.into_iter().map(Bytes::from).collect(),
