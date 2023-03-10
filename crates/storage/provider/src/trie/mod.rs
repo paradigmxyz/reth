@@ -581,7 +581,7 @@ mod tests {
     use std::{collections::HashMap, str::FromStr};
     use triehash::sec_trie_root;
 
-    fn load_genesis_root<DB: Database>(tx: &mut Transaction<'_, DB>) -> Genesis {
+    fn load_mainnet_genesis_root<DB: Database>(tx: &mut Transaction<'_, DB>) -> Genesis {
         let ChainSpec { genesis, .. } = MAINNET.clone();
 
         // Insert account state
@@ -748,7 +748,7 @@ mod tests {
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
-        let genesis = load_genesis_root(&mut tx);
+        let genesis = load_mainnet_genesis_root(&mut tx);
 
         let state_root = genesis_state_root(&genesis.alloc);
 
@@ -854,7 +854,7 @@ mod tests {
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
-        load_genesis_root(&mut tx);
+        load_mainnet_genesis_root(&mut tx);
 
         let root = trie.calculate_root(&tx).expect("should be able to load trie");
 
@@ -885,6 +885,81 @@ mod tests {
 
         for (node, expected) in proof.into_iter().zip(expected.into_iter()) {
             assert_eq!(Bytes::from(node.as_slice()), Bytes::from(expected));
+        }
+    }
+
+    #[test]
+    fn get_storage_proofs() {
+        let trie = DBTrieLoader::default();
+        let db = create_test_rw_db();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
+
+        let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
+        let hashed_address = keccak256(address);
+
+        let storage = HashMap::from([
+            (H256::zero(), U256::from(3)),
+            (H256::from_low_u64_be(2), U256::from(1)),
+        ]);
+
+        let code = "el buen fla";
+        let account = Account {
+            nonce: 155,
+            balance: U256::from(414241124u32),
+            bytecode_hash: Some(keccak256(code)),
+        };
+        tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
+
+        for (k, v) in storage.clone() {
+            tx.put::<tables::HashedStorage>(
+                hashed_address,
+                StorageEntry { key: keccak256(k), value: v },
+            )
+            .unwrap();
+        }
+
+        let root = trie.calculate_root(&tx).expect("should be able to load trie");
+
+        tx.commit().unwrap();
+
+        let (account_proof, storage_root) = trie
+            .generate_acount_proof(&tx.inner().tx().unwrap(), root, hashed_address)
+            .expect("failed to generate proof");
+
+        // values extracted from geth via rpc:
+        let expected_account = hex!("f86fa1205126413e7857595763591580306b3f228f999498c4c5dfa74f633364936e7651b84bf849819b8418b0d164a029ff6f4d518044318d75b118cf439d8d3d7249c8afcba06ba9ecdf8959410571a02ce1a85814ad94a94ed2a1abaf7c57e9b64326622c1b8c21b4ba4d0e7df61392").as_slice();
+        let expected_storage = [
+            [
+                // 0x0000000000000000000000000000000000000000000000000000000000000002
+                hex!("f8518080a04355bd3061ad2d17e0782413925b4fd81a56bd162d91eedb2a00d6c87611471480a015503e91f9250654cf72906e38a7cb14c3f1cc06658379d37f0c5b5c32482880808080808080808080808080").as_slice(),
+                hex!("e2a0305787fa12a823e0f2b7631cc41b3ba8828b3321ca811111fa75cd3aa3bb5ace01").as_slice(),
+            ],
+            [
+                // 0x0000000000000000000000000000000000000000000000000000000000000000
+                hex!("f8518080a04355bd3061ad2d17e0782413925b4fd81a56bd162d91eedb2a00d6c87611471480a015503e91f9250654cf72906e38a7cb14c3f1cc06658379d37f0c5b5c32482880808080808080808080808080").as_slice(),
+                hex!("e2a0390decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e56303").as_slice(),
+            ]
+        ];
+
+        assert!(storage_root != EMPTY_ROOT);
+
+        assert_eq!(account_proof.len(), 1);
+        assert_eq!(account_proof[0], expected_account);
+
+        let storage_proofs = trie
+            .generate_storage_proofs(
+                &tx.inner().tx().unwrap(),
+                storage_root,
+                hashed_address,
+                &[keccak256(H256::from_low_u64_be(2)), keccak256(H256::zero())],
+            )
+            .expect("couldn't generate storage proof");
+
+        for (proof, expected) in storage_proofs.into_iter().zip(expected_storage) {
+            assert_eq!(proof.len(), expected.len());
+            for (got_node, expected_node) in proof.into_iter().zip(expected) {
+                assert_eq!(got_node, expected_node);
+            }
         }
     }
 }
