@@ -290,6 +290,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                 Destination::Pool(move_to) => {
                     debug_assert!(!move_to.eq(&current), "destination must be different");
                     self.move_transaction(current, move_to, &id);
+                    if matches!(move_to, SubPool::Pending) {
+                        outcome.promoted.push(hash);
+                    }
                 }
             }
         }
