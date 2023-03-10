@@ -76,7 +76,7 @@ pub(crate) enum EthApiError {
     Internal(#[from] reth_interfaces::Error),
     /// Error related to signing
     #[error(transparent)]
-    Signing(SignError),
+    Signing(#[from] SignError),
 }
 
 impl From<EthApiError> for RpcError {
@@ -340,11 +340,6 @@ pub(crate) enum SignError {
     NoAccount,
     #[error("Given typed data is not valid")]
     TypedData,
-}
-impl From<SignError> for EthApiError {
-    fn from(err: SignError) -> Self {
-        EthApiError::Signing(err)
-    }
 }
 /// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.
 ///
