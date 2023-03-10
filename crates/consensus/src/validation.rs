@@ -592,7 +592,7 @@ mod tests {
                 provider,
                 &MAINNET,
             ),
-            Err(ConsensusError::NonceNotConsistent.into())
+            Err(ConsensusError::from(InvalidTransactionError::NonceNotConsistent).into())
         )
     }
 
@@ -611,7 +611,7 @@ mod tests {
                 provider,
                 &MAINNET,
             ),
-            Err(ConsensusError::NonceNotConsistent.into())
+            Err(ConsensusError::from(InvalidTransactionError::NonceNotConsistent).into())
         );
     }
 
