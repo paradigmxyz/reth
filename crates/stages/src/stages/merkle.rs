@@ -124,7 +124,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?block_root, expected = ?trie_root, "Block's root state failed verification");
             return Err(StageError::Validation {
                 block: previous_stage_progress,
-                error: consensus::Error::BodyStateRootDiff { got: trie_root, expected: block_root },
+                error: consensus::ConsensusError::BodyStateRootDiff {
+                    got: trie_root,
+                    expected: block_root,
+                },
             })
         }
 
@@ -167,7 +170,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             warn!(target: "sync::stages::merkle::unwind", ?unwind_to, got = ?block_root, expected = ?target_root, "Block's root state failed verification");
             return Err(StageError::Validation {
                 block: unwind_to,
-                error: consensus::Error::BodyStateRootDiff {
+                error: consensus::ConsensusError::BodyStateRootDiff {
                     got: block_root,
                     expected: target_root,
                 },

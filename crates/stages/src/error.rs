@@ -17,7 +17,7 @@ pub enum StageError {
         block: BlockNumber,
         /// The underlying consensus error.
         #[source]
-        error: consensus::Error,
+        error: consensus::ConsensusError,
     },
     /// The stage encountered a database error.
     #[error("An internal database error occurred: {0}")]

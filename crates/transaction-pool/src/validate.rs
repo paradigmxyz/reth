@@ -7,10 +7,7 @@ use crate::{
     MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
 use reth_interfaces::consensus::Error;
-use reth_primitives::{
-    Address, TransactionKind, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
-    U256,
-};
+use reth_primitives::{Address, TransactionKind, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256, InvalidTransactionError};
 use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
 use reth_primitives::rpc::transaction;
@@ -29,7 +26,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
-    Invalid(T, PoolError),
+    Invalid(T, InvalidTransactionError),
     /// An error occurred while trying to validate the transaction
     Error(T, Box<dyn std::error::Error + Send + Sync>)
 }
