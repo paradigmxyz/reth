@@ -18,26 +18,31 @@ pub struct SubStateData {
 }
 
 impl SubStateData {
-    /// apply changesets to substate
+    /// Apply changesets to substate.
     pub fn apply(&mut self, changesets: &[ExecutionResult]) {
         for changeset in changesets {
-            for tx_changeset in changeset.tx_changesets.iter() {
-                // apply accounts
-                for (address, account_change) in tx_changeset.changeset.iter() {
-                    // revert account
-                    self.apply_account(address, &account_change.account);
-                    // revert its storage
-                    self.apply_storage(address, &account_change.storage);
-                }
-                // apply bytecodes
-                for (hash, bytecode) in tx_changeset.new_bytecodes.iter() {
-                    self.bytecodes.entry(*hash).or_insert((0, Bytecode(bytecode.clone()))).0 += 1;
-                }
+            self.apply_one(changeset)
+        }
+    }
+
+    /// Apply one changeset to substate.
+    pub fn apply_one(&mut self, changeset: &ExecutionResult) {
+        for tx_changeset in changeset.tx_changesets.iter() {
+            // apply accounts
+            for (address, account_change) in tx_changeset.changeset.iter() {
+                // revert account
+                self.apply_account(address, &account_change.account);
+                // revert its storage
+                self.apply_storage(address, &account_change.storage);
             }
-            // apply block reward
-            for (address, change) in changeset.block_changesets.iter() {
-                self.apply_account(address, change)
+            // apply bytecodes
+            for (hash, bytecode) in tx_changeset.new_bytecodes.iter() {
+                self.bytecodes.entry(*hash).or_insert((0, Bytecode(bytecode.clone()))).0 += 1;
             }
+        }
+        // apply block reward
+        for (address, change) in changeset.block_changesets.iter() {
+            self.apply_account(address, change)
         }
     }
 
@@ -139,7 +144,7 @@ impl SubStateData {
                             // remove account that we didn't change from substate
 
                             entry.remove_entry();
-                            return
+                            return;
                         }
                         val.info = Account::default();
                         val.storage.clear();
@@ -192,7 +197,7 @@ impl AccountSubState {
 
         if cnt == 1 {
             self.storage_is_clear = None;
-            return true
+            return true;
         }
         false
     }
@@ -210,13 +215,13 @@ impl AccountSubState {
 /// with substate changes that happened previously.
 pub struct SubStateWithProvider<'a, SP: StateProvider> {
     /// Substate
-    pub substate: &'a SubStateData,
+    substate: &'a SubStateData,
     /// Provider
-    pub provider: SP,
+    provider: SP,
     /// side chain block hashes
-    pub sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
+    sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     /// Last N canonical hashes,
-    pub canonical_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
+    canonical_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
 }
 
 impl<'a, SP: StateProvider> SubStateWithProvider<'a, SP> {
@@ -239,7 +244,7 @@ impl<'a, SP: StateProvider> BlockHashProvider for SubStateWithProvider<'a, SP> {
         let block_number = number.as_limbs()[0];
         if let Some(sidechain_block_hash) = self.sidechain_block_hashes.get(&block_number).cloned()
         {
-            return Ok(Some(sidechain_block_hash))
+            return Ok(Some(sidechain_block_hash));
         }
 
         Ok(Some(
@@ -254,7 +259,7 @@ impl<'a, SP: StateProvider> BlockHashProvider for SubStateWithProvider<'a, SP> {
 impl<'a, SP: StateProvider> AccountProvider for SubStateWithProvider<'a, SP> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         if let Some(account) = self.substate.accounts.get(&address).map(|acc| acc.info) {
-            return Ok(Some(account))
+            return Ok(Some(account));
         }
         self.provider.basic_account(address)
     }
@@ -268,10 +273,10 @@ impl<'a, SP: StateProvider> StateProvider for SubStateWithProvider<'a, SP> {
     ) -> Result<Option<reth_primitives::StorageValue>> {
         if let Some(substate_account) = self.substate.accounts.get(&account) {
             if let Some(storage) = substate_account.storage.get(&storage_key) {
-                return Ok(Some(*storage))
+                return Ok(Some(*storage));
             }
             if !substate_account.ask_provider() {
-                return Ok(Some(U256::ZERO))
+                return Ok(Some(U256::ZERO));
             }
         }
         self.provider.storage(account, storage_key)
@@ -279,7 +284,7 @@ impl<'a, SP: StateProvider> StateProvider for SubStateWithProvider<'a, SP> {
 
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
         if let Some((_, bytecode)) = self.substate.bytecodes.get(&code_hash).cloned() {
-            return Ok(Some(bytecode))
+            return Ok(Some(bytecode));
         }
         self.provider.bytecode_by_hash(code_hash)
     }

@@ -10,6 +10,10 @@ use std::{
     marker::{Send, Sync},
 };
 
+
+/// Helper type containing key value pairs.
+pub type KeyValue<T> = (<T as Table>::Key, <T as Table>::Value);
+
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
     /// Compressed type.
@@ -68,9 +72,6 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// Value element of `Table`.
     type Value: Value;
 }
-
-/// Helper type containing key value pair.s
-pub type KeyValue<T> = (<T as Table>::Key, <T as Table>::Value);
 
 /// DupSort allows for keys to be repeated in the database.
 ///

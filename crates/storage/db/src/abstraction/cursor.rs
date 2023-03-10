@@ -162,7 +162,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> Walker<'cursor, 'tx, T,
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
     Walker<'cursor, 'tx, T, CURSOR>
 {
-    /// Return reference to the underlying cursor.
+    /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), Error> {
         self.cursor.delete_current()
     }
@@ -195,7 +195,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> ReverseWalker<'cursor, 
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
     ReverseWalker<'cursor, 'tx, T, CURSOR>
 {
-    /// Return reference to the underlying cursor.
+    /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), Error> {
         self.cursor.delete_current()
     }
@@ -289,7 +289,7 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 't
 impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
     RangeWalker<'cursor, 'tx, T, CURSOR>
 {
-    /// Return reference to the underlying cursor.
+    /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), Error> {
         self.cursor.delete_current()
     }
@@ -312,7 +312,7 @@ pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
 impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T>>
     DupWalker<'cursor, 'tx, T, CURSOR>
 {
-    /// Return reference to the underlying cursor.
+    /// Delete current item that walker points to.
     pub fn delete_current(&mut self) -> Result<(), Error> {
         self.cursor.delete_current()
     }

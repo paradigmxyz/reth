@@ -68,14 +68,14 @@ pub enum ProviderError {
     /// Reached the end of the transaction sender table.
     #[error("Got to the end of the transaction sender table")]
     EndOfTransactionSenderTable,
-    /// Missing block hash in BlockchanTree
+    /// Missing block hash in BlockchainTree
     #[error("Missing block hash for block #{block_number:?} in blockchain tree")]
     BlockchainTreeBlockHash { block_number: BlockNumber },
     /// Thrown when required header related data was not found but was required.
     #[error("requested data not found")]
     HeaderNotFound,
-    /// Missmatch of sender and transaction
-    #[error("Missamatch of sender and transaction id {tx_id}")]
+    /// Mismatch of sender and transaction
+    #[error("Mismatch of sender and transaction id {tx_id}")]
     MismatchOfTransactionAndSenderId { tx_id: TxNumber },
     /// Block body wrong transaction count
     #[error("Stored block indices does not match transaction count")]

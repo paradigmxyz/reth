@@ -42,11 +42,6 @@ impl<DB> ShareableDatabase<DB> {
     pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
         Self { db, chain_spec }
     }
-
-    /// Take database back, useful if database is a object.
-    pub fn take(self) -> DB {
-        self.db
-    }
 }
 
 impl<DB: Clone> Clone for ShareableDatabase<DB> {

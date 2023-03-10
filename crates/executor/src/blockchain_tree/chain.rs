@@ -23,7 +23,7 @@ pub struct Chain {
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
 }
 
-/// Where does the chain connect to.
+/// Contains fork block and hash.
 #[derive(Clone, Copy)]
 pub struct ForkBlock {
     /// Block number of block that chains branches from
@@ -97,35 +97,30 @@ impl Chain {
     /// If parent block is the tip mark chain fork.
     pub fn new_canonical_fork<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
         block: &SealedBlockWithSenders,
-        parent_header: SealedHeader,
+        parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         provider: &SP,
         consensus: &C,
         factory: &EF,
     ) -> Result<Self, Error> {
-        // verify block against the parent
-        consensus.validate_header(block, U256::ZERO)?;
-        consensus.pre_validate_header(block, &parent_header)?;
-        consensus.pre_validate_block(block)?;
-
         // substate
         let substate = SubStateData::default();
         let empty = BTreeMap::new();
-
-        let unseal = block.clone().into_components().0.unseal();
-
-        let changeset = factory
-            .with_sp(SubStateWithProvider::new(&substate, provider, &empty, canonical_block_hashes))
-            .execute_and_verify_receipt(&unseal, U256::MAX, None)?;
-
-        Ok(Self {
-            substate,
-            changesets: vec![changeset],
-            blocks: BTreeMap::from([(block.number, block.clone())]),
-        })
+        
+        let substate_with_sp =
+            SubStateWithProvider::new(&substate, provider, &empty, canonical_block_hashes);
+        
+        let changeset = Self::validate_and_execute(
+            block.clone(),
+            parent_header,
+            substate_with_sp,
+            consensus,
+            factory,
+        )?;
+        
+        Ok(Self::new(vec![(block.clone(), changeset)]))
     }
 
-    /// DONE
     /// Create new chain that branches out from existing side chain.
     pub fn new_chain_fork<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
         &self,
@@ -136,16 +131,11 @@ impl Chain {
         consensus: &C,
         factory: &EF,
     ) -> Result<Self, Error> {
-        let parent_nubmer = block.number - 1;
+        let parent_number = block.number - 1;
         let parent = self
             .blocks
-            .get(&parent_nubmer)
-            .ok_or(ExecError::BlockNumberNotFoundInChain { block_number: parent_nubmer })?;
-
-        // verify block against the parent
-        consensus.validate_header(&block, U256::ZERO)?;
-        consensus.pre_validate_header(&block, parent)?;
-        consensus.pre_validate_block(&block)?;
+            .get(&parent_number)
+            .ok_or(ExecError::BlockNumberNotFoundInChain { block_number: parent_number })?;
 
         // revert changesets
         let revert_from = self.changesets.len() - (self.tip().number - parent.number) as usize;
@@ -154,17 +144,20 @@ impl Chain {
         // Revert changesets to get the state of the parent that we need to apply the change.
         substate.revert(&self.changesets[revert_from..]);
 
-        let unseal = block.clone().into_components().0.unseal();
-
-        // execute block
-        let changeset = factory
-            .with_sp(SubStateWithProvider::new(
-                &substate,
-                provider,
-                &side_chain_block_hashes,
-                canonical_block_hashes,
-            ))
-            .execute_and_verify_receipt(&unseal, U256::MAX, None)?;
+        let substate_with_sp = SubStateWithProvider::new(
+            &substate,
+            provider,
+            &side_chain_block_hashes,
+            canonical_block_hashes,
+        );
+        let changeset = Self::validate_and_execute(
+            block.clone(),
+            parent,
+            substate_with_sp,
+            consensus,
+            factory,
+        )?;
+        substate.apply_one(&changeset);
 
         let chain = Self {
             substate,
@@ -174,6 +167,28 @@ impl Chain {
 
         // if all is okay, return new chain back. Present chain is not modified.
         Ok(chain)
+    }
+
+    /// Validate and execute block and return execution result or error.
+    fn validate_and_execute<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
+        block: SealedBlockWithSenders,
+        parent_block: &SealedHeader,
+        substate: SubStateWithProvider<'_, SP>,
+        consensus: &C,
+        factory: &EF,
+    ) -> Result<ExecutionResult, Error> {
+        consensus.validate_header(&block, U256::ZERO)?;
+        consensus.pre_validate_header(&block, parent_block)?;
+        consensus.pre_validate_block(&block)?;
+
+        let (unseal, senders) = block.into_components();
+        let unseal = unseal.unseal();
+        let res = factory.with_sp(substate).execute_and_verify_receipt(
+            &unseal,
+            U256::MAX,
+            Some(senders),
+        )?;
+        Ok(res)
     }
 
     /// Append block to this chain
@@ -186,22 +201,21 @@ impl Chain {
         consensus: &C,
         factory: &EF,
     ) -> Result<(), Error> {
-        let (_, parent) = self.blocks.last_key_value().expect("Chain has at least one block");
+        let (_, parent_block) = self.blocks.last_key_value().expect("Chain has at least one block");
 
-        consensus.validate_header(&block, U256::ZERO)?;
-        consensus.pre_validate_header(&block, parent)?;
-        consensus.pre_validate_block(&block)?;
-
-        let unseal = block.clone().into_components().0.unseal();
-        let changeset = factory
-            .with_sp(SubStateWithProvider::new(
+        let changeset = Self::validate_and_execute(
+            block.clone(),
+            parent_block,
+            SubStateWithProvider::new(
                 &self.substate,
                 provider,
                 &side_chain_block_hashes,
                 canonical_block_hashes,
-            ))
-            .execute_and_verify_receipt(&unseal, U256::MAX, None)?;
-
+            ),
+            consensus,
+            factory,
+        )?;
+        self.substate.apply_one(&changeset);
         self.changesets.push(changeset);
         self.blocks.insert(block.number, block);
         Ok(())
@@ -211,13 +225,11 @@ impl Chain {
     /// Take substate from newest one.
     pub fn append_chain(&mut self, chain: Chain) -> bool {
         if self.tip().hash() != chain.last().parent_hash {
-            return false
+            return false;
         }
-
         self.blocks.extend(chain.blocks.into_iter());
         self.changesets.extend(chain.changesets.into_iter());
         self.substate = chain.substate;
-
         true
     }
 
@@ -246,10 +258,10 @@ impl Chain {
     /// invalid.
     pub fn split_at_number(mut self, block_number: BlockNumber) -> (Option<Chain>, Option<Chain>) {
         if block_number >= *self.blocks.last_entry().unwrap().key() {
-            return (Some(self), None)
+            return (Some(self), None);
         }
         if block_number < *self.blocks.first_entry().unwrap().key() {
-            return (None, Some(self))
+            return (None, Some(self));
         }
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
         let (first_changesets, second_changeset) = self.changesets.split_at(self.blocks.len());

@@ -4,27 +4,31 @@ use super::chain::{Chain, ChainId, ForkBlock};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-/// Internal indices of the block.
+/// Internal indices of the blocks and chains.  This is main connection 
+/// between blocks, chains and canonical chain.
+/// 
+/// It contains list of canonical block hashes, forks to childs blocks
+/// and block hash to chain id.
 #[derive(Clone)]
 pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,
-    /// Index needed when discarding the chain, so we can remove connected chains from tree.
-    /// NOTE: It contains just a blocks that are forks as a key and not all blocks.
-    fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
-    /// Canonical chain. Contains N number (depends on `finalization_depth`) of blocks.
-    /// These blocks are found in fork_to_child but not inside `blocks_to_chain` or
-    /// `number_to_block` as those are chain specific indices.
-    canonical_chain: BTreeMap<BlockNumber, BlockHash>,
-    /// Block hashes and side chain they belong
-    blocks_to_chain: HashMap<BlockHash, ChainId>,
-    /* Add additional indices if needed as in tx hash index to block */
-    /// Utility index, Block number to block hash.
-    index_number_to_block: HashMap<BlockNumber, HashSet<BlockHash>>,
     /// For EVM's "BLOCKHASH" opcode we require last 256 block hashes. So we need to specify
     /// at least `additional_canonical_block_hashes`+`finalization_windows`, for eth that would be
     /// 256+64.
     num_of_additional_canonical_block_hashes: u64,
+    /// Canonical chain. Contains N number (depends on `finalization_depth`) of blocks.
+    /// These blocks are found in fork_to_child but not inside `blocks_to_chain` or
+    /// `number_to_block` as those are chain specific indices.
+    canonical_chain: BTreeMap<BlockNumber, BlockHash>,
+    /// Index needed when discarding the chain, so we can remove connected chains from tree.
+    /// NOTE: It contains just a blocks that are forks as a key and not all blocks.
+    fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+    /// Block hashes and side chain they belong
+    blocks_to_chain: HashMap<BlockHash, ChainId>,
+    /// Utility index. Block number to block hash. Can be used for
+    /// RPC to fetch all pending block in chain by its number.
+    index_number_to_block: HashMap<BlockNumber, HashSet<BlockHash>>,
 }
 
 impl BlockIndices {
@@ -88,7 +92,7 @@ impl BlockIndices {
         self.fork_to_child.entry(first.parent_hash).or_default().insert(first.hash());
     }
 
-    /// get blocks chain id
+    /// Get the chain ID the block belongs to
     pub fn get_blocks_chain_id(&self, block: &BlockHash) -> Option<ChainId> {
         self.blocks_to_chain.get(block).cloned()
     }

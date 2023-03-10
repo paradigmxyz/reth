@@ -54,4 +54,16 @@ pub enum Error {
     BlockNumberNotFoundInChain { block_number: BlockNumber },
     #[error("Block hash {block_hash} not found in blockchain tree chain")]
     BlockHashNotFoundInChain { block_hash: BlockHash },
+    #[error("Transaction error on revert: {inner:?}")]
+    CanonicalRevert {
+        inner: String,
+    },
+    #[error("Transaction error on commit: {inner:?}")]
+    CanonicalCommit {
+        inner: String,
+    },
+    #[error("Transaction error on pipeline status update: {inner:?}")]
+    PipelineStatusUpdate {
+        inner: String,
+    }
 }

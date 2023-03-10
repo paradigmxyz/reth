@@ -51,12 +51,11 @@ use self::block_indices::BlockIndices;
 ///
 ///
 /// main functions:
-/// * insert_block: insert block inside tree. Execute it and save it to database.
-/// * finalize_block: Flush chain that joins to finalized block.
-/// * make_canonical: Check if we have the hash of block that we want to finalize and commit it to
-///   db. If we dont have the block pipeline syncing should start to fetch the blocks from p2p.
-/// *
-/// Do reorg if needed
+/// * insert_block: Connect block to chain, execute it and if valid insert block inside tree.
+/// * finalize_block: Remove chains that join to now finalized block, as chain becomes invalid.
+/// * make_canonical: Check if we have the hash of block that we want to finalize and
+///     commit it to db. If we dont have the block, pipeline syncing should start
+///     to fetch the blocks from p2p. Do reorg in tables if canonical chain if needed.
 
 pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// chains and present data
@@ -223,7 +222,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let parent_header = parent_header.seal(block.parent_hash);
         let chain = Chain::new_canonical_fork(
             &block,
-            parent_header,
+            &parent_header,
             canonical_block_hashes,
             &provider,
             &self.externals.consensus,
@@ -250,7 +249,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             } else {
                 // if there is no fork block that point to other chains, break the loop.
                 // it means that this fork joins to canonical block.
-                break
+                break;
             }
         }
         hashes
@@ -268,9 +267,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             // get fork block chain
             if let Some(fork_chain_id) = self.block_indices.get_blocks_chain_id(&fork.hash) {
                 chain_id = fork_chain_id;
-                continue
+                continue;
             }
-            break
+            break;
         }
         if self.block_indices.canonical_hash(&fork.number) == Some(fork.hash) {
             Some(fork)
@@ -311,7 +310,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 block_hash: block.hash(),
                 last_finalized: last_finalized_block,
             }
-            .into())
+            .into());
         }
 
         // we will not even try to insert blocks that are too far in future.
@@ -321,34 +320,34 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 block_hash: block.hash(),
                 last_finalized: last_finalized_block,
             }
-            .into())
+            .into());
         }
 
         // check if block is already inside Tree
         if self.block_indices.contains_block_hash(block.hash()) {
             // block is known return that is inserted
-            return Ok(true)
+            return Ok(true);
         }
 
         // check if block is part of canonical chain
         if self.block_indices.canonical_hash(&block.number) == Some(block.hash()) {
             // block is part of canonical chain
-            return Ok(true)
+            return Ok(true);
         }
 
         // check if block parent can be found in Tree
         if let Some(parent_chain) = self.block_indices.get_blocks_chain_id(&block.parent_hash) {
             self.fork_side_chain(block.clone(), parent_chain)?;
-            //self.db.tx_mut()?.put::<tables::PendingBlocks>(block.hash(), block.unseal())?;
-            return Ok(true)
+            // TODO save pending block to database
+            return Ok(true);
         }
 
         // if not found, check if it can be found inside canonical chain.
         if Some(block.parent_hash) == self.block_indices.canonical_hash(&(block.number - 1)) {
             // create new chain that points to that block
             self.fork_canonical_chain(block.clone())?;
-            //self.db.tx_mut()?.put::<tables::PendingBlocks>(block.hash(), block.unseal())?;
-            return Ok(true)
+            // TODO save pending block to database
+            return Ok(true);
         }
         // NOTE: Block doesn't have a parent, and if we receive this block in `make_canonical`
         // function this could be a trigger to initiate p2p syncing, as we are missing the
@@ -374,8 +373,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
-        let num_of_canonical_hashes = self.finalization_window +
-            self.block_indices.num_of_additional_canonical_block_hashes();
+        let num_of_canonical_hashes = self.finalization_window
+            + self.block_indices.num_of_additional_canonical_block_hashes();
 
         let last_canonical_hashes = self
             .externals
@@ -407,9 +406,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         } else {
             if self.block_indices.is_block_hash_canonical(block_hash) {
                 // If block is already canonical don't return error.
-                return Ok(())
+                return Ok(());
             }
-            return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
+            return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into());
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
 
@@ -470,8 +469,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let old_canon_chain = self.revert_canonical(canon_fork.number)?;
             self.commit_canonical(new_canon_chain)?;
 
+            // TODO we can potentially merge now reverted canonical chain with
+            // one of the chain from the tree. Low priority.
+
             // insert old canonical chain to BlockchainTree.
-            // TODO check if there there is chains that can be merged.
             self.insert_chain(old_canon_chain);
         }
 
@@ -486,15 +487,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let (blocks, changesets, _) = chain.into_inner();
         for item in blocks.into_iter().zip(changesets.into_iter()) {
             let ((_, block), changeset) = item;
-            tx.insert_block(block, self.externals.chain_spec.as_ref(), changeset).map_err(|e| {
-                println!("commit error:{e:?}");
-                ExecError::VerificationFailed
-            })?;
+            tx.insert_block(block, self.externals.chain_spec.as_ref(), changeset)
+                .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
         }
         // update pipeline progress.
-        tx.update_pipeline_stages(new_tip).map_err(|_| ExecError::VerificationFailed)?;
-
-        // TODO error cast
+        tx.update_pipeline_stages(new_tip)
+            .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
         tx.commit()?;
 
@@ -515,14 +513,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 self.externals.chain_spec.as_ref(),
                 (revert_until + 1)..,
             )
-            .map_err(|e| {
-                println!("revert error:{e:?}");
-                ExecError::VerificationFailed
-            })?;
+            .map_err(|e| ExecError::CanonicalRevert { inner: e.to_string() })?;
 
         // update pipeline progress.
-        tx.update_pipeline_stages(revert_until).map_err(|_| ExecError::VerificationFailed)?;
-        // TODO error cast
+        tx.update_pipeline_stages(revert_until)
+            .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
         tx.commit()?;
 
@@ -636,7 +631,6 @@ mod tests {
 
     #[test]
     fn sanity_path() {
-        //let genesis
         let (mut block1, exec1) = blocks::block1();
         block1.block.header.header.number = 11;
         block1.block.header.header.state_root =
