@@ -431,14 +431,19 @@ where
         }
 
         let balance_increments = self.post_block_balance_increments(block, total_difficulty)?;
+        let mut includes_block_transition = !balance_increments.is_empty();
         for (address, increment) in balance_increments.into_iter() {
             self.increment_account_balance(address, increment, &mut post_state)?;
         }
 
         if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
+            includes_block_transition = true;
             self.apply_dao_fork_changes(&mut post_state)?;
         }
-        post_state.finish_transition();
+
+        if includes_block_transition {
+            post_state.finish_transition();
+        }
 
         Ok(post_state)
     }
@@ -744,7 +749,7 @@ mod tests {
         );
     }
 
-    /*#[test]
+    #[test]
     fn dao_hardfork_irregular_state_change() {
         let header = Header { number: 1, ..Header::default() };
 
@@ -778,7 +783,11 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(out.tx_changesets.len(), 0, "No tx");
+        assert_eq!(
+            out.transitions_count(),
+            1,
+            "Should only have 1 transition (the block transition)"
+        );
 
         // Check if cache is set
         // beneficiary
@@ -793,24 +802,15 @@ mod tests {
         }
 
         // check changesets
-        let change_set =
-            out.block_changesets.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+        let beneficiary_state =
+            out.accounts().get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap().unwrap();
         assert_eq!(
-            *change_set,
-            AccountInfoChangeSet::Changed {
-                new: Account { balance: U256::from(beneficiary_balance), ..Default::default() },
-                old: Account { balance: U256::ZERO, ..Default::default() }
-            }
+            beneficiary_state,
+            Account { balance: U256::from(beneficiary_balance), ..Default::default() },
         );
-        for (i, address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
-            let change_set = out.block_changesets.get(address).unwrap();
-            assert_eq!(
-                *change_set,
-                AccountInfoChangeSet::Changed {
-                    new: Account { balance: U256::ZERO, ..Default::default() },
-                    old: Account { balance: U256::from(i), ..Default::default() }
-                }
-            );
+        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+            let updated_account = out.accounts().get(address).unwrap().unwrap();
+            assert_eq!(updated_account, Account { balance: U256::ZERO, ..Default::default() });
         }
     }
 
@@ -865,10 +865,12 @@ mod tests {
         let mut executor = Executor::new(chain_spec, db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
-        assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
-
-        let changesets = out.tx_changesets[0].clone();
-        assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
+        assert_eq!(
+            out.transitions_count(),
+            2,
+            "Should only have two transitions (the transaction and the block)"
+        );
+        assert_eq!(out.bytecode().len(), 0, "Should have zero new bytecodes");
 
         let post_account_caller = Account {
             balance: U256::from(0x0de0b6b3a761cf60u64),
@@ -877,21 +879,20 @@ mod tests {
         };
 
         assert_eq!(
-            changesets.changeset.get(&address_caller).unwrap().account,
-            AccountInfoChangeSet::Changed { new: post_account_caller, old: pre_account_caller },
+            out.accounts().get(&address_caller).unwrap().unwrap(),
+            post_account_caller,
             "Caller account has changed and fee is deduced"
         );
 
-        let selfdestroyer_changeset = changesets.changeset.get(&address_selfdestruct).unwrap();
-
-        // check account
         assert_eq!(
-            selfdestroyer_changeset.account,
-            AccountInfoChangeSet::Destroyed { old: pre_account_selfdestroyed },
-            "Selfdestroyed account"
+            out.accounts().get(&address_selfdestruct).unwrap(),
+            &None,
+            "Selfdestructed account should have been deleted"
         );
-
-        assert!(selfdestroyer_changeset.wipe_storage);
+        assert!(
+            out.storage().get(&address_selfdestruct).unwrap().wiped,
+            "Selfdestructed account should have its storage wiped"
+        );
     }
 
     // Test vector from https://github.com/ethereum/tests/blob/3156db5389921125bb9e04142d18e0e7b0cf8d64/BlockchainTests/EIPTests/bc4895-withdrawals/twoIdenticalIndexDifferentValidator.json
@@ -913,7 +914,7 @@ mod tests {
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
-        assert_eq!(out.tx_changesets.len(), 0, "No tx");
+        assert_eq!(out.transitions_count(), 1, "Only one transition (the block transition)");
 
         let withdrawal_sum = withdrawals.iter().fold(U256::ZERO, |sum, w| sum + w.amount_wei());
         let beneficiary_account = executor.db().accounts.get(&withdrawal_beneficiary).unwrap();
@@ -921,29 +922,28 @@ mod tests {
         assert_eq!(beneficiary_account.info.nonce, 0);
         assert_eq!(beneficiary_account.account_state, AccountState::StorageCleared);
 
-        assert_eq!(out.block_changesets.len(), 1);
         assert_eq!(
-            out.block_changesets.get(&withdrawal_beneficiary),
-            Some(&AccountInfoChangeSet::Created {
-                new: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
-            })
+            out.accounts().get(&withdrawal_beneficiary).unwrap(),
+            &Some(Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None }),
+            "Withdrawal account should have gotten its balance set"
         );
 
         // Execute same block again
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
-        assert_eq!(out.tx_changesets.len(), 0, "No tx");
-
-        assert_eq!(out.block_changesets.len(), 1);
         assert_eq!(
-            out.block_changesets.get(&withdrawal_beneficiary),
-            Some(&AccountInfoChangeSet::Changed {
-                old: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
-                new: Account {
-                    nonce: 0,
-                    balance: withdrawal_sum + withdrawal_sum,
-                    bytecode_hash: None
-                },
-            })
+            out.transitions_count(),
+            1,
+            "Should only have one transition (the block transition)"
+        );
+
+        assert_eq!(
+            out.accounts().get(&withdrawal_beneficiary).unwrap(),
+            &Some(Account {
+                nonce: 0,
+                balance: withdrawal_sum + withdrawal_sum,
+                bytecode_hash: None
+            }),
+            "Withdrawal account should have gotten its balance set"
         );
     }
 
@@ -967,27 +967,35 @@ mod tests {
         };
         let mut executor = Executor::new(chain_spec, db);
         // touch account
-        executor.commit_changes(hash_map::HashMap::from([(
-            account,
-            RevmAccount { ..default_acc.clone() },
-        )]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(account, RevmAccount { ..default_acc.clone() })]),
+            &mut PostState::default(),
+        );
         // destroy account
-        executor.commit_changes(hash_map::HashMap::from([(
-            account,
-            RevmAccount { is_destroyed: true, is_touched: true, ..default_acc.clone() },
-        )]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(
+                account,
+                RevmAccount { is_destroyed: true, is_touched: true, ..default_acc.clone() },
+            )]),
+            &mut PostState::default(),
+        );
         // re-create account
-        executor.commit_changes(hash_map::HashMap::from([(
-            account,
-            RevmAccount { is_touched: true, storage_cleared: true, ..default_acc.clone() },
-        )]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(
+                account,
+                RevmAccount { is_touched: true, storage_cleared: true, ..default_acc.clone() },
+            )]),
+            &mut PostState::default(),
+        );
         // touch account
-        executor
-            .commit_changes(hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]),
+            &mut PostState::default(),
+        );
 
         let db = executor.db();
 
         let account = db.load_account(account).unwrap();
         assert_eq!(account.account_state, AccountState::StorageCleared);
-    }*/
+    }
 }
