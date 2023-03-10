@@ -981,6 +981,7 @@ mod tests {
         // touch account
         executor.commit_changes(
             hash_map::HashMap::from([(account, RevmAccount { ..default_acc.clone() })]),
+            true,
             &mut PostState::default(),
         );
         // destroy account
@@ -989,6 +990,7 @@ mod tests {
                 account,
                 RevmAccount { is_destroyed: true, is_touched: true, ..default_acc.clone() },
             )]),
+            true,
             &mut PostState::default(),
         );
         // re-create account
@@ -997,11 +999,13 @@ mod tests {
                 account,
                 RevmAccount { is_touched: true, storage_cleared: true, ..default_acc.clone() },
             )]),
+            true,
             &mut PostState::default(),
         );
         // touch account
         executor.commit_changes(
             hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]),
+            true,
             &mut PostState::default(),
         );
 
