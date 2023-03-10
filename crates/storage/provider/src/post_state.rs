@@ -510,28 +510,28 @@ mod tests {
 
         let mut post_state = PostState::new();
 
-        let ADDRESS_A = Address::zero();
-        let ADDRESS_B = Address::repeat_byte(0xff);
+        let address_a = Address::zero();
+        let address_b = Address::repeat_byte(0xff);
 
-        let ACCOUNT_A = Account { balance: U256::from(1), nonce: 1, bytecode_hash: None };
-        let ACCOUNT_B = Account { balance: U256::from(2), nonce: 2, bytecode_hash: None };
-        let ACCOUNT_B_CHANGED = Account { balance: U256::from(3), nonce: 3, bytecode_hash: None };
+        let account_a = Account { balance: U256::from(1), nonce: 1, bytecode_hash: None };
+        let account_b = Account { balance: U256::from(2), nonce: 2, bytecode_hash: None };
+        let account_b_changed = Account { balance: U256::from(3), nonce: 3, bytecode_hash: None };
 
         // 0x00.. is created
-        post_state.create_account(ADDRESS_A, ACCOUNT_A);
+        post_state.create_account(address_a, account_a);
         // 0x11.. is changed (balance + 1, nonce + 1)
-        post_state.change_account(ADDRESS_B, ACCOUNT_B, ACCOUNT_B_CHANGED);
+        post_state.change_account(address_b, account_b, account_b_changed);
         post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         // Check plain state
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(ADDRESS_A).expect("Could not read account state"),
-            Some(ACCOUNT_A),
+            tx.get::<tables::PlainAccountState>(address_a).expect("Could not read account state"),
+            Some(account_a),
             "Account A state is wrong"
         );
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(ADDRESS_B).expect("Could not read account state"),
-            Some(ACCOUNT_B_CHANGED),
+            tx.get::<tables::PlainAccountState>(address_b).expect("Could not read account state"),
+            Some(account_b_changed),
             "Account B state is wrong"
         );
 
@@ -541,23 +541,23 @@ mod tests {
             .expect("Could not open changeset cursor");
         assert_eq!(
             changeset_cursor.seek_exact(0).expect("Could not read account change set"),
-            Some((0, AccountBeforeTx { address: ADDRESS_A, info: None })),
+            Some((0, AccountBeforeTx { address: address_a, info: None })),
             "Account A changeset is wrong"
         );
         assert_eq!(
             changeset_cursor.next_dup().expect("Changeset table is malformed"),
-            Some((0, AccountBeforeTx { address: ADDRESS_B, info: Some(ACCOUNT_B) })),
+            Some((0, AccountBeforeTx { address: address_b, info: Some(account_b) })),
             "Account B changeset is wrong"
         );
 
         let mut post_state = PostState::new();
         // 0x11.. is destroyed
-        post_state.destroy_account(ADDRESS_B, ACCOUNT_B_CHANGED);
+        post_state.destroy_account(address_b, account_b_changed);
         post_state.write_to_db(&tx, 1).expect("Could not write second post state to DB");
 
         // Check new plain state for account B
         assert_eq!(
-            tx.get::<tables::PlainAccountState>(ADDRESS_B).expect("Could not read account state"),
+            tx.get::<tables::PlainAccountState>(address_b).expect("Could not read account state"),
             None,
             "Account B should be deleted"
         );
@@ -565,7 +565,7 @@ mod tests {
         // Check change set
         assert_eq!(
             changeset_cursor.seek_exact(1).expect("Could not read account change set"),
-            Some((1, AccountBeforeTx { address: ADDRESS_B, info: Some(ACCOUNT_B_CHANGED) })),
+            Some((1, AccountBeforeTx { address: address_b, info: Some(account_b_changed) })),
             "Account B changeset is wrong after deletion"
         );
     }
@@ -577,21 +577,21 @@ mod tests {
 
         let mut post_state = PostState::new();
 
-        let ADDRESS_A = Address::zero();
-        let ADDRESS_B = Address::repeat_byte(0xff);
+        let address_a = Address::zero();
+        let address_b = Address::repeat_byte(0xff);
 
         // 0x00 => 0 => 1
         // 0x01 => 0 => 2
-        let STORAGE_A_CHANGESET = BTreeMap::from([
+        let storage_a_changeset = BTreeMap::from([
             (U256::from(0), (U256::from(0), U256::from(1))),
             (U256::from(1), (U256::from(0), U256::from(2))),
         ]);
 
         // 0x01 => 1 => 2
-        let STORAGE_B_CHANGESET = BTreeMap::from([(U256::from(1), (U256::from(1), U256::from(2)))]);
+        let storage_b_changeset = BTreeMap::from([(U256::from(1), (U256::from(1), U256::from(2)))]);
 
-        post_state.change_storage(ADDRESS_A, STORAGE_A_CHANGESET);
-        post_state.change_storage(ADDRESS_B, STORAGE_B_CHANGESET);
+        post_state.change_storage(address_a, storage_a_changeset);
+        post_state.change_storage(address_b, storage_b_changeset);
         post_state.write_to_db(&tx, 0).expect("Could not write post state to DB");
 
         // Check plain storage state
@@ -600,14 +600,14 @@ mod tests {
             .expect("Could not open plain storage state cursor");
 
         assert_eq!(
-            storage_cursor.seek_exact(ADDRESS_A).unwrap(),
-            Some((ADDRESS_A, StorageEntry { key: H256::zero(), value: U256::from(1) })),
+            storage_cursor.seek_exact(address_a).unwrap(),
+            Some((address_a, StorageEntry { key: H256::zero(), value: U256::from(1) })),
             "Slot 0 for account A should be 1"
         );
         assert_eq!(
             storage_cursor.next_dup().unwrap(),
             Some((
-                ADDRESS_A,
+                address_a,
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should be 2"
@@ -619,9 +619,9 @@ mod tests {
         );
 
         assert_eq!(
-            storage_cursor.seek_exact(ADDRESS_B).unwrap(),
+            storage_cursor.seek_exact(address_b).unwrap(),
             Some((
-                ADDRESS_B,
+                address_b,
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account B should be 2"
@@ -637,9 +637,9 @@ mod tests {
             .cursor_dup_read::<tables::StorageChangeSet>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((0, ADDRESS_A))).unwrap(),
+            changeset_cursor.seek_exact(TransitionIdAddress((0, address_a))).unwrap(),
             Some((
-                TransitionIdAddress((0, ADDRESS_A)),
+                TransitionIdAddress((0, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(0) }
             )),
             "Slot 0 for account A should have changed from 0"
@@ -647,7 +647,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                TransitionIdAddress((0, ADDRESS_A)),
+                TransitionIdAddress((0, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
             )),
             "Slot 1 for account A should have changed from 0"
@@ -659,9 +659,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((0, ADDRESS_B))).unwrap(),
+            changeset_cursor.seek_exact(TransitionIdAddress((0, address_b))).unwrap(),
             Some((
-                TransitionIdAddress((0, ADDRESS_B)),
+                TransitionIdAddress((0, address_b)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
             )),
             "Slot 1 for account B should have changed from 1"
@@ -674,19 +674,19 @@ mod tests {
 
         // Delete account A
         let mut post_state = PostState::new();
-        post_state.destroy_account(ADDRESS_A, Account::default());
+        post_state.destroy_account(address_a, Account::default());
         post_state.write_to_db(&tx, 1).expect("Could not write post state to DB");
 
         assert_eq!(
-            storage_cursor.seek_exact(ADDRESS_A).unwrap(),
+            storage_cursor.seek_exact(address_a).unwrap(),
             None,
             "Account A should have no storage slots after deletion"
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((1, ADDRESS_A))).unwrap(),
+            changeset_cursor.seek_exact(TransitionIdAddress((1, address_a))).unwrap(),
             Some((
-                TransitionIdAddress((1, ADDRESS_A)),
+                TransitionIdAddress((1, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(1) }
             )),
             "Slot 0 for account A should have changed from 1 on deletion"
@@ -694,7 +694,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                TransitionIdAddress((1, ADDRESS_A)),
+                TransitionIdAddress((1, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should have changed from 2 on deletion"
