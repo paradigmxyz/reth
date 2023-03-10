@@ -76,7 +76,7 @@ pub(crate) enum EthApiError {
     Internal(#[from] reth_interfaces::Error),
     /// Error related to signing
     #[error(transparent)]
-    Signing(SignError)
+    Signing(SignError),
 }
 
 impl From<EthApiError> for RpcError {
@@ -339,7 +339,7 @@ pub(crate) enum SignError {
     #[error("Unknown account")]
     NoAccount,
     #[error("Given typed data is not valid")]
-    TypedData
+    TypedData,
 }
 impl From<SignError> for EthApiError {
     fn from(err: SignError) -> Self {

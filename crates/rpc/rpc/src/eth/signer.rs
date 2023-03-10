@@ -1,15 +1,14 @@
 //! An abstraction over ethereum signers.
 
+use crate::eth::error::SignError;
 use ethers_core::{
     types::transaction::eip712::{Eip712, TypedData},
     utils::hash_message,
-
 };
 use reth_primitives::{Address, Signature, TransactionSigned, H256, U256};
 use reth_rpc_types::TypedTransactionRequest;
-use secp256k1::{Message, Secp256k1, SecretKey, All};
+use secp256k1::{All, Message, Secp256k1, SecretKey};
 use std::collections::HashMap;
-use crate::eth::error::SignError;
 
 type Result<T> = std::result::Result<T, SignError>;
 
@@ -42,7 +41,7 @@ pub(crate) trait EthSigner: Send + Sync {
 pub(crate) struct DevSigner {
     addresses: Vec<Address>,
     accounts: HashMap<Address, SecretKey>,
-    sign_engine: Secp256k1<All>
+    sign_engine: Secp256k1<All>,
 }
 
 impl DevSigner {
@@ -52,7 +51,8 @@ impl DevSigner {
     fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
         let secret = self.get_key(account)?;
         let message = &Message::from_slice(hash.as_bytes()).map_err(|_| SignError::CouldNotSign)?;
-        let (rec_id, data) = self.sign_engine.sign_ecdsa_recoverable(message, secret).serialize_compact();
+        let (rec_id, data) =
+            self.sign_engine.sign_ecdsa_recoverable(message, secret).serialize_compact();
         let signature = Signature {
             r: U256::try_from_be_slice(&data[..32]).ok_or(SignError::CouldNotSign)?,
             s: U256::try_from_be_slice(&data[32..64]).ok_or(SignError::CouldNotSign)?,
