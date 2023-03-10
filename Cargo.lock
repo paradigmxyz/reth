@@ -5149,7 +5149,6 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "rand 0.8.5",
- "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",

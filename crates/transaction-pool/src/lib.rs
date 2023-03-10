@@ -86,7 +86,10 @@ pub use crate::{
         BestTransactions, OnNewBlockEvent, PoolTransaction, PooledTransaction, PropagateKind,
         PropagatedTransactions, TransactionOrigin, TransactionPool,
     },
-    validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
+    validate::{
+        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
+        ValidPoolTransaction,
+    },
 };
 use crate::{
     error::PoolResult,
@@ -94,7 +97,7 @@ use crate::{
     traits::{NewTransactionEvent, PoolSize},
 };
 
-use reth_interfaces::consensus::ConsensusError;
+use crate::error::PoolError;
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -164,9 +167,7 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = V::Transaction>,
-    ) -> PoolResult<
-        HashMap<TxHash, Result<TransactionValidationOutcome<V::Transaction>, ConsensusError>>,
-    > {
+    ) -> PoolResult<HashMap<TxHash, TransactionValidationOutcome<V::Transaction>>> {
         let outcome = futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate(origin, tx)),
         )
@@ -182,7 +183,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: V::Transaction,
-    ) -> (TxHash, Result<TransactionValidationOutcome<V::Transaction>, ConsensusError>) {
+    ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
 
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
@@ -229,18 +230,14 @@ where
         let (_, tx) = self.validate(origin, transaction).await;
 
         match tx {
-            Ok(TransactionValidationOutcome::Valid {
-                balance: _,
-                state_nonce: _,
-                transaction: _,
-            }) => self
-                .pool
-                .add_transactions(origin, std::iter::once(tx.unwrap()))
-                .pop()
-                .expect("exists; qed"),
-            Ok(TransactionValidationOutcome::Invalid(_transaction, error)) => Err(error),
-            Err(_err) => {
-                unimplemented!()
+            TransactionValidationOutcome::Valid { .. } => {
+                self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+            }
+            TransactionValidationOutcome::Invalid(transaction, error) => {
+                Err(PoolError::InvalidTransaction(*transaction.hash(), error))
+            }
+            TransactionValidationOutcome::Error(transaction, error) => {
+                Err(PoolError::Other(*transaction.hash(), error))
             }
         }
     }
@@ -252,8 +249,7 @@ where
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(origin, transactions).await?;
 
-        let transactions =
-            self.pool.add_transactions(origin, validated.into_values().map(|x| x.unwrap()));
+        let transactions = self.pool.add_transactions(origin, validated.into_values());
         Ok(transactions)
     }
 
