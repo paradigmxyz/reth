@@ -81,7 +81,7 @@
 
 pub use crate::{
     config::PoolConfig,
-    ordering::TransactionOrdering,
+    ordering::{CostOrdering, TransactionOrdering},
     traits::{
         BestTransactions, OnNewBlockEvent, PoolTransaction, PooledTransaction, PropagateKind,
         PropagatedTransactions, TransactionOrigin, TransactionPool,
