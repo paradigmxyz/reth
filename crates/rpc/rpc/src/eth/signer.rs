@@ -3,12 +3,15 @@
 use ethers_core::{
     types::transaction::eip712::{Eip712, TypedData},
     utils::hash_message,
+
 };
-use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
 use reth_primitives::{Address, Signature, TransactionSigned, H256, U256};
 use reth_rpc_types::TypedTransactionRequest;
 use secp256k1::{Message, Secp256k1, SecretKey, All};
 use std::collections::HashMap;
+use crate::eth::error::SignError;
+
+type Result<T> = std::result::Result<T, SignError>;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
@@ -43,18 +46,16 @@ pub(crate) struct DevSigner {
 }
 
 impl DevSigner {
-
+    fn get_key(&self, account: Address) -> Result<&SecretKey> {
+        self.accounts.get(&account).ok_or(SignError::NoAccount)
+    }
     fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
-        let secret =
-            self.accounts.get(&account).ok_or(RpcError::Custom("No account".to_string()))?;
-        // TODO: Handle unwrap properly
-        let message = &Message::from_slice(hash.as_bytes()).unwrap();
+        let secret = self.get_key(account)?;
+        let message = &Message::from_slice(hash.as_bytes()).map_err(|_| SignError::CouldNotSign)?;
         let (rec_id, data) = self.sign_engine.sign_ecdsa_recoverable(message, secret).serialize_compact();
         let signature = Signature {
-            // TODO:
-            // Handle unwraps properly
-            r: U256::try_from_be_slice(&data[..32]).unwrap(),
-            s: U256::try_from_be_slice(&data[32..64]).unwrap(),
+            r: U256::try_from_be_slice(&data[..32]).ok_or(SignError::CouldNotSign)?,
+            s: U256::try_from_be_slice(&data[32..64]).ok_or(SignError::CouldNotSign)?,
             odd_y_parity: rec_id.to_i32() != 0,
         };
         Ok(signature)
@@ -86,11 +87,10 @@ impl EthSigner for DevSigner {
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
-        let encoded: H256 = payload.encode_eip712().unwrap().into();
+        let encoded: H256 = payload.encode_eip712().map_err(|_| SignError::TypedData)?.into();
         self.sign_hash(encoded, address)
     }
 }
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -101,7 +101,8 @@ mod test {
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
                 .unwrap();
         let accounts = HashMap::from([(Address::default(), secret)]);
-        DevSigner { addresses, accounts }
+        let sign_engine = Secp256k1::new();
+        DevSigner { addresses, accounts, sign_engine }
     }
     #[tokio::test]
     async fn test_sign_type_data() {

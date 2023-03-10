@@ -74,8 +74,9 @@ pub(crate) enum EthApiError {
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
-    #[error("Account is unknown")]
-    UnknownAccount,
+    /// Error related to signing
+    #[error(transparent)]
+    Signing(SignError)
 }
 
 impl From<EthApiError> for RpcError {
@@ -89,7 +90,7 @@ impl From<EthApiError> for RpcError {
             EthApiError::ConflictingRequestGasPrice { .. } |
             EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
             EthApiError::RequestLegacyGasPriceAndTipSet { .. } |
-            EthApiError::UnknownAccount |
+            EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) => {
                 rpc_err(INVALID_PARAMS_CODE, error.to_string(), None)
             }
@@ -331,6 +332,20 @@ impl From<PoolError> for EthApiError {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SignError {
+    #[error("Could not sign")]
+    CouldNotSign,
+    #[error("Unknown account")]
+    NoAccount,
+    #[error("Given typed data is not valid")]
+    TypedData
+}
+impl From<SignError> for EthApiError {
+    fn from(err: SignError) -> Self {
+        EthApiError::Signing(err)
+    }
+}
 /// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.
 ///
 /// **Note:** it's assumed the `out` buffer starts with the call's signature
