@@ -66,7 +66,7 @@ pub fn block1() -> (SealedBlockWithSenders, ExecutionResult) {
     let mut header = block.header.clone().unseal();
     header.number = 1;
     header.state_root =
-        H256(hex!("f7c6a43dd9551fb93b1b72e47c1a16d6f3ea9e87d6088aa56514ffddf53c65d3"));
+        H256(hex!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd"));
     header.parent_hash = H256::zero();
     block.header = header.seal_slow();
 
@@ -98,10 +98,10 @@ pub fn block2() -> (SealedBlockWithSenders, ExecutionResult) {
     let mut header = block.header.clone().unseal();
     header.number = 2;
     header.state_root =
-        H256(hex!("8d1570fc7c7e25de7eab9ae2611ef4752f89b8d1e076916389180a29306dd509"));
+        H256(hex!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8"));
     // parent_hash points to block1 hash
     header.parent_hash =
-        H256(hex!("19a369c389eff93f96511da6a75917ae51ef3d11172a200d5315820bf2a4460e"));
+        H256(hex!("d846db2ab174c492cfe985c18fa75b154e20572bc33bb1c67cf5d2995791bdb7"));
     block.header = header.seal_slow();
 
     let mut account_changeset = AccountChangeSet::default();
