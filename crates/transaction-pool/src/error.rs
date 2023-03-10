@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use reth_primitives::{Address, TxHash};
+use reth_primitives::{Address, InvalidTransactionError, TxHash};
 
 /// Transaction pool result type.
 pub type PoolResult<T> = Result<T, PoolError>;
@@ -21,22 +21,13 @@ pub enum PoolError {
     /// respect the size limits of the pool.
     #[error("[{0:?}] Transaction discarded outright due to pool size constraints.")]
     DiscardedOnInsert(TxHash),
-    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
-    /// respect the size limits of the pool.
-    #[error("[{0:?}] Transaction's gas limit {1} exceeds block's gas limit {2}.")]
-    TxExceedsGasLimit(TxHash, u64, u64),
-    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
-    /// respect the max_init_code_size.
-    #[error("[{0:?}] Transaction's size {1} exceeds max_init_code_size {2}.")]
-    TxExceedsMaxInitCodeSize(TxHash, usize, usize),
-    /// Thrown if the transaction contains an invalid signature
-    #[error("[{0:?}]: Invalid sender")]
-    AccountNotFound(TxHash),
-    /// Thrown if the input data of a transaction is greater
-    /// than some meaningful limit a user might use. This is not a consensus error
-    /// making the transaction invalid, rather a DOS protection.
-    #[error("[{0:?}]: Input data too large")]
-    OversizedData(TxHash, usize, usize),
+    /// Thrown when the transaction is considered invalid.
+    #[error("[{0:?}] {1:?}")]
+    InvalidTransaction(TxHash, InvalidPoolTransactionError),
+    /// Any other error that occurred while inserting/validating a transaction. e.g. IO database
+    /// error
+    #[error("[{0:?}] {1:?}")]
+    Other(TxHash, Box<dyn std::error::Error + Send + Sync>),
 }
 
 // === impl PoolError ===
@@ -49,10 +40,34 @@ impl PoolError {
             PoolError::ProtocolFeeCapTooLow(hash, _) => hash,
             PoolError::SpammerExceededCapacity(_, hash) => hash,
             PoolError::DiscardedOnInsert(hash) => hash,
-            PoolError::TxExceedsGasLimit(hash, _, _) => hash,
-            PoolError::TxExceedsMaxInitCodeSize(hash, _, _) => hash,
-            PoolError::AccountNotFound(hash) => hash,
-            PoolError::OversizedData(hash, _, _) => hash,
+            PoolError::InvalidTransaction(hash, _) => hash,
+            PoolError::Other(hash, _) => hash,
         }
     }
+}
+
+/// Represents errors that can happen when validating transactions for the pool
+///
+/// See [TransactionValidator](crate::TransactionValidator).
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum InvalidPoolTransactionError {
+    /// Hard consensus errors
+    #[error(transparent)]
+    Consensus(#[from] InvalidTransactionError),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the size limits of the pool.
+    #[error("Transaction's gas limit {0} exceeds block's gas limit {1}.")]
+    ExceedsGasLimit(u64, u64),
+    /// Thrown when a new transaction is added to the pool, but then immediately discarded to
+    /// respect the max_init_code_size.
+    #[error("Transaction's size {0} exceeds max_init_code_size {1}.")]
+    ExceedsMaxInitCodeSize(usize, usize),
+    /// Thrown if the transaction contains an invalid signature
+    #[error("Invalid sender")]
+    AccountNotFound,
+    /// Thrown if the input data of a transaction is greater
+    /// than some meaningful limit a user might use. This is not a consensus error
+    /// making the transaction invalid, rather a DOS protection.
+    #[error("Input data too large")]
+    OversizedData(usize, usize),
 }

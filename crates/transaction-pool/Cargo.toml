@@ -20,7 +20,6 @@ normal = [
 # reth
 reth-primitives = { path  = "../primitives" }
 reth-provider = { path = "../storage/provider" }
-reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../rlp" }
 
 # async/futures

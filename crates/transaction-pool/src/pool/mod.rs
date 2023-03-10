@@ -232,7 +232,12 @@ where
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(tx.hash());
-                Err(err)
+                Err(PoolError::InvalidTransaction(*tx.hash(), err))
+            }
+            TransactionValidationOutcome::Error(tx, err) => {
+                let mut listener = self.event_listener.write();
+                listener.discarded(tx.hash());
+                Err(PoolError::Other(*tx.hash(), err))
             }
         }
     }
