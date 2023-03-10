@@ -124,7 +124,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     fn proof(
         &self,
         _address: Address,
-        _keys: Vec<H256>,
+        _keys: &[H256],
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
         todo!("this should retrieve past state info and generate proof")
     }

@@ -16,11 +16,8 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>>;
 
     /// Get account and storage proofs.
-    fn proof(
-        &self,
-        address: Address,
-        keys: Vec<H256>,
-    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
+    fn proof(&self, address: Address, keys: &[H256])
+        -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
 
     /// Get account code by its address.
     ///

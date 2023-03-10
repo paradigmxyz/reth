@@ -521,7 +521,7 @@ impl DBTrieLoader {
         tx: &'tx impl DbTx<'itx>,
         storage_root: H256,
         address: H256,
-        keys: Vec<H256>,
+        keys: &[H256],
     ) -> Result<Vec<Vec<Vec<u8>>>, TrieError> {
         let db = Arc::new(DupHashDatabase::from_root(tx, address, storage_root)?);
         let hasher = Arc::new(HasherKeccak::new());

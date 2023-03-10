@@ -71,7 +71,7 @@ where
             EIP1186AccountProofResponse { address, code_hash: KECCAK_EMPTY, ..Default::default() };
 
         if let Some(account) = state.basic_account(address)? {
-            let (account_proof, storage_hash, stg_proofs) = state.proof(address, keys.clone())?;
+            let (account_proof, storage_hash, stg_proofs) = state.proof(address, &keys)?;
 
             let storage_proof = keys
                 .into_iter()

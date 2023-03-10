@@ -60,7 +60,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
     fn proof(
         &self,
         address: Address,
-        keys: Vec<H256>,
+        keys: &[H256],
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
         let hashed_address = keccak256(address);
         let loader = DBTrieLoader::default();
