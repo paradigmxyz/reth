@@ -54,7 +54,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 
     /// Enable Prometheus metrics.
     ///
@@ -136,10 +136,7 @@ impl Command {
                 let network = self
                     .network
                     .network_config(&config, self.chain.clone())
-                    .build(Arc::new(ShareableDatabase::new(
-                        db.clone(),
-                        Arc::new(self.chain.clone()),
-                    )))
+                    .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
                     .start_network()
                     .await?;
                 let fetch_client = Arc::new(network.fetch_client().await?);
@@ -174,7 +171,7 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
-                let factory = reth_executor::Factory::new(Arc::new(self.chain.clone()));
+                let factory = reth_executor::Factory::new(self.chain.clone());
                 let mut stage = ExecutionStage::new(factory, 10_000);
                 stage.commit_threshold = num_blocks;
                 if !self.skip_unwind {

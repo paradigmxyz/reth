@@ -15,6 +15,7 @@ use secp256k1::{SecretKey, SECP256K1};
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
 };
 
 /// reexports for convenience
@@ -54,7 +55,7 @@ pub struct NetworkConfig<C> {
     /// How to configure the [SessionManager](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
     /// The chain spec
-    pub chain_spec: ChainSpec,
+    pub chain_spec: Arc<ChainSpec>,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -139,7 +140,7 @@ pub struct NetworkConfigBuilder {
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
     /// The network's chain spec
-    chain_spec: ChainSpec,
+    chain_spec: Arc<ChainSpec>,
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
@@ -165,7 +166,7 @@ impl NetworkConfigBuilder {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain_spec: MAINNET.clone(),
+            chain_spec: Arc::new(MAINNET.clone()),
             network_mode: Default::default(),
             executor: None,
             hello_message: None,
@@ -179,7 +180,7 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the chain spec.
-    pub fn chain_spec(mut self, chain_spec: ChainSpec) -> Self {
+    pub fn chain_spec(mut self, chain_spec: Arc<ChainSpec>) -> Self {
         self.chain_spec = chain_spec;
         self
     }
@@ -417,6 +418,7 @@ mod tests {
 
         // remove any `next` fields we would have by removing all hardforks
         chain_spec.hardforks = BTreeMap::new();
+        let chain_spec = Arc::new(chain_spec);
 
         // check that the forkid is initialized with the genesis and no other forks
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());

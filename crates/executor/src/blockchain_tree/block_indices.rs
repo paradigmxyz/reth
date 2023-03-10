@@ -8,23 +8,23 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 #[derive(Clone)]
 pub struct BlockIndices {
     /// Last finalized block.
-    pub last_finalized_block: BlockNumber,
+    last_finalized_block: BlockNumber,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
     /// NOTE: It contains just a blocks that are forks as a key and not all blocks.
-    pub fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+    fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
     /// Canonical chain. Contains N number (depends on `finalization_depth`) of blocks.
     /// These blocks are found in fork_to_child but not inside `blocks_to_chain` or
     /// `number_to_block` as those are chain specific indices.
-    pub canonical_chain: BTreeMap<BlockNumber, BlockHash>,
+    canonical_chain: BTreeMap<BlockNumber, BlockHash>,
     /// Block hashes and side chain they belong
-    pub blocks_to_chain: HashMap<BlockHash, ChainId>,
+    blocks_to_chain: HashMap<BlockHash, ChainId>,
     /* Add additional indices if needed as in tx hash index to block */
     /// Utility index, Block number to block hash.
-    pub index_number_to_block: HashMap<BlockNumber, HashSet<BlockHash>>,
+    index_number_to_block: HashMap<BlockNumber, HashSet<BlockHash>>,
     /// For EVM's "BLOCKHASH" opcode we require last 256 block hashes. So we need to specify
     /// at least `additional_canonical_block_hashes`+`finalization_windows`, for eth that would be
     /// 256+64.
-    pub num_of_additional_canonical_block_hashes: u64,
+    num_of_additional_canonical_block_hashes: u64,
 }
 
 impl BlockIndices {
@@ -44,6 +44,22 @@ impl BlockIndices {
         }
     }
 
+    /// Return number of additional canonical block hashes that we need
+    /// to have to be able to have enought information for EVM execution.
+    pub fn num_of_additional_canonical_block_hashes(&self) -> u64 {
+        self.num_of_additional_canonical_block_hashes
+    }
+
+    /// Return fork to child indices
+    pub fn fork_to_child(&self) -> &HashMap<BlockHash, HashSet<BlockHash>> {
+        &self.fork_to_child
+    }
+
+    /// Return block to chain id
+    pub fn blocks_to_chain(&self) -> &HashMap<BlockHash, ChainId> {
+        &self.blocks_to_chain
+    }
+
     /// Returns `true` if the Tree knowns the block hash.
     pub fn contains_block_hash(&self, block_hash: BlockHash) -> bool {
         self.blocks_to_chain.contains_key(&block_hash)
@@ -61,7 +77,7 @@ impl BlockIndices {
 
     /// Insert block to chain and fork child indices of the new chain
     pub fn insert_chain(&mut self, chain_id: ChainId, chain: &Chain) {
-        for (number, block) in chain.blocks.iter() {
+        for (number, block) in chain.blocks().iter() {
             // add block -> chain_id index
             self.blocks_to_chain.insert(block.hash(), chain_id);
             // add number -> block
@@ -137,7 +153,7 @@ impl BlockIndices {
     /// Does the cleaning of the tree and removing blocks from the chain.
     pub fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<ChainId> {
         let mut lose_chains = BTreeSet::new();
-        for (block_number, block) in chain.blocks.iter() {
+        for (block_number, block) in chain.blocks().iter() {
             let block_hash = block.hash();
             lose_chains.extend(self.remove_block(*block_number, block_hash))
         }

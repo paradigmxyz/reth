@@ -36,7 +36,7 @@ pub struct InitCommand {
         default_value = "mainnet",
         value_parser = genesis_value_parser
     )]
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 }
 
 impl InitCommand {

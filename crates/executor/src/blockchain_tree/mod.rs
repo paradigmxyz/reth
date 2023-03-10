@@ -242,7 +242,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let mut hashes = BTreeMap::new();
         loop {
             let Some(chain) = self.chains.get(&chain_id) else { return hashes};
-            hashes.extend(chain.blocks.values().map(|b| (b.number, b.hash())));
+            hashes.extend(chain.blocks().values().map(|b| (b.number, b.hash())));
 
             let fork_block = chain.fork_block_hash();
             if let Some(next_chain_id) = self.block_indices.get_blocks_chain_id(&fork_block) {
@@ -374,8 +374,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
-        let num_of_canonical_hashes =
-            self.finalization_window + self.block_indices.num_of_additional_canonical_block_hashes;
+        let num_of_canonical_hashes = self.finalization_window +
+            self.block_indices.num_of_additional_canonical_block_hashes();
 
         let last_canonical_hashes = self
             .externals
@@ -450,7 +450,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // update canonical index
-        self.block_indices.canonicalize_blocks(&new_canon_chain.blocks);
+        self.block_indices.canonicalize_blocks(new_canon_chain.blocks());
 
         // if joins to the tip
         if new_canon_chain.fork_block_hash() == old_tip.hash {
@@ -483,8 +483,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let mut tx = Transaction::new(&self.externals.db)?;
 
         let new_tip = chain.tip().number;
-
-        for item in chain.blocks.into_iter().zip(chain.changesets.into_iter()) {
+        let (blocks, changesets, _) = chain.into_inner();
+        for item in blocks.into_iter().zip(changesets.into_iter()) {
             let ((_, block), changeset) = item;
             tx.insert_block(block, self.externals.chain_spec.as_ref(), changeset).map_err(|e| {
                 println!("commit error:{e:?}");
@@ -728,11 +728,11 @@ mod tests {
         // |
         assert_eq!(tree.chains.len(), 2);
         assert_eq!(
-            tree.block_indices.blocks_to_chain,
+            *tree.block_indices.blocks_to_chain(),
             HashMap::from([(block1a_hash, 1), (block2a_hash, 2)])
         );
         assert_eq!(
-            tree.block_indices.fork_to_child,
+            *tree.block_indices.fork_to_child(),
             HashMap::from([
                 (block1.parent_hash, HashSet::from([block1a_hash])),
                 (block1.hash(), HashSet::from([block2a_hash]))
@@ -764,11 +764,11 @@ mod tests {
 
         assert_eq!(tree.chains.len(), 2);
         assert_eq!(
-            tree.block_indices.blocks_to_chain,
+            *tree.block_indices.blocks_to_chain(),
             HashMap::from([(block1.hash(), 4), (block2a_hash, 4), (block2.hash(), 3)])
         );
         assert_eq!(
-            tree.block_indices.fork_to_child,
+            *tree.block_indices.fork_to_child(),
             HashMap::from([
                 (block1.parent_hash, HashSet::from([block1.hash()])),
                 (block1.hash(), HashSet::from([block2.hash()]))

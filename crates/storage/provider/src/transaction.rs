@@ -571,7 +571,7 @@ where
         let mut transactions = transactions.into_iter();
         for (block_number, block_body) in block_bodies {
             let mut one_block_tx = Vec::new();
-            for _ in 0..block_body.tx_count() {
+            for _ in block_body.tx_id_range() {
                 let tx = transactions.next();
                 let sender = senders.next();
 

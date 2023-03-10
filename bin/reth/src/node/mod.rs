@@ -90,7 +90,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = genesis_value_parser
     )]
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 
     /// Enable Prometheus metrics.
     ///
@@ -134,7 +134,7 @@ impl Command {
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
-        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::new(self.chain.clone()));
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint()?;
@@ -316,7 +316,7 @@ impl Command {
     ) -> EngineApiHandle {
         let (message_tx, message_rx) = unbounded_channel();
         let engine_api = EngineApi::new(
-            ShareableDatabase::new(db, Arc::new(self.chain.clone())),
+            ShareableDatabase::new(db, self.chain.clone()),
             self.chain.clone(),
             message_rx,
             forkchoice_state_tx,
@@ -417,7 +417,7 @@ impl Command {
             .network_config(config, self.chain.clone())
             .with_task_executor(Box::new(executor))
             .set_head(head)
-            .build(ShareableDatabase::new(db, Arc::new(self.chain.clone())))
+            .build(ShareableDatabase::new(db, self.chain.clone()))
     }
 
     async fn build_pipeline<H, B, U>(
@@ -443,7 +443,7 @@ impl Command {
             builder = builder.with_max_block(max_block)
         }
 
-        let factory = reth_executor::Factory::new(Arc::new(self.chain.clone()));
+        let factory = reth_executor::Factory::new(self.chain.clone());
         let pipeline = builder
             .with_sync_state_updater(updater.clone())
             .add_stages(
@@ -455,7 +455,7 @@ impl Command {
                     factory.clone(),
                 )
                 .set(TotalDifficultyStage {
-                    chain_spec: self.chain.clone(),
+                    chain_spec: self.chain.as_ref().clone(),
                     commit_threshold: stage_conf.total_difficulty.commit_threshold,
                 })
                 .set(SenderRecoveryStage {

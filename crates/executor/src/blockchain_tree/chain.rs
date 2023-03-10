@@ -9,15 +9,18 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders, SealedHead
 use reth_provider::{BlockExecutor, ExecutorFactory, StateProvider};
 use std::collections::BTreeMap;
 
+/// Chain identification
+pub type ChainId = u64;
+
 /// Side chain that contain it state and connect to block found in canonical chain.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
     /// Chain substate
-    pub substate: SubStateData,
+    substate: SubStateData,
     /// Changesets for block and transaction.
-    pub changesets: Vec<ExecutionResult>,
+    changesets: Vec<ExecutionResult>,
     /// Blocks in this chain
-    pub blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
+    blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
 }
 
 /// Where does the chain connect to.
@@ -29,10 +32,24 @@ pub struct ForkBlock {
     pub hash: BlockHash,
 }
 
-/// Chain identification
-pub type ChainId = u64;
-
 impl Chain {
+    /// Return blocks found in chain
+    pub fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
+        &self.blocks
+    }
+
+    /// Into inneer components
+    pub fn into_inner(
+        self,
+    ) -> (BTreeMap<BlockNumber, SealedBlockWithSenders>, Vec<ExecutionResult>, SubStateData) {
+        (self.blocks, self.changesets, self.substate)
+    }
+
+    /// Return execution results of blocks
+    pub fn changesets(&self) -> &Vec<ExecutionResult> {
+        &self.changesets
+    }
+
     /// Return fork block number and hash.
     pub fn fork_block(&self) -> ForkBlock {
         let tip = self.first();
