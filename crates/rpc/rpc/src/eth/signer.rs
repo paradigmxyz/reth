@@ -42,6 +42,7 @@ pub(crate) struct DevSigner {
 }
 
 impl DevSigner {
+
     fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
         let secp = Secp256k1::new();
         let secret =
