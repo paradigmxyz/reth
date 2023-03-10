@@ -6,10 +6,10 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
-use reth_interfaces::consensus::Error;
+use reth_interfaces::consensus::ConsensusError;
 use reth_primitives::{
-    Address, TransactionKind, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
-    U256,
+    Address, InvalidTransactionError, TransactionKind, TxHash, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
@@ -59,7 +59,7 @@ pub trait TransactionValidator: Send + Sync {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error>;
+    ) -> Result<TransactionValidationOutcome<Self::Transaction>, ConsensusError>;
 
     /// Ensure that the code size is not greater than `max_init_code_size`.
     /// `max_init_code_size` should be configurable so this will take it as an argument.
@@ -109,7 +109,7 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> Result<TransactionValidationOutcome<Self::Transaction>, Error> {
+    ) -> Result<TransactionValidationOutcome<Self::Transaction>, ConsensusError> {
         // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
@@ -119,18 +119,18 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
             EIP2930_TX_TYPE_ID => {
                 // Accept only legacy transactions until EIP-2718/2930 activates
                 if !self.eip2718 {
-                    return Err(Error::TransactionEip2930Disabled)
+                    return Err(InvalidTransactionError::Eip2930Disabled.into())
                 }
             }
 
             EIP1559_TX_TYPE_ID => {
                 // Reject dynamic fee transactions until EIP-1559 activates.
                 if !self.eip1559 {
-                    return Err(Error::TransactionEip1559Disabled)
+                    return Err(InvalidTransactionError::Eip1559Disabled.into())
                 }
             }
 
-            _ => return Err(Error::TxTypeNotSupported),
+            _ => return Err(InvalidTransactionError::TxTypeNotSupported.into()),
         };
 
         // Reject transactions over defined size to prevent DOS attacks
@@ -163,25 +163,25 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
 
         // Ensure max_fee_per_gas is greater than or equal to max_priority_fee_per_gas.
         if transaction.max_fee_per_gas() <= transaction.max_priority_fee_per_gas() {
-            return Err(Error::TipAboveFeeCap)
+            return Err(InvalidTransactionError::TipAboveFeeCap.into())
         }
 
         // Drop non-local transactions under our own minimal accepted gas price or tip
         if !origin.is_local() && transaction.max_fee_per_gas() < self.gas_price {
-            return Err(Error::TransactionMaxFeeLessThenBaseFee)
+            return Err(InvalidTransactionError::MaxFeeLessThenBaseFee.into())
         }
 
         // Checks for chainid
         if transaction.chain_id() != Some(self.chain_id) {
-            return Err(Error::TransactionChainId)
+            return Err(InvalidTransactionError::ChainIdMismatch.into())
         }
 
-        let account = match self.client.basic_account(transaction.sender())? {
+        let account = match self.client.basic_account(transaction.sender()).unwrap() {
             Some(account) => {
                 // Signer account shouldn't have bytecode. Presence of bytecode means this is a
                 // smartcontract.
                 if account.has_bytecode() {
-                    return Err(Error::SignerAccountHasBytecode)
+                    return Err(InvalidTransactionError::SignerAccountHasBytecode.into())
                 } else {
                     account
                 }
@@ -196,15 +196,16 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
 
         // Checks for nonce
         if transaction.nonce() < account.nonce {
-            return Err(Error::TransactionNonceNotConsistent)
+            return Err(InvalidTransactionError::NonceNotConsistent.into())
         }
 
         // Checks for max cost
         if transaction.cost() > account.balance {
-            return Err(Error::InsufficientFunds {
+            return Err(InvalidTransactionError::InsufficientFunds {
                 max_fee: transaction.max_fee_per_gas().unwrap_or_default(),
                 available_funds: account.balance,
-            })
+            }
+            .into())
         }
 
         // Return the valid transaction
