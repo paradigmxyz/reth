@@ -7,7 +7,7 @@ use ethers_core::{
 use jsonrpsee::core::{Error as RpcError, RpcResult as Result};
 use reth_primitives::{Address, Signature, TransactionSigned, H256, U256};
 use reth_rpc_types::TypedTransactionRequest;
-use secp256k1::{Message, Secp256k1, SecretKey};
+use secp256k1::{Message, Secp256k1, SecretKey, All};
 use std::collections::HashMap;
 
 /// An Ethereum Signer used via RPC.
@@ -39,17 +39,17 @@ pub(crate) trait EthSigner: Send + Sync {
 pub(crate) struct DevSigner {
     addresses: Vec<Address>,
     accounts: HashMap<Address, SecretKey>,
+    sign_engine: Secp256k1<All>
 }
 
 impl DevSigner {
 
     fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
-        let secp = Secp256k1::new();
         let secret =
             self.accounts.get(&account).ok_or(RpcError::Custom("No account".to_string()))?;
         // TODO: Handle unwrap properly
         let message = &Message::from_slice(hash.as_bytes()).unwrap();
-        let (rec_id, data) = secp.sign_ecdsa_recoverable(message, secret).serialize_compact();
+        let (rec_id, data) = self.sign_engine.sign_ecdsa_recoverable(message, secret).serialize_compact();
         let signature = Signature {
             // TODO:
             // Handle unwraps properly
