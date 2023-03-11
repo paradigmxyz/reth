@@ -490,7 +490,9 @@ mod tests {
         let events = pipeline.events();
 
         // Run pipeline
-        tokio::spawn(async move { pipeline.run(db).await });
+        tokio::spawn(async move {
+            pipeline.run(db).await.unwrap();
+        });
 
         // Check that the stages were run in order
         assert_eq!(

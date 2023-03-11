@@ -68,7 +68,7 @@ impl TaskDownloader {
             updates: UnboundedReceiverStream::new(updates_rx),
             downloader,
         };
-        spawner.spawn(async move { downloader.await }.boxed());
+        spawner.spawn(downloader.boxed());
 
         Self { from_downloader: UnboundedReceiverStream::new(headers_rx), to_downloader }
     }
