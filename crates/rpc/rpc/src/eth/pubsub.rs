@@ -55,7 +55,7 @@ impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
 
 impl<Client, Pool, Events, Network> EthPubSubApiServer for EthPubSub<Client, Pool, Events, Network>
 where
-    Client: BlockProvider + EvmEnvProvider + SyncStateProvider + Clone + 'static,
+    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
     Network: SyncStateProvider + Clone + 'static,
@@ -70,7 +70,7 @@ where
 
         let pubsub = self.inner.clone();
         self.subscription_task_spawner.spawn(Box::pin(async move {
-            handle_accepted(pubsub, sink, kind, params).await;
+            handle_accepted(pubsub, sink, kind, params, Box::<TokioTaskExecutor>::default()).await;
         }));
 
         Ok(())
@@ -83,11 +83,12 @@ async fn handle_accepted<Client, Pool, Events, Network>(
     mut accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
+    subscription_task_spawner: Box<dyn TaskSpawner>,
 ) where
-    Client: BlockProvider + EvmEnvProvider + 'static,
+    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: ChainEventSubscriptions + 'static,
-    Network: SyncStateProvider + 'static,
+    Events: ChainEventSubscriptions + Clone + 'static,
+    Network: SyncStateProvider + Clone + 'static,
 {
     // if no params are provided, used default filter params
     let _params = match params {
@@ -112,43 +113,53 @@ async fn handle_accepted<Client, Pool, Events, Network>(
             accepted_sink.pipe_from_stream(stream).await;
         }
         SubscriptionKind::Syncing => {
-            // TODO subscribe new blocks -> read is_syncing from network
+            subscription_task_spawner.spawn(Box::pin(async move {
+                // get new block subscription
+                let mut block_subscription = pubsub.chain_events.subscribe_new_blocks();
+                // get initial sync status
+                let mut initial_sync_status = pubsub.network.is_syncing();
+                let initial_sub_res = get_sync_status(pubsub.clone()).await;
+                // send 1 response
+                // Can ignore the error for now
+                accepted_sink.send(&initial_sub_res).unwrap();
 
-            let mut block_subscription = pubsub.chain_events.subscribe_new_blocks();
-            let initial_sync_status = pubsub.network.is_syncing();
-
-            let initial_sub_res = if initial_sync_status {
-                EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
-                    syncing: true,
-                    starting_block: 0,
-                    current_block: pubsub.client.chain_info().unwrap_or_default().best_number,
-                    highest_block: None,
-                }))
-            } else {
-                EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
-            };
-
-            accepted_sink.send(&initial_sub_res).unwrap_or_default();
-
-            while let Some(_) = block_subscription.recv().await {
-                let sub_res = if pubsub.network.is_syncing() {
-                    EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(
-                        SyncStatusMetadata {
-                            syncing: true,
-                            starting_block: 0,
-                            current_block: pubsub.client.chain_info().unwrap().best_number,
-                            highest_block: None,
-                        },
-                    ))
-                } else {
-                    EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
-                };
-
-                if pubsub.network.is_syncing() != initial_sync_status {
-                    accepted_sink.send(&initial_sub_res).unwrap_or_default();
+                while (block_subscription.recv().await).is_some() {
+                    let initial_sub_res = get_sync_status(pubsub.clone()).await;
+                    // Only send a new response if the sync status has changed
+                    if pubsub.network.is_syncing() != initial_sync_status {
+                        accepted_sink.send(&initial_sub_res).unwrap();
+                    }
+                    // Update the sync status on each new block
+                    initial_sync_status = pubsub.network.is_syncing();
                 }
-            }
+            }));
         }
+    }
+}
+
+/// Helper function to get the current sync status.
+async fn get_sync_status<Client, Pool, Events, Network>(
+    pubsub: EthPubSubInner<Client, Pool, Events, Network>,
+) -> EthSubscriptionResult
+where
+    Client: BlockProvider + EvmEnvProvider + 'static,
+    Pool: TransactionPool + 'static,
+    Events: ChainEventSubscriptions + 'static,
+    Network: SyncStateProvider + 'static,
+{
+    let current_block = match pubsub.client.chain_info() {
+        Ok(info) => info.best_number,
+        Err(_) => 0,
+    };
+    if pubsub.network.is_syncing() {
+        EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
+            syncing: true,
+            starting_block: 0,
+            current_block,
+            highest_block: None,
+        }))
+    } else {
+        EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
     }
 }
 
