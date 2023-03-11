@@ -1,4 +1,5 @@
 use reth_db::{
+    common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     mdbx::{
         test_utils::{create_test_db, create_test_db_with_path},
@@ -6,7 +7,7 @@ use reth_db::{
         Env, EnvKind, WriteMap, RW,
     },
     models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
-    table::{KeyValue, Table},
+    table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,

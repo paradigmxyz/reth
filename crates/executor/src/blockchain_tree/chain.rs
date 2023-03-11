@@ -9,15 +9,15 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders, SealedHead
 use reth_provider::{BlockExecutor, ExecutorFactory, StateProvider};
 use std::collections::BTreeMap;
 
-/// Chain identification
-pub type ChainId = u64;
+/// Internal to BlockchainTree chain identification.
+pub(crate) type BlockChainId = u64;
 
 /// Side chain that contain it state and connect to block found in canonical chain.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
-    /// Chain substate
+    /// Chain substate. Updated state after execution all blocks in chain.
     substate: SubStateData,
-    /// Changesets for block and transaction.
+    /// Changesets for block and transaction. Will be used to update tables in database.
     changesets: Vec<ExecutionResult>,
     /// Blocks in this chain
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
@@ -30,6 +30,13 @@ pub struct ForkBlock {
     pub number: u64,
     /// Block hash of block that chains branches from
     pub hash: BlockHash,
+}
+
+impl ForkBlock {
+    /// Return the number hash tuple.
+    pub fn num_hash(&self) -> (BlockNumber, BlockHash) {
+        (self.number, self.hash)
+    }
 }
 
 impl Chain {
@@ -53,12 +60,12 @@ impl Chain {
     /// Return fork block number and hash.
     pub fn fork_block(&self) -> ForkBlock {
         let tip = self.first();
-        ForkBlock { number: tip.number - 1, hash: tip.parent_hash }
+        ForkBlock { number: tip.number.saturating_sub(1), hash: tip.parent_hash }
     }
 
     /// Block fork number
     pub fn fork_block_number(&self) -> BlockNumber {
-        self.first().number - 1
+        self.first().number.saturating_sub(1)
     }
 
     /// Block fork hash
@@ -106,10 +113,10 @@ impl Chain {
         // substate
         let substate = SubStateData::default();
         let empty = BTreeMap::new();
-        
+
         let substate_with_sp =
             SubStateWithProvider::new(&substate, provider, &empty, canonical_block_hashes);
-        
+
         let changeset = Self::validate_and_execute(
             block.clone(),
             parent_header,
@@ -117,7 +124,7 @@ impl Chain {
             consensus,
             factory,
         )?;
-        
+
         Ok(Self::new(vec![(block.clone(), changeset)]))
     }
 
@@ -223,14 +230,19 @@ impl Chain {
 
     /// Merge two chains into one by appending received chain to the current one.
     /// Take substate from newest one.
-    pub fn append_chain(&mut self, chain: Chain) -> bool {
-        if self.tip().hash() != chain.last().parent_hash {
-            return false;
+    pub fn append_chain(&mut self, chain: Chain) -> Result<(), Error> {
+        let chain_tip = self.tip();
+        if chain_tip.hash != chain.fork_block_hash() {
+            return Err(ExecError::AppendChainDoesntConnect {
+                chain_tip: chain_tip.num_hash(),
+                other_chain_fork: chain.fork_block().num_hash(),
+            }
+            .into())
         }
         self.blocks.extend(chain.blocks.into_iter());
         self.changesets.extend(chain.changesets.into_iter());
         self.substate = chain.substate;
-        true
+        Ok(())
     }
 
     /// Iterate over block to find block with the cache that we want to split on.
@@ -257,11 +269,11 @@ impl Chain {
     /// NOTE: Subtate state will be only found in second chain. First change substate will be
     /// invalid.
     pub fn split_at_number(mut self, block_number: BlockNumber) -> (Option<Chain>, Option<Chain>) {
-        if block_number >= *self.blocks.last_entry().unwrap().key() {
-            return (Some(self), None);
+        if block_number >= *self.blocks.last_entry().expect("chain is never empty").key() {
+            return (Some(self), None)
         }
-        if block_number < *self.blocks.first_entry().unwrap().key() {
-            return (None, Some(self));
+        if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
+            return (None, Some(self))
         }
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
         let (first_changesets, second_changeset) = self.changesets.split_at(self.blocks.len());
@@ -287,6 +299,44 @@ mod tests {
     use crate::substate::AccountSubState;
     use reth_primitives::{H160, H256};
     use reth_provider::execution_result::AccountInfoChangeSet;
+
+    #[test]
+    fn chain_apend() {
+        let block = SealedBlockWithSenders::default();
+        let block1_hash = H256([0x01; 32]);
+        let block2_hash = H256([0x02; 32]);
+        let block3_hash = H256([0x03; 32]);
+        let block4_hash = H256([0x04; 32]);
+
+        let mut block1 = block.clone();
+        let mut block2 = block.clone();
+        let mut block3 = block.clone();
+        let mut block4 = block.clone();
+
+        block1.block.header.hash = block1_hash;
+        block2.block.header.hash = block2_hash;
+        block3.block.header.hash = block3_hash;
+        block4.block.header.hash = block4_hash;
+
+        block3.block.header.header.parent_hash = block2_hash;
+
+        let mut chain1 = Chain {
+            substate: Default::default(),
+            changesets: vec![],
+            blocks: BTreeMap::from([(1, block1.clone()), (2, block2.clone())]),
+        };
+
+        let chain2 = Chain {
+            substate: Default::default(),
+            changesets: vec![],
+            blocks: BTreeMap::from([(3, block3.clone()), (4, block4.clone())]),
+        };
+
+        assert_eq!(chain1.append_chain(chain2.clone()), Ok(()));
+
+        // chain1 got changed so this will fail
+        assert!(chain1.append_chain(chain2).is_err());
+    }
 
     #[test]
     fn test_number_split() {
@@ -331,7 +381,7 @@ mod tests {
         // split in two
         assert_eq!(
             chain.clone().split_at_block_hash(&block1_hash),
-            (Some(chain_split1), Some(chain_split2))
+            (Some(chain_split1.clone()), Some(chain_split2.clone()))
         );
 
         // split at unknown block hash

@@ -1,12 +1,12 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
-use super::chain::{Chain, ChainId, ForkBlock};
+use super::chain::{BlockChainId, Chain, ForkBlock};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-/// Internal indices of the blocks and chains.  This is main connection 
+/// Internal indices of the blocks and chains.  This is main connection
 /// between blocks, chains and canonical chain.
-/// 
+///
 /// It contains list of canonical block hashes, forks to childs blocks
 /// and block hash to chain id.
 #[derive(Clone)]
@@ -25,7 +25,7 @@ pub struct BlockIndices {
     /// NOTE: It contains just a blocks that are forks as a key and not all blocks.
     fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
     /// Block hashes and side chain they belong
-    blocks_to_chain: HashMap<BlockHash, ChainId>,
+    blocks_to_chain: HashMap<BlockHash, BlockChainId>,
     /// Utility index. Block number to block hash. Can be used for
     /// RPC to fetch all pending block in chain by its number.
     index_number_to_block: HashMap<BlockNumber, HashSet<BlockHash>>,
@@ -60,7 +60,7 @@ impl BlockIndices {
     }
 
     /// Return block to chain id
-    pub fn blocks_to_chain(&self) -> &HashMap<BlockHash, ChainId> {
+    pub fn blocks_to_chain(&self) -> &HashMap<BlockHash, BlockChainId> {
         &self.blocks_to_chain
     }
 
@@ -80,7 +80,7 @@ impl BlockIndices {
     }
 
     /// Insert block to chain and fork child indices of the new chain
-    pub fn insert_chain(&mut self, chain_id: ChainId, chain: &Chain) {
+    pub fn insert_chain(&mut self, chain_id: BlockChainId, chain: &Chain) {
         for (number, block) in chain.blocks().iter() {
             // add block -> chain_id index
             self.blocks_to_chain.insert(block.hash(), chain_id);
@@ -93,14 +93,17 @@ impl BlockIndices {
     }
 
     /// Get the chain ID the block belongs to
-    pub fn get_blocks_chain_id(&self, block: &BlockHash) -> Option<ChainId> {
+    pub fn get_blocks_chain_id(&self, block: &BlockHash) -> Option<BlockChainId> {
         self.blocks_to_chain.get(block).cloned()
     }
 
     /// Update all block hashes. iterate over present and new list of canonical hashes and compare
     /// them. Remove all missmatches, disconnect them and return all chains that needs to be
     /// removed.
-    pub fn update_block_hashes(&mut self, hashes: BTreeMap<u64, BlockHash>) -> BTreeSet<ChainId> {
+    pub fn update_block_hashes(
+        &mut self,
+        hashes: BTreeMap<u64, BlockHash>,
+    ) -> BTreeSet<BlockChainId> {
         let mut new_hashes = hashes.iter();
         let mut old_hashes = self.canonical_chain().iter();
 
@@ -155,7 +158,7 @@ impl BlockIndices {
 
     /// Remove chain from indices and return dependent chains that needs to be removed.
     /// Does the cleaning of the tree and removing blocks from the chain.
-    pub fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<ChainId> {
+    pub fn remove_chain(&mut self, chain: &Chain) -> BTreeSet<BlockChainId> {
         let mut lose_chains = BTreeSet::new();
         for (block_number, block) in chain.blocks().iter() {
             let block_hash = block.hash();
@@ -169,7 +172,7 @@ impl BlockIndices {
         &mut self,
         block_number: BlockNumber,
         block_hash: BlockHash,
-    ) -> BTreeSet<ChainId> {
+    ) -> BTreeSet<BlockChainId> {
         // rm number -> block
         if let Some(set) = self.index_number_to_block.get_mut(&block_number) {
             set.remove(&block_hash);
@@ -224,7 +227,10 @@ impl BlockIndices {
 
     /// Used for finalization of block.
     /// Return list of chains for removal that depend on finalized canonical chain.
-    pub fn finalize_canonical_blocks(&mut self, finalized_block: BlockNumber) -> BTreeSet<ChainId> {
+    pub fn finalize_canonical_blocks(
+        &mut self,
+        finalized_block: BlockNumber,
+    ) -> BTreeSet<BlockChainId> {
         // get finalized chains. blocks between [self.last_finalized,finalized_block).
         // Dont remove finalized_block, as sidechain can point to it.
         let finalized_blocks: Vec<BlockHash> = self

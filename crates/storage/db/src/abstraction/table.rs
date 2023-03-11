@@ -10,10 +10,6 @@ use std::{
     marker::{Send, Sync},
 };
 
-
-/// Helper type containing key value pairs.
-pub type KeyValue<T> = (<T as Table>::Key, <T as Table>::Value);
-
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
     /// Compressed type.

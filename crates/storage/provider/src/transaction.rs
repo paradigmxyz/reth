@@ -1,5 +1,6 @@
 use itertools::{izip, Itertools};
 use reth_db::{
+    common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::{Database, DatabaseGAT},
     models::{
@@ -7,16 +8,16 @@ use reth_db::{
         storage_sharded_key::{self, StorageShardedKey},
         ShardedKey, StoredBlockBody, TransitionIdAddress,
     },
-    table::{KeyValue, Table},
+    table::Table,
     tables,
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
     TransitionList,
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, Bytecode, ChainSpec, Hardfork, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
-    TransitionId, TxNumber, H256, U256,
+    keccak256, proofs::EMPTY_ROOT, Account, Address, BlockHash, BlockNumber, Bytecode, ChainSpec,
+    Hardfork, Header, Receipt, SealedBlock, SealedBlockWithSenders, StorageEntry,
+    TransactionSignedEcRecovered, TransitionId, TxNumber, H256, U256,
 };
 use reth_tracing::tracing::{info, trace};
 use std::{
@@ -904,10 +905,19 @@ where
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
         if TAKE {
-            let from_transition = match range.start_bound() {
-                Bound::Included(n) => self.get_block_transition(n.saturating_sub(1))?,
-                Bound::Excluded(n) => self.get_block_transition(*n)?,
-                Bound::Unbounded => 0,
+            let (from_transition, parent_number, parent_state_root) = match range.start_bound() {
+                Bound::Included(n) => {
+                    let parent_number = n.saturating_sub(1);
+                    let transition = self.get_block_transition(parent_number)?;
+                    let parent = self.get_header(parent_number)?;
+                    (transition, parent_number, parent.state_root)
+                }
+                Bound::Excluded(n) => {
+                    let transition = self.get_block_transition(*n)?;
+                    let parent = self.get_header(*n)?;
+                    (transition, *n, parent.state_root)
+                }
+                Bound::Unbounded => (0, 0, EMPTY_ROOT),
             };
             let to_transition = match range.end_bound() {
                 Bound::Included(n) => self.get_block_transition(*n)?,
@@ -926,21 +936,33 @@ where
             self.unwind_storage_history_indices(transition_storage_range)?;
 
             // merkle tree
+            let new_state_root;
             {
                 let (tip_number, _) =
                     self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
                 let current_root = self.get_header(tip_number)?.state_root;
                 let loader = DBTrieLoader::default();
-                let _block_root = loader.update_root(self, current_root, transition_range)?;
+                new_state_root = loader.update_root(self, current_root, transition_range)?;
             }
-            // check root
+            // state root should be always correct as we are reverting state.
+            // but for sake of double verification we will check it again.
+            if new_state_root != parent_state_root {
+                let parent_hash = self.get_block_hash(parent_number)?;
+                return Err(TransactionError::StateTrieRootMismatch {
+                    got: new_state_root,
+                    expected: parent_state_root,
+                    block_number: parent_number,
+                    block_hash: parent_hash,
+                })
+            }
         }
         // get blocks
         let blocks = self.get_block_range::<TAKE>(chain_spec, range.clone())?;
         // get execution res
         let execution_res = self.get_block_execution_result_range::<TAKE>(range.clone())?;
         // combine them
-        let res = blocks.into_iter().zip(execution_res.into_iter()).collect();
+        let blocks_with_exec_result: Vec<_> =
+            blocks.into_iter().zip(execution_res.into_iter()).collect();
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
@@ -950,7 +972,7 @@ where
         }
 
         // return them
-        Ok(res)
+        Ok(blocks_with_exec_result)
     }
 
     /// Update all pipeline sync stage progress.
@@ -1462,7 +1484,7 @@ pub enum TransactionError {
     #[error("Merkle trie calculation error: {0}")]
     MerkleTrie(#[from] TrieError),
     /// Root mismatch
-    #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{got:?}")]
+    #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{expected:?}")]
     StateTrieRootMismatch {
         /// Expected root
         expected: H256,

@@ -82,6 +82,12 @@ impl SealedBlock {
         self.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<Address>>>()
     }
 
+    /// Seal sealed block with recovered transaction senders.
+    pub fn seal_with_senders(self) -> Option<SealedBlockWithSenders> {
+        let senders = self.senders()?;
+        Some(SealedBlockWithSenders { block: self, senders })
+    }
+
     /// Unseal the block
     pub fn unseal(self) -> Block {
         Block {

@@ -144,7 +144,7 @@ impl SubStateData {
                             // remove account that we didn't change from substate
 
                             entry.remove_entry();
-                            return;
+                            return
                         }
                         val.info = Account::default();
                         val.storage.clear();
@@ -197,7 +197,7 @@ impl AccountSubState {
 
         if cnt == 1 {
             self.storage_is_clear = None;
-            return true;
+            return true
         }
         false
     }
@@ -244,7 +244,7 @@ impl<'a, SP: StateProvider> BlockHashProvider for SubStateWithProvider<'a, SP> {
         let block_number = number.as_limbs()[0];
         if let Some(sidechain_block_hash) = self.sidechain_block_hashes.get(&block_number).cloned()
         {
-            return Ok(Some(sidechain_block_hash));
+            return Ok(Some(sidechain_block_hash))
         }
 
         Ok(Some(
@@ -259,7 +259,7 @@ impl<'a, SP: StateProvider> BlockHashProvider for SubStateWithProvider<'a, SP> {
 impl<'a, SP: StateProvider> AccountProvider for SubStateWithProvider<'a, SP> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
         if let Some(account) = self.substate.accounts.get(&address).map(|acc| acc.info) {
-            return Ok(Some(account));
+            return Ok(Some(account))
         }
         self.provider.basic_account(address)
     }
@@ -273,10 +273,10 @@ impl<'a, SP: StateProvider> StateProvider for SubStateWithProvider<'a, SP> {
     ) -> Result<Option<reth_primitives::StorageValue>> {
         if let Some(substate_account) = self.substate.accounts.get(&account) {
             if let Some(storage) = substate_account.storage.get(&storage_key) {
-                return Ok(Some(*storage));
+                return Ok(Some(*storage))
             }
             if !substate_account.ask_provider() {
-                return Ok(Some(U256::ZERO));
+                return Ok(Some(U256::ZERO))
             }
         }
         self.provider.storage(account, storage_key)
@@ -284,7 +284,7 @@ impl<'a, SP: StateProvider> StateProvider for SubStateWithProvider<'a, SP> {
 
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
         if let Some((_, bytecode)) = self.substate.bytecodes.get(&code_hash).cloned() {
-            return Ok(Some(bytecode));
+            return Ok(Some(bytecode))
         }
         self.provider.bytecode_by_hash(code_hash)
     }
