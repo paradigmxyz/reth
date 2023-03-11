@@ -431,6 +431,8 @@ where
                         let pool_transaction = <Pool::Transaction as FromRecoveredTransaction>::from_recovered_transaction(tx);
 
                         let pool = self.pool.clone();
+
+                        #[allow(clippy::redundant_async_block)]
                         let import = Box::pin(async move {
                             pool.add_external_transaction(pool_transaction).await
                         });
