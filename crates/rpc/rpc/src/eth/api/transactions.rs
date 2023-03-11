@@ -3,7 +3,7 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{BlockId, Bytes, FromRecoveredTransaction, TransactionSigned, H256};
+use reth_primitives::{BlockId, Bytes, FromRecoveredTransaction, TransactionSigned, H256, U256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
 use reth_rpc_types::{Index, Transaction, TransactionRequest};

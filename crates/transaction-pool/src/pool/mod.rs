@@ -1,7 +1,7 @@
 //! Transaction Pool internals.
 //!
-//! Incoming transactions are before they enter the pool first. The validation outcome can have 3
-//! states:
+//! Incoming transactions validated are before they enter the pool first. The validation outcome can
+//! have 3 states:
 //!
 //!  1. Transaction can _never_ be valid
 //!  2. Transaction is _currently_ valid
@@ -232,7 +232,12 @@ where
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(tx.hash());
-                Err(err)
+                Err(PoolError::InvalidTransaction(*tx.hash(), err))
+            }
+            TransactionValidationOutcome::Error(tx, err) => {
+                let mut listener = self.event_listener.write();
+                listener.discarded(tx.hash());
+                Err(PoolError::Other(*tx.hash(), err))
             }
         }
     }
@@ -417,19 +422,12 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
     discarded: Vec<TxHash>,
-    /// Transactions removed from the Ready pool
-    removed: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Create a new, empty transaction.
     fn new(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
-        Self {
-            transaction,
-            promoted: Default::default(),
-            discarded: Default::default(),
-            removed: Default::default(),
-        }
+        Self { transaction, promoted: Default::default(), discarded: Default::default() }
     }
 }
 

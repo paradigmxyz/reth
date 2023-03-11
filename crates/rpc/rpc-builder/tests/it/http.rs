@@ -80,7 +80,9 @@ where
     EthApiClient::transaction_by_block_number_and_index(client, block_number, index).await.unwrap();
     EthApiClient::uncle_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::uncle_by_block_number_and_index(client, block_number, index).await.unwrap();
-    EthApiClient::create_access_list(client, call_request.clone(), None).await.unwrap();
+    EthApiClient::transaction_by_hash(client, tx_hash).await.unwrap();
+    EthApiClient::transaction_by_block_hash_and_index(client, hash, index).await.unwrap();
+    EthApiClient::transaction_by_block_number_and_index(client, block_number, index).await.unwrap();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));

@@ -620,7 +620,7 @@ mod tests {
                 TestStage::new(StageId("B"))
                     .add_exec(Err(StageError::Validation {
                         block: 5,
-                        error: consensus::Error::BaseFeeMissing,
+                        error: consensus::ConsensusError::BaseFeeMissing,
                     }))
                     .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),

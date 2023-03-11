@@ -8,7 +8,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::{consensus::Error, provider::ProviderError};
+use reth_interfaces::{consensus::ConsensusError, provider::ProviderError};
 use reth_primitives::{ChainSpec, Hardfork, EMPTY_OMMER_ROOT, MAINNET, U256};
 use reth_provider::Transaction;
 use tracing::*;
@@ -78,21 +78,21 @@ impl<DB: Database> Stage<DB> for TotalDifficultyStage {
                 if header.difficulty != U256::ZERO {
                     return Err(StageError::Validation {
                         block: header.number,
-                        error: Error::TheMergeDifficultyIsNotZero,
+                        error: ConsensusError::TheMergeDifficultyIsNotZero,
                     })
                 }
 
                 if header.nonce != 0 {
                     return Err(StageError::Validation {
                         block: header.number,
-                        error: Error::TheMergeNonceIsNotZero,
+                        error: ConsensusError::TheMergeNonceIsNotZero,
                     })
                 }
 
                 if header.ommers_hash != EMPTY_OMMER_ROOT {
                     return Err(StageError::Validation {
                         block: header.number,
-                        error: Error::TheMergeOmmerRootIsNotEmpty,
+                        error: ConsensusError::TheMergeOmmerRootIsNotEmpty,
                     })
                 }
             }
