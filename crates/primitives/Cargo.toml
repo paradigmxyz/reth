@@ -26,7 +26,7 @@ fixed-hash = { version = "0.8", default-features = false, features = [
 ] }
 
 # crypto
-secp256k1 = { version = "0.24.2", default-features = false, features = [
+secp256k1 = { version = "0.26.0", default-features = false, features = [
     "global-context",
     "alloc",
     "recovery",
@@ -74,7 +74,7 @@ proptest-derive = "0.3"
 
 # necessary so we don't hit a "undeclared 'std'": 
 # https://github.com/paradigmxyz/reth/pull/177#discussion_r1021172198 
-secp256k1 = "0.24.2"
+secp256k1 = "0.26.0"
 criterion = "0.4.0"
 pprof = { version = "0.11", features = [
     "flamegraph",

@@ -74,7 +74,7 @@ tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-threa
 tokio-stream = "0.1"
 
 # crypto
-secp256k1 = { version = "0.24", features = [
+secp256k1 = { version = "0.26.0", features = [
     "global-context",
     "rand-std",
     "recovery",
