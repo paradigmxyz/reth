@@ -115,51 +115,29 @@ async fn handle_accepted<Client, Pool, Events, Network>(
         SubscriptionKind::Syncing => {
             subscription_task_spawner.spawn(Box::pin(async move {
                 // get new block subscription
-                let mut block_subscription = pubsub.chain_events.subscribe_new_blocks();
-                // get initial sync status
+                let mut new_blocks =
+                    UnboundedReceiverStream::new(pubsub.chain_events.subscribe_new_blocks());
+                // get current sync status
                 let mut initial_sync_status = pubsub.network.is_syncing();
-                let initial_sub_res = get_sync_status(pubsub.clone()).await;
-                // send 1 response
-                // Can ignore the error for now
-                accepted_sink.send(&initial_sub_res).unwrap();
+                let current_sub_res = pubsub.sync_status(initial_sync_status).await;
 
-                while (block_subscription.recv().await).is_some() {
-                    let initial_sub_res = get_sync_status(pubsub.clone()).await;
+                // send the current status immediately
+                let _ = accepted_sink.send(&current_sub_res);
+
+                while (new_blocks.next().await).is_some() {
+                    let current_syncing = pubsub.network.is_syncing();
                     // Only send a new response if the sync status has changed
-                    if pubsub.network.is_syncing() != initial_sync_status {
-                        accepted_sink.send(&initial_sub_res).unwrap();
+                    if current_syncing != initial_sync_status {
+                        // Update the sync status on each new block
+                        initial_sync_status = current_syncing;
+
+                        // send a new message now that the status changed
+                        let sync_status = pubsub.sync_status(current_syncing).await;
+                        let _ = accepted_sink.send(&sync_status);
                     }
-                    // Update the sync status on each new block
-                    initial_sync_status = pubsub.network.is_syncing();
                 }
             }));
         }
-    }
-}
-
-/// Helper function to get the current sync status.
-async fn get_sync_status<Client, Pool, Events, Network>(
-    pubsub: EthPubSubInner<Client, Pool, Events, Network>,
-) -> EthSubscriptionResult
-where
-    Client: BlockProvider + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Events: ChainEventSubscriptions + 'static,
-    Network: SyncStateProvider + 'static,
-{
-    let current_block = match pubsub.client.chain_info() {
-        Ok(info) => info.best_number,
-        Err(_) => 0,
-    };
-    if pubsub.network.is_syncing() {
-        EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
-            syncing: true,
-            starting_block: 0,
-            current_block,
-            highest_block: None,
-        }))
-    } else {
-        EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
     }
 }
 
@@ -183,6 +161,27 @@ struct EthPubSubInner<Client, Pool, Events, Network> {
 }
 
 // == impl EthPubSubInner ===
+
+impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
+where
+    Client: BlockProvider + 'static,
+{
+    /// Returns the current sync status for the `syncing` subscription
+    async fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
+        let current_block =
+            self.client.chain_info().map(|info| info.best_number).unwrap_or_default();
+        if is_syncing {
+            EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
+                syncing: true,
+                starting_block: 0,
+                current_block,
+                highest_block: Some(current_block),
+            }))
+        } else {
+            EthSubscriptionResult::SyncState(PubSubSyncStatus::Simple(false))
+        }
+    }
+}
 
 impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
 where
