@@ -379,6 +379,7 @@ pub struct Builder<B = Identity, L = ()> {
     settings: Settings,
     resources: Resources,
     logger: L,
+    /// Subscription ID provider.
     id_provider: Arc<dyn IdProvider>,
     service_builder: tower::ServiceBuilder<B>,
 }
