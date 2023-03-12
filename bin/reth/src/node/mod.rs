@@ -454,10 +454,10 @@ impl Command {
                     updater,
                     factory.clone(),
                 )
-                .set(TotalDifficultyStage {
-                    chain_spec: self.chain.clone(),
-                    commit_threshold: stage_conf.total_difficulty.commit_threshold,
-                })
+                .set(
+                    TotalDifficultyStage::new(consensus.clone())
+                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
+                )
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })

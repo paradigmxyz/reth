@@ -140,7 +140,7 @@ where
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(self.header_downloader, self.consensus.clone()))
-            .add_stage(TotalDifficultyStage::default())
+            .add_stage(TotalDifficultyStage::new(self.consensus.clone()))
             .add_stage(BodyStage { downloader: self.body_downloader, consensus: self.consensus })
     }
 }
