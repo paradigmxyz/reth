@@ -44,7 +44,7 @@ rand = { version = "0.8", optional = true }
 thiserror = "1"
 
 # enr
-enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"], optional = true }
+enr = { version = "0.8.0", features = ["serde", "rust-secp256k1"], optional = true }
 
 # ethers
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }

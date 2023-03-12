@@ -24,7 +24,7 @@ secp256k1 = { version = "0.24", features = [
     "rand-std",
     "recovery",
 ] }
-enr = { version = "0.7.0", default-features = false, features = [
+enr = { version = "0.8.0", default-features = false, features = [
     "rust-secp256k1",
 ] }
 
