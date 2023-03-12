@@ -155,22 +155,15 @@ where
         Ok(last_transition_id)
     }
 
-    /// Get the next start transaction id and transition for the `block` by looking at the previous
-    /// block. Returns Zero/Zero for Genesis.
-    pub fn get_next_block_ids(
-        &self,
-        block: BlockNumber,
-    ) -> Result<(TxNumber, TransitionId), TransactionError> {
+    /// Get next start transaction id for the block by looking the the previous block.
+    /// Returns `0` for genesis.
+    pub fn get_next_tx_id(&self, block: BlockNumber) -> Result<TxNumber, TransactionError> {
         if block == 0 {
-            return Ok((0, 0))
+            return Ok(0)
         }
 
-        let prev_number = block - 1;
-        let prev_body = self.get_block_body(prev_number)?;
-        let last_transition = self
-            .get::<tables::BlockTransitionIndex>(prev_number)?
-            .ok_or(ProviderError::BlockTransition { block_number: prev_number })?;
-        Ok((prev_body.start_tx_id + prev_body.tx_count, last_transition))
+        let prev_body = self.get_block_body(block - 1)?;
+        Ok(prev_body.start_tx_id + prev_body.tx_count)
     }
 
     /// Query the block header by number

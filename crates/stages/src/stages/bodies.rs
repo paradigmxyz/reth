@@ -97,11 +97,15 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
 
-        // Get id for the first transaction and first transition in the block
-        let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(start_block)?;
+        // Get last transition id.
+        let stage_progress = input.stage_progress.unwrap_or_default();
+        let mut last_transition_id = tx.get_block_transition(stage_progress)?;
+
+        // Get next transaction id.
+        let mut next_tx_id = tx.get_next_tx_id(start_block)?;
 
         let mut highest_block = input.stage_progress.unwrap_or_default();
-        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
+        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = next_tx_id, transition_id = last_transition_id, "Commencing sync");
 
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
@@ -120,7 +124,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     body_cursor.append(
                         block_number,
                         StoredBlockBody {
-                            start_tx_id: current_tx_id,
+                            start_tx_id: next_tx_id,
                             tx_count: block.body.len() as u64,
                         },
                     )?;
@@ -128,12 +132,14 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                     // Write transactions
                     for transaction in block.body {
                         // Append the transaction
-                        tx_cursor.append(current_tx_id, transaction)?;
-                        tx_transition_cursor.append(current_tx_id, transition_id)?;
-                        // Increment transaction id for each transaction.
-                        current_tx_id += 1;
+                        tx_cursor.append(next_tx_id, transaction)?;
+
                         // Increment transition id for each transaction.
-                        transition_id += 1;
+                        last_transition_id += 1;
+                        tx_transition_cursor.append(next_tx_id, last_transition_id)?;
+
+                        // Increment next transaction id.
+                        next_tx_id += 1;
                     }
 
                     // Write ommers if any
@@ -162,7 +168,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 BlockResponse::Empty(_) => {
                     body_cursor.append(
                         block_number,
-                        StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
+                        StoredBlockBody { start_tx_id: next_tx_id, tx_count: 0 },
                     )?;
                 }
             };
@@ -178,9 +184,9 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             let has_reward = self.consensus.has_block_reward(td.into(), difficulty);
             let has_post_block_transition = has_reward || has_withdrawals;
             if has_post_block_transition {
-                transition_id += 1;
+                last_transition_id += 1;
             }
-            block_transition_cursor.append(block_number, transition_id)?;
+            block_transition_cursor.append(block_number, last_transition_id)?;
 
             highest_block = block_number;
         }
@@ -641,13 +647,16 @@ mod tests {
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let mut tx_transition_cursor = tx.cursor_read::<tables::TxTransitionIndex>()?;
 
-                    let first_body_key = match bodies_cursor.first()? {
-                        Some((key, _)) => key,
-                        None => return Ok(()),
+                    // Skip first seeded block
+                    let Some((_, genesis)) = bodies_cursor.first()? else {
+                        return Ok(())
+                    };
+                    let Some((first_body_key, _)) = bodies_cursor.next()? else {
+                        return Ok(())
                     };
 
                     let mut prev_number: Option<BlockNumber> = None;
-                    let mut expected_transition_id = 0;
+                    let mut expected_transition_id = genesis.tx_count + 1;
 
                     for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (number, body) = entry?;
@@ -678,11 +687,12 @@ mod tests {
                         for tx_id in body.tx_id_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
                             assert!(tx_entry.is_some(), "Transaction is missing.");
-                            assert_eq!(
-                                tx_transition_cursor.seek_exact(tx_id).expect("to be okay").expect("to be present").1, expected_transition_id
-                            );
+                            
                             // Increment expected id for each transaction transition.
                             expected_transition_id += 1;
+
+                            let (_, transition_id) = tx_transition_cursor.seek_exact(tx_id).expect("to be okay").expect("to be present");
+                            assert_eq!(transition_id, expected_transition_id);  
                         }
 
                         // Increment expected id for block reward.
@@ -690,13 +700,13 @@ mod tests {
                             .seek(number)?
                             .expect("Missing TD for header")
                             .1;
-                        if self.consensus.has_block_reward(td.into(), header.difficulty) {
+                        if self.consensus.has_block_reward(td.into(), header.difficulty) && header.number != 0 {
                             expected_transition_id += 1;
                         }
 
                         // Validate that block transition exists
-                        assert_eq!(block_transition_cursor.seek_exact(number).expect("To be okay").expect("Block transition to be present").1,expected_transition_id);
-
+                        let (_, last_block_transition) = block_transition_cursor.seek_exact(number).expect("To be okay").expect("Block transition to be present");
+                        assert_eq!(last_block_transition, expected_transition_id);
 
                         prev_number = Some(number);
                     }
