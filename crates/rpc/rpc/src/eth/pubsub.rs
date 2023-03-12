@@ -1,5 +1,6 @@
 //! `eth_` PubSub RPC handler implementation
 
+use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
 use reth_interfaces::{events::ChainEventSubscriptions, sync::SyncStateProvider};
 use reth_primitives::{rpc::FilteredParams, TxHash};
@@ -10,7 +11,7 @@ use reth_rpc_types::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
         SyncStatusMetadata,
     },
-    Header,
+    Header, Log,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -204,5 +205,20 @@ where
         UnboundedReceiverStream::new(self.chain_events.subscribe_new_blocks()).map(|new_block| {
             Header::from_primitive_with_hash(new_block.header.as_ref().clone(), new_block.hash)
         })
+    }
+
+    /// Returns a stream that yields all new RPC blocks.
+    fn into_log_stream(self) -> impl Stream<Item = Header> {
+        UnboundedReceiverStream::new(self.chain_events.subscribe_new_blocks())
+            .filter_map(move |new_block| {
+                let transactions =
+                    self.client.transactions_by_block(new_block.hash.into()).ok().flatten()?;
+                Some((new_block, transactions))
+            })
+            .flat_map(|(new_block, transactions)| {
+                let mut logs: Vec<Log> = Vec::new();
+                let mut log_index: u32 = 0;
+                unimplemented!()
+            })
     }
 }
