@@ -3,6 +3,7 @@ members = [
     "bin/reth",
     "crates/consensus",
     "crates/executor",
+    "crates/fundamental-types",
     "crates/interfaces",
     "crates/metrics/metrics-derive",
     "crates/metrics/common",

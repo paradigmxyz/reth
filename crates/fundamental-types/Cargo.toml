@@ -1,0 +1,46 @@
+[package]
+name = "reth-fundamental-types"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "fundamental ethereum types shared by revm, reth and ethers"
+
+[dependencies]
+# eth
+ruint = { version = "1.7", features = ["rlp"] }
+primitive-types = { version = "0.12", default-features = false, optional = true }
+
+reth-rlp = { path = "../rlp", version = "0.1" , default-features = false, optional = true }
+
+# misc
+bytes = { version = "1.4", default-features = false }
+
+# bits B256 B160 crate
+fixed-hash = { version = "0.8", default-features = false, features = [
+    "rustc-hex",
+] }
+
+# utility
+hex-literal = "0.3"
+derive_more = "0.99"
+
+# optional
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[dev-dependencies]
+arbitrary = { version = "1.2", features = ["derive"] }
+proptest = { version = "1.1" }
+proptest-derive = "0.3"
+ruint = { version = "1.7.0", features = [
+    "primitive-types",
+    "rlp",
+    "proptest",
+    "arbitrary",
+] }
+
+[features]
+default = ["std"]
+std = ["bytes/std"]
+primitive-types = ["dep:primitive-types", "ruint/primitive-types"]
