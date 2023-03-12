@@ -4623,10 +4623,8 @@ name = "reth-fundamental-types"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
- "bytes",
  "derive_more",
  "fixed-hash",
- "hex-literal",
  "primitive-types",
  "proptest",
  "proptest-derive",

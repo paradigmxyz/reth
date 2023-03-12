@@ -12,22 +12,19 @@ description = "fundamental ethereum types shared by revm, reth and ethers"
 ruint = { version = "1.7", features = ["rlp"] }
 primitive-types = { version = "0.12", default-features = false, optional = true }
 
-reth-rlp = { path = "../rlp", version = "0.1" , default-features = false, optional = true }
-
-# misc
-bytes = { version = "1.4", default-features = false }
-
 # bits B256 B160 crate
 fixed-hash = { version = "0.8", default-features = false, features = [
     "rustc-hex",
 ] }
 
 # utility
-hex-literal = "0.3"
 derive_more = "0.99"
 
 # optional
 serde = { version = "1.0", features = ["derive"], optional = true }
+arbitrary = { version = "1.2", features = ["derive"], optional = true }
+proptest = { version = "1.1", optional = true }
+proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
 arbitrary = { version = "1.2", features = ["derive"] }
@@ -42,5 +39,12 @@ ruint = { version = "1.7.0", features = [
 
 [features]
 default = ["std"]
-std = ["bytes/std"]
+std = []
 primitive-types = ["dep:primitive-types", "ruint/primitive-types"]
+arbitrary = [
+    "ruint/arbitrary",
+    "ruint/proptest",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-derive",
+]
