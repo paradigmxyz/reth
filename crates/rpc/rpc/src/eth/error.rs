@@ -162,7 +162,7 @@ pub enum InvalidTransactionError {
     /// TODO?
     //#[error("Out of gas:")]
     //MemoryLimitOutOfGas(U256),
-    // As BasicOutOfGas but thrown when gas exhausts during memory expansion.
+    /// As BasicOutOfGas but thrown when gas exhausts during memory expansion.
     #[error("Out of gas: gas exhausts during memory expansion, gas required exceeds allowance: {0:?}")]
     MemoryOutOfGas(U256),
     /// As BasicOutOfGas but thrown when gas exhausts during precompiled contract execution.
