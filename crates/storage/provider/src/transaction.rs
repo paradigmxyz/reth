@@ -719,6 +719,13 @@ where
                 current_transition_id += 1;
             }
 
+            // Transition is incremeneted every time before Paris hardfork and after
+            // Shanghai only if there are Withdrawals in the block. So it is correct to
+            // to increment transition id every time there is a block changeset present.
+            if !results.block_changesets.is_empty() {
+                current_transition_id += 1;
+            }
+
             // If there are any post block changes, we will add account changesets to db.
             for (address, changeset) in results.block_changesets.into_iter() {
                 trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
@@ -729,7 +736,6 @@ where
                     spurious_dragon_active,
                 )?;
             }
-            current_transition_id += 1;
         }
         Ok(())
     }
