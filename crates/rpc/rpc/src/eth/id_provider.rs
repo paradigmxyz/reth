@@ -1,5 +1,5 @@
-use std::fmt::Write;
 use jsonrpsee::types::SubscriptionId;
+use std::fmt::Write;
 
 /// An [IdProvider](jsonrpsee::core::traits::IdProvider) for ethereum subscription ids.
 ///
@@ -24,7 +24,7 @@ fn to_quantity(val: u128) -> SubscriptionId<'static> {
     let non_zero = b.iter().take_while(|b| **b == 0).count();
     let b = &b[non_zero..];
     if b.is_empty() {
-        return SubscriptionId::Str("0x0".into());
+        return SubscriptionId::Str("0x0".into())
     }
 
     let mut id = String::with_capacity(2 * b.len() + 2);
@@ -38,17 +38,16 @@ fn to_quantity(val: u128) -> SubscriptionId<'static> {
     id.into()
 }
 
-
 #[cfg(test)]
 mod tests {
-    use reth_primitives::U128;
     use super::*;
+    use reth_primitives::U128;
 
     #[test]
     fn test_id_provider_quantity() {
-        let id =  to_quantity(0);
+        let id = to_quantity(0);
         assert_eq!(id, SubscriptionId::Str("0x0".into()));
-        let id =  to_quantity(1);
+        let id = to_quantity(1);
         assert_eq!(id, SubscriptionId::Str("0x1".into()));
 
         for _ in 0..1000 {
@@ -56,12 +55,13 @@ mod tests {
             let id = to_quantity(val);
             match id {
                 SubscriptionId::Str(id) => {
-                    let from_hex : U128 = id.parse().unwrap();
+                    let from_hex: U128 = id.parse().unwrap();
                     assert_eq!(from_hex, U128::from(val));
                 }
-                SubscriptionId::Num(_) => {unreachable!()}
+                SubscriptionId::Num(_) => {
+                    unreachable!()
+                }
             }
         }
-
     }
 }
