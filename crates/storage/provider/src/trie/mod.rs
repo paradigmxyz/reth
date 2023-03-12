@@ -260,7 +260,7 @@ impl<'tx, 'db, DB: Database> DBTrieLoader<'tx, 'db, DB> {
         let mut accounts_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(None)?;
 
-        let db = Arc::new(HashDatabase::<DB>::new(&self.tx)?);
+        let db = Arc::new(HashDatabase::<DB>::new(self.tx)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -280,7 +280,7 @@ impl<'tx, 'db, DB: Database> DBTrieLoader<'tx, 'db, DB> {
     }
 
     fn calculate_storage_root(&self, address: H256) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::<DB>::new(&self.tx, address)?);
+        let db = Arc::new(DupHashDatabase::<DB>::new(self.tx, address)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -318,7 +318,7 @@ impl<'tx, 'db, DB: Database> DBTrieLoader<'tx, 'db, DB> {
 
         let changed_accounts = self.gather_changes(tid_range)?;
 
-        let db = Arc::new(HashDatabase::<DB>::from_root(&self.tx, root)?);
+        let db = Arc::new(HashDatabase::<DB>::from_root(self.tx, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -360,7 +360,7 @@ impl<'tx, 'db, DB: Database> DBTrieLoader<'tx, 'db, DB> {
         address: H256,
         changed_storages: BTreeSet<H256>,
     ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabase::<DB>::from_root(&self.tx, address, root)?);
+        let db = Arc::new(DupHashDatabase::<DB>::from_root(self.tx, address, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
