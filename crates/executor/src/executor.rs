@@ -376,12 +376,13 @@ where
         // Fill revm structure.
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
-        let out = if self.stack.should_inspect(&self.evm.env, transaction.hash()) {
+        let hash = transaction.hash();
+        let out = if self.stack.should_inspect(&self.evm.env, hash) {
             // execution with inspector.
             let output = self.evm.inspect(&mut self.stack);
             tracing::trace!(
                 target: "evm",
-                hash = ?transaction.hash(), ?output, ?transaction, env = ?self.evm.env,
+                ?hash, ?output, ?transaction, env = ?self.evm.env,
                 "Executed transaction"
             );
             output
@@ -389,7 +390,7 @@ where
             // main execution.
             self.evm.transact()
         };
-        out.map_err(|e| Error::EVM(format!("{e:?}")))
+        out.map_err(|e| Error::EVM { hash, message: format!("{e:?}") })
     }
 
     /// Runs the provided transactions and commits their state. Will proceed
