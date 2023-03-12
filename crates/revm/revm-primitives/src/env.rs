@@ -81,6 +81,9 @@ pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: 
             tx_env.data = input.0.clone();
             tx_env.chain_id = *chain_id;
             tx_env.nonce = Some(*nonce);
+            if !tx_env.access_list.is_empty() {
+                tx_env.access_list.clear();
+            }
         }
         Transaction::Eip2930(TxEip2930 {
             nonce,
