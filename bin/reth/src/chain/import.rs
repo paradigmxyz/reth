@@ -152,10 +152,10 @@ impl ImportCommand {
                     NoopStatusUpdater::default(),
                     factory.clone(),
                 )
-                .set(TotalDifficultyStage {
-                    chain_spec: self.chain.clone(),
-                    commit_threshold: config.stages.total_difficulty.commit_threshold,
-                })
+                .set(
+                    TotalDifficultyStage::new(consensus.clone())
+                        .with_commit_threshold(config.stages.total_difficulty.commit_threshold),
+                )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })

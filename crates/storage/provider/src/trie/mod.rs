@@ -1,9 +1,7 @@
-use crate::Transaction;
 use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    database::Database,
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut},
@@ -43,13 +41,13 @@ pub enum TrieError {
 }
 
 /// Database wrapper implementing HashDB trait, with a read-write transaction.
-struct HashDatabaseMut<'tx, 'itx, DB: Database> {
-    tx: &'tx Transaction<'itx, DB>,
+pub struct HashDatabaseMut<'tx, TX> {
+    tx: &'tx TX,
 }
 
-impl<'tx, 'itx, DB> cita_trie::DB for HashDatabaseMut<'tx, 'itx, DB>
+impl<'tx, 'db, TX> cita_trie::DB for HashDatabaseMut<'tx, TX>
 where
-    DB: Database,
+    TX: DbTxMut<'db> + DbTx<'db> + Send + Sync,
 {
     type Error = TrieError;
 
@@ -93,9 +91,12 @@ where
     }
 }
 
-impl<'tx, 'itx, DB: Database> HashDatabaseMut<'tx, 'itx, DB> {
+impl<'tx, 'db, TX> HashDatabaseMut<'tx, TX>
+where
+    TX: DbTxMut<'db> + DbTx<'db> + Send + Sync,
+{
     /// Instantiates a new Database for the accounts trie, with an empty root
-    fn new(tx: &'tx Transaction<'itx, DB>) -> Result<Self, TrieError> {
+    pub fn new(tx: &'tx TX) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         if tx.get::<tables::AccountsTrie>(root)?.is_none() {
             tx.put::<tables::AccountsTrie>(root, [EMPTY_STRING_CODE].to_vec())?;
@@ -104,7 +105,7 @@ impl<'tx, 'itx, DB: Database> HashDatabaseMut<'tx, 'itx, DB> {
     }
 
     /// Instantiates a new Database for the accounts trie, with an existing root
-    fn from_root(tx: &'tx Transaction<'itx, DB>, root: H256) -> Result<Self, TrieError> {
+    pub fn from_root(tx: &'tx TX, root: H256) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
             return Self::new(tx)
         }
@@ -114,14 +115,14 @@ impl<'tx, 'itx, DB: Database> HashDatabaseMut<'tx, 'itx, DB> {
 }
 
 /// Database wrapper implementing HashDB trait, with a read-write transaction.
-struct DupHashDatabaseMut<'tx, 'itx, DB: Database> {
-    tx: &'tx Transaction<'itx, DB>,
+pub struct DupHashDatabaseMut<'tx, TX> {
+    tx: &'tx TX,
     key: H256,
 }
 
-impl<'tx, 'itx, DB> cita_trie::DB for DupHashDatabaseMut<'tx, 'itx, DB>
+impl<'tx, 'db, TX> cita_trie::DB for DupHashDatabaseMut<'tx, TX>
 where
-    DB: Database,
+    TX: DbTxMut<'db> + DbTx<'db> + Send + Sync,
 {
     type Error = TrieError;
 
@@ -175,9 +176,12 @@ where
     }
 }
 
-impl<'tx, 'itx, DB: Database> DupHashDatabaseMut<'tx, 'itx, DB> {
+impl<'tx, 'db, TX> DupHashDatabaseMut<'tx, TX>
+where
+    TX: DbTxMut<'db> + DbTx<'db> + Send + Sync,
+{
     /// Instantiates a new Database for the storage trie, with an empty root
-    fn new(tx: &'tx Transaction<'itx, DB>, key: H256) -> Result<Self, TrieError> {
+    pub fn new(tx: &'tx TX, key: H256) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
         if cursor.seek_by_key_subkey(key, root)?.filter(|entry| entry.hash == root).is_none() {
@@ -190,7 +194,7 @@ impl<'tx, 'itx, DB: Database> DupHashDatabaseMut<'tx, 'itx, DB> {
     }
 
     /// Instantiates a new Database for the storage trie, with an existing root
-    fn from_root(tx: &'tx Transaction<'itx, DB>, key: H256, root: H256) -> Result<Self, TrieError> {
+    pub fn from_root(tx: &'tx TX, key: H256, root: H256) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
             return Self::new(tx, key)
         }
@@ -293,7 +297,7 @@ impl<'tx, 'itx, TX: DbTx<'itx>> DupHashDatabase<'tx, 'itx, TX> {
 
 /// An Ethereum account, for RLP encoding traits deriving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
-pub(crate) struct EthAccount {
+pub struct EthAccount {
     /// Account nonce.
     nonce: u64,
     /// Account balance.
@@ -316,8 +320,15 @@ impl From<Account> for EthAccount {
 }
 
 impl EthAccount {
-    pub(crate) fn from_with_root(acc: Account, storage_root: H256) -> EthAccount {
-        Self { storage_root, ..Self::from(acc) }
+    /// Set storage root on account.
+    pub fn with_storage_root(mut self, storage_root: H256) -> Self {
+        self.storage_root = storage_root;
+        self
+    }
+
+    /// Get account's storage root.
+    pub fn storage_root(&self) -> H256 {
+        self.storage_root
     }
 }
 
@@ -325,34 +336,41 @@ impl EthAccount {
 /// of a the encoded nodes in the path from the root of the tree to the leaf.
 pub type MerkleProof = Vec<Vec<u8>>;
 
-/// Helper struct that interacts with a Merkle Patricia Tree persisted
-/// in the database.
-#[derive(Debug, Default)]
-pub struct DBTrieLoader;
+/// Struct for calculating the root of a merkle patricia tree,
+/// while populating the database with intermediate hashes.
+pub struct DBTrieLoader<'tx, TX> {
+    tx: &'tx TX,
+}
 
-impl DBTrieLoader {
+impl<'tx, TX> DBTrieLoader<'tx, TX> {
+    /// Create new instance of trie loader.
+    pub fn new(tx: &'tx TX) -> Self {
+        Self { tx }
+    }
+}
+
+// Read-write impls
+impl<'tx, 'db, TX> DBTrieLoader<'tx, TX>
+where
+    TX: DbTxMut<'db> + DbTx<'db> + Send + Sync,
+{
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
-    pub fn calculate_root<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
-    ) -> Result<H256, TrieError> {
-        tx.clear::<tables::AccountsTrie>()?;
-        tx.clear::<tables::StoragesTrie>()?;
+    pub fn calculate_root(&self) -> Result<H256, TrieError> {
+        self.tx.clear::<tables::AccountsTrie>()?;
+        self.tx.clear::<tables::StoragesTrie>()?;
 
-        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+        let mut accounts_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
         let mut walker = accounts_cursor.walk(None)?;
 
-        let db = Arc::new(HashDatabaseMut::new(tx)?);
+        let db = Arc::new(HashDatabaseMut::new(self.tx)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
         let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
 
         while let Some((hashed_address, account)) = walker.next().transpose()? {
-            let value = EthAccount::from_with_root(
-                account,
-                self.calculate_storage_root(tx, hashed_address)?,
-            );
+            let value = EthAccount::from(account)
+                .with_storage_root(self.calculate_storage_root(hashed_address)?);
 
             let mut out = Vec::new();
             Encodable::encode(&value, &mut out);
@@ -363,18 +381,15 @@ impl DBTrieLoader {
         Ok(root)
     }
 
-    fn calculate_storage_root<DB: Database>(
-        &self,
-        tx: &Transaction<'_, DB>,
-        address: H256,
-    ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabaseMut::new(tx, address)?);
+    /// Calculate the accounts storage root.
+    pub fn calculate_storage_root(&self, address: H256) -> Result<H256, TrieError> {
+        let db = Arc::new(DupHashDatabaseMut::new(self.tx, address)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
         let mut trie = PatriciaTrie::new(Arc::clone(&db), Arc::clone(&hasher));
 
-        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         // Should be able to use walk_dup, but any call to next() causes an assert fail in mdbx.c
         // let mut walker = storage_cursor.walk_dup(address, H256::zero())?;
@@ -390,24 +405,23 @@ impl DBTrieLoader {
 
         // if root is empty remove it from db
         if root == EMPTY_ROOT {
-            tx.delete::<tables::StoragesTrie>(address, None)?;
+            self.tx.delete::<tables::StoragesTrie>(address, None)?;
         }
 
         Ok(root)
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
-    pub fn update_root<DB: Database>(
+    pub fn update_root(
         &self,
-        tx: &Transaction<'_, DB>,
         root: H256,
         tid_range: Range<TransitionId>,
     ) -> Result<H256, TrieError> {
-        let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+        let mut accounts_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
 
-        let changed_accounts = self.gather_changes(tx, tid_range)?;
+        let changed_accounts = self.gather_changes(tid_range)?;
 
-        let db = Arc::new(HashDatabaseMut::from_root(tx, root)?);
+        let db = Arc::new(HashDatabaseMut::from_root(self.tx, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
@@ -418,13 +432,13 @@ impl DBTrieLoader {
                 trie.remove(address.as_bytes())?;
 
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
-                self.update_storage_root(tx, storage_root, address, changed_storages)?
+                self.update_storage_root(storage_root, address, changed_storages)?
             } else {
-                self.calculate_storage_root(tx, address)?
+                self.calculate_storage_root(address)?
             };
 
             if let Some((_, account)) = accounts_cursor.seek_exact(address)? {
-                let value = EthAccount::from_with_root(account, storage_root);
+                let value = EthAccount::from(account).with_storage_root(storage_root);
 
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
@@ -434,7 +448,7 @@ impl DBTrieLoader {
 
         let new_root = H256::from_slice(trie.root()?.as_slice());
         if new_root != root {
-            let mut cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+            let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
             if cursor.seek_exact(root)?.is_some() {
                 cursor.delete_current()?;
             }
@@ -443,19 +457,19 @@ impl DBTrieLoader {
         Ok(new_root)
     }
 
-    fn update_storage_root<DB: Database>(
+    /// Update the account's storage root
+    pub fn update_storage_root(
         &self,
-        tx: &Transaction<'_, DB>,
         root: H256,
         address: H256,
         changed_storages: BTreeSet<H256>,
     ) -> Result<H256, TrieError> {
-        let db = Arc::new(DupHashDatabaseMut::from_root(tx, address, root)?);
+        let db = Arc::new(DupHashDatabaseMut::from_root(self.tx, address, root)?);
 
         let hasher = Arc::new(HasherKeccak::new());
 
         let mut trie = PatriciaTrie::from(Arc::clone(&db), Arc::clone(&hasher), root.as_bytes())?;
-        let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
 
         for key in changed_storages {
             if let Some(StorageEntry { value, .. }) =
@@ -470,7 +484,7 @@ impl DBTrieLoader {
 
         let new_root = H256::from_slice(trie.root()?.as_slice());
         if new_root != root {
-            let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+            let mut cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
             if cursor
                 .seek_by_key_subkey(address, root)?
                 .filter(|entry| entry.hash == root)
@@ -482,18 +496,17 @@ impl DBTrieLoader {
 
         // if root is empty remove it from db
         if new_root == EMPTY_ROOT {
-            tx.delete::<tables::StoragesTrie>(address, None)?;
+            self.tx.delete::<tables::StoragesTrie>(address, None)?;
         }
 
         Ok(new_root)
     }
 
-    fn gather_changes<DB: Database>(
+    fn gather_changes(
         &self,
-        tx: &Transaction<'_, DB>,
         tid_range: Range<TransitionId>,
     ) -> Result<BTreeMap<H256, BTreeSet<H256>>, TrieError> {
-        let mut account_cursor = tx.cursor_read::<tables::AccountChangeSet>()?;
+        let mut account_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
 
         let mut account_changes: BTreeMap<Address, BTreeSet<H256>> = BTreeMap::new();
 
@@ -503,7 +516,7 @@ impl DBTrieLoader {
             account_changes.insert(address, Default::default());
         }
 
-        let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
+        let mut storage_cursor = self.tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
         let start = TransitionIdAddress((tid_range.start, Address::zero()));
         let end = TransitionIdAddress((tid_range.end, Address::zero()));
@@ -524,9 +537,15 @@ impl DBTrieLoader {
 
         Ok(hashed_changes)
     }
+}
 
+// Read-only impls
+impl<'tx, 'db, TX> DBTrieLoader<'tx, TX>
+where
+    TX: DbTx<'db> + Send + Sync,
+{
     /// Returns a Merkle proof of the given account, plus its storage root hash.
-    pub fn generate_acount_proof<'tx, 'itx>(
+    pub fn generate_acount_proof<'itx>(
         &self,
         tx: &'tx impl DbTx<'itx>,
         root: H256,
@@ -546,7 +565,7 @@ impl DBTrieLoader {
     }
 
     /// Returns a Merkle proof of the given storage keys, starting at the given root hash.
-    pub fn generate_storage_proofs<'tx, 'itx>(
+    pub fn generate_storage_proofs<'itx>(
         &self,
         tx: &'tx impl DbTx<'itx>,
         storage_root: H256,
@@ -568,17 +587,24 @@ impl DBTrieLoader {
 
 #[cfg(test)]
 mod tests {
+    use crate::Transaction;
+
     use super::*;
     use assert_matches::assert_matches;
     use proptest::{prelude::ProptestConfig, proptest};
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
+    use reth_db::{
+        database::{Database, DatabaseGAT},
+        mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_primitives::{
         hex_literal::hex,
         keccak256,
         proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
         Address, Bytes, ChainSpec, Genesis, MAINNET,
     };
-    use std::{collections::HashMap, str::FromStr};
+    use std::{collections::HashMap, ops::Deref, str::FromStr};
     use triehash::sec_trie_root;
 
     fn load_mainnet_genesis_root<DB: Database>(tx: &mut Transaction<'_, DB>) -> Genesis {
@@ -610,17 +636,24 @@ mod tests {
         genesis
     }
 
+    fn create_test_loader<'tx, 'db>(
+        tx: &'tx Transaction<'db, Env<WriteMap>>,
+    ) -> DBTrieLoader<'tx, <Arc<Env<WriteMap>> as DatabaseGAT<'db>>::TXMut> {
+        DBTrieLoader::new(tx.deref())
+    }
+
     #[test]
     fn empty_trie() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
-        assert_matches!(trie.calculate_root(&tx), Ok(got) if got == EMPTY_ROOT);
+        assert_matches!(
+            create_test_loader(&tx).calculate_root(),
+            Ok(got) if got == EMPTY_ROOT
+        );
     }
 
     #[test]
     fn single_account_trie() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
@@ -630,14 +663,13 @@ mod tests {
         EthAccount::from(account).encode(&mut encoded_account);
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, encoded_account)]).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            create_test_loader(&tx).calculate_root(),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn two_accounts_trie() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -661,14 +693,13 @@ mod tests {
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            create_test_loader(&tx).calculate_root(),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn single_storage_trie() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -689,14 +720,13 @@ mod tests {
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
         assert_matches!(
-            trie.calculate_storage_root(&tx, hashed_address),
+            create_test_loader(&tx).calculate_storage_root(hashed_address),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn single_account_with_storage_trie() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -729,22 +759,19 @@ mod tests {
             (k, out)
         });
 
-        let eth_account = EthAccount::from_with_root(
-            account,
-            H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0),
-        );
+        let storage_root = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
+        let eth_account = EthAccount::from(account).with_storage_root(storage_root);
         eth_account.encode(&mut out);
 
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            create_test_loader(&tx).calculate_root(),
             Ok(got) if got == expected
         );
     }
 
     #[test]
     fn verify_genesis() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -753,7 +780,7 @@ mod tests {
         let state_root = genesis_state_root(&genesis.alloc);
 
         assert_matches!(
-            trie.calculate_root(&tx),
+            create_test_loader(&tx).calculate_root(),
             Ok(got) if got == state_root
         );
     }
@@ -797,13 +824,12 @@ mod tests {
             BTreeSet::from([keccak256(H256::zero()), keccak256(H256::from_low_u64_be(2))]),
         )]);
         assert_matches!(
-            DBTrieLoader::default().gather_changes(&tx, 32..33),
+            create_test_loader(&tx).gather_changes(32..33),
             Ok(got) if got == expected
         );
     }
 
     fn test_with_accounts(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>) {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -829,14 +855,14 @@ mod tests {
                     EMPTY_ROOT
                 };
                 let mut out = Vec::new();
-                EthAccount::from_with_root(account, storage_root).encode(&mut out);
+                EthAccount::from(account).with_storage_root(storage_root).encode(&mut out);
                 (address, out)
             })
             .collect::<Vec<(Address, Vec<u8>)>>();
 
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts).0);
         assert_matches!(
-            trie.calculate_root(&tx),
+            create_test_loader(&tx).calculate_root(),
             Ok(got) if got == expected
         , "where expected is {expected:?}");
     }
@@ -850,18 +876,21 @@ mod tests {
 
     #[test]
     fn get_proof() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
         load_mainnet_genesis_root(&mut tx);
 
-        let root = trie.calculate_root(&tx).expect("should be able to load trie");
+        let root = {
+            let trie = create_test_loader(&tx);
+            trie.calculate_root().expect("should be able to load trie")
+        };
 
         tx.commit().unwrap();
 
         let address = Address::from(hex!("000d836201318ec6899a67540690382780743280"));
 
+        let trie = create_test_loader(&tx);
         let (proof, storage_root) = trie
             .generate_acount_proof(&tx.inner().tx().unwrap(), root, keccak256(address))
             .expect("failed to generate proof");
@@ -890,7 +919,6 @@ mod tests {
 
     #[test]
     fn get_storage_proofs() {
-        let trie = DBTrieLoader::default();
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -918,10 +946,14 @@ mod tests {
             .unwrap();
         }
 
-        let root = trie.calculate_root(&tx).expect("should be able to load trie");
+        let root = {
+            let trie = create_test_loader(&tx);
+            trie.calculate_root().expect("should be able to load trie")
+        };
 
         tx.commit().unwrap();
 
+        let trie = create_test_loader(&tx);
         let (account_proof, storage_root) = trie
             .generate_acount_proof(&tx.inner().tx().unwrap(), root, hashed_address)
             .expect("failed to generate proof");

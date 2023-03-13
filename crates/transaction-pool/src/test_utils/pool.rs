@@ -41,7 +41,7 @@ impl MockPool {
 
 impl Default for MockPool {
     fn default() -> Self {
-        Self { pool: TxPool::new(Arc::new(MockOrdering::default()), Default::default()) }
+        Self { pool: TxPool::new(MockOrdering::default(), Default::default()) }
     }
 }
 

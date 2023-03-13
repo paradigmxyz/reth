@@ -137,7 +137,7 @@ impl Command {
                 };
                 let (_, result) = (move || {
                     let client = fetch_client.clone();
-                    async move { client.get_block_bodies(vec![hash]).await }
+                    client.get_block_bodies(vec![hash])
                 })
                 .retry(&backoff)
                 .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))

@@ -9,7 +9,6 @@ use crate::{
 };
 use async_trait::async_trait;
 pub use mock::*;
-use reth_interfaces::consensus::ConsensusError;
 use std::{marker::PhantomData, sync::Arc};
 
 /// A [Pool] used for testing
@@ -17,11 +16,7 @@ pub type TestPool = Pool<NoopTransactionValidator<MockTransaction>, MockOrdering
 
 /// Returns a new [Pool] used for testing purposes
 pub fn testing_pool() -> TestPool {
-    Pool::new(
-        Arc::new(NoopTransactionValidator::default()),
-        Arc::new(MockOrdering::default()),
-        Default::default(),
-    )
+    Pool::new(NoopTransactionValidator::default(), MockOrdering::default(), Default::default())
 }
 
 // A [`TransactionValidator`] that does nothing.
@@ -37,12 +32,12 @@ impl<T: PoolTransaction> TransactionValidator for NoopTransactionValidator<T> {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> Result<TransactionValidationOutcome<Self::Transaction>, ConsensusError> {
-        Ok(TransactionValidationOutcome::Valid {
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        TransactionValidationOutcome::Valid {
             balance: Default::default(),
             state_nonce: 0,
             transaction,
-        })
+        }
     }
 }
 

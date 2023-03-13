@@ -66,7 +66,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
         keys: &[H256],
     ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
         let hashed_address = keccak256(address);
-        let loader = DBTrieLoader::default();
+        let loader = DBTrieLoader::new(self.db);
         let root = self
             .db
             .cursor_read::<tables::Headers>()?

@@ -1,13 +1,13 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
+    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
-    Bytecode, Bytes, ChainInfo, Header, StorageKey, StorageValue, TransactionSigned, TxHash, H256,
-    U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionSigned,
+    TxHash, TxNumber, H256, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
@@ -153,6 +153,20 @@ impl TransactionsProvider for MockEthProvider {
         _range: impl RangeBounds<reth_primitives::BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         unimplemented!()
+    }
+}
+
+impl ReceiptProvider for MockEthProvider {
+    fn receipt(&self, _id: TxNumber) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipt_by_hash(&self, _hash: TxHash) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipts_by_block(&self, _block: BlockId) -> Result<Option<Vec<Receipt>>> {
+        Ok(None)
     }
 }
 
