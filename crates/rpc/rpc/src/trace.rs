@@ -35,6 +35,7 @@ impl<Client> TraceApiServer for TraceApi<Client>
 where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
+    /// Handler for `trace_call`
     async fn call(
         &self,
         _call: CallRequest,
@@ -44,6 +45,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_callMany`
     async fn call_many(
         &self,
         _calls: Vec<(CallRequest, HashSet<TraceType>)>,
@@ -52,6 +54,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_rawTransaction`
     async fn raw_transaction(
         &self,
         _data: Bytes,
@@ -61,6 +64,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_replayBlockTransactions`
     async fn replay_block_transactions(
         &self,
         _block_id: BlockId,
@@ -69,6 +73,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_replayTransaction`
     async fn replay_transaction(
         &self,
         _transaction: H256,
@@ -77,14 +82,17 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_block`
     async fn block(&self, _block_id: BlockId) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_filter`
     async fn filter(&self, _filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_get`
     fn trace(
         &self,
         _hash: H256,
@@ -93,6 +101,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_transaction`
     fn transaction_traces(&self, _hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         Err(internal_rpc_err("unimplemented"))
     }
