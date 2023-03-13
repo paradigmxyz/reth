@@ -25,11 +25,13 @@ impl<N> Web3ApiServer for Web3Api<N>
 where
     N: NetworkInfo + 'static,
 {
+    /// Handler for `web3_clientVersion`
     async fn client_version(&self) -> RpcResult<String> {
         let status = self.network.network_status().await.to_rpc_result()?;
         Ok(status.client_version)
     }
 
+    /// Handler for `web3_sha3`
     fn sha3(&self, input: Bytes) -> RpcResult<H256> {
         Ok(keccak256(input))
     }

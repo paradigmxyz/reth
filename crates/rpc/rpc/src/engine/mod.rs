@@ -58,6 +58,7 @@ impl EngineApi {
 
 #[async_trait]
 impl EngineApiServer for EngineApi {
+    /// Handler for `engine_getPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
@@ -69,6 +70,7 @@ impl EngineApiServer for EngineApi {
         .await
     }
 
+    /// Handler for `engine_getPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
         let (tx, rx) = oneshot::channel();
@@ -79,6 +81,7 @@ impl EngineApiServer for EngineApi {
         .await
     }
 
+    /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
     ///
     /// Caution: This should not accept the `withdrawals` field
@@ -100,6 +103,7 @@ impl EngineApiServer for EngineApi {
         .await
     }
 
+    /// Handler for `engine_forkchoiceUpdatedV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
     async fn fork_choice_updated_v2(
         &self,
@@ -119,6 +123,7 @@ impl EngineApiServer for EngineApi {
         .await
     }
 
+    /// Handler for `engine_getPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
     ///
     /// Caution: This should not return the `withdrawals` field
@@ -127,12 +132,14 @@ impl EngineApiServer for EngineApi {
         self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
     }
 
+    /// Handler for `engine_getPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
     async fn get_payload_v2(&self, payload_id: H64) -> Result<ExecutionPayload> {
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
     }
 
+    /// Handler for `engine_getPayloadBodiesByHashV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1>
     async fn get_payload_bodies_by_hash_v1(
         &self,
@@ -142,6 +149,7 @@ impl EngineApiServer for EngineApi {
         self.delegate_request(EngineApiMessage::GetPayloadBodiesByHash(block_hashes, tx), rx).await
     }
 
+    /// Handler for `engine_getPayloadBodiesByRangeV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     async fn get_payload_bodies_by_range_v1(
         &self,
@@ -152,6 +160,7 @@ impl EngineApiServer for EngineApi {
         self.delegate_request(EngineApiMessage::GetPayloadBodiesByRange(start, count, tx), rx).await
     }
 
+    /// Handler for `engine_exchangeTransitionConfigurationV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_exchangeTransitionConfigurationV1>
     async fn exchange_transition_configuration(
         &self,
@@ -162,6 +171,7 @@ impl EngineApiServer for EngineApi {
             .await
     }
 
+    /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> Result<Vec<String>> {
         Ok(CAPABILITIES.into_iter().map(str::to_owned).collect())

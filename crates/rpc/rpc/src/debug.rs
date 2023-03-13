@@ -31,23 +31,28 @@ impl<Eth> DebugApiServer for DebugApi<Eth>
 where
     Eth: EthApiSpec + 'static,
 {
+    /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, _block_id: BlockId) -> RpcResult<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, _block_id: BlockId) -> RpcResult<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `debug_getRawTransaction`
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transaction(&self, _hash: H256) -> RpcResult<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, _block_id: BlockId) -> RpcResult<Vec<Bytes>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<RichBlock>> {
         Err(internal_rpc_err("unimplemented"))
     }
