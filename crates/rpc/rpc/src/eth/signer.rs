@@ -5,9 +5,9 @@ use ethers_core::{
     types::transaction::eip712::{Eip712, TypedData},
     utils::hash_message,
 };
-use reth_primitives::{Address, Signature, TransactionSigned, H256, U256};
+use reth_primitives::{sign_message, Address, Signature, TransactionSigned, H256};
 use reth_rpc_types::TypedTransactionRequest;
-use secp256k1::{Message, SecretKey, SECP256K1};
+use secp256k1::SecretKey;
 use std::collections::HashMap;
 
 type Result<T> = std::result::Result<T, SignError>;
@@ -49,14 +49,8 @@ impl DevSigner {
     }
     fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
         let secret = self.get_key(account)?;
-        let message = &Message::from_slice(hash.as_bytes()).map_err(|_| SignError::CouldNotSign)?;
-        let (rec_id, data) = SECP256K1.sign_ecdsa_recoverable(message, secret).serialize_compact();
-        let signature = Signature {
-            r: U256::try_from_be_slice(&data[..32]).ok_or(SignError::CouldNotSign)?,
-            s: U256::try_from_be_slice(&data[32..64]).ok_or(SignError::CouldNotSign)?,
-            odd_y_parity: rec_id.to_i32() != 0,
-        };
-        Ok(signature)
+        let signature = sign_message(H256::from_slice(secret.as_ref()), hash);
+        signature.map_err(|_| SignError::CouldNotSign)
     }
 }
 #[async_trait::async_trait]
@@ -92,6 +86,7 @@ impl EthSigner for DevSigner {
 #[cfg(test)]
 mod test {
     use super::*;
+    use reth_primitives::U256;
     use std::str::FromStr;
     fn build_signer() -> DevSigner {
         let addresses = vec![];
@@ -101,6 +96,7 @@ mod test {
         let accounts = HashMap::from([(Address::default(), secret)]);
         DevSigner { addresses, accounts }
     }
+
     #[tokio::test]
     async fn test_sign_type_data() {
         let eip_712_example = serde_json::json!(

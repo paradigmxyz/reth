@@ -111,6 +111,7 @@ impl Signature {
         hex::encode(&sig[..]).as_bytes().into()
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;

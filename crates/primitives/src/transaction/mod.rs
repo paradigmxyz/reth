@@ -12,7 +12,7 @@ pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE
 mod access_list;
 mod signature;
 mod tx_type;
-mod util;
+pub(crate) mod util;
 
 /// Legacy transaction.
 #[main_codec]

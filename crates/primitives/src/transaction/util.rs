@@ -1,11 +1,16 @@
 use crate::{keccak256, Address};
 
 pub(crate) mod secp256k1 {
+    use crate::Signature;
+
     use super::*;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
-        Error, Message, SECP256K1,
+        Message, SecretKey, SECP256K1,
     };
+    use revm_primitives::{B256, U256};
+
+    pub(crate) use ::secp256k1::Error;
 
     /// secp256k1 signer recovery
     pub(crate) fn recover(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
@@ -15,6 +20,21 @@ pub(crate) mod secp256k1 {
         let public = SECP256K1.recover_ecdsa(&Message::from_slice(&msg[..32])?, &sig)?;
         let hash = keccak256(&public.serialize_uncompressed()[1..]);
         Ok(Address::from_slice(&hash[12..]))
+    }
+
+    /// Signs message with the given secret key.
+    /// Returns the corresponding signature.
+    pub fn sign_message(secret: B256, message: B256) -> Result<Signature, secp256k1::Error> {
+        let sec = SecretKey::from_slice(secret.as_ref())?;
+        let s = SECP256K1.sign_ecdsa_recoverable(&Message::from_slice(&message[..])?, &sec);
+        let (rec_id, data) = s.serialize_compact();
+
+        let signature = Signature {
+            r: U256::try_from_be_slice(&data[..32]).expect("The slice has at most 32 bytes"),
+            s: U256::try_from_be_slice(&data[32..64]).expect("The slice has at most 32 bytes"),
+            odd_y_parity: rec_id.to_i32() != 0,
+        };
+        Ok(signature)
     }
 }
 #[cfg(test)]
