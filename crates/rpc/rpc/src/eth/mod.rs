@@ -6,6 +6,7 @@ pub(crate) mod error;
 mod filter;
 mod id_provider;
 mod pubsub;
+pub(crate) mod revm_utils;
 mod signer;
 
 pub use api::{EthApi, EthApiSpec};
