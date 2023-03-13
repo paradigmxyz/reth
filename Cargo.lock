@@ -4487,12 +4487,12 @@ dependencies = [
  "data-encoding",
  "enr",
  "linked_hash_set",
- "lru 0.9.0",
  "parking_lot 0.12.1",
  "reth-net-common",
  "reth-primitives",
  "reth-rlp",
  "reth-tracing",
+ "schnellru",
  "secp256k1 0.24.3",
  "serde",
  "serde_with",
@@ -4882,7 +4882,9 @@ version = "0.1.0"
 dependencies = [
  "hashbrown 0.13.2",
  "reth-primitives",
+ "reth-rpc-types",
  "revm",
+ "serde",
 ]
 
 [[package]]
@@ -5021,8 +5023,10 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
+ "ethers-core",
  "jsonrpsee-types",
  "lru 0.9.0",
+ "rand 0.8.5",
  "reth-interfaces",
  "reth-network-api",
  "reth-primitives",
@@ -5102,16 +5106,13 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
- "reth-revm",
  "reth-rlp",
- "reth-staged-sync",
  "serde",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",
- "triehash",
 ]
 
 [[package]]
@@ -5152,6 +5153,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-metrics-derive",
  "reth-primitives",
+ "reth-provider",
  "reth-rlp",
  "ruint",
  "serde",
@@ -5163,7 +5165,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.0.0"
-source = "git+https://github.com/bluealloy/revm#f2656b7eac6fab1cb872268bb7d0dda4b5d3aa85"
+source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -5173,9 +5175,8 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm#f2656b7eac6fab1cb872268bb7d0dda4b5d3aa85"
+source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
 dependencies = [
- "bitvec 1.0.1",
  "derive_more",
  "enumn",
  "revm-primitives",
@@ -5185,7 +5186,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.0"
-source = "git+https://github.com/bluealloy/revm#f2656b7eac6fab1cb872268bb7d0dda4b5d3aa85"
+source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
 dependencies = [
  "k256",
  "num",
@@ -5201,7 +5202,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm#f2656b7eac6fab1cb872268bb7d0dda4b5d3aa85"
+source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
 dependencies = [
  "arbitrary",
  "auto_impl",

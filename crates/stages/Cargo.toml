@@ -14,11 +14,9 @@ normal = [
 ]
 
 [dependencies]
-# reth libs
+# reth
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
-reth-revm = { path = "../revm" }
-reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 reth-metrics-derive = { path = "../metrics/metrics-derive" }
@@ -54,6 +52,7 @@ reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
 reth-executor = { path = "../executor" }
+reth-rlp = { path = "../rlp" }
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
 tempfile = "3.3.0"
 assert_matches = "1.5.0"
@@ -66,10 +65,6 @@ criterion = { version = "0.4.0", features = ["async_futures"] }
 proptest = { version = "1.0" }
 arbitrary = { version = "1.1.7", features = ["derive"] }
 eyre = "0.6.8"
-
-# trie
-reth-staged-sync = { path = "../staged-sync" }
-triehash = "0.8"
 
 [features]
 default = ["serde"]

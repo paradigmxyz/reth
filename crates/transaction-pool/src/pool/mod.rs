@@ -1,7 +1,7 @@
 //! Transaction Pool internals.
 //!
-//! Incoming transactions are before they enter the pool first. The validation outcome can have 3
-//! states:
+//! Incoming transactions validated are before they enter the pool first. The validation outcome can
+//! have 3 states:
 //!
 //!  1. Transaction can _never_ be valid
 //!  2. Transaction is _currently_ valid
@@ -100,7 +100,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Internal mapping of addresses to plain ints.
     identifiers: RwLock<SenderIdentifiers>,
     /// Transaction validation.
-    validator: Arc<V>,
+    validator: V,
     /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
     /// Pool settings.
@@ -115,13 +115,13 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
 
 // === impl PoolInner ===
 
-impl<V: TransactionValidator, T: TransactionOrdering> PoolInner<V, T>
+impl<V, T> PoolInner<V, T>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub(crate) fn new(validator: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub(crate) fn new(validator: V, ordering: T, config: PoolConfig) -> Self {
         Self {
             identifiers: Default::default(),
             validator,
@@ -232,7 +232,12 @@ where
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
                 listener.discarded(tx.hash());
-                Err(err)
+                Err(PoolError::InvalidTransaction(*tx.hash(), err))
+            }
+            TransactionValidationOutcome::Error(tx, err) => {
+                let mut listener = self.event_listener.write();
+                listener.discarded(tx.hash());
+                Err(PoolError::Other(*tx.hash(), err))
             }
         }
     }
@@ -417,19 +422,12 @@ pub struct AddedPendingTransaction<T: PoolTransaction> {
     promoted: Vec<TxHash>,
     /// transaction that failed and became discarded
     discarded: Vec<TxHash>,
-    /// Transactions removed from the Ready pool
-    removed: Vec<Arc<ValidPoolTransaction<T>>>,
 }
 
 impl<T: PoolTransaction> AddedPendingTransaction<T> {
     /// Create a new, empty transaction.
     fn new(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
-        Self {
-            transaction,
-            promoted: Default::default(),
-            discarded: Default::default(),
-            removed: Default::default(),
-        }
+        Self { transaction, promoted: Default::default(), discarded: Default::default() }
     }
 }
 

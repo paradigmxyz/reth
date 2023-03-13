@@ -1,13 +1,12 @@
 //! Contains RPC handler implementations specific to transactions
-
 use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{Bytes, FromRecoveredTransaction, TransactionSigned, H256};
+use reth_primitives::{BlockId, Bytes, FromRecoveredTransaction, TransactionSigned, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
-use reth_rpc_types::TransactionRequest;
+use reth_rpc_types::{Index, Transaction, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
@@ -18,6 +17,57 @@ where
 {
     pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
         unimplemented!()
+    }
+
+    /// Finds a given [Transaction] by its hash.
+    ///
+    /// Returns `Ok(None)` if no matching transaction was found.
+    pub(crate) async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<Transaction>> {
+        match self.client().transaction_by_hash(hash)? {
+            None => Ok(None),
+            Some(tx) => {
+                let tx = tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+
+                let tx = Transaction::from_recovered_with_block_context(
+                    tx,
+                    // TODO: this is just stubbed out for now still need to fully implement tx =>
+                    // block
+                    H256::default(),
+                    u64::default(),
+                    Index::default().into(),
+                );
+                Ok(Some(tx))
+            }
+        }
+    }
+
+    /// Get Transaction by [BlockId] and the index of the transaction within that Block.
+    ///
+    /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
+    pub(crate) async fn transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId>,
+        index: Index,
+    ) -> EthResult<Option<Transaction>> {
+        let block_id = block_id.into();
+        if let Some(block) = self.client().block(block_id)? {
+            let block_hash = self
+                .client()
+                .block_hash_for_id(block_id)?
+                .ok_or(EthApiError::UnknownBlockNumber)?;
+            if let Some(tx_signed) = block.body.into_iter().nth(index.into()) {
+                let tx =
+                    tx_signed.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+                return Ok(Some(Transaction::from_recovered_with_block_context(
+                    tx,
+                    block_hash,
+                    block.header.number,
+                    index.into(),
+                )))
+            }
+        }
+
+        Ok(None)
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.

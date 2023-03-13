@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header,
+    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
     TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
@@ -21,6 +21,7 @@ use revm_primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{ops::RangeBounds, sync::Arc};
 
 mod state;
+use crate::traits::ReceiptProvider;
 pub use state::{
     chain::ChainState,
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
@@ -176,7 +177,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
             if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
                 let tx_range = body.tx_id_range();
                 if tx_range.is_empty() {
-                    Ok(Some(Vec::default()))
+                    Ok(Some(Vec::new()))
                 } else {
                     let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let transactions = tx_cursor
@@ -216,6 +217,47 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
             }
         }
         Ok(results)
+    }
+}
+
+impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
+    fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
+        self.db.view(|tx| tx.get::<tables::Receipts>(id))?.map_err(Into::into)
+    }
+
+    fn receipt_by_hash(&self, hash: TxHash) -> Result<Option<Receipt>> {
+        self.db
+            .view(|tx| {
+                if let Some(id) = tx.get::<tables::TxHashNumber>(hash)? {
+                    tx.get::<tables::Receipts>(id)
+                } else {
+                    Ok(None)
+                }
+            })?
+            .map_err(Into::into)
+    }
+
+    fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
+        if let Some(number) = self.block_number_for_id(block)? {
+            let tx = self.db.tx()?;
+            if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
+                let tx_range = body.tx_id_range();
+                if tx_range.is_empty() {
+                    Ok(Some(Vec::new()))
+                } else {
+                    let mut tx_cursor = tx.cursor_read::<tables::Receipts>()?;
+                    let transactions = tx_cursor
+                        .walk_range(tx_range)?
+                        .map(|result| result.map(|(_, tx)| tx))
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(Some(transactions))
+                }
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 

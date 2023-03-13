@@ -481,8 +481,8 @@ where
         // merkle tree
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
-            let loader = DBTrieLoader::default();
-            let root = loader.update_root(self, current_root, from..to)?;
+            let loader = DBTrieLoader::<DB>::new(self);
+            let root = loader.update_root(current_root, from..to)?;
             if root != block_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
@@ -941,8 +941,8 @@ where
                 let (tip_number, _) =
                     self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
                 let current_root = self.get_header(tip_number)?.state_root;
-                let loader = DBTrieLoader::default();
-                new_state_root = loader.update_root(self, current_root, transition_range)?;
+                let loader = DBTrieLoader::<DB>::new(self);
+                new_state_root = loader.update_root(current_root, transition_range)?;
             }
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
@@ -1371,6 +1371,8 @@ where
                 current_transition_id += 1;
             }
 
+            let have_block_changeset = !results.block_changesets.is_empty();
+
             // If there are any post block changes, we will add account changesets to db.
             for (address, changeset) in results.block_changesets.into_iter() {
                 trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
@@ -1381,7 +1383,13 @@ where
                     spurious_dragon_active,
                 )?;
             }
-            current_transition_id += 1;
+
+            // Transition is incremeneted every time before Paris hardfork and after
+            // Shanghai only if there are Withdrawals in the block. So it is correct to
+            // to increment transition id every time there is a block changeset present.
+            if have_block_changeset {
+                current_transition_id += 1;
+            }
         }
         Ok(())
     }

@@ -66,7 +66,6 @@ where
         let our_status_bytes = our_status_bytes.freeze();
         self.inner.send(our_status_bytes).await?;
 
-        tracing::trace!("waiting for eth status from peer");
         let their_msg_res = self.inner.next().await;
 
         let their_msg = match their_msg_res {

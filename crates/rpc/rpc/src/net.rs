@@ -29,14 +29,17 @@ where
     Net: PeersInfo + 'static,
     Eth: EthApiSpec + 'static,
 {
+    /// Handler for `net_version`
     fn version(&self) -> Result<String> {
         Ok(self.eth.chain_id().to_string())
     }
 
+    /// Handler for `net_peerCount`
     fn peer_count(&self) -> Result<PeerCount> {
         Ok(PeerCount::Hex(self.network.num_connected_peers().into()))
     }
 
+    /// Handler for `net_listening`
     fn is_listening(&self) -> Result<bool> {
         Ok(true)
     }

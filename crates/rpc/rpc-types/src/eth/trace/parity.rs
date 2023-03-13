@@ -7,6 +7,9 @@ use reth_primitives::{Address, Bytes, H256, U256, U64};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Result type for parity style transaction trace
+pub type TraceResult = crate::trace::common::TraceResult<TraceOutput, String>;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TraceType {
@@ -75,11 +78,26 @@ pub enum Action {
     Reward(RewardAction),
 }
 
+/// An external action type.
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionType {
+    /// Contract call.
+    Call,
+    /// Contract creation.
+    Create,
+    /// Contract suicide/selfdestruct.
+    Selfdestruct,
+    /// A block reward.
+    Reward,
+}
+
 /// Call type.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CallType {
     /// None
+    #[default]
     None,
     /// Call
     Call,
@@ -154,13 +172,6 @@ pub struct CreateOutput {
 pub enum TraceOutput {
     Call(CallOutput),
     Create(CreateOutput),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum TraceResult {
-    Success { result: TraceOutput },
-    Error { error: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
