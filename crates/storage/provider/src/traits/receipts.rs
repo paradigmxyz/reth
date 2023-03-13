@@ -3,7 +3,7 @@ use reth_primitives::{BlockId, Receipt, TxHash, TxNumber};
 
 ///  Client trait for fetching [Receipt] data .
 #[auto_impl::auto_impl(&, Arc)]
-pub(crate) trait ReceiptProvider: Send + Sync {
+pub trait ReceiptProvider: Send + Sync {
     /// Get receipt by transaction number
     fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>>;
 
