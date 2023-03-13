@@ -3,8 +3,8 @@
 use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
 use reth_interfaces::{events::ChainEventSubscriptions, sync::SyncStateProvider};
-use reth_primitives::{rpc::FilteredParams, TxHash};
-use reth_provider::{BlockProvider, EvmEnvProvider};
+use reth_primitives::{BlockId, rpc::FilteredParams, TxHash};
+use reth_provider::{BlockProvider, EvmEnvProvider, ReceiptProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
     pubsub::{
@@ -87,7 +87,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
     params: Option<Params>,
     subscription_task_spawner: Box<dyn TaskSpawner>,
 ) where
-    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
+    Client: BlockProvider + ReceiptProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
     Network: SyncStateProvider + Clone + 'static,
@@ -197,7 +197,7 @@ where
 
 impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
 where
-    Client: BlockProvider + EvmEnvProvider + 'static,
+    Client: BlockProvider + ReceiptProvider + EvmEnvProvider + 'static,
     Events: ChainEventSubscriptions + 'static,
     Network: SyncStateProvider + 'static,
 {
@@ -212,8 +212,10 @@ where
     fn into_log_stream(self) -> impl Stream<Item = Header> {
         UnboundedReceiverStream::new(self.chain_events.subscribe_new_blocks())
             .filter_map(move |new_block| {
+                let block_id: BlockId = new_block.hash.into();
                 let transactions =
-                    self.client.transactions_by_block(new_block.hash.into()).ok().flatten()?;
+                    self.client.transactions_by_block(block_id).ok().flatten()?;
+                let receipts = self.client.receipts_by_block(block_id).ok().flatten()?;
                 Some((new_block, transactions))
             })
             .flat_map(|(new_block, transactions)| {
