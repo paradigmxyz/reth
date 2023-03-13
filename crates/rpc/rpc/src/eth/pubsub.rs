@@ -4,7 +4,7 @@ use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
 use reth_interfaces::{events::ChainEventSubscriptions, sync::SyncStateProvider};
 use reth_primitives::{filter::FilteredParams, BlockId, TxHash, H256, U256};
-use reth_provider::{BlockProvider, EvmEnvProvider, ReceiptProvider};
+use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
     pubsub::{
@@ -87,7 +87,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
     params: Option<Params>,
     subscription_task_spawner: Box<dyn TaskSpawner>,
 ) where
-    Client: BlockProvider + ReceiptProvider + EvmEnvProvider + Clone + 'static,
+    Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
     Network: SyncStateProvider + Clone + 'static,
@@ -198,7 +198,7 @@ where
 
 impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
 where
-    Client: BlockProvider + ReceiptProvider + EvmEnvProvider + 'static,
+    Client: BlockProvider + EvmEnvProvider + 'static,
     Events: ChainEventSubscriptions + 'static,
     Network: SyncStateProvider + 'static,
 {
@@ -214,9 +214,15 @@ where
         UnboundedReceiverStream::new(self.chain_events.subscribe_new_blocks())
             .filter_map(move |new_block| {
                 let block_id: BlockId = new_block.hash.into();
-                let transactions = self.client.transactions_by_block(block_id).ok().flatten()?;
-                let receipts = self.client.receipts_by_block(block_id).ok().flatten()?;
-                futures::future::ready(Some((new_block, transactions, receipts)))
+                // TODO(mattsse): this should be optimized because we only need the hashes
+                let txs = self.client.transactions_by_block(block_id).ok().flatten();
+                let receipts = self.client.receipts_by_block(block_id).ok().flatten();
+                match (txs, receipts) {
+                    (Some(txs), Some(receipts)) => {
+                        futures::future::ready(Some((new_block, txs, receipts)))
+                    }
+                    _ => futures::future::ready(None),
+                }
             })
             .flat_map(move |(new_block, transactions, receipts)| {
                 let block_hash = new_block.hash;
@@ -231,10 +237,9 @@ where
                     let logs = receipt.logs;
 
                     // tracks the index of the log in the transaction
-                    let mut transaction_log_index: u32 = 0;
                     let transaction_hash = tx.hash;
 
-                    for log in logs {
+                    for (transaction_log_idx, log) in logs.into_iter().enumerate() {
                         if matches_filter(block_hash, block_number, &log, &filter) {
                             let log = Log {
                                 address: log.address,
@@ -245,13 +250,12 @@ where
                                 transaction_hash: Some(transaction_hash),
                                 transaction_index: Some(U256::from(transaction_idx)),
                                 log_index: Some(U256::from(log_index)),
-                                transaction_log_index: Some(transaction_log_index),
+                                transaction_log_index: Some(U256::from(transaction_log_idx)),
                                 removed: false,
                             };
                             all_logs.push(log);
                         }
                         log_index += 1;
-                        transaction_log_index += 1;
                     }
                 }
                 futures::stream::iter(all_logs)
@@ -266,14 +270,13 @@ fn matches_filter(
     log: &reth_primitives::Log,
     params: &FilteredParams,
 ) -> bool {
-    if params.filter.is_some() {
-        if !params.filter_block_range(block_number) ||
+    if params.filter.is_some() &&
+        (!params.filter_block_range(block_number) ||
             !params.filter_block_hash(block_hash) ||
             !params.filter_address(log) ||
-            !params.filter_topics(log)
-        {
-            return false
-        }
+            !params.filter_topics(log))
+    {
+        return false
     }
     true
 }
