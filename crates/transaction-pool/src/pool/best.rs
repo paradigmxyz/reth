@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn test_best_iter() {
-        let mut pool = PendingPool::new(Arc::new(MockOrdering::default()));
+        let mut pool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 10;
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_best_iter_invalid() {
-        let mut pool = PendingPool::new(Arc::new(MockOrdering::default()));
+        let mut pool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 10;
