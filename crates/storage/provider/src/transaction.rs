@@ -277,6 +277,78 @@ impl<'this, DB> Transaction<'this, DB>
 where
     DB: Database,
 {
+    /// Get requested blocks transaction with signer
+    pub fn get_block_transaction_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
+        self.get_take_block_transaction_range::<false>(range)
+    }
+
+    /// Take requested blocks transaction with signer
+    pub fn take_block_transaction_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
+        self.get_take_block_transaction_range::<true>(range)
+    }
+
+    /// Return range of blocks and its execution result
+    pub fn get_block_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<SealedBlockWithSenders>, TransactionError> {
+        self.get_take_block_range::<false>(chain_spec, range)
+    }
+
+    /// Return range of blocks and its execution result
+    pub fn take_block_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<SealedBlockWithSenders>, TransactionError> {
+        self.get_take_block_range::<true>(chain_spec, range)
+    }
+
+    /// Transverse over changesets and plain state and recreated the execution results.
+    ///
+    /// Return results from database.
+    pub fn get_block_execution_result_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<ExecutionResult>, TransactionError> {
+        self.get_take_block_execution_result_range::<false>(range)
+    }
+
+    /// Transverse over changesets and plain state and recreated the execution results.
+    ///
+    /// Get results and remove them from database
+    pub fn take_block_execution_result_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<ExecutionResult>, TransactionError> {
+        self.get_take_block_execution_result_range::<true>(range)
+    }
+
+    /// Get range of blocks and its execution result
+    pub fn get_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
+        self.get_take_block_and_execution_range::<false>(chain_spec, range)
+    }
+
+    /// Take range of blocks and its execution result
+    pub fn take_block_and_execution_range(
+        &self,
+        chain_spec: &ChainSpec,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
+        self.get_take_block_and_execution_range::<true>(chain_spec, range)
+    }
+
     /// Unwind and clear account hashing
     pub fn unwind_account_hashing(
         &self,
@@ -531,7 +603,7 @@ where
     }
 
     /// Get requested blocks transaction with signer
-    pub fn get_block_transaction_range<const TAKE: bool>(
+    fn get_take_block_transaction_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
@@ -598,7 +670,7 @@ where
     }
 
     /// Return range of blocks and its execution result
-    pub fn get_block_range<const TAKE: bool>(
+    fn get_take_block_range<const TAKE: bool>(
         &self,
         chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
@@ -616,7 +688,7 @@ where
         let block_withdrawals =
             self.get_or_take::<tables::BlockWithdrawals, TAKE>(range.clone())?;
 
-        let block_tx = self.get_block_transaction_range::<TAKE>(range.clone())?;
+        let block_tx = self.get_take_block_transaction_range::<TAKE>(range.clone())?;
 
         if TAKE {
             // rm HeaderTD
@@ -693,7 +765,7 @@ where
     }
 
     /// Transverse over changesets and plain state and recreated the execution results.
-    pub fn get_block_execution_result_range<const TAKE: bool>(
+    fn get_take_block_execution_result_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<ExecutionResult>, TransactionError> {
@@ -899,7 +971,7 @@ where
     }
 
     /// Return range of blocks and its execution result
-    pub fn get_block_and_execution_range<const TAKE: bool>(
+    pub fn get_take_block_and_execution_range<const TAKE: bool>(
         &self,
         chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
@@ -957,9 +1029,9 @@ where
             }
         }
         // get blocks
-        let blocks = self.get_block_range::<TAKE>(chain_spec, range.clone())?;
+        let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
         // get execution res
-        let execution_res = self.get_block_execution_result_range::<TAKE>(range.clone())?;
+        let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
         // combine them
         let blocks_with_exec_result: Vec<_> =
             blocks.into_iter().zip(execution_res.into_iter()).collect();
@@ -1524,23 +1596,24 @@ mod test {
             .shanghai_activated()
             .build();
 
-        let genesis = genesis();
-        insert_canonical_block(tx.deref_mut(), genesis.clone(), None, false).unwrap();
+        let data = BlockChainTestData::default();
+        let genesis = data.genesis.clone();
+        let (block1, exec_res1) = data.blocks[0].clone();
+        let (block2, exec_res2) = data.blocks[1].clone();
+
+        insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
 
         tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
-        assert_genesis_block(&tx, genesis.clone());
-
-        let (block1, exec_res1) = block1();
-        let (block2, exec_res2) = block2();
+        assert_genesis_block(&tx, data.genesis.clone());
 
         tx.insert_block(block1.clone(), &chain_spec, exec_res1.clone()).unwrap();
 
         // get one block
-        let get = tx.get_block_and_execution_range::<false>(&chain_spec, 1..=1).unwrap();
+        let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
         assert_eq!(get, vec![(block1.clone(), exec_res1.clone())]);
 
         // take one block
-        let take = tx.get_block_and_execution_range::<true>(&chain_spec, 1..=1).unwrap();
+        let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();
         assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
         assert_genesis_block(&tx, genesis.clone());
 
@@ -1548,18 +1621,18 @@ mod test {
         tx.insert_block(block2.clone(), &chain_spec, exec_res2.clone()).unwrap();
 
         // get second block
-        let get = tx.get_block_and_execution_range::<false>(&chain_spec, 2..=2).unwrap();
+        let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
         assert_eq!(get, vec![(block2.clone(), exec_res2.clone())]);
 
         // get two blocks
-        let get = tx.get_block_and_execution_range::<false>(&chain_spec, 1..=2).unwrap();
+        let get = tx.get_block_and_execution_range(&chain_spec, 1..=2).unwrap();
         assert_eq!(
             get,
             vec![(block1.clone(), exec_res1.clone()), (block2.clone(), exec_res2.clone())]
         );
 
         // take two blocks
-        let get = tx.get_block_and_execution_range::<true>(&chain_spec, 1..=2).unwrap();
+        let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();
         assert_eq!(
             get,
             vec![(block1.clone(), exec_res1.clone()), (block2.clone(), exec_res2.clone())]

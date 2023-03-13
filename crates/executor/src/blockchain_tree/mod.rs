@@ -531,7 +531,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
-            .get_block_and_execution_range::<true>(
+            .take_block_and_execution_range(
                 self.externals.chain_spec.as_ref(),
                 (revert_until + 1)..,
             )
@@ -562,7 +562,8 @@ mod tests {
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{hex_literal::hex, proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        execution_result::ExecutionResult, insert_block, test_utils::blocks, BlockExecutor,
+        execution_result::ExecutionResult, insert_block, test_utils::blocks::BlockChainTestData,
+        BlockExecutor,
     };
 
     struct TestFactory {
@@ -633,10 +634,9 @@ mod tests {
         (db, consensus, executor_factory, chain_spec)
     }
 
-    fn setup(externals: &TestExternals) {
+    fn setup(mut genesis: SealedBlock, externals: &TestExternals) {
         // insert genesis to db.
 
-        let mut genesis = blocks::genesis();
         genesis.header.header.number = 10;
         genesis.header.header.state_root = EMPTY_ROOT;
         let tx_mut = externals.0.tx_mut().unwrap();
@@ -652,11 +652,12 @@ mod tests {
 
     #[test]
     fn sanity_path() {
-        let (mut block1, exec1) = blocks::block1();
+        let data = BlockChainTestData::default();
+        let (mut block1, exec1) = data.blocks[0].clone();
         block1.number = 11;
         block1.state_root =
             H256(hex!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd"));
-        let (mut block2, exec2) = blocks::block2();
+        let (mut block2, exec2) = data.blocks[1].clone();
         block2.number = 12;
         block2.state_root =
             H256(hex!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8"));
@@ -665,7 +666,7 @@ mod tests {
         let externals = externals(vec![exec2.clone(), exec1.clone(), exec2.clone(), exec1.clone()]);
 
         // last finalized block would be number 9.
-        setup(&externals);
+        setup(data.genesis, &externals);
 
         // make tree
         let (db, consensus, exec_factory, chain_spec) = externals;
