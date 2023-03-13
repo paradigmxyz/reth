@@ -18,8 +18,10 @@ use revm::{
 use types::{CallTrace, CallTraceStep};
 
 mod arena;
+mod config;
 mod types;
 mod utils;
+pub use config::TraceInspectorConfig;
 
 /// An inspector that collects call traces.
 ///
@@ -29,10 +31,10 @@ mod utils;
 /// The [TracingInspector] keeps track of everything by:
 ///   1. start tracking steps/calls on [Inspector::step] and [Inspector::call]
 ///   2. complete steps/calls on [Inspector::step_end] and [Inspector::call_end]
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct TracingInspector {
-    /// Whether to include individual steps [Inspector::step]
-    record_steps: bool,
+    /// Configures what and how the inspector records traces.
+    config: TraceInspectorConfig,
     /// Records all call traces
     traces: CallTraceArena,
     trace_stack: Vec<usize>,
@@ -47,16 +49,20 @@ pub struct TracingInspector {
 // === impl TracingInspector ===
 
 impl TracingInspector {
+    /// Returns a new instance for the given config
+    pub fn new(config: TraceInspectorConfig) -> Self {
+        Self {
+            config,
+            traces: Default::default(),
+            trace_stack: vec![],
+            step_stack: vec![],
+            gas_inspector: Default::default(),
+        }
+    }
+
     /// Consumes the Inspector and returns the recorded.
     pub fn finalize(self) -> CallTraceArena {
         self.traces
-    }
-
-    /// Enables step recording and uses the configured [GasInspector] to report gas costs for each
-    /// step.
-    pub fn with_steps_recording(mut self) -> Self {
-        self.record_steps = true;
-        self
     }
 
     /// Configures a [GasInspector]
@@ -167,14 +173,19 @@ impl TracingInspector {
 
         let pc = interp.program_counter();
 
+        let memory =
+            self.config.record_memory_snapshots.then(|| interp.memory.clone()).unwrap_or_default();
+        let stack =
+            self.config.record_stack_snapshots.then(|| interp.stack.clone()).unwrap_or_default();
+
         trace.trace.steps.push(CallTraceStep {
             depth: data.journaled_state.depth(),
             pc,
             op: OpCode::try_from_u8(interp.contract.bytecode.bytecode()[pc])
                 .expect("is valid opcode;"),
             contract: interp.contract.address,
-            stack: interp.stack.clone(),
-            memory: interp.memory.clone(),
+            stack,
+            memory,
             gas: self.gas_inspector.as_ref().gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
@@ -199,28 +210,31 @@ impl TracingInspector {
         let step = &mut self.traces.arena[trace_idx].trace.steps[step_idx];
 
         if let Some(pc) = interp.program_counter().checked_sub(1) {
-            let op = interp.contract.bytecode.bytecode()[pc];
+            if self.config.record_state_diff {
+                let op = interp.contract.bytecode.bytecode()[pc];
 
-            let journal_entry = data
-                .journaled_state
-                .journal
-                .last()
-                // This should always work because revm initializes it as `vec![vec![]]`
-                // See [JournaledState::new](revm::JournaledState)
-                .expect("exists; initialized with vec")
-                .last();
+                let journal_entry = data
+                    .journaled_state
+                    .journal
+                    .last()
+                    // This should always work because revm initializes it as `vec![vec![]]`
+                    // See [JournaledState::new](revm::JournaledState)
+                    .expect("exists; initialized with vec")
+                    .last();
 
-            step.state_diff = match (op, journal_entry) {
-                (
-                    opcode::SLOAD | opcode::SSTORE,
-                    Some(JournalEntry::StorageChange { address, key, .. }),
-                ) => {
-                    // SAFETY: (Address,key) exists if part if StorageChange
-                    let value = data.journaled_state.state[address].storage[key].present_value();
-                    Some((*key, value))
-                }
-                _ => None,
-            };
+                step.state_diff = match (op, journal_entry) {
+                    (
+                        opcode::SLOAD | opcode::SSTORE,
+                        Some(JournalEntry::StorageChange { address, key, .. }),
+                    ) => {
+                        // SAFETY: (Address,key) exists if part if StorageChange
+                        let value =
+                            data.journaled_state.state[address].storage[key].present_value();
+                        Some((*key, value))
+                    }
+                    _ => None,
+                };
+            }
 
             step.gas_cost = step.gas - self.gas_inspector.as_ref().gas_remaining();
         }
@@ -249,7 +263,7 @@ where
         data: &mut EVMData<'_, DB>,
         is_static: bool,
     ) -> InstructionResult {
-        if self.record_steps {
+        if self.config.record_steps {
             self.gas_inspector.step(interp, data, is_static);
             self.start_step(interp, data);
         }
@@ -279,7 +293,7 @@ where
         is_static: bool,
         eval: InstructionResult,
     ) -> InstructionResult {
-        if self.record_steps {
+        if self.config.record_steps {
             self.gas_inspector.step_end(interp, data, is_static, eval);
             self.fill_step_on_step_end(interp, data, eval);
             return eval
