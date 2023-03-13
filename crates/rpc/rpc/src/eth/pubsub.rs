@@ -60,6 +60,7 @@ where
     Events: ChainEventSubscriptions + Clone + 'static,
     Network: SyncStateProvider + Clone + 'static,
 {
+    /// Handler for `eth_subscribe`
     fn subscribe(
         &self,
         mut sink: SubscriptionSink,
