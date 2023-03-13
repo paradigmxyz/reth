@@ -15,7 +15,10 @@ use std::{
     sync::Arc,
 };
 
-use self::block_indices::BlockIndices;
+use self::{
+    block_indices::BlockIndices,
+    chain::{ChainSplit, SplitAt},
+};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -65,9 +68,9 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     block_indices: BlockIndices,
     /// Number of block after finalized block that we are storing. It should be more then
     /// finalization window
-    num_of_side_chain_max_size: u64,
+    max_blocks_in_chain: u64,
     /// Finalization windows. Number of blocks that can be reorged
-    finalization_window: u64,
+    max_reorg_depth: u64,
     /// Externals
     externals: Externals<DB, C, EF>,
 }
@@ -106,11 +109,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         consensus: C,
         executor_factory: EF,
         chain_spec: Arc<ChainSpec>,
-        finalization_window: u64,
-        num_of_side_chain_max_size: u64,
+        max_reorg_depth: u64,
+        max_blocks_in_chain: u64,
         num_of_additional_canonical_block_hashes: u64,
     ) -> Result<Self, Error> {
-        if finalization_window > num_of_side_chain_max_size {
+        if max_reorg_depth > max_blocks_in_chain {
             panic!("Side chain size should be more then finalization window");
         }
 
@@ -118,15 +121,15 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .tx()?
             .cursor_read::<tables::CanonicalHeaders>()?
             .walk_back(None)?
-            .take((finalization_window + num_of_additional_canonical_block_hashes) as usize)
+            .take((max_reorg_depth + num_of_additional_canonical_block_hashes) as usize)
             .collect::<Result<Vec<(BlockNumber, BlockHash)>, _>>()?;
 
         // TODO(rakita) save last finalized block inside database but for now just take
-        // tip-finalization_window
+        // tip-max_reorg_depth
         // task: https://github.com/paradigmxyz/reth/issues/1712
         let (last_finalized_block_number, _) =
-            if last_canonical_hashes.len() > finalization_window as usize {
-                last_canonical_hashes[finalization_window as usize]
+            if last_canonical_hashes.len() > max_reorg_depth as usize {
+                last_canonical_hashes[max_reorg_depth as usize]
             } else {
                 // it is in reverse order from tip to N
                 last_canonical_hashes.last().cloned().unwrap_or_default()
@@ -143,8 +146,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 num_of_additional_canonical_block_hashes,
                 BTreeMap::from_iter(last_canonical_hashes.into_iter()),
             ),
-            num_of_side_chain_max_size,
-            finalization_window,
+            max_blocks_in_chain,
+            max_reorg_depth,
         })
     }
 
@@ -327,7 +330,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // we will not even try to insert blocks that are too far in future.
-        if block.number > last_finalized_block + self.num_of_side_chain_max_size {
+        if block.number > last_finalized_block + self.max_blocks_in_chain {
             return Err(ExecError::PendingBlockIsInFuture {
                 block_number: block.number,
                 block_hash: block.hash(),
@@ -388,8 +391,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ) -> Result<(), Error> {
         self.finalize_block(last_finalized_block);
 
-        let num_of_canonical_hashes = self.finalization_window +
-            self.block_indices.num_of_additional_canonical_block_hashes();
+        let num_of_canonical_hashes =
+            self.max_reorg_depth + self.block_indices.num_of_additional_canonical_block_hashes();
 
         let last_canonical_hashes = self
             .externals
@@ -412,6 +415,23 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
+    /// Split chain and return canonical part of it. Pending part reinsert inside tree
+    /// with same chain_id.
+    fn split_chain(&mut self, chain_id: BlockChainId, chain: Chain, split_at: SplitAt) -> Chain {
+        match chain.split(split_at) {
+            ChainSplit::Split { canonical, pending } => {
+                // rest of splited chain is inserted back with same chain_id.
+                self.block_indices.insert_chain(chain_id, &pending);
+                self.chains.insert(chain_id, pending);
+                canonical
+            }
+            ChainSplit::NoSplitCanonical(canonical) => canonical,
+            ChainSplit::NoSplitPending(_) => {
+                panic!("Should not happen as block indices guarantee structure of blocks")
+            }
+        }
+    }
+
     /// Make block and its parent canonical. Unwind chains to database if necessary.
     ///
     /// If block is already part of canonical chain return Ok.
@@ -428,14 +448,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let chain = self.chains.remove(&chain_id).expect("To be present");
 
         // we are spliting chain as there is possibility that only part of chain get canonicalized.
-        let (canonical, pending) = chain.split_at_block_hash(block_hash);
-        let canonical = canonical.expect("Canonical chain is present");
-
-        if let Some(pending) = pending {
-            // rest of splited chain is inserted back with same chain_id.
-            self.block_indices.insert_chain(chain_id, &pending);
-            self.chains.insert(chain_id, pending);
-        }
+        let canonical = self.split_chain(chain_id, chain, SplitAt::Hash(*block_hash));
 
         let mut block_fork = canonical.fork_block();
         let mut block_fork_number = canonical.fork_block_number();
@@ -445,13 +458,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         while let Some(chain_id) = self.block_indices.get_blocks_chain_id(&block_fork.hash) {
             let chain = self.chains.remove(&chain_id).expect("To fork to be present");
             block_fork = chain.fork_block();
-            let (canonical, rest) = chain.split_at_number(block_fork_number);
-            let canonical = canonical.expect("Chain is present");
-            // reinsert back the chunk of sidechain that didn't get reorged.
-            if let Some(rest_of_sidechain) = rest {
-                self.block_indices.insert_chain(chain_id, &rest_of_sidechain);
-                self.chains.insert(chain_id, rest_of_sidechain);
-            }
+            let canonical = self.split_chain(chain_id, chain, SplitAt::Number(block_fork_number));
             block_fork_number = canonical.fork_block_number();
             chains_to_promote.push(canonical);
         }
@@ -646,12 +653,12 @@ mod tests {
     #[test]
     fn sanity_path() {
         let (mut block1, exec1) = blocks::block1();
-        block1.block.header.header.number = 11;
-        block1.block.header.header.state_root =
+        block1.number = 11;
+        block1.state_root =
             H256(hex!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd"));
         let (mut block2, exec2) = blocks::block2();
-        block2.block.header.header.number = 12;
-        block2.block.header.header.state_root =
+        block2.number = 12;
+        block2.state_root =
             H256(hex!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8"));
 
         // test pops execution results from vector, so order is from last to first.ß
@@ -720,10 +727,10 @@ mod tests {
 
         let mut block1a = block1.clone();
         let block1a_hash = H256([0x33; 32]);
-        block1a.block.header.hash = block1a_hash;
+        block1a.hash = block1a_hash;
         let mut block2a = block2.clone();
         let block2a_hash = H256([0x34; 32]);
-        block2a.block.header.hash = block2a_hash;
+        block2a.hash = block2a_hash;
 
         // reinsert two blocks that point to canonical chain
         assert_eq!(tree.insert_block_with_senders(&block1a), Ok(true));

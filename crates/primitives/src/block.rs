@@ -7,7 +7,12 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{fmt, fmt::Formatter, ops::Deref, str::FromStr};
+use std::{
+    fmt,
+    fmt::Formatter,
+    ops::{Deref, DerefMut},
+    str::FromStr,
+};
 
 /// Ethereum full block.
 ///
@@ -106,6 +111,12 @@ impl Deref for SealedBlock {
     }
 }
 
+impl DerefMut for SealedBlock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.header
+    }
+}
+
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SealedBlockWithSenders {
@@ -135,6 +146,12 @@ impl Deref for SealedBlockWithSenders {
     type Target = SealedBlock;
     fn deref(&self) -> &Self::Target {
         &self.block
+    }
+}
+
+impl DerefMut for SealedBlockWithSenders {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.block
     }
 }
 

@@ -14,7 +14,7 @@ pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,
     /// For EVM's "BLOCKHASH" opcode we require last 256 block hashes. So we need to specify
-    /// at least `additional_canonical_block_hashes`+`finalization_windows`, for eth that would be
+    /// at least `additional_canonical_block_hashes`+`max_reorg_depth`, for eth that would be
     /// 256+64.
     num_of_additional_canonical_block_hashes: u64,
     /// Canonical chain. Contains N number (depends on `finalization_depth`) of blocks.

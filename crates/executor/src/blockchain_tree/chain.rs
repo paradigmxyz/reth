@@ -184,7 +184,7 @@ impl Chain {
         consensus: &C,
         factory: &EF,
     ) -> Result<ExecutionResult, Error> {
-        consensus.validate_header(&block, U256::ZERO)?;
+        consensus.validate_header(&block, U256::MAX)?;
         consensus.pre_validate_header(&block, parent_block)?;
         consensus.pre_validate_block(&block)?;
 
@@ -245,52 +245,89 @@ impl Chain {
         Ok(())
     }
 
-    /// Iterate over block to find block with the cache that we want to split on.
-    /// Given block cache will be contained in first split. If block with hash
-    /// is not found first option would be None.
-    /// NOTE: Database state will only be found in second chain.
-    pub fn split_at_block_hash(self, block_hash: &BlockHash) -> (Option<Chain>, Option<Chain>) {
-        let block_number = self.blocks.iter().find_map(|(num, block)| {
-            if block.hash() == *block_hash {
-                Some(*num)
-            } else {
-                None
-            }
-        });
-        if let Some(block_number) = block_number {
-            Self::split_at_number(self, block_number)
-        } else {
-            (None, Some(self))
-        }
-    }
-
-    /// Split chain at the number, block with given number will be included at first chain.
+    /// Split chain at the number or hash, block with given number will be included at first chain.
     /// If any chain is empty (Does not have blocks) None will be returned.
-    /// NOTE: Subtate state will be only found in second chain. First change substate will be
+    ///
+    /// If block hash is not found ChainSplit::NoSplitPending is returned.
+    ///
+    /// Subtate state will be only found in second chain. First change substate will be
     /// invalid.
-    pub fn split_at_number(mut self, block_number: BlockNumber) -> (Option<Chain>, Option<Chain>) {
-        if block_number >= *self.blocks.last_entry().expect("chain is never empty").key() {
-            return (Some(self), None)
-        }
-        if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-            return (None, Some(self))
-        }
+    pub fn split(mut self, split_at: SplitAt) -> ChainSplit {
+        let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
+        let block_number = match split_at {
+            SplitAt::Hash(block_hash) => {
+                let block_number = self.blocks.iter().find_map(|(num, block)| {
+                    if block.hash() == block_hash {
+                        Some(*num)
+                    } else {
+                        None
+                    }
+                });
+                let Some(block_number) = block_number else { return ChainSplit::NoSplitPending(self)};
+                // If block number is same as tip whole chain is becoming canonical.
+                if block_number == chain_tip {
+                    return ChainSplit::NoSplitCanonical(self)
+                }
+                block_number
+            }
+            SplitAt::Number(block_number) => {
+                if block_number >= chain_tip {
+                    return ChainSplit::NoSplitCanonical(self)
+                }
+                if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
+                    return ChainSplit::NoSplitPending(self)
+                }
+                block_number
+            }
+        };
+
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
         let (first_changesets, second_changeset) = self.changesets.split_at(self.blocks.len());
 
-        (
-            Some(Chain {
+        ChainSplit::Split {
+            canonical: Chain {
                 substate: SubStateData::default(),
                 changesets: first_changesets.to_vec(),
                 blocks: self.blocks,
-            }),
-            Some(Chain {
+            },
+            pending: Chain {
                 substate: self.substate,
                 changesets: second_changeset.to_vec(),
                 blocks: higher_number_blocks,
-            }),
-        )
+            },
+        }
     }
+}
+
+/// Used in spliting the chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SplitAt {
+    /// Split at block number.
+    Number(BlockNumber),
+    /// Split at block hash.
+    Hash(BlockHash),
+}
+
+/// Result of spliting chain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChainSplit {
+    /// Chain is not splited. Pending chain is returned.
+    /// Given block split is higher than last block.
+    /// Or in case of split by hash when hash is unknown.
+    NoSplitPending(Chain),
+    /// Chain is not splited. Canonical chain is returned.
+    /// Given block split is lower than first block.
+    NoSplitCanonical(Chain),
+    /// Chain is splited in two.
+    /// Given block split is contained in first chain.
+    Split {
+        /// Left contains lower block number that get canonicalized.
+        /// And substate is empty and not usable.
+        canonical: Chain,
+        /// Right contains higher block number, that is still pending.
+        /// And substate from original chain is moved here.
+        pending: Chain,
+    },
 }
 
 #[cfg(test)]
@@ -352,12 +389,12 @@ mod tests {
 
         let mut block1 = SealedBlockWithSenders::default();
         let block1_hash = H256([15; 32]);
-        block1.block.header.hash = block1_hash;
+        block1.hash = block1_hash;
         block1.senders.push(H160([4; 20]));
 
         let mut block2 = SealedBlockWithSenders::default();
         let block2_hash = H256([16; 32]);
-        block2.block.header.hash = block2_hash;
+        block2.hash = block2_hash;
         block2.senders.push(H160([4; 20]));
 
         let chain = Chain {
@@ -380,19 +417,25 @@ mod tests {
 
         // split in two
         assert_eq!(
-            chain.clone().split_at_block_hash(&block1_hash),
-            (Some(chain_split1.clone()), Some(chain_split2.clone()))
+            chain.clone().split(SplitAt::Hash(block1_hash)),
+            ChainSplit::Split { canonical: chain_split1.clone(), pending: chain_split2.clone() }
         );
 
         // split at unknown block hash
         assert_eq!(
-            chain.clone().split_at_block_hash(&H256([100; 32])),
-            (None, Some(chain.clone()))
+            chain.clone().split(SplitAt::Hash(H256([100; 32]))),
+            ChainSplit::NoSplitPending(chain.clone())
         );
 
         // split at higher number
-        assert_eq!(chain.clone().split_at_number(10), (Some(chain.clone()), None));
+        assert_eq!(
+            chain.clone().split(SplitAt::Number(10)),
+            ChainSplit::NoSplitCanonical(chain.clone())
+        );
         // split at lower number
-        assert_eq!(chain.clone().split_at_number(0), (None, Some(chain.clone())));
+        assert_eq!(
+            chain.clone().split(SplitAt::Number(0)),
+            ChainSplit::NoSplitPending(chain.clone())
+        );
     }
 }

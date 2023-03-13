@@ -34,6 +34,7 @@ pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlo
     assert_eq!(tx.table::<tables::PlainStorageState>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountHistory>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StorageHistory>().unwrap(), vec![]);
+    // TODO check after this gets done: https://github.com/paradigmxyz/reth/issues/1588
     // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::BlockTransitionIndex>().unwrap(), vec![(n, 0)]);
     assert_eq!(tx.table::<tables::TxTransitionIndex>().unwrap(), vec![]);
