@@ -7,7 +7,7 @@ use ethers_core::{
 };
 use reth_primitives::{Address, Signature, TransactionSigned, H256, U256};
 use reth_rpc_types::TypedTransactionRequest;
-use secp256k1::{All, Message, Secp256k1, SecretKey};
+use secp256k1::{Message, SecretKey, SECP256K1};
 use std::collections::HashMap;
 
 type Result<T> = std::result::Result<T, SignError>;
@@ -41,7 +41,6 @@ pub(crate) trait EthSigner: Send + Sync {
 pub(crate) struct DevSigner {
     addresses: Vec<Address>,
     accounts: HashMap<Address, SecretKey>,
-    sign_engine: Secp256k1<All>,
 }
 
 impl DevSigner {
@@ -51,8 +50,7 @@ impl DevSigner {
     fn sign_hash(&self, hash: H256, account: Address) -> Result<Signature> {
         let secret = self.get_key(account)?;
         let message = &Message::from_slice(hash.as_bytes()).map_err(|_| SignError::CouldNotSign)?;
-        let (rec_id, data) =
-            self.sign_engine.sign_ecdsa_recoverable(message, secret).serialize_compact();
+        let (rec_id, data) = SECP256K1.sign_ecdsa_recoverable(message, secret).serialize_compact();
         let signature = Signature {
             r: U256::try_from_be_slice(&data[..32]).ok_or(SignError::CouldNotSign)?,
             s: U256::try_from_be_slice(&data[32..64]).ok_or(SignError::CouldNotSign)?,
@@ -101,8 +99,7 @@ mod test {
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
                 .unwrap();
         let accounts = HashMap::from([(Address::default(), secret)]);
-        let sign_engine = Secp256k1::new();
-        DevSigner { addresses, accounts, sign_engine }
+        DevSigner { addresses, accounts }
     }
     #[tokio::test]
     async fn test_sign_type_data() {
