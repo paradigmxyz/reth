@@ -12,7 +12,7 @@ use std::collections::HashSet;
 pub trait TraceApi {
     /// Executes the given call and returns a number of possible traces for it.
     #[method(name = "trace_call")]
-    async fn call(
+    async fn trace_call(
         &self,
         call: CallRequest,
         trace_types: HashSet<TraceType>,
@@ -23,7 +23,7 @@ pub trait TraceApi {
     /// on top of a pending block with all n-1 transactions applied (traced) first. Allows to trace
     /// dependent transactions.
     #[method(name = "trace_callMany")]
-    async fn call_many(
+    async fn trace_call_many(
         &self,
         calls: Vec<(CallRequest, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
@@ -33,7 +33,7 @@ pub trait TraceApi {
     ///
     /// Expects a raw transaction data
     #[method(name = "trace_rawTransaction")]
-    async fn raw_transaction(
+    async fn trace_raw_transaction(
         &self,
         data: Bytes,
         trace_types: HashSet<TraceType>,
@@ -58,17 +58,24 @@ pub trait TraceApi {
 
     /// Returns traces created at given block.
     #[method(name = "trace_block")]
-    async fn block(&self, block_id: BlockId) -> Result<Option<Vec<LocalizedTransactionTrace>>>;
+    async fn trace_block(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>>;
 
     /// Returns traces matching given filter
     #[method(name = "trace_filter")]
-    async fn filter(&self, filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>>;
+    async fn trace_filter(&self, filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>>;
 
     /// Returns transaction trace at given index.
     #[method(name = "trace_get")]
-    fn trace(&self, hash: H256, indices: Vec<Index>) -> Result<Option<LocalizedTransactionTrace>>;
+    fn trace_get(
+        &self,
+        hash: H256,
+        indices: Vec<Index>,
+    ) -> Result<Option<LocalizedTransactionTrace>>;
 
     /// Returns all traces of given transaction.
     #[method(name = "trace_transaction")]
-    fn transaction_traces(&self, hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>>;
+    fn trace_transaction(&self, hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>>;
 }
