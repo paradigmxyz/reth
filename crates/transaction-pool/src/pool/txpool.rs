@@ -98,7 +98,7 @@ pub struct TxPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> TxPool<T> {
     /// Create a new graph pool instance.
-    pub(crate) fn new(ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub(crate) fn new(ordering: T, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
             pending_pool: PendingPool::new(ordering),
