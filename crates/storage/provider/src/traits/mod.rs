@@ -19,7 +19,7 @@ mod header;
 pub use header::HeaderProvider;
 
 mod receipts;
-pub(crate) use receipts::ReceiptProvider;
+pub use receipts::ReceiptProvider;
 
 mod state;
 pub use state::{StateProvider, StateProviderFactory};
