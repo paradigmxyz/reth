@@ -116,14 +116,14 @@ where
         self.local_head.as_ref().expect("is initialized").number
     }
 
-    /// Returns the existing sync target hash.
+    /// Returns the existing sync target.
     ///
     /// # Panics
     ///
     /// If the sync target has never been set.
     #[inline]
-    fn existing_sync_target_hash(&self) -> H256 {
-        self.sync_target.as_ref().expect("is initialized").hash
+    fn existing_sync_target(&self) -> SyncTargetBlock {
+        self.sync_target.as_ref().expect("is initialized").clone()
     }
 
     /// Max requests to handle at the same time
@@ -198,7 +198,7 @@ where
         headers: Vec<Header>,
         peer_id: PeerId,
     ) -> Result<(), HeadersResponseError> {
-        let sync_target_hash = self.existing_sync_target_hash();
+        let sync_target = self.existing_sync_target();
         let mut validated = Vec::with_capacity(headers.len());
 
         let sealed_headers = headers.into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
@@ -211,15 +211,45 @@ where
                     trace!(target: "downloaders::headers", ?error ,"Failed to validate header");
                     return Err(HeadersResponseError { request, peer_id: Some(peer_id), error })
                 }
-            } else if parent.hash() != sync_target_hash {
-                return Err(HeadersResponseError {
-                    request,
-                    peer_id: Some(peer_id),
-                    error: DownloadError::InvalidTip {
-                        received: parent.hash(),
-                        expected: sync_target_hash,
-                    },
-                })
+            } else {
+                match sync_target {
+                    SyncTargetBlock::Hash(hash) => {
+                        if parent.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: parent.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::Number(number) => {
+                        if parent.number != number {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTipNumber {
+                                    received: parent.number,
+                                    expected: number,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::HashAndNumber { hash, .. } => {
+                        if parent.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: parent.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
+                }
             }
 
             validated.push(parent);
@@ -246,7 +276,7 @@ where
     fn on_block_number_update(&mut self, target_block_number: u64, next_block: u64) {
         // Update the trackers
         if let Some(old_target) =
-            self.sync_target.as_mut().and_then(|t| t.number.replace(target_block_number))
+            self.sync_target.as_mut().and_then(|t| t.replace_number(target_block_number))
         {
             if target_block_number > old_target {
                 // the new target is higher than the old target we need to update the
@@ -277,7 +307,7 @@ where
         &mut self,
         response: HeadersRequestOutcome,
     ) -> Result<(), HeadersResponseError> {
-        let sync_target_hash = self.existing_sync_target_hash();
+        let sync_target = self.existing_sync_target();
         let HeadersRequestOutcome { request, outcome } = response;
         match outcome {
             Ok(res) => {
@@ -299,15 +329,43 @@ where
 
                 let target = headers.remove(0).seal_slow();
 
-                if target.hash() != sync_target_hash {
-                    return Err(HeadersResponseError {
-                        request,
-                        peer_id: Some(peer_id),
-                        error: DownloadError::InvalidTip {
-                            received: target.hash(),
-                            expected: sync_target_hash,
-                        },
-                    })
+                match sync_target {
+                    SyncTargetBlock::Hash(hash) => {
+                        if target.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: target.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::Number(number) => {
+                        if target.number != number {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTipNumber {
+                                    received: target.number,
+                                    expected: number,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::HashAndNumber { hash, .. } => {
+                        if target.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: target.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
                 }
 
                 trace!(target: "downloaders::headers", head=?self.local_block_number(), hash=?target.hash(), number=%target.number, "Received sync target");
@@ -552,7 +610,7 @@ where
 
     /// If the given target is different from the current target, we need to update the sync target
     fn update_sync_target(&mut self, target: SyncTarget) {
-        let current_tip = self.sync_target.as_ref().map(|t| t.hash);
+        let current_tip = self.sync_target.as_ref().and_then(|t| t.hash());
         match target {
             SyncTarget::Tip(tip) => {
                 if Some(tip) != current_tip {
@@ -591,13 +649,22 @@ where
 
                     // Update the sync target hash
                     self.sync_target = match self.sync_target.take() {
-                        Some(mut sync_target) => {
-                            sync_target.hash = target;
-                            Some(sync_target)
-                        }
+                        Some(sync_target) => Some(sync_target.with_hash(target)),
                         None => Some(SyncTargetBlock::from_hash(target)),
                     };
                     self.on_block_number_update(parent_block_number, parent_block_number);
+                }
+            }
+            SyncTarget::TipNum(num) => {
+                let current_tip_num = self.sync_target.as_ref().and_then(|t| t.number());
+                if Some(num) != current_tip_num {
+                    trace!(target: "downloaders::headers", %num, "Updating sync target based on num");
+                    // just update the sync target
+                    self.sync_target = match self.sync_target.take() {
+                        Some(sync_target) => Some(sync_target.with_number(num)),
+                        None => Some(SyncTargetBlock::from_number(num)),
+                    };
+                    self.on_block_number_update(num, num);
                 }
             }
         }
@@ -649,6 +716,11 @@ where
                     }
                 }
                 Poll::Pending => {
+                    trace!(
+                        target: "downloaders::headers",
+                        head=?this.local_block_number(),
+                        "Pending sync target request"
+                    );
                     this.sync_target_request = Some(req);
                     return Poll::Pending
                 }
@@ -823,24 +895,82 @@ impl HeadersResponseError {
 }
 
 /// The block to which we want to close the gap: (local head...sync target]
-#[derive(Debug, Default)]
-struct SyncTargetBlock {
+/// This tracks the sync target block, so this could be either a block number or hash.
+#[derive(Clone, Debug)]
+pub enum SyncTargetBlock {
     /// Block hash of the targeted block
-    hash: H256,
-    /// This is an `Option` because we don't know the block number at first
-    number: Option<u64>,
+    Hash(H256),
+    /// Block number of the targeted block
+    Number(u64),
+    /// Both the block hash and number of the targeted block
+    HashAndNumber {
+        /// Block hash of the targeted block
+        hash: H256,
+        /// Block number of the targeted block
+        number: u64,
+    },
 }
 
 impl SyncTargetBlock {
     /// Create new instance from hash.
     fn from_hash(hash: H256) -> Self {
-        Self { hash, number: None }
+        Self::Hash(hash)
+    }
+
+    /// Create new instance from number.
+    fn from_number(num: u64) -> Self {
+        Self::Number(num)
+    }
+
+    /// Set the hash for the sync target.
+    fn with_hash(self, hash: H256) -> Self {
+        match self {
+            Self::Hash(_) => Self::Hash(hash),
+            Self::Number(number) => Self::HashAndNumber { hash, number },
+            Self::HashAndNumber { number, .. } => Self::HashAndNumber { hash, number },
+        }
     }
 
     /// Set a number on the instance.
-    fn with_number(mut self, number: u64) -> Self {
-        self.number = Some(number);
-        self
+    fn with_number(self, number: u64) -> Self {
+        match self {
+            Self::Hash(hash) => Self::HashAndNumber { hash, number },
+            Self::Number(_) => Self::Number(number),
+            Self::HashAndNumber { hash, .. } => Self::HashAndNumber { hash, number },
+        }
+    }
+
+    /// Replace the target block number, and return the old block number, if it was set.
+    fn replace_number(&mut self, number: u64) -> Option<u64> {
+        match self {
+            Self::Hash(_) => None,
+            Self::Number(old_number) => {
+                *old_number = number;
+                Some(number)
+            }
+            Self::HashAndNumber { number: old_number, .. } => {
+                *old_number = number;
+                Some(number)
+            }
+        }
+    }
+
+    /// Return the hash of the target block, if it is set.
+    fn hash(&self) -> Option<H256> {
+        match self {
+            Self::Hash(hash) => Some(*hash),
+            Self::Number(_) => None,
+            Self::HashAndNumber { hash, .. } => Some(*hash),
+        }
+    }
+
+    /// Return the block number of the sync target, if it is set.
+    fn number(&self) -> Option<u64> {
+        match self {
+            Self::Hash(_) => None,
+            Self::Number(number) => Some(*number),
+            Self::HashAndNumber { number, .. } => Some(*number),
+        }
     }
 }
 
@@ -1013,7 +1143,7 @@ mod tests {
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
             downloader.sync_target,
-            Some(target) => target.number.is_some()
+            Some(target) => target.number().is_some()
         );
     }
 

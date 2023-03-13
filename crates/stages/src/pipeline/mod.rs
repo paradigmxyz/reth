@@ -77,6 +77,7 @@ pub use set::*;
 pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     stages: Vec<BoxedStage<DB>>,
     max_block: Option<BlockNumber>,
+    continuous: bool,
     listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
     progress: PipelineProgress,
@@ -88,6 +89,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
         Self {
             stages: Vec::new(),
             max_block: None,
+            continuous: false,
             listeners: PipelineEventListeners::default(),
             sync_state_updater: None,
             progress: PipelineProgress::default(),
