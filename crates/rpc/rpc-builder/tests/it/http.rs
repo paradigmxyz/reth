@@ -167,14 +167,16 @@ where
     };
 
     assert!(is_unimplemented(
-        TraceApiClient::call(client, CallRequest::default(), HashSet::default(), None)
+        TraceApiClient::trace_call(client, CallRequest::default(), HashSet::default(), None)
             .await
             .err()
             .unwrap()
     ));
-    assert!(is_unimplemented(TraceApiClient::call_many(client, vec![], None).await.err().unwrap()));
     assert!(is_unimplemented(
-        TraceApiClient::raw_transaction(client, Bytes::default(), HashSet::default(), None)
+        TraceApiClient::trace_call_many(client, vec![], None).await.err().unwrap()
+    ));
+    assert!(is_unimplemented(
+        TraceApiClient::trace_raw_transaction(client, Bytes::default(), HashSet::default(), None)
             .await
             .err()
             .unwrap()
@@ -191,13 +193,15 @@ where
             .err()
             .unwrap()
     ));
-    assert!(is_unimplemented(TraceApiClient::block(client, block_id).await.err().unwrap()));
-    assert!(is_unimplemented(TraceApiClient::filter(client, trace_filter).await.err().unwrap()));
+    assert!(is_unimplemented(TraceApiClient::trace_block(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(
-        TraceApiClient::trace(client, H256::default(), vec![]).await.err().unwrap()
+        TraceApiClient::trace_filter(client, trace_filter).await.err().unwrap()
     ));
     assert!(is_unimplemented(
-        TraceApiClient::transaction_traces(client, H256::default()).await.err().unwrap()
+        TraceApiClient::trace_get(client, H256::default(), vec![]).await.err().unwrap()
+    ));
+    assert!(is_unimplemented(
+        TraceApiClient::trace_transaction(client, H256::default()).await.err().unwrap()
     ));
 }
 

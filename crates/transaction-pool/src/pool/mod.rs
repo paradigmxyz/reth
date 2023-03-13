@@ -100,7 +100,7 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
     /// Internal mapping of addresses to plain ints.
     identifiers: RwLock<SenderIdentifiers>,
     /// Transaction validation.
-    validator: Arc<V>,
+    validator: V,
     /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
     /// Pool settings.
@@ -115,13 +115,13 @@ pub struct PoolInner<V: TransactionValidator, T: TransactionOrdering> {
 
 // === impl PoolInner ===
 
-impl<V: TransactionValidator, T: TransactionOrdering> PoolInner<V, T>
+impl<V, T> PoolInner<V, T>
 where
     V: TransactionValidator,
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub(crate) fn new(validator: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
+    pub(crate) fn new(validator: V, ordering: T, config: PoolConfig) -> Self {
         Self {
             identifiers: Default::default(),
             validator,

@@ -22,7 +22,7 @@ use std::{
 /// is also pending, then this will be moved to the `independent` queue.
 pub(crate) struct PendingPool<T: TransactionOrdering> {
     /// How to order transactions.
-    ordering: Arc<T>,
+    ordering: T,
     /// Keeps track of transactions inserted in the pool.
     ///
     /// This way we can determine when transactions where submitted to the pool.
@@ -46,7 +46,7 @@ pub(crate) struct PendingPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance.
-    pub(crate) fn new(ordering: Arc<T>) -> Self {
+    pub(crate) fn new(ordering: T) -> Self {
         Self {
             ordering,
             submission_id: 0,

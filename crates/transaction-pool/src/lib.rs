@@ -148,8 +148,8 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub fn new(client: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
-        Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
+    pub fn new(validator: V, ordering: T, config: PoolConfig) -> Self {
+        Self { pool: Arc::new(PoolInner::new(validator, ordering, config)) }
     }
 
     /// Returns the wrapped pool.
@@ -302,7 +302,7 @@ where
     }
 }
 
-impl<V: TransactionValidator, O: TransactionOrdering> Clone for Pool<V, O> {
+impl<V: TransactionValidator, T: TransactionOrdering> Clone for Pool<V, T> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
     }

@@ -1,10 +1,10 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
+    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, ChainInfo, Header,
+    Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, ChainInfo, Header, Receipt,
     StorageKey, StorageValue, TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
@@ -60,6 +60,20 @@ impl TransactionsProvider for NoopProvider {
         _range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         Ok(Vec::default())
+    }
+}
+
+impl ReceiptProvider for NoopProvider {
+    fn receipt(&self, _id: TxNumber) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipt_by_hash(&self, _hash: TxHash) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipts_by_block(&self, _block: BlockId) -> Result<Option<Vec<Receipt>>> {
+        Ok(None)
     }
 }
 
