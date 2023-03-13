@@ -67,34 +67,35 @@ where
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        let mut proof =
-            EIP1186AccountProofResponse { address, code_hash: KECCAK_EMPTY, ..Default::default() };
+        let (account_proof, storage_hash, stg_proofs) = state.proof(address, &keys)?;
+
+        let storage_proof = keys
+            .into_iter()
+            .zip(stg_proofs)
+            .map(|(key, proof)| {
+                state.storage(address, key).map(|op| StorageProof {
+                    key: U256::from_be_bytes(*key.as_fixed_bytes()),
+                    value: op.unwrap_or_default(),
+                    proof,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let mut proof = EIP1186AccountProofResponse {
+            address,
+            code_hash: KECCAK_EMPTY,
+            account_proof,
+            storage_hash,
+            storage_proof,
+            ..Default::default()
+        };
 
         if let Some(account) = state.basic_account(address)? {
-            let (account_proof, storage_hash, stg_proofs) = state.proof(address, &keys)?;
-
-            let storage_proof = keys
-                .into_iter()
-                .zip(stg_proofs)
-                .map(|(key, proof)| {
-                    state.storage(address, key).map(|op| StorageProof {
-                        key: U256::from_be_bytes(*key.as_fixed_bytes()),
-                        value: op.unwrap_or_default(),
-                        proof,
-                    })
-                })
-                .collect::<Result<_, _>>()?;
-
-            proof = EIP1186AccountProofResponse {
-                balance: account.balance,
-                nonce: account.nonce.into(),
-                code_hash: account.get_bytecode_hash(),
-                storage_hash,
-                account_proof,
-                storage_proof,
-                ..proof
-            };
+            proof.balance = account.balance;
+            proof.nonce = account.nonce.into();
+            proof.code_hash = account.get_bytecode_hash();
         }
+
         Ok(proof)
     }
 }

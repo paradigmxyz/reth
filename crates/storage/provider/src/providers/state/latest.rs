@@ -9,7 +9,8 @@ use reth_db::{
 };
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
-    keccak256, Account, Address, Bytecode, Bytes, StorageKey, StorageValue, H256, U256,
+    keccak256, Account, Address, Bytecode, Bytes, StorageKey, StorageValue, H256, KECCAK_EMPTY,
+    U256,
 };
 use std::marker::PhantomData;
 
@@ -77,16 +78,22 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
         let (account_proof, storage_root) = loader
             .generate_acount_proof(self.db, root, hashed_address)
             .map_err(|_| ProviderError::StateTree)?;
+        let account_proof = account_proof.into_iter().map(Bytes::from).collect();
 
-        let hashed_keys: Vec<H256> = keys.iter().map(keccak256).collect();
-        let storage_proof = loader
-            .generate_storage_proofs(self.db, storage_root, hashed_address, &hashed_keys)
-            .map_err(|_| ProviderError::StateTree)?;
-        Ok((
-            account_proof.into_iter().map(Bytes::from).collect(),
-            storage_root,
-            storage_proof.into_iter().map(|v| v.into_iter().map(Bytes::from).collect()).collect(),
-        ))
+        let storage_proof = if storage_root == KECCAK_EMPTY {
+            // if there isn't storage, we return empty storage proofs
+            (0..keys.len()).map(|_| Vec::new()).collect()
+        } else {
+            let hashed_keys: Vec<H256> = keys.iter().map(keccak256).collect();
+            loader
+                .generate_storage_proofs(self.db, storage_root, hashed_address, &hashed_keys)
+                .map_err(|_| ProviderError::StateTree)?
+                .into_iter()
+                .map(|v| v.into_iter().map(Bytes::from).collect())
+                .collect()
+        };
+
+        Ok((account_proof, storage_root, storage_proof))
     }
 }
 
