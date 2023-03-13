@@ -279,7 +279,8 @@ impl<'tx, 'db, DB: Database> DBTrieLoader<'tx, 'db, DB> {
         Ok(root)
     }
 
-    fn calculate_storage_root(&self, address: H256) -> Result<H256, TrieError> {
+    /// Calculate the accounts storage root.
+    pub fn calculate_storage_root(&self, address: H256) -> Result<H256, TrieError> {
         let db = Arc::new(DupHashDatabase::<DB>::new(self.tx, address)?);
 
         let hasher = Arc::new(HasherKeccak::new());
@@ -354,7 +355,8 @@ impl<'tx, 'db, DB: Database> DBTrieLoader<'tx, 'db, DB> {
         Ok(new_root)
     }
 
-    fn update_storage_root(
+    /// Update the account's storage root
+    pub fn update_storage_root(
         &self,
         root: H256,
         address: H256,
