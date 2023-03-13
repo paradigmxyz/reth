@@ -214,7 +214,6 @@ where
         UnboundedReceiverStream::new(self.chain_events.subscribe_new_blocks())
             .filter_map(move |new_block| {
                 let block_id: BlockId = new_block.hash.into();
-                // TODO(mattsse): this should be optimized because we only need the hashes
                 let txs = self.client.transactions_by_block(block_id).ok().flatten();
                 let receipts = self.client.receipts_by_block(block_id).ok().flatten();
                 match (txs, receipts) {
