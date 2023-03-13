@@ -1,11 +1,11 @@
-use crate::{BlockIdProvider, HeaderProvider, TransactionsProvider};
+use crate::{BlockIdProvider, HeaderProvider, ReceiptProvider, TransactionsProvider};
 use reth_interfaces::Result;
 use reth_primitives::{Block, BlockId, BlockNumberOrTag, Header, H256};
 
 /// Api trait for fetching `Block` related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockProvider:
-    BlockIdProvider + HeaderProvider + TransactionsProvider + Send + Sync
+    BlockIdProvider + HeaderProvider + TransactionsProvider + ReceiptProvider + Send + Sync
 {
     /// Returns the block.
     ///
