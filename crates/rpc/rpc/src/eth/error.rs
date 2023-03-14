@@ -334,10 +334,13 @@ impl From<PoolError> for EthApiError {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SignError {
+    /// Error occured while trying to sign data.
     #[error("Could not sign")]
     CouldNotSign,
+    /// Signer for requested account not found.
     #[error("Unknown account")]
     NoAccount,
+    /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
     TypedData,
 }
