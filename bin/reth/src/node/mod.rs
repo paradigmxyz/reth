@@ -51,7 +51,7 @@ use reth_stages::{
     prelude::*,
     stages::{
         BodyStage, ExecutionStage, FinishStage, HeaderStage, SenderRecoveryStage,
-        TotalDifficultyStage, FINISH,
+        TotalDifficultyStage, FINISH, HEADERS,
     },
 };
 use reth_tasks::TaskExecutor;
@@ -491,12 +491,18 @@ impl Command {
         let factory = reth_executor::Factory::new(self.chain.clone());
 
         let default_stages = if continuous {
-            StageSetBuilder::default()
-                .add_stage(HeaderStage::new(header_downloader, consensus.clone()).continuous())
-                .add_stage(TotalDifficultyStage::new(consensus.clone()))
-                .add_stage(BodyStage { downloader: body_downloader, consensus: consensus.clone() })
-                .add_set(OfflineStages::new(factory.clone()))
-                .add_stage(FinishStage::new(updater.clone()))
+            let continuous_headers =
+                HeaderStage::new(header_downloader, consensus.clone()).continuous();
+            let online_builder = OnlineStages::builder_with_headers(
+                continuous_headers,
+                consensus.clone(),
+                body_downloader,
+            );
+            DefaultStages::<H, B, U, reth_executor::Factory>::add_offline_stages(
+                online_builder,
+                updater.clone(),
+                factory.clone(),
+            )
         } else {
             DefaultStages::new(
                 consensus.clone(),
