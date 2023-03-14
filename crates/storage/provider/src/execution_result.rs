@@ -53,7 +53,10 @@ pub enum AccountInfoChangeSet {
         old: Account,
     },
     /// Nothing was changed for the account (nonce/balance).
-    NoChange,
+    NoChange {
+        /// Useful to clear existing empty accounts pre-EIP-161.
+        is_empty: bool,
+    },
 }
 
 impl AccountInfoChangeSet {
@@ -94,8 +97,10 @@ impl AccountInfoChangeSet {
                     AccountBeforeTx { address, info: Some(old) },
                 )?;
             }
-            AccountInfoChangeSet::NoChange => {
-                // do nothing storage account didn't change
+            AccountInfoChangeSet::NoChange { is_empty } => {
+                if has_state_clear_eip && is_empty {
+                    tx.delete::<tables::PlainAccountState>(address, None)?;
+                }
             }
         }
         Ok(())
