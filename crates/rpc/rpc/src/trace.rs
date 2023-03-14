@@ -1,10 +1,10 @@
 use crate::{
-    eth::{cache::EthStateCache, EthTransactions, TransactionSource},
+    eth::{cache::EthStateCache, EthTransactions},
     result::internal_rpc_err,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
+use reth_primitives::{BlockId, Bytes, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
@@ -115,18 +115,12 @@ where
         &self,
         hash: H256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
-        let (block_id, _transaction) = match self.eth_api.transaction_by_hash(hash).await? {
+        let (_transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
             None => return Ok(None),
-            Some(tx) => match tx {
-                TransactionSource::Pool(tx) => (BlockId::Number(BlockNumberOrTag::Pending), tx),
-                TransactionSource::Database { transaction, block_hash, .. } => {
-                    (BlockId::Hash(block_hash.into()), transaction)
-                }
-            },
+            Some(res) => res,
         };
 
-        //
-        let (_cfg, _block_env, _at) = self.eth_api.evm_env_at(block_id).await?;
+        let (_cfg, _block_env, _at) = self.eth_api.evm_env_at(at).await?;
 
         Err(internal_rpc_err("unimplemented"))
     }

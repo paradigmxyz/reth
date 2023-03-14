@@ -8,7 +8,7 @@ use reth_primitives::{
     BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     TransactionSigned, TransactionSignedEcRecovered, H256, U256,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory, TransactionsProvider};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
 use reth_rpc_types::{Index, Transaction, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -202,6 +202,15 @@ pub enum TransactionSource {
         /// Number of the block.
         block_number: u64,
     },
+}
+
+impl From<TransactionSource> for TransactionSignedEcRecovered {
+    fn from(value: TransactionSource) -> Self {
+        match value {
+            TransactionSource::Pool(tx) => tx,
+            TransactionSource::Database { transaction, .. } => transaction,
+        }
+    }
 }
 
 impl From<TransactionSource> for Transaction {
