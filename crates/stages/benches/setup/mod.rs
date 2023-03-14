@@ -123,7 +123,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         tx.insert_accounts_and_storages(start_state.clone()).unwrap();
 
         // make first block after genesis have valid state root
-        let root = DBTrieLoader::default().calculate_root(&tx.inner()).unwrap();
+        let root =
+            DBTrieLoader::default().calculate_root(&tx.inner()).and_then(|e| e.root()).unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -144,7 +145,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         // make last block have valid state root
         let root = {
             let mut tx_mut = tx.inner();
-            let root = DBTrieLoader::default().calculate_root(&tx_mut).unwrap();
+            let root =
+                DBTrieLoader::default().calculate_root(&tx_mut).and_then(|e| e.root()).unwrap();
             tx_mut.commit().unwrap();
             root
         };

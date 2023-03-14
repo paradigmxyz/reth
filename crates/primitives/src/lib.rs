@@ -34,6 +34,7 @@ mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
+pub use proofs::ProofCheckpoint;
 
 pub use account::{Account, Bytecode};
 pub use bits::H512;

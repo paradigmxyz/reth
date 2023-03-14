@@ -308,8 +308,8 @@ where
         // merkle tree
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
-            let loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader.update_root(current_root, from..to)?;
+            let mut loader = DBTrieLoader::new(self.deref_mut());
+            let root = loader.update_root(current_root, from..to).and_then(|e| e.root())?;
             if root != block.state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,

@@ -4851,6 +4851,7 @@ dependencies = [
  "itertools 0.10.5",
  "parking_lot 0.12.1",
  "proptest",
+ "reth-codecs",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
