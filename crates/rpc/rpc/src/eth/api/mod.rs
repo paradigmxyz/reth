@@ -3,29 +3,25 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use crate::eth::signer::EthSigner;
+use crate::eth::{cache::EthStateCache, error::EthResult, signer::EthSigner};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    Address, BlockId, BlockNumberOrTag, ChainInfo, TransactionSigned, H256, U64,
-};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U64};
 use reth_provider::{
-    BlockProvider, EvmEnvProvider, StateProvider as StateProviderTrait, StateProviderFactory,
+    providers::ChainState, BlockProvider, EvmEnvProvider, StateProvider as StateProviderTrait,
+    StateProviderFactory,
 };
-use std::{num::NonZeroUsize, ops::Deref};
-
-use crate::eth::{cache::EthStateCache, error::EthResult};
-use reth_provider::providers::ChainState;
 use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
-use std::sync::Arc;
+use std::{num::NonZeroUsize, ops::Deref, sync::Arc};
 
 mod block;
 mod call;
 mod server;
 mod state;
 mod transactions;
+pub use transactions::{EthTransactions, TransactionSource};
 
 /// Cache limit of block-level fee history for `eth_feeHistory` RPC method.
 const FEE_HISTORY_CACHE_LIMIT: usize = 2048;
@@ -34,7 +30,7 @@ const FEE_HISTORY_CACHE_LIMIT: usize = 2048;
 ///
 /// Defines core functionality of the `eth` API implementation.
 #[async_trait]
-pub trait EthApiSpec: Send + Sync {
+pub trait EthApiSpec: EthTransactions + Send + Sync {
     /// Returns the current ethereum protocol version.
     async fn protocol_version(&self) -> Result<U64>;
 
@@ -46,9 +42,6 @@ pub trait EthApiSpec: Send + Sync {
 
     /// Returns a list of addresses owned by client.
     fn accounts(&self) -> Vec<Address>;
-
-    /// Returns the transaction by hash
-    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<TransactionSigned>>;
 }
 
 /// `Eth` API implementation.
@@ -242,10 +235,6 @@ where
 
     fn accounts(&self) -> Vec<Address> {
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
-    }
-
-    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<TransactionSigned>> {
-        self.client().transaction_by_hash(hash)
     }
 }
 

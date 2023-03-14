@@ -3,7 +3,10 @@
 
 use super::EthApiSpec;
 use crate::{
-    eth::{api::EthApi, error::EthApiError},
+    eth::{
+        api::{EthApi, EthTransactions},
+        error::EthApiError,
+    },
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
@@ -118,7 +121,7 @@ where
 
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: H256) -> Result<Option<reth_rpc_types::Transaction>> {
-        Ok(EthApi::transaction_by_hash(self, hash).await?)
+        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
