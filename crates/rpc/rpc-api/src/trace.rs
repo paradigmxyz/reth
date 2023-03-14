@@ -69,7 +69,7 @@ pub trait TraceApi {
 
     /// Returns transaction trace at given index.
     #[method(name = "trace_get")]
-    fn trace_get(
+    async fn trace_get(
         &self,
         hash: H256,
         indices: Vec<Index>,
@@ -77,5 +77,6 @@ pub trait TraceApi {
 
     /// Returns all traces of given transaction.
     #[method(name = "trace_transaction")]
-    fn trace_transaction(&self, hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>>;
+    async fn trace_transaction(&self, hash: H256)
+        -> Result<Option<Vec<LocalizedTransactionTrace>>>;
 }
