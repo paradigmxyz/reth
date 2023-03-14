@@ -1014,7 +1014,8 @@ where
                     self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
                 let current_root = self.get_header(tip_number)?.state_root;
                 let mut loader = DBTrieLoader::new(self.deref());
-                new_state_root = loader.update_root(current_root, transition_range).and_then(|e| e.root())?;
+                new_state_root =
+                    loader.update_root(current_root, transition_range).and_then(|e| e.root())?;
             }
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.

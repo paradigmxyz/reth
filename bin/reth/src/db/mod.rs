@@ -207,7 +207,6 @@ impl<'a, DB: Database> DbTool<'a, DB> {
         let chain = random_block_range(0..len, Default::default(), 0..64);
 
         self.db.update(|tx| {
-            let chain = chain;
             chain.into_iter().try_for_each(|block| {
                 insert_canonical_block(tx, block, None, true)?;
                 Ok::<_, eyre::Error>(())

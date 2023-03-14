@@ -2,6 +2,10 @@
 pub mod block_indices;
 pub mod chain;
 
+use self::{
+    block_indices::BlockIndices,
+    chain::{ChainSplit, SplitAt},
+};
 use chain::{BlockChainId, Chain, ForkBlock};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
@@ -13,11 +17,6 @@ use reth_provider::{
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
-};
-
-use self::{
-    block_indices::BlockIndices,
-    chain::{ChainSplit, SplitAt},
 };
 
 #[cfg_attr(doc, aquamarine::aquamarine)]

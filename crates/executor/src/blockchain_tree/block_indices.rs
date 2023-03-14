@@ -9,7 +9,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 ///
 /// It contains list of canonical block hashes, forks to childs blocks
 /// and block hash to chain id.
-#[derive(Clone)]
 pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,
@@ -105,9 +104,9 @@ impl BlockIndices {
         hashes: BTreeMap<u64, BlockHash>,
     ) -> BTreeSet<BlockChainId> {
         let mut new_hashes = hashes.iter();
-        let mut old_hashes = self.canonical_chain().iter();
+        let mut old_hashes = self.canonical_chain().clone().into_iter();
 
-        let mut remove = BTreeMap::new();
+        let mut remove = Vec::new();
 
         let mut new_hash = new_hashes.next();
         let mut old_hash = old_hashes.next();
@@ -121,29 +120,29 @@ impl BlockIndices {
                 // Old canonical chain had more block than new chain.
                 // remove all present block.
                 // this is mostly not going to happen as reorg should make new chain in Tree.
-                while let Some((rem_num,rem_hash)) = old_hash {
-                    remove.insert(*rem_num,*rem_hash);
+                while let Some(rem) = old_hash {
+                    remove.push(rem);
                     old_hash = old_hashes.next();
                 }
                 break;
             };
-
-            match new_block_value.0.cmp(old_block_value.0) {
+            // compare old and new canonical block number
+            match new_block_value.0.cmp(&old_block_value.0) {
                 std::cmp::Ordering::Less => {
                     // new chain has more past blocks than old chain
                     new_hash = new_hashes.next();
                 }
                 std::cmp::Ordering::Equal => {
-                    if new_block_value.1 != old_block_value.1 {
+                    if *new_block_value.1 != old_block_value.1 {
                         // remove block hash as it is different
-                        remove.insert(*old_block_value.0, *old_block_value.1);
+                        remove.push(old_block_value);
                     }
                     new_hash = new_hashes.next();
                     old_hash = old_hashes.next();
                 }
                 std::cmp::Ordering::Greater => {
                     // old chain has more past blocks that new chain
-                    remove.insert(*old_block_value.0, *old_block_value.1);
+                    remove.push(old_block_value);
                     old_hash = old_hashes.next()
                 }
             }
@@ -181,15 +180,15 @@ impl BlockIndices {
         self.blocks_to_chain.remove(&block_hash);
 
         // rm fork -> child
-        if let Some(fork_blocks) = self.fork_to_child.remove(&block_hash) {
-            return fork_blocks.into_iter().fold(BTreeSet::new(), |mut fold, fork_child| {
-                if let Some(lose_chain) = self.blocks_to_chain.remove(&fork_child) {
-                    fold.insert(lose_chain);
-                }
-                fold
+        let removed_fork = self.fork_to_child.remove(&block_hash);
+        removed_fork
+            .map(|fork_blocks| {
+                fork_blocks
+                    .into_iter()
+                    .filter_map(|fork_child| self.blocks_to_chain.remove(&fork_child))
+                    .collect()
             })
-        }
-        BTreeSet::new()
+            .unwrap_or_default()
     }
 
     /// Remove all blocks from canonical list and insert new blocks to it.

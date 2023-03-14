@@ -45,7 +45,7 @@ impl Chain {
         &self.blocks
     }
 
-    /// Into inneer components
+    /// Into inner components
     pub fn into_inner(
         self,
     ) -> (BTreeMap<BlockNumber, SealedBlockWithSenders>, Vec<ExecutionResult>, SubStateData) {

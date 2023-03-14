@@ -80,12 +80,12 @@ impl AccountInfoChangeSet {
                     Self::Changed { new, old }
                 } else {
                     if new.is_empty() {}
-                    Self::NoChange { is_empty: true}
+                    Self::NoChange { is_empty: true }
                 }
             }
             (None, Some(new)) => Self::Created { new },
             (Some(old), None) => Self::Destroyed { old },
-            (None, None) => Self::NoChange { is_empty: false},
+            (None, None) => Self::NoChange { is_empty: false },
         }
     }
     /// Apply the changes from the changeset to a database transaction.
