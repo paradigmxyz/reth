@@ -10,7 +10,7 @@ description = "Staged syncing primitives used in reth."
 [package.metadata.cargo-udeps.ignore]
 normal = [
     # Used for diagrams in docs
-    "aquamarine"
+    "aquamarine",
 ]
 
 [dependencies]
@@ -46,7 +46,7 @@ proptest = { version = "1.0", optional = true }
 
 [dev-dependencies]
 # reth
-reth-primitives = { path = "../primitives", features = ["arbitrary"]}
+reth-primitives = { path = "../primitives", features = ["arbitrary"] }
 reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
@@ -60,7 +60,11 @@ rand = "0.8.5"
 paste = "1.0"
 
 # Stage benchmarks
-pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { version = "0.11", features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 criterion = { version = "0.4.0", features = ["async_futures"] }
 proptest = { version = "1.0" }
 arbitrary = { version = "1.1.7", features = ["derive"] }

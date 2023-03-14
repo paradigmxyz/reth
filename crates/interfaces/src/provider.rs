@@ -71,6 +71,11 @@ pub enum ProviderError {
     /// Missing block hash in BlockchainTree
     #[error("Missing block hash for block #{block_number:?} in blockchain tree")]
     BlockchainTreeBlockHash { block_number: BlockNumber },
+    /// Some error occurred while interacting with the state tree.
+    #[error("Unknown error occurred while interacting with the state trie.")]
+    StateTrie,
+    #[error("History state root, can't be calculated")]
+    HistoryStateRoot,
     /// Thrown when required header related data was not found but was required.
     #[error("requested data not found")]
     HeaderNotFound,

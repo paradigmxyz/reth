@@ -553,8 +553,8 @@ where
         // merkle tree
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
-            let loader = DBTrieLoader::<DB>::new(self);
-            let root = loader.update_root(current_root, from..to)?;
+            let mut loader = DBTrieLoader::new(self.deref_mut());
+            let root = loader.update_root(current_root, from..to).and_then(|e| e.root())?;
             if root != block_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
@@ -1013,8 +1013,8 @@ where
                 let (tip_number, _) =
                     self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
                 let current_root = self.get_header(tip_number)?.state_root;
-                let loader = DBTrieLoader::<DB>::new(self);
-                new_state_root = loader.update_root(current_root, transition_range)?;
+                let mut loader = DBTrieLoader::new(self.deref());
+                new_state_root = loader.update_root(current_root, transition_range).and_then(|e| e.root())?;
             }
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.

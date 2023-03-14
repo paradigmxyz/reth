@@ -176,7 +176,7 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
             let tx = self.db.tx()?;
             if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
                 let tx_range = body.tx_id_range();
-                if tx_range.is_empty() {
+                return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
                     let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
@@ -186,12 +186,9 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
                 }
-            } else {
-                Ok(None)
             }
-        } else {
-            Ok(None)
         }
+        Ok(None)
     }
 
     fn transactions_by_block_range(
@@ -242,7 +239,7 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
             let tx = self.db.tx()?;
             if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
                 let tx_range = body.tx_id_range();
-                if tx_range.is_empty() {
+                return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
                     let mut tx_cursor = tx.cursor_read::<tables::Receipts>()?;
@@ -252,12 +249,9 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     Ok(Some(transactions))
                 }
-            } else {
-                Ok(None)
             }
-        } else {
-            Ok(None)
         }
+        Ok(None)
     }
 }
 
@@ -265,16 +259,13 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
             if let Some(number) = self.block_number_for_id(id)? {
-                Ok(self
+                return Ok(self
                     .db
                     .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
                     .map(|w| w.withdrawals))
-            } else {
-                Ok(None)
             }
-        } else {
-            Ok(None)
         }
+        Ok(None)
     }
 }
 

@@ -7,8 +7,9 @@ use crate::{
     MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
 use reth_primitives::{
-    Address, InvalidTransactionError, TransactionKind, TxHash, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    Address, IntoRecoveredTransaction, InvalidTransactionError, TransactionKind,
+    TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID, U256,
 };
 use reth_provider::AccountProvider;
 use std::{fmt, time::Instant};
@@ -327,6 +328,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// The heap allocated size of this transaction.
     pub(crate) fn size(&self) -> usize {
         self.transaction.size()
+    }
+}
+
+impl<T: PoolTransaction> IntoRecoveredTransaction for ValidPoolTransaction<T> {
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        self.transaction.to_recovered_transaction()
     }
 }
 

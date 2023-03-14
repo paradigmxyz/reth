@@ -31,7 +31,7 @@ pub struct TransactionChangeSet {
 }
 
 /// Contains old/new account changes
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AccountInfoChangeSet {
     /// The account is newly created. Account can be created by just by sending balance,
     ///
@@ -59,8 +59,16 @@ pub enum AccountInfoChangeSet {
         old: Account,
     },
     /// Nothing was changed for the account (nonce/balance).
-    #[default]
-    NoChange,
+    NoChange {
+        /// Used to clear existing empty accounts pre-EIP-161.
+        is_empty: bool,
+    },
+}
+
+impl Default for AccountInfoChangeSet {
+    fn default() -> Self {
+        AccountInfoChangeSet::NoChange { is_empty: false }
+    }
 }
 
 impl AccountInfoChangeSet {
@@ -71,12 +79,13 @@ impl AccountInfoChangeSet {
                 if new != old {
                     Self::Changed { new, old }
                 } else {
-                    Self::NoChange
+                    if new.is_empty() {}
+                    Self::NoChange { is_empty: true}
                 }
             }
             (None, Some(new)) => Self::Created { new },
             (Some(old), None) => Self::Destroyed { old },
-            (None, None) => Self::NoChange,
+            (None, None) => Self::NoChange { is_empty: false},
         }
     }
     /// Apply the changes from the changeset to a database transaction.
@@ -116,8 +125,10 @@ impl AccountInfoChangeSet {
                     AccountBeforeTx { address, info: Some(old) },
                 )?;
             }
-            AccountInfoChangeSet::NoChange => {
-                // do nothing storage account didn't change
+            AccountInfoChangeSet::NoChange { is_empty } => {
+                if has_state_clear_eip && is_empty {
+                    tx.delete::<tables::PlainAccountState>(address, None)?;
+                }
             }
         }
         Ok(())

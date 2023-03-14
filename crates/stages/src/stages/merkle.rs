@@ -1,8 +1,11 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::consensus;
-use reth_provider::{trie::DBTrieLoader, Transaction};
-use std::fmt::Debug;
+use reth_provider::{
+    trie::{DBTrieLoader, TrieProgress},
+    Transaction,
+};
+use std::{fmt::Debug, ops::DerefMut};
 use tracing::*;
 
 /// The [`StageId`] of the merkle hashing execution stage.
@@ -105,23 +108,32 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let trie_root = if from_transition == to_transition {
             block_root
-        } else if to_transition - from_transition > threshold || stage_progress == 0 {
-            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
-            // if there are more blocks than threshold it is faster to rebuild the trie
-            DBTrieLoader::<DB>::new(tx)
-                .calculate_root()
-                .map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
-            // Iterate over changeset (similar to Hashing stages) and take new values
-            let current_root = tx.get_header(stage_progress)?.state_root;
-            DBTrieLoader::<DB>::new(tx)
-                .update_root(current_root, from_transition..to_transition)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?
+            let res = if to_transition - from_transition > threshold || stage_progress == 0 {
+                debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
+                // if there are more blocks than threshold it is faster to rebuild the trie
+                let mut loader = DBTrieLoader::new(tx.deref_mut());
+                loader.calculate_root().map_err(|e| StageError::Fatal(Box::new(e)))?
+            } else {
+                debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
+                // Iterate over changeset (similar to Hashing stages) and take new values
+                let current_root = tx.get_header(stage_progress)?.state_root;
+                let mut loader = DBTrieLoader::new(tx.deref_mut());
+                loader
+                    .update_root(current_root, from_transition..to_transition)
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?
+            };
+
+            match res {
+                TrieProgress::Complete(root) => root,
+                TrieProgress::InProgress(_) => {
+                    return Ok(ExecOutput { stage_progress, done: false })
+                }
+            }
         };
 
         if block_root != trie_root {
-            warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?block_root, expected = ?trie_root, "Block's root state failed verification");
+            warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?trie_root, expected = ?block_root, "Block's root state failed verification");
             return Err(StageError::Validation {
                 block: previous_stage_progress,
                 error: consensus::ConsensusError::BodyStateRootDiff {
@@ -156,13 +168,28 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         let current_root = tx.get_header(input.stage_progress)?.state_root;
-
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let block_root = DBTrieLoader::<DB>::new(tx)
-            .update_root(current_root, from_transition..to_transition)
-            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+        let mut loader = DBTrieLoader::new(tx.deref_mut());
+        let block_root = loop {
+            match loader
+                .update_root(current_root, from_transition..to_transition)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?
+            {
+                TrieProgress::Complete(root) => break root,
+                TrieProgress::InProgress(_) => {
+                    // Save the loader's progress & drop it to allow committing to the database,
+                    // otherwise we're hitting the borrow checker
+                    let progress = loader.current;
+                    let _ = loader;
+                    tx.commit()?;
+                    // Reinstantiate the loader from where it was left off.
+                    loader = DBTrieLoader::new(tx.deref_mut());
+                    loader.current = progress;
+                }
+            }
+        };
 
         if block_root != target_root {
             let unwind_to = input.unwind_to;
@@ -191,6 +218,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+        database::DatabaseGAT,
         mdbx::{Env, WriteMap},
         tables,
         transaction::{DbTx, DbTxMut},
@@ -199,7 +227,7 @@ mod tests {
         random_block, random_block_range, random_contract_account_range, random_transition_range,
     };
     use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, ops::Deref};
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
@@ -262,8 +290,8 @@ mod tests {
 
     fn create_trie_loader<'tx, 'db>(
         tx: &'tx Transaction<'db, Env<WriteMap>>,
-    ) -> DBTrieLoader<'tx, 'db, Env<WriteMap>> {
-        DBTrieLoader::<Env<WriteMap>>::new(tx)
+    ) -> DBTrieLoader<'tx, <Env<WriteMap> as DatabaseGAT<'db>>::TXMut> {
+        DBTrieLoader::new(tx.deref())
     }
 
     struct MerkleTestRunner {
@@ -446,7 +474,10 @@ mod tests {
 
     impl MerkleTestRunner {
         fn state_root(&self) -> Result<H256, TestRunnerError> {
-            Ok(create_trie_loader(&self.tx.inner()).calculate_root().unwrap())
+            Ok(create_trie_loader(&self.tx.inner())
+                .calculate_root()
+                .and_then(|e| e.root())
+                .unwrap())
         }
 
         pub(crate) fn generate_initial_trie(
@@ -458,8 +489,10 @@ mod tests {
             )?;
 
             let mut tx = self.tx.inner();
-            let root =
-                create_trie_loader(&tx).calculate_root().expect("couldn't create initial trie");
+            let root = create_trie_loader(&tx)
+                .calculate_root()
+                .and_then(|e| e.root())
+                .expect("couldn't create initial trie");
 
             tx.commit()?;
 
@@ -470,7 +503,10 @@ mod tests {
             if previous_stage_progress != 0 {
                 let block_root =
                     self.tx.inner().get_header(previous_stage_progress).unwrap().state_root;
-                let root = create_trie_loader(&self.tx.inner()).calculate_root().unwrap();
+                let root = create_trie_loader(&self.tx().inner())
+                    .calculate_root()
+                    .and_then(|e| e.root())
+                    .unwrap();
                 assert_eq!(block_root, root);
             }
             Ok(())
