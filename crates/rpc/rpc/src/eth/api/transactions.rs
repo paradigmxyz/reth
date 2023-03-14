@@ -123,6 +123,52 @@ where
 
 // === impl EthApi ===
 
+/// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
+#[async_trait::async_trait]
+pub trait EthTransactions: Send + Sync {
+    /// Returns the transaction by hash.
+    ///
+    /// Checks the pool and state.
+    ///
+    /// Returns `Ok(None)` if no matching transaction was found.
+    async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>>;
+}
+
+#[async_trait]
+impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
+where
+    Pool: TransactionPool + Clone + 'static,
+    Client: TransactionsProvider + 'static,
+    Network: Send + Sync + 'static,
+{
+    async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
+        if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
+        {
+            return Ok(Some(TransactionSource::Pool(tx)))
+        }
+
+        match self.client().transaction_by_hash(hash)? {
+            None => Ok(None),
+            Some(tx) => {
+                let transaction =
+                    tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+
+                let tx = TransactionSource::Database {
+                    transaction,
+                    // TODO: this is just stubbed out for now still need to fully implement tx =>
+                    // block
+                    index: 0,
+                    block_hash: Default::default(),
+                    block_number: 0,
+                };
+                Ok(Some(tx))
+            }
+        }
+    }
+}
+
+// === impl EthApi ===
+
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + 'static,
