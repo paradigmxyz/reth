@@ -179,11 +179,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             {
                 TrieProgress::Complete(root) => break root,
                 TrieProgress::InProgress(_) => {
-                    // Save the loader's progress & drop it
-                    // to allow committing to the database (otherwise we're hitting the borrow
-                    // checker)
+                    // Save the loader's progress & drop it to allow committing to the database,
+                    // otherwise we're hitting the borrow checker
                     let progress = loader.current;
-                    drop(loader);
+                    let _ = loader;
                     tx.commit()?;
                     // Reinstantiate the loader from where it was left off.
                     loader = DBTrieLoader::new(tx.deref_mut());
