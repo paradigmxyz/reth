@@ -178,13 +178,14 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
+                // Checkpoint is no longer valid if the range of transitions changed. 
+                // An already hashed account may have been changed with the new range, and therefore should be hashed again. 
                 checkpoint.to != to_transition ||
                 checkpoint.from != from_transition
             {
                 // clear table, load all accounts and hash it
                 tx.clear::<tables::HashedAccount>()?;
 
-                // Checkpoint is invalid if the range changed
                 checkpoint = AccountHashingCheckpoint::default();
                 self.save_checkpoint(tx, checkpoint)?;
             }

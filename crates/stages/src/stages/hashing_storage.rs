@@ -98,12 +98,13 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
+                // Checkpoint is no longer valid if the range of transitions changed. 
+                // An already hashed storage may have been changed with the new range, and therefore should be hashed again. 
                 checkpoint.to != to_transition ||
                 checkpoint.from != from_transition
             {
                 tx.clear::<tables::HashedStorage>()?;
 
-                // Checkpoint is invalid if the range changed
                 checkpoint = StorageHashingCheckpoint::default();
                 self.save_checkpoint(tx, checkpoint)?;
             }
