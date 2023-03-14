@@ -35,7 +35,6 @@ mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
 pub mod proofs;
-pub use proofs::ProofCheckpoint;
 
 pub use account::{Account, Bytecode};
 pub use bits::H512;
@@ -45,7 +44,7 @@ pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
     MAINNET, SEPOLIA,
 };
-pub use checkpoints::*;
+pub use checkpoints::{AccountHashingCheckpoint, ProofCheckpoint, StorageHashingCheckpoint};
 pub use constants::{
     EMPTY_OMMER_ROOT, GOERLI_GENESIS, KECCAK_EMPTY, MAINNET_GENESIS, SEPOLIA_GENESIS,
 };
