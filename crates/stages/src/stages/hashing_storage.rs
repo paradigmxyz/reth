@@ -260,7 +260,6 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestTransaction, UnwindStageTestRunner, PREV_STAGE_ID,
     };
-    use assert_matches::assert_matches;
     use reth_db::{
         cursor::DbCursorRW,
         mdbx::{tx::Tx, WriteMap, RW},
@@ -295,18 +294,25 @@ mod tests {
 
         runner.seed_execution(input).expect("failed to seed execution");
 
-        let rx = runner.execute(input);
+        loop {
+            if let Ok(result) = runner.execute(input).await.unwrap() {
+                if !result.done {
+                    // Continue from checkpoint
+                    continue
+                } else {
+                    assert!(result.stage_progress == previous_stage);
 
-        // Assert the successful result
-        let result = rx.await.unwrap();
-        assert_matches!(
-            result,
-            Ok(ExecOutput { done, stage_progress })
-                if done && stage_progress == previous_stage
-        );
+                    // Validate the stage execution
+                    assert!(
+                        runner.validate_execution(input, Some(result)).is_ok(),
+                        "execution validation"
+                    );
 
-        // Validate the stage execution
-        assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+                    break
+                }
+            }
+            panic!("Failed execution");
+        }
     }
 
     struct StorageHashingTestRunner {
