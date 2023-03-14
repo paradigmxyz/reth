@@ -106,7 +106,7 @@ impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
     fn chain_info(&self) -> Result<ChainInfo> {
         let best_number = self
             .db
-            .view(|tx| tx.get::<tables::SyncStage>("Finish".as_bytes().to_vec()))?
+            .view(|tx| tx.get::<tables::SyncStage>("Finish".to_string()))?
             .map_err(Into::<reth_interfaces::db::Error>::into)?
             .unwrap_or_default();
         let best_hash = self.block_hash(U256::from(best_number))?.unwrap_or_default();

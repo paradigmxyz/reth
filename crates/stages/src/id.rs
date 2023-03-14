@@ -27,7 +27,7 @@ impl StageId {
 
     /// Get the last committed progress of this stage.
     pub fn get_progress<'db>(&self, tx: &impl DbTx<'db>) -> Result<Option<BlockNumber>, DbError> {
-        tx.get::<SyncStage>(self.0.as_bytes().to_vec())
+        tx.get::<SyncStage>(self.0.to_string())
     }
 
     /// Save the progress of this stage.
@@ -36,7 +36,7 @@ impl StageId {
         tx: &impl DbTxMut<'db>,
         block: BlockNumber,
     ) -> Result<(), DbError> {
-        tx.put::<SyncStage>(self.0.as_bytes().to_vec(), block)
+        tx.put::<SyncStage>(self.0.to_string(), block)
     }
 }
 
