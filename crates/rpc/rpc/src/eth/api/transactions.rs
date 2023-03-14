@@ -1,13 +1,61 @@
 //! Contains RPC handler implementations specific to transactions
+use async_trait::async_trait;
 use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{BlockId, Bytes, FromRecoveredTransaction, TransactionSigned, H256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_primitives::{BlockId, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction, TransactionSigned, H256};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory, TransactionsProvider};
 use reth_rlp::Decodable;
 use reth_rpc_types::{Index, Transaction, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
+
+/// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
+#[async_trait::async_trait]
+pub trait EthTransactions : Send + Sync {
+
+    /// Returns the transaction by hash.
+    ///
+    /// Checks the pool and state
+    async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>>;
+}
+
+#[async_trait]
+impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
+    where
+        Pool: TransactionPool + Clone + 'static,
+        Client: TransactionsProvider + 'static,
+        Network: Send + Sync +'static
+{
+    async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
+        if let Some(tx) = self.pool().get(&hash).map(|tx|tx.transaction.to_recovered_transaction()) {
+
+        }
+
+        todo!()
+    }
+}
+
+/// Represents from where a transaction was fetched.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum TransactionSource {
+    /// Transaction exists in the pool (Pending)
+    Pool(TransactionSigned),
+    /// Transaction already executed
+    Database {
+        /// Transaction fetched via provider
+        transaction: TransactionSigned,
+        /// Index of the transaction in the block
+        index: usize,
+        /// Hash of the block.
+        block_hash: H256,
+        /// Number of the block.
+        block_number: u64,
+    }
+}
+
+
+// === impl EthApi ===
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
