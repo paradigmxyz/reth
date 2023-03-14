@@ -709,7 +709,7 @@ mod tests {
 
         assert_eq!(
             changesets.changeset.get(&account1).unwrap().account,
-            AccountInfoChangeSet::NoChange { is_empty: true },
+            AccountInfoChangeSet::NoChange { is_empty: false },
             "No change to account"
         );
         assert_eq!(
