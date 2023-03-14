@@ -8,12 +8,12 @@ use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
 use revm::primitives::{EVMError, Halt};
 
 /// Result alias
-pub(crate) type EthResult<T> = Result<T, EthApiError>;
+pub type EthResult<T> = Result<T, EthApiError>;
 
 /// Errors that can occur when interacting with the `eth_` namespace
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_docs)]
-pub(crate) enum EthApiError {
+pub enum EthApiError {
     /// When a raw transaction is empty
     #[error("Empty transaction data")]
     EmptyRawTransactionData,
@@ -161,6 +161,7 @@ pub enum InvalidTransactionError {
     /// Unspecific evm halt error
     #[error("EVM error {0:?}")]
     EvmHalt(Halt),
+    /// Invalid chain id set for the transaction.
     #[error("Invalid chain id")]
     InvalidChainId,
 }
@@ -268,7 +269,8 @@ impl std::error::Error for RevertError {}
 
 /// A helper error type that's mainly used to mirror `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum RpcPoolError {
+#[allow(missing_docs)]
+pub enum RpcPoolError {
     #[error("already known")]
     AlreadyKnown,
     #[error("invalid sender")]
