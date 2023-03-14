@@ -198,9 +198,6 @@ where
     assert!(is_unimplemented(
         TraceApiClient::trace_get(client, H256::default(), vec![]).await.err().unwrap()
     ));
-    assert!(is_unimplemented(
-        TraceApiClient::trace_transaction(client, H256::default()).await.err().unwrap()
-    ));
 }
 
 async fn test_basic_web3_calls<C>(client: &C)

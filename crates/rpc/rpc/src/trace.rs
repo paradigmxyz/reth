@@ -1,4 +1,7 @@
-use crate::{eth::cache::EthStateCache, result::internal_rpc_err};
+use crate::{
+    eth::{cache::EthStateCache, EthTransactions},
+    result::internal_rpc_err,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, Bytes, H256};
@@ -14,26 +17,29 @@ use std::collections::HashSet;
 ///
 /// This type provides the functionality for handling `trace` related requests.
 #[derive(Clone)]
-pub struct TraceApi<Client> {
+pub struct TraceApi<Client, Eth> {
     /// The client that can interact with the chain.
     client: Client,
+    /// Access to commonly used code of the `eth` namespace
+    eth_api: Eth,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
 }
 
 // === impl TraceApi ===
 
-impl<Client> TraceApi<Client> {
+impl<Client, Eth> TraceApi<Client, Eth> {
     /// Create a new instance of the [TraceApi]
-    pub fn new(client: Client, eth_cache: EthStateCache) -> Self {
-        Self { client, eth_cache }
+    pub fn new(client: Client, eth_api: Eth, eth_cache: EthStateCache) -> Self {
+        Self { client, eth_api, eth_cache }
     }
 }
 
 #[async_trait]
-impl<Client> TraceApiServer for TraceApi<Client>
+impl<Client, Eth> TraceApiServer for TraceApi<Client, Eth>
 where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Eth: EthTransactions + 'static,
 {
     /// Handler for `trace_call`
     async fn trace_call(
@@ -107,13 +113,20 @@ where
     /// Handler for `trace_transaction`
     async fn trace_transaction(
         &self,
-        _hash: H256,
+        hash: H256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
+        let (_transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        let (_cfg, _block_env, _at) = self.eth_api.evm_env_at(at).await?;
+
         Err(internal_rpc_err("unimplemented"))
     }
 }
 
-impl<Client> std::fmt::Debug for TraceApi<Client> {
+impl<Client, Eth> std::fmt::Debug for TraceApi<Client, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceApi").finish_non_exhaustive()
     }
