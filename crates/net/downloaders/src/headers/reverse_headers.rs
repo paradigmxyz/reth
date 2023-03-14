@@ -16,7 +16,9 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256};
+use reth_primitives::{
+    BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
+};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},
@@ -521,8 +523,8 @@ where
     }
 
     /// Returns the request for the `sync_target` header.
-    fn get_sync_target_request(&self, start: H256) -> HeadersRequest {
-        HeadersRequest { start: start.into(), limit: 1, direction: HeadersDirection::Falling }
+    fn get_sync_target_request(&self, start: BlockHashOrNumber) -> HeadersRequest {
+        HeadersRequest { start, limit: 1, direction: HeadersDirection::Falling }
     }
 
     /// Starts a request future
@@ -632,8 +634,9 @@ where
                     trace!(target: "downloaders::headers", new=?target, "Request new sync target");
                     self.metrics.out_of_order_requests.increment(1);
                     self.sync_target = Some(new_sync_target);
-                    self.sync_target_request =
-                        Some(self.request_fut(self.get_sync_target_request(tip), Priority::High));
+                    self.sync_target_request = Some(
+                        self.request_fut(self.get_sync_target_request(tip.into()), Priority::High),
+                    );
                 }
             }
             SyncTarget::Gap(existing) => {
@@ -659,12 +662,13 @@ where
                 let current_tip_num = self.sync_target.as_ref().and_then(|t| t.number());
                 if Some(num) != current_tip_num {
                     trace!(target: "downloaders::headers", %num, "Updating sync target based on num");
+                    self.metrics.out_of_order_requests.increment(1);
                     // just update the sync target
-                    self.sync_target = match self.sync_target.take() {
-                        Some(sync_target) => Some(sync_target.with_number(num)),
-                        None => Some(SyncTargetBlock::from_number(num)),
-                    };
-                    self.on_block_number_update(num, num);
+                    self.sync_target = Some(SyncTargetBlock::from_number(num));
+                    // self.on_block_number_update(num, num);
+                    self.sync_target_request = Some(
+                        self.request_fut(self.get_sync_target_request(num.into()), Priority::High),
+                    );
                 }
             }
         }
@@ -716,11 +720,6 @@ where
                     }
                 }
                 Poll::Pending => {
-                    trace!(
-                        target: "downloaders::headers",
-                        head=?this.local_block_number(),
-                        "Pending sync target request"
-                    );
                     this.sync_target_request = Some(req);
                     return Poll::Pending
                 }
