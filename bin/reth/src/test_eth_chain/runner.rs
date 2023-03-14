@@ -140,13 +140,13 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         // insert genesis
         let header: SealedHeader = suite.genesis_block_header.into();
         let genesis_block = SealedBlock { header, body: vec![], ommers: vec![], withdrawals: None };
-        reth_provider::insert_canonical_block(&tx, &genesis_block, has_block_reward)?;
+        reth_provider::insert_canonical_block(&tx, genesis_block, None, has_block_reward)?;
 
         let mut last_block = None;
         suite.blocks.iter().try_for_each(|block| -> eyre::Result<()> {
             let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-            reth_provider::insert_canonical_block(&tx, &decoded, has_block_reward)?;
             last_block = Some(decoded.number);
+            reth_provider::insert_canonical_block(&tx, decoded, None, has_block_reward)?;
             Ok(())
         })?;
 

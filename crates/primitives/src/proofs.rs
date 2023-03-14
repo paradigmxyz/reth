@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     keccak256, Address, Bytes, GenesisAccount, Header, Log, Receipt, TransactionSigned, Withdrawal,
     H256,
@@ -9,6 +7,7 @@ use hash_db::Hasher;
 use hex_literal::hex;
 use plain_hasher::PlainHasher;
 use reth_rlp::Encodable;
+use std::collections::HashMap;
 use triehash::{ordered_trie_root, sec_trie_root};
 
 /// Keccak-256 hash of the RLP of an empty list, KEC("\xc0").
@@ -36,7 +35,6 @@ impl Hasher for KeccakHasher {
 
 /// Calculate a transaction root.
 ///
-/// Iterates over the given transactions and the merkle merkle trie root of
 /// `(rlp(index), encoded(tx))` pairs.
 pub fn calculate_transaction_root<'a>(
     transactions: impl IntoIterator<Item = &'a TransactionSigned>,

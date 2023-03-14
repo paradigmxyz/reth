@@ -59,18 +59,15 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
     pub(crate) fn resolve_root(&mut self, link: LinkEntry<K>) {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
-        self.queued_queries.push_back(Query::Root(Box::pin(async move {
-            resolve_root(resolver, link, timeout).await
-        })))
+        self.queued_queries.push_back(Query::Root(Box::pin(resolve_root(resolver, link, timeout))))
     }
 
     /// Resolves the [DnsEntry] for `<hash.domain>`
     pub(crate) fn resolve_entry(&mut self, link: LinkEntry<K>, hash: String, kind: ResolveKind) {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
-        self.queued_queries.push_back(Query::Entry(Box::pin(async move {
-            resolve_entry(resolver, link, hash, kind, timeout).await
-        })))
+        self.queued_queries
+            .push_back(Query::Entry(Box::pin(resolve_entry(resolver, link, hash, kind, timeout))))
     }
 
     /// Advances the state of the queries

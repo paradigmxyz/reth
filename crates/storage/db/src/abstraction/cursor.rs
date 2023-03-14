@@ -159,6 +159,15 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> Walker<'cursor, 'tx, T,
     }
 }
 
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
+    Walker<'cursor, 'tx, T, CURSOR>
+{
+    /// Delete current item that walker points to.
+    pub fn delete_current(&mut self) -> Result<(), Error> {
+        self.cursor.delete_current()
+    }
+}
+
 /// Provides a reverse iterator to `Cursor` when handling `Table`.
 /// Also check [`Walker`]
 pub struct ReverseWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
@@ -180,6 +189,15 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> ReverseWalker<'cursor, 
     pub fn forward(self) -> Walker<'cursor, 'tx, T, CURSOR> {
         let start = self.cursor.current().transpose();
         Walker::new(self.cursor, start)
+    }
+}
+
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
+    ReverseWalker<'cursor, 'tx, T, CURSOR>
+{
+    /// Delete current item that walker points to.
+    pub fn delete_current(&mut self) -> Result<(), Error> {
+        self.cursor.delete_current()
     }
 }
 
@@ -268,6 +286,15 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 't
     }
 }
 
+impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRW<'tx, T> + DbCursorRO<'tx, T>>
+    RangeWalker<'cursor, 'tx, T, CURSOR>
+{
+    /// Delete current item that walker points to.
+    pub fn delete_current(&mut self) -> Result<(), Error> {
+        self.cursor.delete_current()
+    }
+}
+
 /// Provides an iterator to `Cursor` when handling a `DupSort` table.
 ///
 /// Reason why we have two lifetimes is to distinguish between `'cursor` lifetime
@@ -280,6 +307,15 @@ pub struct DupWalker<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> {
     pub start: IterPairResult<T>,
     /// Phantom data for 'tx. As it is only used for `DbDupCursorRO`.
     pub _tx_phantom: PhantomData<&'tx T>,
+}
+
+impl<'cursor, 'tx, T: DupSort, CURSOR: DbCursorRW<'tx, T> + DbDupCursorRO<'tx, T>>
+    DupWalker<'cursor, 'tx, T, CURSOR>
+{
+    /// Delete current item that walker points to.
+    pub fn delete_current(&mut self) -> Result<(), Error> {
+        self.cursor.delete_current()
+    }
 }
 
 impl<'cursor, 'tx, T: DupSort, CURSOR: DbDupCursorRO<'tx, T>> std::iter::Iterator

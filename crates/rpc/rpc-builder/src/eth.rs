@@ -14,7 +14,7 @@ pub struct EthHandlers<Client, Pool, Network, Events> {
     /// Polling based filter handler available on all transports
     pub filter: EthFilter<Client, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: Option<EthPubSub<Client, Pool, Events>>,
+    pub pubsub: Option<EthPubSub<Client, Pool, Events, Network>>,
 }
 
 /// Additional config values for the eth namespace

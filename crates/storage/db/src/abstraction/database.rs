@@ -43,7 +43,7 @@ pub trait Database: for<'a> DatabaseGAT<'a> {
     /// the end of the execution.
     fn update<T, F>(&self, f: F) -> Result<T, Error>
     where
-        F: Fn(&<Self as DatabaseGAT<'_>>::TXMut) -> T,
+        F: FnOnce(&<Self as DatabaseGAT<'_>>::TXMut) -> T,
     {
         let tx = self.tx_mut()?;
 

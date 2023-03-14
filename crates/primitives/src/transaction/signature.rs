@@ -6,7 +6,7 @@ use reth_rlp::{Decodable, DecodeError, Encodable};
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
     pub r: U256,

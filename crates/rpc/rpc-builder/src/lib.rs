@@ -58,13 +58,15 @@ use jsonrpsee::{
         server::{host_filtering::AllowHosts, rpc_module::Methods},
         Error as RpcError,
     },
-    server::{Server, ServerHandle},
+    server::{IdProvider, Server, ServerHandle},
     RpcModule,
 };
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
-use reth_rpc::{AdminApi, DebugApi, EthApi, EthFilter, NetApi, TraceApi, Web3Api};
+use reth_rpc::{
+    AdminApi, DebugApi, EthApi, EthFilter, EthSubscriptionIdProvider, NetApi, TraceApi, Web3Api,
+};
 use reth_rpc_api::servers::*;
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
@@ -559,6 +561,7 @@ where
         namespaces: impl Iterator<Item = RethRpcModule>,
     ) -> Vec<Methods> {
         let eth_api = self.eth_api();
+        let eth_cache = self.eth_cache();
         namespaces
             .map(|namespace| {
                 self.modules
@@ -572,7 +575,11 @@ where
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Trace => TraceApi::new().into_rpc().into(),
+                        RethRpcModule::Trace => {
+                            TraceApi::new(self.client.clone(), eth_api.clone(), eth_cache.clone())
+                                .into_rpc()
+                                .into()
+                        }
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                     })
                     .clone()
@@ -667,11 +674,17 @@ impl RpcServerConfig {
     pub fn ipc(config: IpcServerBuilder) -> Self {
         Self::default().with_ipc(config)
     }
+
     /// Configures the http server
+    ///
+    /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
+    /// To set a custom [IdProvider], please use [Self::with_id_provider].
     pub fn with_http(mut self, config: ServerBuilder) -> Self {
-        self.http_server_config = Some(config.http_only());
+        self.http_server_config =
+            Some(config.http_only().set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
+
     /// Configure the corsdomains
     pub fn with_cors(mut self, cors_domain: String) -> Self {
         self.http_cors_domains = Some(cors_domain);
@@ -679,8 +692,12 @@ impl RpcServerConfig {
     }
 
     /// Configures the ws server
+    ///
+    /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
+    /// To set a custom [IdProvider], please use [Self::with_id_provider].
     pub fn with_ws(mut self, config: ServerBuilder) -> Self {
-        self.ws_server_config = Some(config.ws_only());
+        self.ws_server_config =
+            Some(config.ws_only().set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
 
@@ -701,8 +718,31 @@ impl RpcServerConfig {
     }
 
     /// Configures the ipc server
+    ///
+    /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
+    /// To set a custom [IdProvider], please use [Self::with_id_provider].
     pub fn with_ipc(mut self, mut config: IpcServerBuilder) -> Self {
-        self.ipc_server_config = Some(config);
+        self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+
+    /// Sets a custom [IdProvider] for all configured transports.
+    ///
+    /// By default all transports use [EthSubscriptionIdProvider]
+    pub fn with_id_provider<I>(mut self, id_provider: I) -> Self
+    where
+        I: IdProvider + Clone + 'static,
+    {
+        if let Some(http) = self.http_server_config {
+            self.http_server_config = Some(http.set_id_provider(id_provider.clone()));
+        }
+        if let Some(ws) = self.ws_server_config {
+            self.ws_server_config = Some(ws.set_id_provider(id_provider.clone()));
+        }
+        if let Some(ipc) = self.ipc_server_config {
+            self.ipc_server_config = Some(ipc.set_id_provider(id_provider));
+        }
+
         self
     }
 

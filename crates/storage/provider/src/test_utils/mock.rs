@@ -1,13 +1,13 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
+    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
-    Bytecode, Bytes, ChainInfo, Header, StorageKey, StorageValue, TransactionSigned, TxHash, H256,
-    U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionSigned,
+    TxHash, TxNumber, H256, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
@@ -156,6 +156,20 @@ impl TransactionsProvider for MockEthProvider {
     }
 }
 
+impl ReceiptProvider for MockEthProvider {
+    fn receipt(&self, _id: TxNumber) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipt_by_hash(&self, _hash: TxHash) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipts_by_block(&self, _block: BlockId) -> Result<Option<Vec<Receipt>>> {
+        Ok(None)
+    }
+}
+
 impl BlockHashProvider for MockEthProvider {
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
         let lock = self.blocks.lock();
@@ -237,6 +251,14 @@ impl StateProvider for MockEthProvider {
                 _ => None,
             }
         }))
+    }
+
+    fn proof(
+        &self,
+        _address: Address,
+        _keys: &[H256],
+    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        todo!()
     }
 }
 

@@ -1,4 +1,5 @@
 use reth_db::{
+    common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     mdbx::{
         test_utils::{create_test_db, create_test_db_with_path},
@@ -88,9 +89,8 @@ impl TestTransaction {
         })
     }
 
-    #[allow(clippy::type_complexity)]
     /// Return full table as Vec
-    pub fn table<T: Table>(&self) -> Result<Vec<(T::Key, T::Value)>, DbError>
+    pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DbError>
     where
         T::Key: Default + Ord,
     {

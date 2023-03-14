@@ -1,7 +1,11 @@
-use crate::result::internal_rpc_err;
+use crate::{
+    eth::{cache::EthStateCache, EthTransactions},
+    result::internal_rpc_err,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, Bytes, H256};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
@@ -12,23 +16,33 @@ use std::collections::HashSet;
 /// `trace` API implementation.
 ///
 /// This type provides the functionality for handling `trace` related requests.
-#[non_exhaustive]
-pub struct TraceApi {}
+#[derive(Clone)]
+pub struct TraceApi<Client, Eth> {
+    /// The client that can interact with the chain.
+    client: Client,
+    /// Access to commonly used code of the `eth` namespace
+    eth_api: Eth,
+    /// The async cache frontend for eth related data
+    eth_cache: EthStateCache,
+}
 
 // === impl TraceApi ===
 
-impl TraceApi {
+impl<Client, Eth> TraceApi<Client, Eth> {
     /// Create a new instance of the [TraceApi]
-    #[allow(clippy::new_without_default)]
-    // TODO add necessary types
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(client: Client, eth_api: Eth, eth_cache: EthStateCache) -> Self {
+        Self { client, eth_api, eth_cache }
     }
 }
 
 #[async_trait]
-impl TraceApiServer for TraceApi {
-    async fn call(
+impl<Client, Eth> TraceApiServer for TraceApi<Client, Eth>
+where
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Eth: EthTransactions + 'static,
+{
+    /// Handler for `trace_call`
+    async fn trace_call(
         &self,
         _call: CallRequest,
         _trace_types: HashSet<TraceType>,
@@ -37,7 +51,8 @@ impl TraceApiServer for TraceApi {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn call_many(
+    /// Handler for `trace_callMany`
+    async fn trace_call_many(
         &self,
         _calls: Vec<(CallRequest, HashSet<TraceType>)>,
         _block_id: Option<BlockId>,
@@ -45,7 +60,8 @@ impl TraceApiServer for TraceApi {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn raw_transaction(
+    /// Handler for `trace_rawTransaction`
+    async fn trace_raw_transaction(
         &self,
         _data: Bytes,
         _trace_types: HashSet<TraceType>,
@@ -54,6 +70,7 @@ impl TraceApiServer for TraceApi {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_replayBlockTransactions`
     async fn replay_block_transactions(
         &self,
         _block_id: BlockId,
@@ -62,6 +79,7 @@ impl TraceApiServer for TraceApi {
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_replayTransaction`
     async fn replay_transaction(
         &self,
         _transaction: H256,
@@ -70,15 +88,21 @@ impl TraceApiServer for TraceApi {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn block(&self, _block_id: BlockId) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
+    /// Handler for `trace_block`
+    async fn trace_block(
+        &self,
+        _block_id: BlockId,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn filter(&self, _filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
+    /// Handler for `trace_filter`
+    async fn trace_filter(&self, _filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    fn trace(
+    /// Handler for `trace_get`
+    async fn trace_get(
         &self,
         _hash: H256,
         _indices: Vec<Index>,
@@ -86,12 +110,23 @@ impl TraceApiServer for TraceApi {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    fn transaction_traces(&self, _hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
+    /// Handler for `trace_transaction`
+    async fn trace_transaction(
+        &self,
+        hash: H256,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
+        let (_transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        let (_cfg, _block_env, _at) = self.eth_api.evm_env_at(at).await?;
+
         Err(internal_rpc_err("unimplemented"))
     }
 }
 
-impl std::fmt::Debug for TraceApi {
+impl<Client, Eth> std::fmt::Debug for TraceApi<Client, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceApi").finish_non_exhaustive()
     }

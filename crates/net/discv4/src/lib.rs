@@ -406,10 +406,10 @@ impl Discv4Service {
         let mut tasks = JoinSet::<()>::new();
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(async move { receive_loop(udp, ingress_tx, local_node_record.id).await });
+        tasks.spawn(receive_loop(udp, ingress_tx, local_node_record.id));
 
         let udp = Arc::clone(&socket);
-        tasks.spawn(async move { send_loop(udp, egress_rx).await });
+        tasks.spawn(send_loop(udp, egress_rx));
 
         let kbuckets = KBucketsTable::new(
             NodeKey::from(&local_node_record).into(),
