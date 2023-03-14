@@ -5,6 +5,7 @@ pub mod cache;
 pub mod error;
 mod filter;
 mod id_provider;
+mod logs_utils;
 mod pubsub;
 pub(crate) mod revm_utils;
 mod signer;
