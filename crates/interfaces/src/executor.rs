@@ -5,8 +5,8 @@ use thiserror::Error;
 #[allow(missing_docs)]
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    #[error("EVM reported invalid transaction:{0}")]
-    EVM(String),
+    #[error("EVM reported invalid transaction ({hash:?}): {message}")]
+    EVM { hash: H256, message: String },
     #[error("Example of error.")]
     VerificationFailed,
     #[error("Fatal internal error")]

@@ -35,7 +35,8 @@ impl<Client> TraceApiServer for TraceApi<Client>
 where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
-    async fn call(
+    /// Handler for `trace_call`
+    async fn trace_call(
         &self,
         _call: CallRequest,
         _trace_types: HashSet<TraceType>,
@@ -44,7 +45,8 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn call_many(
+    /// Handler for `trace_callMany`
+    async fn trace_call_many(
         &self,
         _calls: Vec<(CallRequest, HashSet<TraceType>)>,
         _block_id: Option<BlockId>,
@@ -52,7 +54,8 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn raw_transaction(
+    /// Handler for `trace_rawTransaction`
+    async fn trace_raw_transaction(
         &self,
         _data: Bytes,
         _trace_types: HashSet<TraceType>,
@@ -61,6 +64,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_replayBlockTransactions`
     async fn replay_block_transactions(
         &self,
         _block_id: BlockId,
@@ -69,6 +73,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Handler for `trace_replayTransaction`
     async fn replay_transaction(
         &self,
         _transaction: H256,
@@ -77,15 +82,21 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn block(&self, _block_id: BlockId) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
+    /// Handler for `trace_block`
+    async fn trace_block(
+        &self,
+        _block_id: BlockId,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    async fn filter(&self, _filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
+    /// Handler for `trace_filter`
+    async fn trace_filter(&self, _filter: TraceFilter) -> Result<Vec<LocalizedTransactionTrace>> {
         Err(internal_rpc_err("unimplemented"))
     }
 
-    fn trace(
+    /// Handler for `trace_get`
+    fn trace_get(
         &self,
         _hash: H256,
         _indices: Vec<Index>,
@@ -93,7 +104,8 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    fn transaction_traces(&self, _hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
+    /// Handler for `trace_transaction`
+    fn trace_transaction(&self, _hash: H256) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
         Err(internal_rpc_err("unimplemented"))
     }
 }

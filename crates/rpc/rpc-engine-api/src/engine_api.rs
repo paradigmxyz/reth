@@ -336,6 +336,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
 
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
     /// valid chain.
+    ///
+    /// These responses should adhere to the [Engine API Spec for
+    /// `engine_forkchoiceUpdated`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1).
     pub fn fork_choice_updated(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -349,14 +352,66 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
             }))
         }
 
-        // Block is not known, nothing to do.
-        if !self.client.is_known(&head_block_hash)? {
+        let head = if let Some(head) = self.client.header(&head_block_hash)? {
+            head
+        } else {
+            // Block is not known, nothing to do.
             return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
-        }
+        };
 
         // The finalized block hash is not known, we are still syncing
         if !finalized_block_hash.is_zero() && !self.client.is_known(&finalized_block_hash)? {
             return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
+        }
+
+        let head_td = if let Some(head_td) = self.client.header_td(&head_block_hash)? {
+            head_td
+        } else {
+            // internal error - we have the head block but not the total difficulty
+            return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::Internal(
+                    reth_interfaces::provider::ProviderError::TotalDifficulty {
+                        number: head.number,
+                    }
+                    .into(),
+                )
+                .to_string(),
+            }))
+        };
+
+        // From the Engine API spec:
+        //
+        // If forkchoiceState.headBlockHash references a PoW block, client software MUST validate
+        // this block with respect to terminal block conditions according to EIP-3675. This check
+        // maps to the transition block validity section of the EIP. Additionally, if this
+        // validation fails, client software MUST NOT update the forkchoice state and MUST NOT
+        // begin a payload build process.
+        //
+        // We use ZERO here because as long as the total difficulty is above the ttd, we are sure
+        // that the block is EITHER:
+        //  * The terminal PoW block, or
+        //  * A child of the terminal PoW block
+        //
+        // Using the head.difficulty instead of U256::ZERO here would be incorrect because it would
+        // not return true on the terminal PoW block. For the terminal PoW block, head_td -
+        // head.difficulty would be less than the TTD, causing active_at_ttd to return false.
+        if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(head_td, U256::ZERO) {
+            // This case returns a `latestValidHash` of zero because it is required by the engine
+            // api spec:
+            //
+            // Client software MUST respond to this method call in the following way:
+            // {
+            //     status: INVALID,
+            //     latestValidHash:
+            // 0x0000000000000000000000000000000000000000000000000000000000000000,
+            //     validationError: errorMessage | null
+            // }
+            // obtained either from the Payload validation process or as a result of validating a
+            // terminal PoW block referenced by forkchoiceState.headBlockHash
+            return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
+                validation_error: EngineApiError::PayloadPreMerge.to_string(),
+            })
+            .with_latest_valid_hash(H256::zero()))
         }
 
         if let Err(error) = self.forkchoice_state_tx.send(fork_choice_state) {
@@ -921,8 +976,13 @@ mod tests {
             let (handle, api) = setup_engine_api();
             tokio::spawn(api);
 
+            let ttd = handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap();
             let finalized = random_header(90, None);
-            let head = random_header(100, None);
+            let mut head = random_header(100, None).unseal();
+
+            // set the difficulty so we know it is post-merge
+            head.difficulty = ttd;
+            let head = head.seal_slow();
             handle.client.extend_headers([
                 (head.hash(), head.clone().unseal()),
                 (finalized.hash(), finalized.clone().unseal()),
@@ -953,6 +1013,58 @@ mod tests {
 
             assert!(handle.forkchoice_state_has_changed());
             assert_eq!(handle.forkchoice_state(), state);
+        }
+
+        #[tokio::test]
+        async fn forkchoice_updated_invalid_pow() {
+            let (handle, api) = setup_engine_api();
+            tokio::spawn(api);
+
+            let finalized = random_header(90, None);
+            let mut head = random_header(100, None).unseal();
+
+            // ensure we don't mess up when subtracting just in case
+            let ttd = handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap();
+            assert!(ttd > finalized.difficulty);
+
+            // set the difficulty so we know it is post-merge
+            head.difficulty = ttd - U256::from(1) - finalized.difficulty;
+            let head = head.seal_slow();
+            handle.client.extend_headers([
+                (head.hash(), head.clone().unseal()),
+                (finalized.hash(), finalized.clone().unseal()),
+            ]);
+
+            let state = ForkchoiceState {
+                head_block_hash: head.hash(),
+                finalized_block_hash: finalized.hash(),
+                ..Default::default()
+            };
+
+            let (result_tx, result_rx) = oneshot::channel();
+            handle.send_message(EngineApiMessage::ForkchoiceUpdated(
+                EngineApiMessageVersion::V1,
+                state.clone(),
+                None,
+                result_tx,
+            ));
+
+            let expected_result = ForkchoiceUpdated {
+                payload_id: None,
+                payload_status: PayloadStatus {
+                    status: PayloadStatusEnum::Invalid {
+                        validation_error: EngineApiError::PayloadPreMerge.to_string(),
+                    },
+                    latest_valid_hash: Some(H256::zero()),
+                },
+            };
+            assert_matches!(result_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+
+            // From the engine API spec:
+            //
+            // Additionally, if this validation fails, client software MUST NOT update the
+            // forkchoice state and MUST NOT begin a payload build process.
+            assert!(!handle.forkchoice_state_has_changed());
         }
     }
 
