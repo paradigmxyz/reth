@@ -27,10 +27,10 @@ use std::collections::BTreeMap;
 #[async_trait::async_trait]
 impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
-    Self: EthApiSpec,
+    Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
+    Network: Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {

@@ -4,6 +4,7 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
         revm_utils::{build_call_evm_env, get_precompiles, inspect, transact},
+        EthTransactions,
     },
     EthApi,
 };
@@ -18,6 +19,7 @@ use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     CallRequest,
 };
+use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
     primitives::{
@@ -33,31 +35,10 @@ const MIN_CREATE_GAS: u64 = 53_000u64;
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
+    Pool: TransactionPool + Clone + 'static,
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: Send + Sync + 'static,
 {
-    /// Returns the revm evm env for the requested [BlockId]
-    ///
-    /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
-    /// for.
-    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
-        // TODO handle Pending state's env
-        match at {
-            BlockId::Number(BlockNumberOrTag::Pending) => {
-                // This should perhaps use the latest env settings and update block specific
-                // settings like basefee/number
-                unimplemented!("support pending state env")
-            }
-            hash_or_num => {
-                let block_hash = self
-                    .client()
-                    .block_hash_for_id(hash_or_num)?
-                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-                let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
-                Ok((cfg, env, block_hash.into()))
-            }
-        }
-    }
-
     /// Executes the call request at the given [BlockId]
     pub(crate) async fn call_at(
         &self,
