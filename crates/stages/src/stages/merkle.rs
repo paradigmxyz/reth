@@ -130,7 +130,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     return Ok(ExecOutput { stage_progress, done: false })
                 }
             }
-        }
+        };
 
         if block_root != trie_root {
             warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?trie_root, expected = ?block_root, "Block's root state failed verification");
@@ -167,12 +167,11 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let mut loader = DBTrieLoader::new(tx.deref_mut());
         let current_root = tx.get_header(input.stage_progress)?.state_root;
-
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
+        let mut loader = DBTrieLoader::new(tx.deref_mut());
         let block_root = loop {
             match loader
                 .update_root(current_root, from_transition..to_transition)
@@ -180,7 +179,15 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             {
                 TrieProgress::Complete(root) => break root,
                 TrieProgress::InProgress(_) => {
+                    // Save the loader's progress & drop it
+                    // to allow committing to the database (otherwise we're hitting the borrow
+                    // checker)
+                    let progress = loader.current;
+                    drop(loader);
                     tx.commit()?;
+                    // Reinstantiate the loader from where it was left off.
+                    loader = DBTrieLoader::new(tx.deref_mut());
+                    loader.current = progress;
                 }
             }
         };
@@ -468,7 +475,10 @@ mod tests {
 
     impl MerkleTestRunner {
         fn state_root(&self) -> Result<H256, TestRunnerError> {
-            Ok(create_trie_loader(&self.tx.inner()).calculate_root().and_then(|e| e.root()).unwrap())
+            Ok(create_trie_loader(&self.tx.inner())
+                .calculate_root()
+                .and_then(|e| e.root())
+                .unwrap())
         }
 
         pub(crate) fn generate_initial_trie(
@@ -480,8 +490,10 @@ mod tests {
             )?;
 
             let mut tx = self.tx.inner();
-            let root =
-                create_trie_loader(&tx).calculate_root().and_then(|e| e.root()).expect("couldn't create initial trie");
+            let root = create_trie_loader(&tx)
+                .calculate_root()
+                .and_then(|e| e.root())
+                .expect("couldn't create initial trie");
 
             tx.commit()?;
 
@@ -492,7 +504,10 @@ mod tests {
             if previous_stage_progress != 0 {
                 let block_root =
                     self.tx.inner().get_header(previous_stage_progress).unwrap().state_root;
-                let root = create_trie_loader(&self.tx.inner()).and_then(|e| e.root()).calculate_root().unwrap();
+                let root = create_trie_loader(&self.tx().inner())
+                    .calculate_root()
+                    .and_then(|e| e.root())
+                    .unwrap();
                 assert_eq!(block_root, root);
             }
             Ok(())

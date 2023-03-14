@@ -361,9 +361,9 @@ pub struct DBTrieLoader<'tx, TX> {
     /// `StoragesTrie`.
     pub commit_threshold: u64,
     /// The current number of inserted keys from both `AccountsTrie` and `StoragesTrie`.
-    current: u64,
+    pub current: u64,
     /// The transaction to use for inserting the trie nodes.
-    tx: &'tx TX,
+    pub tx: &'tx TX,
 }
 
 /// Status of the trie calculation.
