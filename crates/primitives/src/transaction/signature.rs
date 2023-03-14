@@ -1,4 +1,4 @@
-use crate::{transaction::util::secp256k1, Address, Bytes, H256, U256};
+use crate::{transaction::util::secp256k1, Address, H256, U256};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
 
@@ -102,13 +102,13 @@ impl Signature {
 
     /// Turn this signature into its byte
     /// (hex) representation.
-    pub fn to_bytes(&self) -> Bytes {
+    pub fn to_bytes(&self) -> [u8; 65] {
         let mut sig = [0u8; 65];
         sig[..32].copy_from_slice(&self.r.to_be_bytes::<32>());
         sig[32..64].copy_from_slice(&self.s.to_be_bytes::<32>());
         let v = u8::from(self.odd_y_parity) + 27;
         sig[64] = v;
-        hex::encode(&sig[..]).as_bytes().into()
+        sig
     }
 }
 
