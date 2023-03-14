@@ -49,10 +49,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{
-        BodyStage, ExecutionStage, FinishStage, HeaderStage, SenderRecoveryStage,
-        TotalDifficultyStage, FINISH, HEADERS,
-    },
+    stages::{ExecutionStage, HeaderStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
