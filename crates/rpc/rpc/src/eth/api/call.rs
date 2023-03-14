@@ -27,7 +27,6 @@ use revm::{
     },
     Database,
 };
-use std::ops::Deref;
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;

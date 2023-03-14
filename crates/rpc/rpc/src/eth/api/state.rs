@@ -1,13 +1,13 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::{
-    eth::{
-        error::{EthApiError, EthResult},
-    },
+    eth::error::{EthApiError, EthResult},
     EthApi,
 };
 use reth_primitives::{Address, BlockId, Bytes, H256, KECCAK_EMPTY, U256};
-use reth_provider::{AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
+use reth_provider::{
+    AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
+};
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>

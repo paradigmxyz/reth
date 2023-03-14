@@ -3,17 +3,15 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use crate::eth::{cache::EthStateCache, signer::EthSigner};
+use crate::eth::{cache::EthStateCache, error::EthResult, signer::EthSigner};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U64};
-use reth_provider::{
-    BlockProvider, EvmEnvProvider, StateProvider as StateProviderTrait, StateProviderFactory,
-};
+use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
-use std::{num::NonZeroUsize, ops::Deref, sync::Arc};
+use std::{num::NonZeroUsize, sync::Arc};
 
 mod block;
 mod call;
@@ -110,19 +108,14 @@ where
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
-            self.latest_state().map( |state |ChainState::new(Box::new(state))).map(Some)
+            self.latest_state().map(ChainState::boxed).map(Some)
         }
     }
 
     /// Returns the state at the given [BlockId] enum.
-    pub(crate) fn state_at_block_id(
-        &self,
-        block_id: BlockId,
-    ) -> Result<Option<ChainState>> {
+    pub(crate) fn state_at_block_id(&self, block_id: BlockId) -> Result<Option<ChainState<'_>>> {
         match block_id {
-            BlockId::Hash(hash) => {
-                self.state_at_hash(hash.into()).map( |state |ChainState::new(Box::new(state))).map(Some)
-            }
+            BlockId::Hash(hash) => self.state_at_hash(hash.into()).map(ChainState::boxed).map(Some),
             BlockId::Number(num) => self.state_at_block_number(num),
         }
     }
@@ -133,7 +126,7 @@ where
     pub(crate) fn state_at_block_number(
         &self,
         num: BlockNumberOrTag,
-    ) -> Result<Option<ChainState>> {
+    ) -> Result<Option<ChainState<'_>>> {
         if let Some(number) = self.convert_block_number(num)? {
             self.state_at_number(number).map(Some)
         } else {
@@ -152,8 +145,8 @@ where
     /// Returns the state at the given block number
     pub(crate) fn state_at_number(&self, block_number: u64) -> Result<ChainState<'_>> {
         match self.convert_block_number(BlockNumberOrTag::Latest)? {
-            Some(num) if num == block_number => self.latest_state().map( |state |ChainState::new(Box::new(state))),
-            _ => self.client().history_by_block_number(block_number).map( |state |ChainState::new(Box::new(state)))
+            Some(num) if num == block_number => self.latest_state().map(ChainState::boxed),
+            _ => self.client().history_by_block_number(block_number).map(ChainState::boxed),
         }
     }
 
