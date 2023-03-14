@@ -22,6 +22,7 @@ mod server;
 mod state;
 mod transactions;
 pub use transactions::{EthTransactions, TransactionSource};
+use crate::eth::error::EthApiError;
 
 /// Cache limit of block-level fee history for `eth_feeHistory` RPC method.
 const FEE_HISTORY_CACHE_LIMIT: usize = 2048;
@@ -42,6 +43,12 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 
     /// Returns a list of addresses owned by client.
     fn accounts(&self) -> Vec<Address>;
+
+    /// Executes the closure with the state that corresponds to the given [BlockId].
+    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+        where
+            F: FnOnce(ChainState<'_>) -> EthResult<T>;
+
 }
 
 /// `Eth` API implementation.
@@ -133,14 +140,6 @@ where
         self.client().convert_block_number(num)
     }
 
-    /// Helper function to execute a closure with the database at a specific block.
-    pub(crate) fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
-    where
-        F: FnOnce(ChainState<'_>) -> T,
-    {
-        unimplemented!()
-    }
-
     /// Returns the state at the given [BlockId] enum or the latest.
     pub(crate) fn state_at_block_id_or_latest(
         &self,
@@ -173,10 +172,17 @@ where
         &self,
         num: BlockNumberOrTag,
     ) -> Result<Option<HistoryOrLatest<'_, Client>>> {
-        if let Some(number) = self.convert_block_number(num)? {
-            self.state_at_number(number).map(Some)
-        } else {
-            Ok(None)
+        match num {
+            BlockNumberOrTag::Pending => {
+                unimplemented!("pending state not supported yet")
+            }
+            num => {
+                if let Some(number) = self.convert_block_number(num)? {
+                    self.state_at_number(number).map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
         }
     }
 
@@ -235,6 +241,14 @@ where
 
     fn accounts(&self) -> Vec<Address> {
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
+    }
+
+    fn with_state_at<F, T>(&self, at: BlockId, _f: F) -> EthResult<T> where F: FnOnce(ChainState<'_>) -> EthResult<T> {
+         let state = self.state_at_block_id(at)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state =   Box::new(state.deref()) as Box<dyn reth_provider::StateProvider>;
+
+
+        todo!()
     }
 }
 
