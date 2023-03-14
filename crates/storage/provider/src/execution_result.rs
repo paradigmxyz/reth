@@ -1,11 +1,6 @@
 //! Output of execution.
 
-use reth_db::{
-    models::AccountBeforeTx,
-    tables,
-    transaction::{DbTx, DbTxMut},
-    Error as DbError,
-};
+use reth_db::{models::AccountBeforeTx, tables, transaction::DbTxMut, Error as DbError};
 use reth_primitives::{Account, Address, Receipt, H256, U256};
 use revm_primitives::Bytecode;
 use std::collections::BTreeMap;
@@ -66,7 +61,7 @@ pub enum AccountInfoChangeSet {
 
 impl AccountInfoChangeSet {
     /// Apply the changes from the changeset to a database transaction.
-    pub fn apply_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+    pub fn apply_to_db<'a, TX: DbTxMut<'a>>(
         self,
         tx: &TX,
         address: Address,
