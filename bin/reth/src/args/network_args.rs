@@ -7,17 +7,15 @@ use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
 use reth_primitives::{ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
-use std::{net::Ipv4Addr, path::PathBuf};
+use std::path::PathBuf;
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
-    #[arg(long = "listener.address")]
-    pub listener_address: Option<Ipv4Addr>,
-
-    #[arg(long = "listener.port")]
-    pub listener_port: Option<u16>,
+    /// The port to listen for incoming connections.
+    #[arg(long = "discovery.port")]
+    pub discovery_port: Option<u16>,
 
     /// Disable the discovery service.
     #[command(flatten)]

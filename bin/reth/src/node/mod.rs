@@ -423,8 +423,8 @@ impl Command {
             .with_task_executor(Box::new(executor))
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
-                self.network.listener_address.unwrap_or_else(|| Ipv4Addr::UNSPECIFIED),
-                self.network.listener_port.unwrap_or_else(|| DEFAULT_DISCOVERY_PORT),
+                Ipv4Addr::UNSPECIFIED,
+                self.network.discovery_port.unwrap_or_else(|| DEFAULT_DISCOVERY_PORT),
             )))
             .build(ShareableDatabase::new(db, self.chain.clone()))
     }
