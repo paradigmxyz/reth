@@ -185,7 +185,7 @@ where
                                     new: to_reth_acc(&account.info),
                                 }
                             } else {
-                                AccountInfoChangeSet::NoChange
+                                AccountInfoChangeSet::NoChange { is_empty: account.is_empty() }
                             };
                         entry.info = account.info.clone();
                         (account_changeset, entry)
@@ -709,7 +709,7 @@ mod tests {
 
         assert_eq!(
             changesets.changeset.get(&account1).unwrap().account,
-            AccountInfoChangeSet::NoChange,
+            AccountInfoChangeSet::NoChange { is_empty: false },
             "No change to account"
         );
         assert_eq!(
