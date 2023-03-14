@@ -7,7 +7,7 @@ use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
 use reth_primitives::{ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Args)]
@@ -50,7 +50,11 @@ pub struct NetworkArgs {
 impl NetworkArgs {
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`ChainSpec`], in addition to the
     /// values in this option struct.
-    pub fn network_config(&self, config: &Config, chain_spec: ChainSpec) -> NetworkConfigBuilder {
+    pub fn network_config(
+        &self,
+        config: &Config,
+        chain_spec: Arc<ChainSpec>,
+    ) -> NetworkConfigBuilder {
         let peers_file = (!self.no_persist_peers).then_some(&self.peers_file);
         let network_config_builder = config
             .network_config(self.nat, peers_file.map(|f| f.as_ref().to_path_buf()))

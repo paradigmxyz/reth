@@ -5,7 +5,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Account, Address};
+use reth_primitives::keccak256;
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 use tracing::*;
@@ -63,12 +63,12 @@ impl AccountHashingStage {
     pub fn seed<DB: Database>(
         tx: &mut Transaction<'_, DB>,
         opts: SeedOpts,
-    ) -> Result<Vec<(Address, Account)>, StageError> {
+    ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
         use reth_db::models::AccountBeforeTx;
         use reth_interfaces::test_utils::generators::{
             random_block_range, random_eoa_account_range,
         };
-        use reth_primitives::{H256, U256};
+        use reth_primitives::{Account, H256, U256};
         use reth_provider::insert_canonical_block;
 
         let blocks = random_block_range(opts.blocks, H256::zero(), opts.txs);
@@ -76,7 +76,7 @@ impl AccountHashingStage {
         let transitions = std::cmp::min(opts.transitions, num_transitions);
 
         for block in blocks {
-            insert_canonical_block(&**tx, &block, true).unwrap();
+            insert_canonical_block(&**tx, block, None, true).unwrap();
         }
         let mut accounts = random_eoa_account_range(opts.accounts);
         {
@@ -203,37 +203,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
 
-        let mut hashed_accounts = tx.cursor_write::<tables::HashedAccount>()?;
-
         // Aggregate all transition changesets and and make list of account that have been changed.
-        tx.cursor_read::<tables::AccountChangeSet>()?
-            .walk_range(from_transition_rev..to_transition_rev)?
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .rev()
-            // fold all account to get the old balance/nonces and account that needs to be removed
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<Address, Option<Account>>, (_, account_before)| {
-                    accounts.insert(account_before.address, account_before.info);
-                    accounts
-                },
-            )
-            .into_iter()
-            // hash addresses and collect it inside sorted BTreeMap.
-            // We are doing keccak only once per address.
-            .map(|(address, account)| (keccak256(address), account))
-            .collect::<BTreeMap<_, _>>()
-            .into_iter()
-            // Apply values to HashedState (if Account is None remove it);
-            .try_for_each(|(hashed_address, account)| -> Result<(), StageError> {
-                if let Some(account) = account {
-                    hashed_accounts.upsert(hashed_address, account)?;
-                } else if hashed_accounts.seek_exact(hashed_address)?.is_some() {
-                    hashed_accounts.delete_current()?;
-                }
-                Ok(())
-            })?;
+        tx.unwind_account_hashing(from_transition_rev..to_transition_rev)?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -283,6 +254,7 @@ mod tests {
             ExecInput, ExecOutput, UnwindInput,
         };
         use reth_db::{cursor::DbCursorRO, tables, transaction::DbTx};
+        use reth_primitives::Address;
 
         pub(crate) struct AccountHashingTestRunner {
             pub(crate) tx: TestTransaction,

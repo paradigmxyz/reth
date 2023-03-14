@@ -871,6 +871,11 @@ impl TransactionSignedEcRecovered {
         self.signed_transaction
     }
 
+    /// Desolve Self to its component
+    pub fn to_components(self) -> (TransactionSigned, Address) {
+        (self.signed_transaction, self.signer)
+    }
+
     /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
     /// signer.
     pub fn from_signed_transaction(signed_transaction: TransactionSigned, signer: Address) -> Self {

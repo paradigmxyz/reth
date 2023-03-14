@@ -23,7 +23,7 @@ pub type NumTransactions = u64;
 pub struct StoredBlockBody {
     /// The id of the first transaction in this block
     pub start_tx_id: TxNumber,
-    /// The total number of transactions
+    /// The total number of transactions in the block
     pub tx_count: NumTransactions,
 }
 
@@ -40,9 +40,19 @@ impl StoredBlockBody {
         self.start_tx_id.saturating_add(self.tx_count).saturating_sub(1)
     }
 
+    /// First transaction index.
+    pub fn first_tx_index(&self) -> TxNumber {
+        self.start_tx_id
+    }
+
     /// Return a flag whether the block is empty
     pub fn is_empty(&self) -> bool {
         self.tx_count == 0
+    }
+
+    /// Return number of transaction inside block
+    pub fn tx_count(&self) -> NumTransactions {
+        self.tx_count
     }
 }
 

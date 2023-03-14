@@ -53,13 +53,13 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
     /// Create new instance of [EngineApi].
     pub fn new(
         client: Client,
-        chain_spec: ChainSpec,
+        chain_spec: Arc<ChainSpec>,
         message_rx: mpsc::UnboundedReceiver<EngineApiMessage>,
         forkchoice_state_tx: watch::Sender<ForkchoiceState>,
     ) -> Self {
         Self {
             client,
-            chain_spec: Arc::new(chain_spec),
+            chain_spec,
             message_rx: UnboundedReceiverStream::new(message_rx),
             forkchoice_state_tx,
         }

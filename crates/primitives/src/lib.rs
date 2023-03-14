@@ -38,7 +38,9 @@ pub use proofs::ProofCheckpoint;
 
 pub use account::{Account, Bytecode};
 pub use bits::H512;
-pub use block::{Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock};
+pub use block::{
+    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock, SealedBlockWithSenders,
+};
 pub use bloom::Bloom;
 pub use chain::{
     AllGenesisFormats, Chain, ChainInfo, ChainSpec, ChainSpecBuilder, ForkCondition, GOERLI,
@@ -124,3 +126,6 @@ pub fn keccak256(data: impl AsRef<[u8]>) -> H256 {
     hasher.finalize(&mut buf);
     buf.into()
 }
+
+#[cfg(any(test, feature = "arbitrary"))]
+pub use arbitrary;
