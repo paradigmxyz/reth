@@ -2,7 +2,6 @@ use crate::{
     providers::state::macros::delegate_provider_impls, AccountProvider, BlockHashProvider,
     StateProvider,
 };
-use std::marker::PhantomData;
 
 /// A type that can access the state at a specific access point (block number or tag)
 ///
@@ -16,16 +15,20 @@ use std::marker::PhantomData;
 ///
 /// Note: The lifetime of this type is limited by the type that created it.
 pub struct ChainState<'a> {
-    inner: Box<dyn StateProvider>,
-    _phantom: PhantomData<&'a ()>,
+    inner: Box<dyn StateProvider + 'a>,
 }
 
 // == impl ChainState ===
 
 impl<'a> ChainState<'a> {
     /// Wraps the given [StateProvider]
-    pub fn new(inner: Box<dyn StateProvider>) -> Self {
-        Self { inner, _phantom: Default::default() }
+    pub fn boxed<S: StateProvider + 'a>(inner: S) -> Self {
+        Self::new(Box::new(inner))
+    }
+
+    /// Wraps the given [StateProvider]
+    pub fn new(inner: Box<dyn StateProvider + 'a>) -> Self {
+        Self { inner }
     }
 
     /// Returns a new provider that takes the `TX` as reference
