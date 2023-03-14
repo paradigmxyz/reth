@@ -777,7 +777,7 @@ where
     TX: DbTx<'db> + Send + Sync,
 {
     /// Returns a Merkle proof of the given account, plus its storage root hash.
-    pub fn generate_acount_proof<'itx>(
+    pub fn generate_acount_proof(
         &self,
         root: H256,
         address: H256,
@@ -796,7 +796,7 @@ where
     }
 
     /// Returns a Merkle proof of the given storage keys, starting at the given root hash.
-    pub fn generate_storage_proofs<'itx>(
+    pub fn generate_storage_proofs(
         &self,
         storage_root: H256,
         address: H256,
