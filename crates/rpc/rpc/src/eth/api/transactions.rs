@@ -5,32 +5,64 @@ use crate::{
 };
 use async_trait::async_trait;
 use reth_primitives::{
-    BlockId, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction, TransactionSigned,
-    TransactionSignedEcRecovered, H256, U256,
+    BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
+    TransactionSigned, TransactionSignedEcRecovered, H256, U256,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory, TransactionsProvider};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
 use reth_rpc_types::{Index, Transaction, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
+use revm::primitives::{BlockEnv, CfgEnv};
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Returns the revm evm env for the requested [BlockId]
+    ///
+    /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
+    /// for.
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
+
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>>;
+
+    /// Returns the transaction by including its corresponding [BlockId]
+    async fn transaction_by_hash_at(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<(TransactionSource, BlockId)>>;
 }
 
 #[async_trait]
 impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
-    Client: TransactionsProvider + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
+    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
+        // TODO handle Pending state's env
+        match at {
+            BlockId::Number(BlockNumberOrTag::Pending) => {
+                // This should perhaps use the latest env settings and update block specific
+                // settings like basefee/number
+                unimplemented!("support pending state env")
+            }
+            hash_or_num => {
+                let block_hash = self
+                    .client()
+                    .block_hash_for_id(hash_or_num)?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+                Ok((cfg, env, block_hash.into()))
+            }
+        }
+    }
+
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
         if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
         {
@@ -52,6 +84,38 @@ where
                     block_number: 0,
                 };
                 Ok(Some(tx))
+            }
+        }
+    }
+
+    async fn transaction_by_hash_at(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<(TransactionSource, BlockId)>> {
+        match self.transaction_by_hash(hash).await? {
+            None => return Ok(None),
+            Some(tx) => {
+                let res = match tx {
+                    tx @ TransactionSource::Pool(_) => {
+                        (tx, BlockId::Number(BlockNumberOrTag::Pending))
+                    }
+                    TransactionSource::Database {
+                        transaction,
+                        index,
+                        block_hash,
+                        block_number,
+                    } => {
+                        let at = BlockId::Hash(block_hash.into());
+                        let tx = TransactionSource::Database {
+                            transaction,
+                            index,
+                            block_hash,
+                            block_number,
+                        };
+                        (tx, at)
+                    }
+                };
+                Ok(Some(res))
             }
         }
     }
@@ -138,6 +202,15 @@ pub enum TransactionSource {
         /// Number of the block.
         block_number: u64,
     },
+}
+
+impl From<TransactionSource> for TransactionSignedEcRecovered {
+    fn from(value: TransactionSource) -> Self {
+        match value {
+            TransactionSource::Pool(tx) => tx,
+            TransactionSource::Database { transaction, .. } => transaction,
+        }
+    }
 }
 
 impl From<TransactionSource> for Transaction {

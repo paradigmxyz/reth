@@ -576,7 +576,9 @@ where
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
                         RethRpcModule::Trace => {
-                            TraceApi::new(self.client.clone(), eth_cache.clone()).into_rpc().into()
+                            TraceApi::new(self.client.clone(), eth_api.clone(), eth_cache.clone())
+                                .into_rpc()
+                                .into()
                         }
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                     })
