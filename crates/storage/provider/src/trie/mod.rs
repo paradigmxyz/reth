@@ -2,10 +2,10 @@ use cita_trie::{PatriciaTrie, Trie};
 use hasher::HasherKeccak;
 use reth_codecs::Compact;
 use reth_db::{
-    transaction::{DbTx, DbTxMut},
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, ProofCheckpoint, StorageEntry,
@@ -210,9 +210,16 @@ where
 }
 
 /// Database wrapper implementing HashDB trait, with a read-only transaction.
-struct HashDatabase<'tx, 'itx, TX: DbTx<'itx>> {
+pub struct HashDatabase<'tx, 'itx, TX: DbTx<'itx>> {
     tx: &'tx TX,
     _p: PhantomData<&'itx ()>, // to suppress "unused" lifetime 'itx
+}
+
+impl<'tx, 'itx, TX: DbTx<'itx>> HashDatabase<'tx, 'itx, TX> {
+    /// Creates a new Hash database with the given transaction
+    pub fn new(tx: &'tx TX) -> Self {
+        Self { tx, _p: Default::default() }
+    }
 }
 
 impl<'tx, 'itx, TX> cita_trie::DB for HashDatabase<'tx, 'itx, TX>
@@ -253,10 +260,17 @@ impl<'tx, 'itx, TX: DbTx<'itx>> HashDatabase<'tx, 'itx, TX> {
 }
 
 /// Database wrapper implementing HashDB trait, with a read-only transaction.
-struct DupHashDatabase<'tx, 'itx, TX: DbTx<'itx>> {
+pub struct DupHashDatabase<'tx, 'itx, TX: DbTx<'itx>> {
     tx: &'tx TX,
     key: H256,
     _p: PhantomData<&'itx ()>, // to suppress "unused" lifetime 'itx
+}
+
+impl<'tx, 'itx, TX: DbTx<'itx>> DupHashDatabase<'tx, 'itx, TX> {
+    /// Creates a new DupHash database with the given transaction and key.
+    pub fn new(tx: &'tx TX, key: H256) -> Self {
+        Self { tx, key, _p: Default::default() }
+    }
 }
 
 impl<'tx, 'itx, TX> cita_trie::DB for DupHashDatabase<'tx, 'itx, TX>
@@ -375,7 +389,7 @@ impl TrieProgress {
 impl<'tx, TX> DBTrieLoader<'tx, TX> {
     /// Create new instance of trie loader.
     pub fn new(tx: &'tx TX) -> Self {
-        Self { tx, commit_threshold: 500_000, current:0 }
+        Self { tx, commit_threshold: 500_000, current: 0 }
     }
 }
 
@@ -385,9 +399,7 @@ where
     TX: DbTxMut<'db> + DbTx<'db> + Send + Sync,
 {
     /// Calculates the root of the state trie, saving intermediate hashes in the database.
-    pub fn calculate_root(
-        &mut self,
-    ) -> Result<TrieProgress, TrieError> {
+    pub fn calculate_root(&mut self) -> Result<TrieProgress, TrieError> {
         let mut checkpoint = self.get_checkpoint()?;
 
         if checkpoint.hashed_address.is_none() {
@@ -399,12 +411,12 @@ where
         let hasher = Arc::new(HasherKeccak::new());
         let mut trie = if let Some(root) = checkpoint.account_root {
             PatriciaTrie::from(
-                Arc::new(HashDatabase::from_root(self.tx, root)?),
+                Arc::new(HashDatabaseMut::from_root(self.tx, root)?),
                 hasher,
                 root.as_bytes(),
             )?
         } else {
-            PatriciaTrie::new(Arc::new(HashDatabase::new(self.tx)?), hasher)
+            PatriciaTrie::new(Arc::new(HashDatabaseMut::new(self.tx)?), hasher)
         };
 
         let mut accounts_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
@@ -417,7 +429,7 @@ where
                 checkpoint.storage_root.take(),
             )? {
                 TrieProgress::Complete(root) => {
-                    let value = EthAccount::from_with_root(account, root);
+                    let value = EthAccount::from(account).with_storage_root(root);
 
                     let mut out = Vec::new();
                     Encodable::encode(&value, &mut out);
@@ -460,7 +472,7 @@ where
             (
                 storage_cursor.seek_by_key_subkey(address, entry)?.filter(|e| e.key == entry),
                 PatriciaTrie::from(
-                    Arc::new(DupHashDatabase::from_root(
+                    Arc::new(DupHashDatabaseMut::from_root(
                         self.tx,
                         address,
                         previous_root.expect("is some"),
@@ -472,7 +484,7 @@ where
         } else {
             (
                 storage_cursor.seek_by_key_subkey(address, H256::zero())?,
-                PatriciaTrie::new(Arc::new(DupHashDatabase::new(self.tx, address)?), hasher),
+                PatriciaTrie::new(Arc::new(DupHashDatabaseMut::new(self.tx, address)?), hasher),
             )
         };
 
@@ -522,7 +534,7 @@ where
             .skip_while(|(addr, _)| next_acc.is_some() && next_acc.expect("is some") != *addr);
 
         let mut trie = PatriciaTrie::from(
-            Arc::new(HashDatabase::from_root(self.tx, previous_root)?),
+            Arc::new(HashDatabaseMut::from_root(self.tx, previous_root)?),
             Arc::new(HasherKeccak::new()),
             previous_root.as_bytes(),
         )?;
@@ -560,7 +572,7 @@ where
             };
 
             if let Some((_, account)) = accounts_cursor.seek_exact(hashed_address)? {
-                let value = EthAccount::from_with_root(account, storage_root);
+                let value = EthAccount::from(account).with_storage_root(storage_root);
 
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
@@ -593,7 +605,7 @@ where
     ) -> Result<TrieProgress, TrieError> {
         let mut hashed_storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
         let mut trie = PatriciaTrie::new(
-            Arc::new(DupHashDatabase::from_root(self.tx, address, previous_root)?),
+            Arc::new(DupHashDatabaseMut::from_root(self.tx, address, previous_root)?),
             Arc::new(HasherKeccak::new()),
         );
 
@@ -684,10 +696,7 @@ where
     }
 
     /// Saves the trie progress
-    pub fn save_checkpoint(
-        &mut self,
-        checkpoint: ProofCheckpoint,
-    ) -> Result<(), TrieError> {
+    pub fn save_checkpoint(&mut self, checkpoint: ProofCheckpoint) -> Result<(), TrieError> {
         let mut buf = vec![];
         checkpoint.to_compact(&mut buf);
 
@@ -698,10 +707,9 @@ where
     }
 
     /// Gets the trie progress
-    pub fn get_checkpoint(
-        &self,
-    ) -> Result<ProofCheckpoint, TrieError> {
-        let buf = self.tx.get::<tables::SyncStageProgress>("TrieLoader".into())?.unwrap_or_default();
+    pub fn get_checkpoint(&self) -> Result<ProofCheckpoint, TrieError> {
+        let buf =
+            self.tx.get::<tables::SyncStageProgress>("TrieLoader".into())?.unwrap_or_default();
 
         if buf.is_empty() {
             return Ok(ProofCheckpoint::default())
@@ -719,7 +727,7 @@ where
     /// Finds the most recent account trie root and removes the previous one if applicable.
     fn replace_account_root(
         &self,
-        trie: &mut PatriciaTrie<HashDatabase<'_, 'db, TX>, HasherKeccak>,
+        trie: &mut PatriciaTrie<HashDatabaseMut<'_, TX>, HasherKeccak>,
         previous_root: H256,
     ) -> Result<H256, TrieError> {
         let new_root = H256::from_slice(trie.root()?.as_slice());
@@ -737,7 +745,7 @@ where
     /// Finds the most recent storage trie root and removes the previous one if applicable.
     fn replace_storage_root(
         &self,
-        mut trie: PatriciaTrie<DupHashDatabase<'_, 'db, TX>, HasherKeccak>,
+        mut trie: PatriciaTrie<DupHashDatabaseMut<'_, TX>, HasherKeccak>,
         address: H256,
         previous_root: H256,
     ) -> Result<H256, TrieError> {
@@ -810,6 +818,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::Transaction;
+    use std::ops::DerefMut;
 
     use super::*;
     use assert_matches::assert_matches;
@@ -893,7 +902,7 @@ mod tests {
     #[test]
     fn two_accounts_trie() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
         let mut trie = DBTrieLoader::new(tx.deref_mut());
 
         let accounts = [
@@ -907,7 +916,7 @@ mod tests {
             ),
         ];
         for (address, account) in accounts {
-            tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
+            trie.tx.put::<tables::HashedAccount>(keccak256(address), account).unwrap();
         }
         let encoded_accounts = accounts.iter().map(|(k, v)| {
             let mut out = Vec::new();
@@ -924,7 +933,7 @@ mod tests {
     #[test]
     fn single_storage_trie() {
         let db = create_test_rw_db();
-        let tx = Transaction::new(db.as_ref()).unwrap();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
         let mut trie = DBTrieLoader::new(tx.deref_mut());
 
         let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
@@ -932,11 +941,12 @@ mod tests {
 
         let storage = Vec::from([(H256::from_low_u64_be(2), U256::from(1))]);
         for (k, v) in storage.clone() {
-            tx.put::<tables::HashedStorage>(
-                hashed_address,
-                StorageEntry { key: keccak256(k), value: v },
-            )
-            .unwrap();
+            trie.tx
+                .put::<tables::HashedStorage>(
+                    hashed_address,
+                    StorageEntry { key: keccak256(k), value: v },
+                )
+                .unwrap();
         }
         let encoded_storage = storage.iter().map(|(k, v)| {
             let out = encode_fixed_size(v).to_vec();
@@ -1106,8 +1116,8 @@ mod tests {
         load_mainnet_genesis_root(&mut tx);
 
         let root = {
-            let trie = create_test_loader(&tx);
-            trie.calculate_root().expect("should be able to load trie")
+            let mut trie = create_test_loader(&tx);
+            trie.calculate_root().expect("should be able to load trie").root().unwrap()
         };
 
         tx.commit().unwrap();
@@ -1115,9 +1125,8 @@ mod tests {
         let address = Address::from(hex!("000d836201318ec6899a67540690382780743280"));
 
         let trie = create_test_loader(&tx);
-        let (proof, storage_root) = trie
-            .generate_acount_proof(root, keccak256(address))
-            .expect("failed to generate proof");
+        let (proof, storage_root) =
+            trie.generate_acount_proof(root, keccak256(address)).expect("failed to generate proof");
 
         // values extracted from geth via rpc:
         // {
@@ -1171,16 +1180,15 @@ mod tests {
         }
 
         let root = {
-            let trie = create_test_loader(&tx);
-            trie.calculate_root().expect("should be able to load trie")
+            let mut trie = create_test_loader(&tx);
+            trie.calculate_root().expect("should be able to load trie").root().unwrap()
         };
 
         tx.commit().unwrap();
 
         let trie = create_test_loader(&tx);
-        let (account_proof, storage_root) = trie
-            .generate_acount_proof(root, hashed_address)
-            .expect("failed to generate proof");
+        let (account_proof, storage_root) =
+            trie.generate_acount_proof(root, hashed_address).expect("failed to generate proof");
 
         // values extracted from geth via rpc:
         let expected_account = hex!("f86fa1205126413e7857595763591580306b3f228f999498c4c5dfa74f633364936e7651b84bf849819b8418b0d164a029ff6f4d518044318d75b118cf439d8d3d7249c8afcba06ba9ecdf8959410571a02ce1a85814ad94a94ed2a1abaf7c57e9b64326622c1b8c21b4ba4d0e7df61392").as_slice();
