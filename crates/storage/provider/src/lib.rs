@@ -23,7 +23,7 @@ pub use providers::{
     LatestStateProviderRef, ShareableDatabase,
 };
 
-/// Merkle trie
+/// Helper type for loading Merkle Patricia Trees from the database
 pub mod trie;
 
 /// Execution result

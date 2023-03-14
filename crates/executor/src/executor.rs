@@ -185,7 +185,7 @@ where
                                     new: to_reth_acc(&account.info),
                                 }
                             } else {
-                                AccountInfoChangeSet::NoChange
+                                AccountInfoChangeSet::NoChange { is_empty: account.is_empty() }
                             };
                         entry.info = account.info.clone();
                         (account_changeset, entry)
@@ -599,6 +599,14 @@ mod tests {
         fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
+
+        fn proof(
+            &self,
+            _address: Address,
+            _keys: &[H256],
+        ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+            todo!()
+        }
     }
 
     #[test]
@@ -701,7 +709,7 @@ mod tests {
 
         assert_eq!(
             changesets.changeset.get(&account1).unwrap().account,
-            AccountInfoChangeSet::NoChange,
+            AccountInfoChangeSet::NoChange { is_empty: false },
             "No change to account"
         );
         assert_eq!(

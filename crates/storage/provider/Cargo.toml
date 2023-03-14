@@ -13,6 +13,7 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
+reth-codecs = { path = "../codecs" }
 reth-tracing = {path = "../../tracing"}
 reth-rlp = {path = "../../rlp"}
 

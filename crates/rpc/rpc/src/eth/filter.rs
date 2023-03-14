@@ -1,11 +1,12 @@
 use crate::{
     eth::error::EthApiError,
     result::{internal_rpc_err, rpc_error_with_code, ToRpcResult},
+    EthSubscriptionIdProvider,
 };
 use async_trait::async_trait;
 use jsonrpsee::{
     core::RpcResult,
-    server::{IdProvider, RandomIntegerIdProvider},
+    server::{IdProvider},
 };
 use reth_primitives::{filter::{Filter, FilterBlockOption, FilteredParams}, Block, U256, Receipt};
 use reth_provider::{BlockProvider, EvmEnvProvider};
@@ -33,7 +34,7 @@ impl<Client, Pool> EthFilter<Client, Pool> {
             client,
             active_filters: Default::default(),
             pool,
-            id_provider: Arc::new(RandomIntegerIdProvider),
+            id_provider: Arc::new(EthSubscriptionIdProvider::default()),
             max_logs_in_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
         };
         Self { inner: Arc::new(inner) }
