@@ -87,9 +87,9 @@ impl Transaction {
         tx
     }
 
-    /// Create a new rpc transaction result for a pending signed transaction, setting block
+    /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    pub(crate) fn from_recovered(tx: TransactionSignedEcRecovered) -> Self {
+    pub fn from_recovered(tx: TransactionSignedEcRecovered) -> Self {
         let signer = tx.signer();
         let signed_tx = tx.into_signed();
 
