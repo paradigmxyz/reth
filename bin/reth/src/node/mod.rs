@@ -177,7 +177,7 @@ impl Command {
         if self.continuous {
             info!(target: "reth::cli", "Continuous sync mode enabled");
             let fetch_client = network.fetch_client().await?;
-            let tip_header = self.fetch_tip(fetch_client, 1).await?;
+            let tip_header = self.fetch_tip(fetch_client, 1.into()).await?;
             forkchoice_state_tx.send(ForkchoiceState {
                 head_block_hash: tip_header.hash(),
                 finalized_block_hash: tip_header.hash(),
@@ -409,18 +409,7 @@ impl Command {
             return Ok(number)
         }
 
-        info!(target: "reth::cli", ?tip, "Fetching tip block number from the network.");
-        loop {
-            match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
-                Ok(tip_header) => {
-                    info!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip block number");
-                    return Ok(tip_header.number)
-                }
-                Err(error) => {
-                    error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
-                }
-            }
-        }
+        Ok(self.fetch_tip(fetch_client, BlockHashOrNumber::Hash(tip)).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -429,13 +418,13 @@ impl Command {
     async fn fetch_tip(
         &self,
         fetch_client: FetchClient,
-        tip: u64,
+        tip: BlockHashOrNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error> {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
-            match get_single_header(fetch_client.clone(), BlockHashOrNumber::Number(tip)).await {
+            match get_single_header(fetch_client.clone(), tip).await {
                 Ok(tip_header) => {
-                    info!(target: "reth::cli", ?tip, "Successfully fetched tip block number");
+                    info!(target: "reth::cli", ?tip, "Successfully fetched tip");
                     return Ok(tip_header)
                 }
                 Err(error) => {
