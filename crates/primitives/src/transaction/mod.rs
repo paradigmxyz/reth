@@ -176,6 +176,8 @@ pub enum Transaction {
     Eip1559(TxEip1559),
 }
 
+// === impl Transaction ===
+
 impl Transaction {
     /// Heavy operation that return signature hash over rlp encoded transaction.
     /// It is only for signature signing or signer recovery.
@@ -856,6 +858,8 @@ pub struct TransactionSignedEcRecovered {
     signed_transaction: TransactionSigned,
 }
 
+// === impl TransactionSignedEcRecovered ===
+
 impl TransactionSignedEcRecovered {
     /// Signer of transaction recovered from signature
     pub fn signer(&self) -> Address {
@@ -871,23 +875,6 @@ impl TransactionSignedEcRecovered {
     /// signer.
     pub fn from_signed_transaction(signed_transaction: TransactionSigned, signer: Address) -> Self {
         Self { signed_transaction, signer }
-    }
-}
-
-/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
-///
-/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
-/// transaction type that the transaction pool uses.
-pub trait FromRecoveredTransaction {
-    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
-}
-
-// Noop conversion
-impl FromRecoveredTransaction for TransactionSignedEcRecovered {
-    #[inline]
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        tx
     }
 }
 
@@ -908,6 +895,23 @@ impl Decodable for TransactionSignedEcRecovered {
             .recover_signer()
             .ok_or(DecodeError::Custom("Unable to recover decoded transaction signer."))?;
         Ok(TransactionSignedEcRecovered { signer, signed_transaction })
+    }
+}
+
+/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
+///
+/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
+/// transaction type that the transaction pool uses.
+pub trait FromRecoveredTransaction {
+    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
+}
+
+// Noop conversion
+impl FromRecoveredTransaction for TransactionSignedEcRecovered {
+    #[inline]
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+        tx
     }
 }
 
