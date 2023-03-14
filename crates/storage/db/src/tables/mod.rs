@@ -32,7 +32,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 26] = [
+pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -59,6 +59,7 @@ pub const TABLES: [(TableType, &str); 26] = [
     (TableType::DupSort, StoragesTrie::const_name()),
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, SyncStage::const_name()),
+    (TableType::Table, SyncStageProgress::const_name()),
 ];
 
 #[macro_export]
@@ -291,6 +292,11 @@ table!(
 table!(
     /// Stores the highest synced block number of each stage.
     ( SyncStage ) StageId | BlockNumber
+);
+
+table!(
+    /// Stores arbitrary data to keep track of a stage first-sync progress.
+    ( SyncStageProgress ) StageId | Vec<u8>
 );
 
 ///

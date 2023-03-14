@@ -13,8 +13,9 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
-reth-tracing = { path = "../../tracing" }
-reth-rlp = { path = "../../rlp" }
+reth-codecs = { path = "../codecs" }
+reth-tracing = {path = "../../tracing"}
+reth-rlp = {path = "../../rlp"}
 
 revm-primitives = "1.0.0"
 

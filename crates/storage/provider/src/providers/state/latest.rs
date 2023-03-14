@@ -76,7 +76,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .state_root;
 
         let (account_proof, storage_root) = loader
-            .generate_acount_proof(self.db, root, hashed_address)
+            .generate_acount_proof(root, hashed_address)
             .map_err(|_| ProviderError::StateTree)?;
         let account_proof = account_proof.into_iter().map(Bytes::from).collect();
 
@@ -86,7 +86,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
         } else {
             let hashed_keys: Vec<H256> = keys.iter().map(keccak256).collect();
             loader
-                .generate_storage_proofs(self.db, storage_root, hashed_address, &hashed_keys)
+                .generate_storage_proofs(storage_root, hashed_address, &hashed_keys)
                 .map_err(|_| ProviderError::StateTree)?
                 .into_iter()
                 .map(|v| v.into_iter().map(Bytes::from).collect())
