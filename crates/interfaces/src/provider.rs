@@ -68,6 +68,9 @@ pub enum ProviderError {
     /// Reached the end of the transaction sender table.
     #[error("Got to the end of the transaction sender table")]
     EndOfTransactionSenderTable,
+    /// Some error occurred while interacting with the state tree.
+    #[error("Unknown error occurred while interacting with the state tree.")]
+    StateTree,
     /// Thrown when required header related data was not found but was required.
     #[error("requested data not found")]
     HeaderNotFound,
