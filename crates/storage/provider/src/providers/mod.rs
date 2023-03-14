@@ -40,8 +40,8 @@ pub struct ShareableDatabase<DB> {
 
 impl<DB> ShareableDatabase<DB> {
     /// create new database provider
-    pub fn new(db: DB, chain_spec: ChainSpec) -> Self {
-        Self { db, chain_spec: Arc::new(chain_spec) }
+    pub fn new(db: DB, chain_spec: Arc<ChainSpec>) -> Self {
+        Self { db, chain_spec }
     }
 }
 
@@ -366,6 +366,8 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::ShareableDatabase;
     use crate::{BlockIdProvider, StateProviderFactory};
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
@@ -375,7 +377,7 @@ mod tests {
     fn common_history_provider() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db, chain_spec);
+        let provider = ShareableDatabase::new(db, Arc::new(chain_spec));
         let _ = provider.latest();
     }
 
@@ -383,7 +385,7 @@ mod tests {
     fn default_chain_info() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let db = create_test_db::<WriteMap>(EnvKind::RW);
-        let provider = ShareableDatabase::new(db, chain_spec);
+        let provider = ShareableDatabase::new(db, Arc::new(chain_spec));
 
         let chain_info = provider.chain_info().expect("should be ok");
         assert_eq!(chain_info.best_number, 0);

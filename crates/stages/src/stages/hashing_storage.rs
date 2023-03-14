@@ -1,13 +1,13 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use num_traits::Zero;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::DbDupCursorRO,
     database::Database,
     models::TransitionIdAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Address, StorageEntry, H256, U256};
+use reth_primitives::{keccak256, Address, StorageEntry};
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
@@ -154,47 +154,10 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
 
-        let mut hashed_storage = tx.cursor_dup_write::<tables::HashedStorage>()?;
-
-        // Aggregate all transition changesets and make list of accounts that have been changed.
-        tx.cursor_read::<tables::StorageChangeSet>()?
-            .walk_range(
-                TransitionIdAddress((from_transition_rev, Address::zero()))..
-                    TransitionIdAddress((to_transition_rev, Address::zero())),
-            )?
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .rev()
-            // fold all account to get the old balance/nonces and account that needs to be removed
-            .fold(
-                BTreeMap::new(),
-                |mut accounts: BTreeMap<(Address, H256), U256>,
-                 (TransitionIdAddress((_, address)), storage_entry)| {
-                    accounts.insert((address, storage_entry.key), storage_entry.value);
-                    accounts
-                },
-            )
-            .into_iter()
-            // hash addresses and collect it inside sorted BTreeMap.
-            // We are doing keccak only once per address.
-            .map(|((address, key), value)| ((keccak256(address), keccak256(key)), value))
-            .collect::<BTreeMap<_, _>>()
-            .into_iter()
-            // Apply values to HashedStorage (if Value is zero just remove it);
-            .try_for_each(|((hashed_address, key), value)| -> Result<(), StageError> {
-                if hashed_storage
-                    .seek_by_key_subkey(hashed_address, key)?
-                    .filter(|entry| entry.key == key)
-                    .is_some()
-                {
-                    hashed_storage.delete_current()?;
-                }
-
-                if value != U256::ZERO {
-                    hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
-                }
-                Ok(())
-            })?;
+        tx.unwind_storage_hashing(
+            TransitionIdAddress((from_transition_rev, Address::zero()))..
+                TransitionIdAddress((to_transition_rev, Address::zero())),
+        )?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -209,7 +172,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{
-        cursor::DbCursorRW,
+        cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
         models::{StoredBlockBody, TransitionIdAddress},
     };

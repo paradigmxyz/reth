@@ -1,4 +1,4 @@
-use reth_primitives::{Bloom, H256};
+use reth_primitives::{BlockHash, BlockNumber, Bloom, H256};
 use thiserror::Error;
 
 /// BlockExecutor Errors
@@ -34,4 +34,34 @@ pub enum Error {
     BlockGasUsed { got: u64, expected: u64 },
     #[error("Provider error")]
     ProviderError,
+    #[error("BlockChainId can't be found in BlockchainTree with internal index {chain_id}")]
+    BlockChainIdConsistency { chain_id: u64 },
+    #[error(
+        "Appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
+    )]
+    AppendChainDoesntConnect { chain_tip: (u64, H256), other_chain_fork: (u64, H256) },
+    #[error("Canonical chain header #{block_hash} can't be found ")]
+    CanonicalChain { block_hash: BlockHash },
+    #[error("Can't insert #{block_number} {block_hash} as last finalized block number is {last_finalized}")]
+    PendingBlockIsFinalized {
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        last_finalized: BlockNumber,
+    },
+    #[error("Can't insert block  #{block_number} {block_hash} to far in future, as last finalized block number is {last_finalized}")]
+    PendingBlockIsInFuture {
+        block_hash: BlockHash,
+        block_number: BlockNumber,
+        last_finalized: BlockNumber,
+    },
+    #[error("Block number #{block_number} not found in blockchain tree chain")]
+    BlockNumberNotFoundInChain { block_number: BlockNumber },
+    #[error("Block hash {block_hash} not found in blockchain tree chain")]
+    BlockHashNotFoundInChain { block_hash: BlockHash },
+    #[error("Transaction error on revert: {inner:?}")]
+    CanonicalRevert { inner: String },
+    #[error("Transaction error on commit: {inner:?}")]
+    CanonicalCommit { inner: String },
+    #[error("Transaction error on pipeline status update: {inner:?}")]
+    PipelineStatusUpdate { inner: String },
 }

@@ -13,7 +13,7 @@ impl BeaconConsensusBuilder {
     /// [watch::channel] for updating the forkchoice state.
     pub fn build(
         self,
-        chain_spec: ChainSpec,
+        chain_spec: Arc<ChainSpec>,
     ) -> (Arc<BeaconConsensus>, watch::Sender<ForkchoiceState>) {
         let (forkchoice_state_tx, forkchoice_state_rx) = watch::channel(ForkchoiceState::default());
         let inner = Arc::new(BeaconConsensus::new(chain_spec, forkchoice_state_rx));

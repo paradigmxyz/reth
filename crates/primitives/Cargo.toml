@@ -90,6 +90,7 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive",
 ]
+test-utils = []
 
 [[bench]]
 name = "recover_ecdsa_crit"

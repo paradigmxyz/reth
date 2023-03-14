@@ -32,7 +32,9 @@ pub enum TrieError {
     InternalError(#[from] cita_trie::TrieError),
     /// The database doesn't contain the root of the trie.
     #[error("The root node wasn't found in the DB")]
-    MissingRoot(H256),
+    MissingAccountRoot(H256),
+    #[error("The storage root node wasn't found in the DB")]
+    MissingStorageRoot(H256),
     /// Error returned by the database.
     #[error("{0:?}")]
     DatabaseError(#[from] reth_db::Error),
@@ -112,7 +114,7 @@ where
         if root == EMPTY_ROOT {
             return Self::new(tx)
         }
-        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
+        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingAccountRoot(root))?;
         Ok(Self { tx })
     }
 }
@@ -204,7 +206,7 @@ where
         tx.cursor_dup_read::<tables::StoragesTrie>()?
             .seek_by_key_subkey(key, root)?
             .filter(|entry| entry.hash == root)
-            .ok_or(TrieError::MissingRoot(root))?;
+            .ok_or(TrieError::MissingStorageRoot(root))?;
         Ok(Self { tx, key })
     }
 }
@@ -254,7 +256,7 @@ where
 impl<'tx, 'itx, TX: DbTx<'itx>> HashDatabase<'tx, 'itx, TX> {
     /// Instantiates a new Database for the accounts trie, with an existing root
     fn from_root(tx: &'tx TX, root: H256) -> Result<Self, TrieError> {
-        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingRoot(root))?;
+        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingAccountRoot(root))?;
         Ok(Self { tx, _p: Default::default() })
     }
 }
@@ -307,7 +309,7 @@ impl<'tx, 'itx, TX: DbTx<'itx>> DupHashDatabase<'tx, 'itx, TX> {
     fn from_root(tx: &'tx TX, key: H256, root: H256) -> Result<Self, TrieError> {
         tx.cursor_dup_read::<tables::StoragesTrie>()?
             .seek_by_key_subkey(key, root)?
-            .ok_or(TrieError::MissingRoot(root))?;
+            .ok_or(TrieError::MissingAccountRoot(root))?;
         Ok(Self { tx, key, _p: Default::default() })
     }
 }

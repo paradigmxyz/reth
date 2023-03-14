@@ -8,7 +8,7 @@ use ethers_core::types::{Block, H256 as EthersH256, H64};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable, EMPTY_STRING_CODE};
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 /// Describes the current head block.
 ///
@@ -284,9 +284,9 @@ impl Decodable for Header {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SealedHeader {
     /// Locked Header fields.
-    header: Header,
+    pub header: Header,
     /// Locked Header hash.
-    hash: BlockHash,
+    pub hash: BlockHash,
 }
 
 impl SealedHeader {
@@ -401,6 +401,12 @@ impl Deref for SealedHeader {
 
     fn deref(&self) -> &Self::Target {
         &self.header
+    }
+}
+
+impl DerefMut for SealedHeader {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.header
     }
 }
 

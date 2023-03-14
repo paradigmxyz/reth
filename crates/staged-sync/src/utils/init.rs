@@ -37,7 +37,7 @@ pub enum InitDatabaseError {
 #[allow(clippy::field_reassign_with_default)]
 pub fn init_genesis<DB: Database>(
     db: Arc<DB>,
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 ) -> Result<H256, InitDatabaseError> {
     let genesis = chain.genesis();
 
@@ -85,6 +85,8 @@ pub fn init_genesis<DB: Database>(
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
     use super::{init_genesis, InitDatabaseError};
     use reth_db::mdbx::test_utils::create_test_rw_db;
     use reth_primitives::{
@@ -94,7 +96,7 @@ mod tests {
     #[test]
     fn success_init_genesis_mainnet() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, MAINNET.clone()).unwrap();
+        let genesis_hash = init_genesis(db, Arc::new(MAINNET.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS);
@@ -103,7 +105,7 @@ mod tests {
     #[test]
     fn success_init_genesis_goerli() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, GOERLI.clone()).unwrap();
+        let genesis_hash = init_genesis(db, Arc::new(GOERLI.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS);
@@ -112,7 +114,7 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let db = create_test_rw_db();
-        let genesis_hash = init_genesis(db, SEPOLIA.clone()).unwrap();
+        let genesis_hash = init_genesis(db, Arc::new(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS);
@@ -121,10 +123,10 @@ mod tests {
     #[test]
     fn fail_init_inconsistent_db() {
         let db = create_test_rw_db();
-        init_genesis(db.clone(), SEPOLIA.clone()).unwrap();
+        init_genesis(db.clone(), Arc::new(SEPOLIA.clone())).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(db, MAINNET.clone());
+        let genesis_hash = init_genesis(db, Arc::new(MAINNET.clone()));
 
         assert_eq!(
             genesis_hash.unwrap_err(),

@@ -1,4 +1,4 @@
-use crate::{Header, SealedHeader, TransactionSigned, Withdrawal, H256};
+use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256};
 use ethers_core::types::BlockNumber;
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
@@ -12,10 +12,10 @@ use std::{fmt, fmt::Formatter, ops::Deref, str::FromStr};
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 25)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
+#[derive_arbitrary(rlp, 25)]
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
@@ -26,6 +26,18 @@ pub struct Block {
     pub ommers: Vec<Header>,
     /// Block withdrawals.
     pub withdrawals: Option<Vec<Withdrawal>>,
+}
+
+impl Block {
+    /// Create SealedBLock that will create all header hashes.
+    pub fn seal_slow(self) -> SealedBlock {
+        SealedBlock {
+            header: self.header.seal_slow(),
+            body: self.body,
+            ommers: self.ommers.into_iter().map(|o| o.seal_slow()).collect(),
+            withdrawals: self.withdrawals,
+        }
+    }
 }
 
 impl Deref for Block {
@@ -65,6 +77,17 @@ impl SealedBlock {
         (self.header, self.body, self.ommers)
     }
 
+    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    pub fn senders(&self) -> Option<Vec<Address>> {
+        self.body.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<Address>>>()
+    }
+
+    /// Seal sealed block with recovered transaction senders.
+    pub fn seal_with_senders(self) -> Option<SealedBlockWithSenders> {
+        let senders = self.senders()?;
+        Some(SealedBlockWithSenders { block: self, senders })
+    }
+
     /// Unseal the block
     pub fn unseal(self) -> Block {
         Block {
@@ -80,6 +103,52 @@ impl Deref for SealedBlock {
     type Target = SealedHeader;
     fn deref(&self) -> &Self::Target {
         &self.header
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl std::ops::DerefMut for SealedBlock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.header
+    }
+}
+
+/// Sealed block with senders recovered from transactions.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SealedBlockWithSenders {
+    /// Sealed block
+    pub block: SealedBlock,
+    /// List of senders that match trasanctions from block.
+    pub senders: Vec<Address>,
+}
+
+impl SealedBlockWithSenders {
+    /// New sealed block with sender. Return none if len of tx and senders does not match
+    pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
+        if block.body.len() != senders.len() {
+            None
+        } else {
+            Some(Self { block, senders })
+        }
+    }
+
+    /// Split Structure to its components
+    pub fn into_components(self) -> (SealedBlock, Vec<Address>) {
+        (self.block, self.senders)
+    }
+}
+
+impl Deref for SealedBlockWithSenders {
+    type Target = SealedBlock;
+    fn deref(&self) -> &Self::Target {
+        &self.block
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl std::ops::DerefMut for SealedBlockWithSenders {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.block
     }
 }
 
