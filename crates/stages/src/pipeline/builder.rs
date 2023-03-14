@@ -56,13 +56,6 @@ where
         self
     }
 
-    /// Indicate that the pipeline should continue to download blocks, and make header requests by
-    /// block number, even if there is no fork choice update.
-    pub fn with_continuous(mut self, continuous: bool) -> Self {
-        self.pipeline.continuous = continuous;
-        self
-    }
-
     /// Set a [SyncStateUpdater].
     pub fn with_sync_state_updater(mut self, updater: U) -> Self {
         self.pipeline.sync_state_updater = Some(updater);
