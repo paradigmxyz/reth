@@ -39,7 +39,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 
     /// Disable the discovery service.
     #[command(flatten)]

@@ -90,7 +90,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = genesis_value_parser
     )]
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 
     /// Enable Prometheus metrics.
     ///
@@ -443,7 +443,7 @@ impl Command {
             builder = builder.with_max_block(max_block)
         }
 
-        let factory = reth_executor::Factory::new(Arc::new(self.chain.clone()));
+        let factory = reth_executor::Factory::new(self.chain.clone());
         let pipeline = builder
             .with_sync_state_updater(updater.clone())
             .add_stages(

@@ -1,16 +1,7 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::{Database, DatabaseGAT},
-    models::ShardedKey,
-    tables,
-    transaction::{DbTx, DbTxMut, DbTxMutGAT},
-    TransitionList,
-};
+use reth_db::database::Database;
 use reth_provider::Transaction;
-
-use reth_primitives::{Address, TransitionId};
-use std::{collections::BTreeMap, fmt::Debug};
+use std::fmt::Debug;
 use tracing::*;
 
 /// The [`StageId`] of the account history indexing stage.
@@ -18,7 +9,7 @@ pub const INDEX_ACCOUNT_HISTORY: StageId = StageId("IndexAccountHistory");
 
 /// Stage is indexing history the account changesets generated in
 /// [`ExecutionStage`][crate::stages::ExecutionStage]. For more information
-/// on index sharding take a look at [`tables::AccountHistory`]
+/// on index sharding take a look at [`reth_db::tables::AccountHistory`]
 #[derive(Debug)]
 pub struct IndexAccountHistoryStage {
     /// Number of blocks after which the control
@@ -75,84 +66,25 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
         let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
 
-        let mut cursor = tx.cursor_write::<tables::AccountHistory>()?;
+        tx.unwind_account_history_indices(from_transition_rev..to_transition_rev)?;
 
-        let account_changeset = tx
-            .cursor_read::<tables::AccountChangeSet>()?
-            .walk(Some(from_transition_rev))?
-            .take_while(|res| res.as_ref().map(|(k, _)| *k < to_transition_rev).unwrap_or_default())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let last_indices = account_changeset
-            .into_iter()
-            // reverse so we can get lowest transition id where we need to unwind account.
-            .rev()
-            // fold all account and get last transition index
-            .fold(BTreeMap::new(), |mut accounts: BTreeMap<Address, u64>, (index, account)| {
-                // we just need address and lowest transition id.
-                accounts.insert(account.address, index);
-                accounts
-            });
-        // try to unwind the index
-        for (address, rem_index) in last_indices {
-            let shard_part = unwind_account_history_shards::<DB>(&mut cursor, address, rem_index)?;
-
-            // check last shard_part, if present, items needs to be reinserted.
-            if !shard_part.is_empty() {
-                // there are items in list
-                tx.put::<tables::AccountHistory>(
-                    ShardedKey::new(address, u64::MAX),
-                    TransitionList::new(shard_part)
-                        .expect("There is at least one element in list and it is sorted."),
-                )?;
-            }
-        }
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
 }
 
-/// Unwind all history shards. For boundary shard, remove it from database and
-/// return last part of shard with still valid items. If all full shard were removed, return list
-/// would be empty.
-pub fn unwind_account_history_shards<DB: Database>(
-    cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
-        tables::AccountHistory,
-    >,
-    address: Address,
-    transition_id: TransitionId,
-) -> Result<Vec<usize>, StageError> {
-    let mut item = cursor.seek_exact(ShardedKey::new(address, u64::MAX))?;
-
-    while let Some((sharded_key, list)) = item {
-        // there is no more shard for address
-        if sharded_key.key != address {
-            break
-        }
-        cursor.delete_current()?;
-        // check first item and if it is more and eq than `transition_id` delete current
-        // item.
-        let first = list.iter(0).next().expect("List can't empty");
-        if first >= transition_id as usize {
-            item = cursor.prev()?;
-            continue
-        } else if transition_id <= sharded_key.highest_transition_id {
-            // if first element is in scope whole list would be removed.
-            // so at least this first element is present.
-            return Ok(list.iter(0).take_while(|i| *i < transition_id as usize).collect::<Vec<_>>())
-        } else {
-            let new_list = list.iter(0).collect::<Vec<_>>();
-            return Ok(new_list)
-        }
-    }
-    Ok(Vec::new())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
-    use reth_db::models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx};
+    use reth_db::{
+        models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey},
+        tables,
+        transaction::DbTxMut,
+        TransitionList,
+    };
     use reth_primitives::{hex_literal::hex, H160};
 
     const ADDRESS: H160 = H160(hex!("0000000000000000000000000000000000000001"));

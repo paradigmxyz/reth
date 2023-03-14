@@ -3,6 +3,7 @@
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds};
 
 use crate::{
+    common::{PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
@@ -12,13 +13,6 @@ use crate::{
     Error,
 };
 use reth_libmdbx::{self, Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
-
-/// Alias type for a `(key, value)` result coming from a cursor.
-pub type PairResult<T> = Result<Option<(<T as Table>::Key, <T as Table>::Value)>, Error>;
-/// Alias type for a `(key, value)` result coming from an iterator.
-pub type IterPairResult<T> = Option<Result<(<T as Table>::Key, <T as Table>::Value), Error>>;
-/// Alias type for a value result coming from a cursor without its key.
-pub type ValueOnlyResult<T> = Result<Option<<T as Table>::Value>, Error>;
 
 /// Read only Cursor.
 pub type CursorRO<'tx, T> = Cursor<'tx, RO, T>;

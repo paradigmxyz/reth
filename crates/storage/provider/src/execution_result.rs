@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 /// Execution Result containing vector of transaction changesets
 /// and block reward if present
-#[derive(Debug)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct ExecutionResult {
     /// Transaction changeset containing [Receipt], changed [Accounts][Account] and Storages.
     pub tx_changesets: Vec<TransactionChangeSet>,
@@ -20,7 +20,7 @@ pub struct ExecutionResult {
 /// transaction [Receipt] every change to state ([Account], Storage, [Bytecode])
 /// that this transaction made and its old values
 /// so that history account table can be updated.
-#[derive(Debug, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct TransactionChangeSet {
     /// Transaction receipt
     pub receipt: Receipt,
@@ -33,7 +33,9 @@ pub struct TransactionChangeSet {
 /// Contains old/new account changes
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AccountInfoChangeSet {
-    /// The account is newly created.
+    /// The account is newly created. Account can be created by just by sending balance,
+    ///
+    /// Revert of this changeset is empty account,
     Created {
         /// The newly created account.
         new: Account,
@@ -41,11 +43,15 @@ pub enum AccountInfoChangeSet {
     /// An account was deleted (selfdestructed) or we have touched
     /// an empty account and we need to remove/destroy it.
     /// (Look at state clearing [EIP-158](https://eips.ethereum.org/EIPS/eip-158))
+    ///
+    /// Revert of this changeset is old account
     Destroyed {
         /// The account that was destroyed.
         old: Account,
     },
     /// The account was changed.
+    ///
+    /// revert of this changeset is old account
     Changed {
         /// The account after the change.
         new: Account,
@@ -54,12 +60,34 @@ pub enum AccountInfoChangeSet {
     },
     /// Nothing was changed for the account (nonce/balance).
     NoChange {
-        /// Useful to clear existing empty accounts pre-EIP-161.
+        /// Used to clear existing empty accounts pre-EIP-161.
         is_empty: bool,
     },
 }
 
+impl Default for AccountInfoChangeSet {
+    fn default() -> Self {
+        AccountInfoChangeSet::NoChange { is_empty: false }
+    }
+}
+
 impl AccountInfoChangeSet {
+    /// Create new account info changeset
+    pub fn new(old: Option<Account>, new: Option<Account>) -> Self {
+        match (old, new) {
+            (Some(old), Some(new)) => {
+                if new != old {
+                    Self::Changed { new, old }
+                } else {
+                    if new.is_empty() {}
+                    Self::NoChange { is_empty: true }
+                }
+            }
+            (None, Some(new)) => Self::Created { new },
+            (Some(old), None) => Self::Destroyed { old },
+            (None, None) => Self::NoChange { is_empty: false },
+        }
+    }
     /// Apply the changes from the changeset to a database transaction.
     pub fn apply_to_db<'a, TX: DbTxMut<'a>>(
         self,
@@ -108,7 +136,7 @@ impl AccountInfoChangeSet {
 }
 
 /// Diff change set that is needed for creating history index and updating current world state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone)]
 pub struct AccountChangeSet {
     /// Old and New account account change.
     pub account: AccountInfoChangeSet,

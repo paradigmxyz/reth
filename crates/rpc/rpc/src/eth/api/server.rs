@@ -3,7 +3,10 @@
 
 use super::EthApiSpec;
 use crate::{
-    eth::{api::EthApi, error::EthApiError},
+    eth::{
+        api::{EthApi, EthTransactions},
+        error::EthApiError,
+    },
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
@@ -24,10 +27,10 @@ use std::collections::BTreeMap;
 #[async_trait::async_trait]
 impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
-    Self: EthApiSpec,
+    Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
+    Network: Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
@@ -118,7 +121,7 @@ where
 
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: H256) -> Result<Option<reth_rpc_types::Transaction>> {
-        Ok(EthApi::transaction_by_hash(self, hash).await?)
+        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
