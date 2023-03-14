@@ -1,14 +1,14 @@
 use crate::{
-    eth::error::EthApiError,
+    eth::{error::EthApiError, logs_utils},
     result::{internal_rpc_err, rpc_error_with_code, ToRpcResult},
     EthSubscriptionIdProvider,
 };
 use async_trait::async_trait;
-use jsonrpsee::{
-    core::RpcResult,
-    server::{IdProvider},
+use jsonrpsee::{core::RpcResult, server::IdProvider};
+use reth_primitives::{
+    filter::{Filter, FilterBlockOption, FilteredParams},
+    U256,
 };
-use reth_primitives::{filter::{Filter, FilterBlockOption, FilteredParams}, Block, U256, Receipt};
 use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{FilterChanges, FilterId, Log};
@@ -150,7 +150,7 @@ where
             trace!(target: "rpc::eth::filter", ?id, "uninstalled filter");
             Ok(true)
         } else {
-           Ok(false)
+            Ok(false)
         }
     }
 
@@ -202,7 +202,7 @@ where
     ///  - underlying database error
     ///  - amount of matches exceeds configured limit
     fn filter_logs(&self, filter: &Filter, from_block: u64, to_block: u64) -> RpcResult<Vec<Log>> {
-        let mut logs = Vec::new();
+        let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
         let topics =
@@ -212,47 +212,41 @@ where
         let address_filter = FilteredParams::address_filter(&filter.address);
         let topics_filter = FilteredParams::topics_filter(&topics);
 
+        // loop over the range of new blocks and check logs if the filter matches the log's bloom
+        // filter
         for block_number in from_block..=to_block {
             if let Some(block) = self.client.block_by_number(block_number).to_rpc_result()? {
                 // only if filter matches
                 if FilteredParams::matches_address(block.header.logs_bloom, &address_filter) &&
                     FilteredParams::matches_topics(block.header.logs_bloom, &topics_filter)
                 {
-                    if let Some(receipts) = self.client.receipts_by_block(block.number.into()).to_rpc_result()? {
-                        self.append_matching_block_logs(&mut logs, &filter_params, block, receipts);
+                    // get receipts for the block
+                    if let Some(receipts) =
+                        self.client.receipts_by_block(block.number.into()).to_rpc_result()?
+                    {
+                        let block_hash = block.hash_slow();
+
+                        logs_utils::append_matching_block_logs(
+                            &mut all_logs,
+                            &filter_params,
+                            block_hash,
+                            block_number,
+                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                        );
 
                         // size check
-                        if logs.len() > self.max_logs_in_response {
-                            return Err(
-                                FilterError::QueryExceedsMaxResults(self.max_logs_in_response).into()
+                        if all_logs.len() > self.max_logs_in_response {
+                            return Err(FilterError::QueryExceedsMaxResults(
+                                self.max_logs_in_response,
                             )
+                            .into())
                         }
                     }
                 }
             }
         }
 
-        Ok(logs)
-    }
-
-    /// Appends all logs emitted in the `block` that match the `filter` to the `logs` vector.
-    #[allow(clippy::ptr_arg)]
-    fn append_matching_block_logs(
-        &self,
-        all_logs: &mut Vec<Log>,
-        filter: &FilteredParams,
-        block: Block,
-        receipts: Vec<Receipt>
-    ) {
-        let block_log_index: u32 = 0;
-        let block_hash = block.hash_slow();
-
-        // TODO: unify code with pubsub
-        // loop over all transactions in the block
-        for tx in block.body {
-            let _transaction_log_index: u32 = 0;
-            let _transaction_hash = tx.hash;
-        }
+        Ok(all_logs)
     }
 }
 
@@ -274,7 +268,6 @@ struct ActiveFilter {
 }
 
 #[derive(Clone, Debug)]
-#[allow(clippy::large_enum_variant)]
 enum FilterKind {
     Log(Box<Filter>),
     Block,
@@ -287,8 +280,7 @@ pub enum FilterError {
     #[error("filter not found")]
     FilterNotFound(FilterId),
     #[error("Query exceeds max results {0}")]
-    QueryExceedsMaxResults(usize)
-
+    QueryExceedsMaxResults(usize),
 }
 
 // convert the error
@@ -300,10 +292,7 @@ impl From<FilterError> for jsonrpsee::core::Error {
                 "filter not found",
             ),
             err @ FilterError::QueryExceedsMaxResults(_) => {
-                rpc_error_with_code(
-                    jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                    err.to_string(),
-                )
+                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
     }
