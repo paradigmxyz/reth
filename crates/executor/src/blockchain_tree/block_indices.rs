@@ -2,7 +2,7 @@
 
 use super::chain::{BlockChainId, Chain, ForkBlock};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.  This is main connection
 /// between blocks, chains and canonical chain.
@@ -64,7 +64,7 @@ impl BlockIndices {
     }
 
     /// Returns `true` if the Tree knowns the block hash.
-    pub fn contains_block_hash(&self, block_hash: BlockHash) -> bool {
+    pub fn contains_pending_block_hash(&self, block_hash: BlockHash) -> bool {
         self.blocks_to_chain.contains_key(&block_hash)
     }
 
@@ -76,6 +76,17 @@ impl BlockIndices {
     /// Last finalized block
     pub fn last_finalized_block(&self) -> BlockNumber {
         self.last_finalized_block
+    }
+
+    /// Insert non fork block.
+    pub fn insert_non_fork_block(
+        &mut self,
+        block_number: BlockNumber,
+        block_hash: BlockHash,
+        chain_id: BlockChainId,
+    ) {
+        self.index_number_to_block.entry(block_number).or_default().insert(block_hash);
+        self.blocks_to_chain.insert(block_hash, chain_id);
     }
 
     /// Insert block to chain and fork child indices of the new chain
@@ -173,9 +184,15 @@ impl BlockIndices {
         block_hash: BlockHash,
     ) -> BTreeSet<BlockChainId> {
         // rm number -> block
-        if let Some(set) = self.index_number_to_block.get_mut(&block_number) {
+        if let Entry::Occupied(mut entry) = self.index_number_to_block.entry(block_number) {
+            let set = entry.get_mut();
             set.remove(&block_hash);
+            // remove set if empty
+            if set.is_empty() {
+                entry.remove();
+            }
         }
+
         // rm block -> chain_id
         self.blocks_to_chain.remove(&block_hash);
 
@@ -210,12 +227,24 @@ impl BlockIndices {
             |(number, hash, parent_hash)| {
                 // rm block -> chain_id
                 self.blocks_to_chain.remove(&hash);
+
                 // rm number -> block
-                if let Some(set) = self.index_number_to_block.get_mut(&number) {
+                if let Entry::Occupied(mut entry) = self.index_number_to_block.entry(number) {
+                    let set = entry.get_mut();
                     set.remove(&hash);
+                    // remove set if empty
+                    if set.is_empty() {
+                        entry.remove();
+                    }
                 }
-                if let Some(set) = self.fork_to_child.get_mut(&parent_hash) {
+                // rm fork block -> hash
+                if let Entry::Occupied(mut entry) = self.fork_to_child.entry(parent_hash) {
+                    let set = entry.get_mut();
                     set.remove(&hash);
+                    // remove set if empty
+                    if set.is_empty() {
+                        entry.remove();
+                    }
                 }
             },
         );

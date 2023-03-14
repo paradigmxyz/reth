@@ -184,6 +184,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         // append the block if it is continuing the chain.
         if chain_tip == block.parent_hash {
+            let block_hash = block.hash();
+            let block_number = block.number;
             parent_chain.append_block(
                 block,
                 block_hashes,
@@ -192,6 +194,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 &self.externals.consensus,
                 &self.externals.executor_factory,
             )?;
+            drop(provider);
+            self.block_indices.insert_non_fork_block(block_number, block_hash, chain_id)
         } else {
             let chain = parent_chain.new_chain_fork(
                 block,
@@ -339,7 +343,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
 
         // check if block is already inside Tree
-        if self.block_indices.contains_block_hash(block.hash()) {
+        if self.block_indices.contains_pending_block_hash(block.hash()) {
             // block is known return that is inserted
             return Ok(true)
         }
@@ -649,6 +653,50 @@ mod tests {
         tx_mut.commit().unwrap();
     }
 
+    /// Test data structure that will check tree internals
+    #[derive(Default, Debug)]
+    struct TreeTester {
+        /// Number of chains
+        chain_num: Option<usize>,
+        /// Check block to chain index
+        block_to_chain: Option<HashMap<BlockHash, BlockChainId>>,
+        /// Check fork to child index
+        fork_to_child: Option<HashMap<BlockHash, HashSet<BlockHash>>>,
+    }
+
+    impl TreeTester {
+        fn with_chain_num(mut self, chain_num: usize) -> Self {
+            self.chain_num = Some(chain_num);
+            self
+        }
+        fn with_block_to_chain(mut self, block_to_chain: HashMap<BlockHash, BlockChainId>) -> Self {
+            self.block_to_chain = Some(block_to_chain);
+            self
+        }
+        fn with_fork_to_child(
+            mut self,
+            fork_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
+        ) -> Self {
+            self.fork_to_child = Some(fork_to_child);
+            self
+        }
+
+        fn assert<DB: Database, C: Consensus, EF: ExecutorFactory>(
+            self,
+            tree: &BlockchainTree<DB, C, EF>,
+        ) {
+            if let Some(chain_num) = self.chain_num {
+                assert_eq!(tree.chains.len(), chain_num);
+            }
+            if let Some(block_to_chain) = self.block_to_chain {
+                assert_eq!(*tree.block_indices.blocks_to_chain(), block_to_chain);
+            }
+            if let Some(fork_to_child) = self.fork_to_child {
+                assert_eq!(*tree.block_indices.fork_to_child(), fork_to_child);
+            }
+        }
+    }
+
     #[test]
     fn sanity_path() {
         let data = BlockChainTestData::default();
@@ -709,6 +757,11 @@ mod tests {
         //  /
         // g1 (canonical blocks)
         // |
+        TreeTester::default()
+            .with_chain_num(1)
+            .with_block_to_chain(HashMap::from([(block1.hash, 0), (block2.hash, 0)]))
+            .with_fork_to_child(HashMap::from([(block1.parent_hash, HashSet::from([block1.hash]))]))
+            .assert(&tree);
 
         // make block1 canonical
         assert_eq!(tree.make_canonical(&block1.hash()), Ok(()));
@@ -724,6 +777,11 @@ mod tests {
         // |
         // g1 (canonical blocks)
         // |
+        TreeTester::default()
+            .with_chain_num(0)
+            .with_block_to_chain(HashMap::from([]))
+            .with_fork_to_child(HashMap::from([]))
+            .assert(&tree);
 
         let mut block1a = block1.clone();
         let block1a_hash = H256([0x33; 32]);
@@ -734,8 +792,17 @@ mod tests {
 
         // reinsert two blocks that point to canonical chain
         assert_eq!(tree.insert_block_with_senders(&block1a), Ok(true));
-        assert_eq!(tree.insert_block_with_senders(&block2a), Ok(true));
 
+        TreeTester::default()
+            .with_chain_num(1)
+            .with_block_to_chain(HashMap::from([(block1a_hash, 1)]))
+            .with_fork_to_child(HashMap::from([(
+                block1.parent_hash,
+                HashSet::from([block1a_hash]),
+            )]))
+            .assert(&tree);
+
+        assert_eq!(tree.insert_block_with_senders(&block2a), Ok(true));
         // Trie state:
         // b2   b2a (side chain)
         // |   /
@@ -745,18 +812,14 @@ mod tests {
         // |/
         // g1 (10)
         // |
-        assert_eq!(tree.chains.len(), 2);
-        assert_eq!(
-            *tree.block_indices.blocks_to_chain(),
-            HashMap::from([(block1a_hash, 1), (block2a_hash, 2)])
-        );
-        assert_eq!(
-            *tree.block_indices.fork_to_child(),
-            HashMap::from([
+        TreeTester::default()
+            .with_chain_num(2)
+            .with_block_to_chain(HashMap::from([(block1a_hash, 1), (block2a_hash, 2)]))
+            .with_fork_to_child(HashMap::from([
                 (block1.parent_hash, HashSet::from([block1a_hash])),
-                (block1.hash(), HashSet::from([block2a_hash]))
-            ])
-        );
+                (block1.hash(), HashSet::from([block2a_hash])),
+            ]))
+            .assert(&tree);
 
         // make b2a canonical
         assert_eq!(tree.make_canonical(&block2a_hash), Ok(()));
@@ -769,6 +832,14 @@ mod tests {
         // |/
         // g1 (10)
         // |
+        TreeTester::default()
+            .with_chain_num(2)
+            .with_block_to_chain(HashMap::from([(block1a_hash, 1), (block2.hash, 3)]))
+            .with_fork_to_child(HashMap::from([
+                (block1.parent_hash, HashSet::from([block1a_hash])),
+                (block1.hash(), HashSet::from([block2.hash])),
+            ]))
+            .assert(&tree);
 
         assert_eq!(tree.make_canonical(&block1a_hash), Ok(()));
         // Trie state:
@@ -780,19 +851,18 @@ mod tests {
         // |/
         // g1 (10)
         // |
-
-        assert_eq!(tree.chains.len(), 2);
-        assert_eq!(
-            *tree.block_indices.blocks_to_chain(),
-            HashMap::from([(block1.hash(), 4), (block2a_hash, 4), (block2.hash(), 3)])
-        );
-        assert_eq!(
-            *tree.block_indices.fork_to_child(),
-            HashMap::from([
-                (block1.parent_hash, HashSet::from([block1.hash()])),
-                (block1.hash(), HashSet::from([block2.hash()]))
-            ])
-        );
+        TreeTester::default()
+            .with_chain_num(2)
+            .with_block_to_chain(HashMap::from([
+                (block1.hash, 4),
+                (block2a_hash, 4),
+                (block2.hash, 3),
+            ]))
+            .with_fork_to_child(HashMap::from([
+                (block1.parent_hash, HashSet::from([block1.hash])),
+                (block1.hash(), HashSet::from([block2.hash])),
+            ]))
+            .assert(&tree);
 
         // make b2 canonical
         assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
@@ -805,6 +875,14 @@ mod tests {
         // |/
         // g1 (10)
         // |
+        TreeTester::default()
+            .with_chain_num(2)
+            .with_block_to_chain(HashMap::from([(block1a_hash, 5), (block2a_hash, 4)]))
+            .with_fork_to_child(HashMap::from([
+                (block1.parent_hash, HashSet::from([block1a_hash])),
+                (block1.hash(), HashSet::from([block2a_hash])),
+            ]))
+            .assert(&tree);
 
         // finalize b1 that would make b1a removed from tree
         tree.finalize_block(11);
@@ -816,6 +894,11 @@ mod tests {
         // |
         // g1 (10)
         // |
+        TreeTester::default()
+            .with_chain_num(1)
+            .with_block_to_chain(HashMap::from([(block2a_hash, 4)]))
+            .with_fork_to_child(HashMap::from([(block1.hash(), HashSet::from([block2a_hash]))]))
+            .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
         assert_eq!(tree.update_canonical_hashes(12), Ok(()));
@@ -826,5 +909,10 @@ mod tests {
         // |
         // g1 (10)
         // |
+        TreeTester::default()
+            .with_chain_num(0)
+            .with_block_to_chain(HashMap::from([]))
+            .with_fork_to_child(HashMap::from([]))
+            .assert(&tree);
     }
 }
