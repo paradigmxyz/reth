@@ -81,18 +81,23 @@
 
 pub use crate::{
     config::PoolConfig,
-    ordering::TransactionOrdering,
+    ordering::{CostOrdering, TransactionOrdering},
     traits::{
         BestTransactions, OnNewBlockEvent, PoolTransaction, PooledTransaction, PropagateKind,
         PropagatedTransactions, TransactionOrigin, TransactionPool,
     },
-    validate::{TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction},
+    validate::{
+        EthTransactionValidator, TransactionValidationOutcome, TransactionValidator,
+        ValidPoolTransaction,
+    },
 };
 use crate::{
     error::PoolResult,
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
+
+use crate::error::PoolError;
 use reth_primitives::{TxHash, U256};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -110,6 +115,24 @@ mod validate;
 /// Common test helpers for mocking A pool
 pub mod test_utils;
 
+// TX_SLOT_SIZE is used to calculate how many data slots a single transaction
+// takes up based on its size. The slots are used as DoS protection, ensuring
+// that validating a new transaction remains a constant operation (in reality
+// O(maxslots), where max slots are 4 currently).
+pub(crate) const TX_SLOT_SIZE: usize = 32 * 1024;
+
+// TX_MAX_SIZE is the maximum size a single transaction can have. This field has
+// non-trivial consequences: larger transactions are significantly harder and
+// more expensive to propagate; larger transactions also take more resources
+// to validate whether they fit into the pool or not.
+pub(crate) const TX_MAX_SIZE: usize = 4 * TX_SLOT_SIZE; //128KB
+
+// Maximum bytecode to permit for a contract
+pub(crate) const MAX_CODE_SIZE: usize = 24576;
+
+// Maximum initcode to permit in a creation transaction and create instructions
+pub(crate) const MAX_INIT_CODE_SIZE: usize = 2 * MAX_CODE_SIZE;
+
 /// A shareable, generic, customizable `TransactionPool` implementation.
 #[derive(Debug)]
 pub struct Pool<V: TransactionValidator, T: TransactionOrdering> {
@@ -125,8 +148,8 @@ where
     T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
 {
     /// Create a new transaction pool instance.
-    pub fn new(client: Arc<V>, ordering: Arc<T>, config: PoolConfig) -> Self {
-        Self { pool: Arc::new(PoolInner::new(client, ordering, config)) }
+    pub fn new(validator: V, ordering: T, config: PoolConfig) -> Self {
+        Self { pool: Arc::new(PoolInner::new(validator, ordering, config)) }
     }
 
     /// Returns the wrapped pool.
@@ -162,8 +185,10 @@ where
         transaction: V::Transaction,
     ) -> (TxHash, TransactionValidationOutcome<V::Transaction>) {
         let hash = *transaction.hash();
+
         // TODO(mattsse): this is where additional validate checks would go, like banned senders
         // etc...
+
         let outcome = self.pool.validator().validate_transaction(origin, transaction).await;
 
         (hash, outcome)
@@ -203,7 +228,18 @@ where
         transaction: Self::Transaction,
     ) -> PoolResult<TxHash> {
         let (_, tx) = self.validate(origin, transaction).await;
-        self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+
+        match tx {
+            TransactionValidationOutcome::Valid { .. } => {
+                self.pool.add_transactions(origin, std::iter::once(tx)).pop().expect("exists; qed")
+            }
+            TransactionValidationOutcome::Invalid(transaction, error) => {
+                Err(PoolError::InvalidTransaction(*transaction.hash(), error))
+            }
+            TransactionValidationOutcome::Error(transaction, error) => {
+                Err(PoolError::Other(*transaction.hash(), error))
+            }
+        }
     }
 
     async fn add_transactions(
@@ -212,6 +248,7 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> PoolResult<Vec<PoolResult<TxHash>>> {
         let validated = self.validate_all(origin, transactions).await?;
+
         let transactions = self.pool.add_transactions(origin, validated.into_values());
         Ok(transactions)
     }
@@ -265,7 +302,7 @@ where
     }
 }
 
-impl<V: TransactionValidator, O: TransactionOrdering> Clone for Pool<V, O> {
+impl<V: TransactionValidator, T: TransactionOrdering> Clone for Pool<V, T> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
     }

@@ -27,7 +27,8 @@
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient, TestStatusUpdater};
-//! # use reth_primitives::PeerId;
+//! # use reth_executor::Factory;
+//! # use reth_primitives::{PeerId,MAINNET};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
@@ -40,12 +41,13 @@
 //! #    consensus.clone(),
 //! #    create_test_rw_db()
 //! # );
+//! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! # let (status_updater, _) = TestStatusUpdater::new();
 //! // Create a pipeline that can fully sync
 //! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
 //! Pipeline::builder()
 //!     .add_stages(
-//!         DefaultStages::new(consensus, headers_downloader, bodies_downloader, status_updater)
+//!         DefaultStages::new(consensus, headers_downloader, bodies_downloader, status_updater, factory)
 //!     )
 //!     .build();
 //! ```
@@ -54,11 +56,6 @@ mod id;
 mod pipeline;
 mod stage;
 mod util;
-
-/// The real database type we use in Reth using MDBX.
-pub type DefaultDB<'a> = LatestStateProviderRef<'a, 'a, Tx<'a, RW, WriteMap>>;
-use reth_db::mdbx::{tx::Tx, WriteMap, RW};
-use reth_provider::LatestStateProviderRef;
 
 #[allow(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]

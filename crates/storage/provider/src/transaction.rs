@@ -14,8 +14,8 @@ use reth_db::{
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
-    StorageEntry, TransitionId, TxNumber, H256, U256,
+    keccak256, Account, Address, BlockHash, BlockNumber, Bytecode, ChainSpec, Hardfork, Header,
+    SealedBlock, StorageEntry, TransitionId, TxNumber, H256, U256,
 };
 use reth_tracing::tracing::{info, trace};
 use std::{
@@ -308,8 +308,8 @@ where
         // merkle tree
         {
             let current_root = self.get_header(parent_block_number)?.state_root;
-            let mut loader = DBTrieLoader::default();
-            let root = loader.update_root(self, current_root, from..to).and_then(|e| e.root())?;
+            let mut loader = DBTrieLoader::new(self.deref_mut());
+            let root = loader.update_root(current_root, from..to).and_then(|e| e.root())?;
             if root != block.state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
@@ -710,15 +710,16 @@ where
                 for (hash, bytecode) in result.new_bytecodes.into_iter() {
                     // make different types of bytecode. Checked and maybe even analyzed (needs to
                     // be packed). Currently save only raw bytes.
-                    let bytecode = bytecode.bytes();
-                    trace!(target: "sync::stages::execution", ?hash, ?bytecode, len = bytecode.len(), "Inserting bytecode");
-                    self.put::<tables::Bytecodes>(hash, bytecode[..bytecode.len()].to_vec())?;
-
+                    let bytes = bytecode.bytes();
+                    trace!(target: "sync::stages::execution", ?hash, ?bytes, len = bytes.len(), "Inserting bytecode");
+                    self.put::<tables::Bytecodes>(hash, Bytecode(bytecode))?;
                     // NOTE: bytecode bytes are not inserted in change set and can be found in
                     // separate table
                 }
                 current_transition_id += 1;
             }
+
+            let have_block_changeset = !results.block_changesets.is_empty();
 
             // If there are any post block changes, we will add account changesets to db.
             for (address, changeset) in results.block_changesets.into_iter() {
@@ -730,7 +731,13 @@ where
                     spurious_dragon_active,
                 )?;
             }
-            current_transition_id += 1;
+
+            // Transition is incremeneted every time before Paris hardfork and after
+            // Shanghai only if there are Withdrawals in the block. So it is correct to
+            // to increment transition id every time there is a block changeset present.
+            if have_block_changeset {
+                current_transition_id += 1;
+            }
         }
         Ok(())
     }

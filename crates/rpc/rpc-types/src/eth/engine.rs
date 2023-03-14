@@ -145,6 +145,11 @@ impl PayloadStatus {
     pub fn from_status(status: PayloadStatusEnum) -> Self {
         Self { status, latest_valid_hash: None }
     }
+
+    pub fn with_latest_valid_hash(mut self, latest_valid_hash: H256) -> Self {
+        self.latest_valid_hash = Some(latest_valid_hash);
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

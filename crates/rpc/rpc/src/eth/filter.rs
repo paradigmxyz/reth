@@ -1,12 +1,10 @@
 use crate::{
     eth::error::EthApiError,
     result::{internal_rpc_err, rpc_error_with_code, ToRpcResult},
+    EthSubscriptionIdProvider,
 };
 use async_trait::async_trait;
-use jsonrpsee::{
-    core::RpcResult,
-    server::{IdProvider, RandomIntegerIdProvider},
-};
+use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_primitives::{
     filter::{Filter, FilterBlockOption, FilteredParams},
     Block, U256,
@@ -36,7 +34,7 @@ impl<Client, Pool> EthFilter<Client, Pool> {
             client,
             active_filters: Default::default(),
             pool,
-            id_provider: Arc::new(RandomIntegerIdProvider),
+            id_provider: Arc::new(EthSubscriptionIdProvider::default()),
             max_logs_in_response: DEFAULT_MAX_LOGS_IN_RESPONSE,
         };
         Self { inner: Arc::new(inner) }
@@ -54,18 +52,22 @@ where
     Client: BlockProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
+    /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::Log(Box::new(filter))).await
     }
 
+    /// Handler for `eth_newBlockFilter`
     async fn new_block_filter(&self) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::Block).await
     }
 
+    /// Handler for `eth_newPendingTransactionFilter`
     async fn new_pending_transaction_filter(&self) -> RpcResult<FilterId> {
         self.inner.install_filter(FilterKind::PendingTransaction).await
     }
 
+    /// Handler for `eth_getFilterChanges`
     async fn filter_changes(&self, id: FilterId) -> RpcResult<FilterChanges> {
         let info = self.inner.client.chain_info().to_rpc_result()?;
         let best_number = info.best_number;
@@ -136,10 +138,12 @@ where
         }
     }
 
+    /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, _id: FilterId) -> RpcResult<Vec<Log>> {
         todo!()
     }
 
+    /// Handler for `eth_uninstallFilter`
     async fn uninstall_filter(&self, id: FilterId) -> RpcResult<bool> {
         let mut filters = self.inner.active_filters.inner.lock().await;
         if filters.remove(&id).is_some() {
@@ -150,6 +154,7 @@ where
         }
     }
 
+    /// Handler for `eth_getLogs`
     async fn logs(&self, _filter: Filter) -> RpcResult<Vec<Log>> {
         todo!()
     }

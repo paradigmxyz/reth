@@ -1,12 +1,13 @@
 use crate::{
-    AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider,
-    HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
+    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
-    keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag, Bytes,
-    ChainInfo, Header, StorageKey, StorageValue, TransactionSigned, TxHash, H256, U256,
+    keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionSigned,
+    TxHash, TxNumber, H256, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
@@ -26,7 +27,7 @@ pub struct MockEthProvider {
 #[derive(Debug, Clone)]
 pub struct ExtendedAccount {
     account: Account,
-    bytecode: Option<Bytes>,
+    bytecode: Option<Bytecode>,
     storage: HashMap<StorageKey, StorageValue>,
 }
 
@@ -44,7 +45,7 @@ impl ExtendedAccount {
     pub fn with_bytecode(mut self, bytecode: Bytes) -> Self {
         let hash = keccak256(&bytecode);
         self.account.bytecode_hash = Some(hash);
-        self.bytecode = Some(bytecode);
+        self.bytecode = Some(Bytecode::new_raw(bytecode.into()));
         self
     }
 }
@@ -155,6 +156,20 @@ impl TransactionsProvider for MockEthProvider {
     }
 }
 
+impl ReceiptProvider for MockEthProvider {
+    fn receipt(&self, _id: TxNumber) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipt_by_hash(&self, _hash: TxHash) -> Result<Option<Receipt>> {
+        Ok(None)
+    }
+
+    fn receipts_by_block(&self, _block: BlockId) -> Result<Option<Vec<Receipt>>> {
+        Ok(None)
+    }
+}
+
 impl BlockHashProvider for MockEthProvider {
     fn block_hash(&self, number: U256) -> Result<Option<H256>> {
         let lock = self.blocks.lock();
@@ -226,7 +241,7 @@ impl StateProvider for MockEthProvider {
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).cloned())
     }
 
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytes>> {
+    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
         let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
             match (account.account.bytecode_hash.as_ref(), account.bytecode.as_ref()) {
@@ -236,6 +251,14 @@ impl StateProvider for MockEthProvider {
                 _ => None,
             }
         }))
+    }
+
+    fn proof(
+        &self,
+        _address: Address,
+        _keys: &[H256],
+    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        todo!()
     }
 }
 

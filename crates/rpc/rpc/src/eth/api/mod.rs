@@ -10,8 +10,10 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, ChainInfo, TransactionSigned, H256, U64,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
-use std::num::NonZeroUsize;
+use reth_provider::{
+    BlockProvider, EvmEnvProvider, StateProvider as StateProviderTrait, StateProviderFactory,
+};
+use std::{num::NonZeroUsize, ops::Deref};
 
 use crate::eth::{cache::EthStateCache, error::EthResult};
 use reth_provider::providers::ChainState;
@@ -97,6 +99,37 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     }
 }
 
+// Transparent wrapper to enable state access helpers
+// returning latest state provider when appropiate
+pub(crate) enum StateProvider<'a, H, L> {
+    History(H),
+    Latest(L),
+    _Unreachable(&'a ()), // like a PhantomData for 'a
+}
+
+type HistoryOrLatest<'a, Client> = StateProvider<
+    'a,
+    <Client as StateProviderFactory>::HistorySP<'a>,
+    <Client as StateProviderFactory>::LatestSP<'a>,
+>;
+
+impl<'a, H, L> Deref for StateProvider<'a, H, L>
+where
+    Self: 'a,
+    H: StateProviderTrait + 'a,
+    L: StateProviderTrait + 'a,
+{
+    type Target = dyn StateProviderTrait + 'a;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            StateProvider::History(h) => h,
+            StateProvider::Latest(l) => l,
+            StateProvider::_Unreachable(()) => unreachable!(),
+        }
+    }
+}
+
 // === State access helpers ===
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
@@ -119,11 +152,11 @@ where
     pub(crate) fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+    ) -> Result<Option<HistoryOrLatest<'_, Client>>> {
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
-            self.latest_state()
+            self.latest_state().map(|v| Some(StateProvider::Latest(v)))
         }
     }
 
@@ -131,9 +164,11 @@ where
     pub(crate) fn state_at_block_id(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+    ) -> Result<Option<HistoryOrLatest<'_, Client>>> {
         match block_id {
-            BlockId::Hash(hash) => self.state_at_hash(hash.into()).map(Some),
+            BlockId::Hash(hash) => {
+                self.state_at_hash(hash.into()).map(|s| Some(StateProvider::History(s)))
+            }
             BlockId::Number(num) => self.state_at_block_number(num),
         }
     }
@@ -144,7 +179,7 @@ where
     pub(crate) fn state_at_block_number(
         &self,
         num: BlockNumberOrTag,
-    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
+    ) -> Result<Option<HistoryOrLatest<'_, Client>>> {
         if let Some(number) = self.convert_block_number(num)? {
             self.state_at_number(number).map(Some)
         } else {
@@ -161,18 +196,16 @@ where
     }
 
     /// Returns the state at the given block number
-    pub(crate) fn state_at_number(
-        &self,
-        block_number: u64,
-    ) -> Result<<Client as StateProviderFactory>::HistorySP<'_>> {
-        self.client().history_by_block_number(block_number)
+    pub(crate) fn state_at_number(&self, block_number: u64) -> Result<HistoryOrLatest<'_, Client>> {
+        match self.convert_block_number(BlockNumberOrTag::Latest)? {
+            Some(num) if num == block_number => self.latest_state().map(StateProvider::Latest),
+            _ => self.client().history_by_block_number(block_number).map(StateProvider::History),
+        }
     }
 
     /// Returns the _latest_ state
-    pub(crate) fn latest_state(
-        &self,
-    ) -> Result<Option<<Client as StateProviderFactory>::HistorySP<'_>>> {
-        self.state_at_block_number(BlockNumberOrTag::Latest)
+    pub(crate) fn latest_state(&self) -> Result<<Client as StateProviderFactory>::LatestSP<'_>> {
+        self.client().latest()
     }
 }
 

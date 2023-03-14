@@ -77,7 +77,7 @@ where
         &mut self,
         configs: impl IntoIterator<Item = PeerConfig<C>>,
     ) -> Result<(), NetworkError> {
-        let peers = configs.into_iter().map(|c| async { c.launch().await }).collect::<Vec<_>>();
+        let peers = configs.into_iter().map(|c| c.launch()).collect::<Vec<_>>();
         let peers = futures::future::join_all(peers).await;
         for peer in peers {
             self.peers.push(peer?);

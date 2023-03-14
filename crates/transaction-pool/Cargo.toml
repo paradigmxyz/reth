@@ -19,6 +19,7 @@ normal = [
 
 # reth
 reth-primitives = { path  = "../primitives" }
+reth-provider = { path = "../storage/provider" }
 reth-rlp = { path = "../rlp" }
 
 # async/futures
