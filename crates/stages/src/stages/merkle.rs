@@ -2,7 +2,7 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, Unwi
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::consensus;
 use reth_provider::{trie::DBTrieLoader, Transaction};
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::DerefMut};
 use tracing::*;
 
 /// The [`StageId`] of the merkle hashing execution stage.
@@ -108,14 +108,14 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else if to_transition - from_transition > threshold || stage_progress == 0 {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             // if there are more blocks than threshold it is faster to rebuild the trie
-            DBTrieLoader::<DB>::new(tx)
+            DBTrieLoader::new(tx.deref_mut())
                 .calculate_root()
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
             // Iterate over changeset (similar to Hashing stages) and take new values
             let current_root = tx.get_header(stage_progress)?.state_root;
-            DBTrieLoader::<DB>::new(tx)
+            DBTrieLoader::new(tx.deref_mut())
                 .update_root(current_root, from_transition..to_transition)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
@@ -160,7 +160,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let block_root = DBTrieLoader::<DB>::new(tx)
+        let block_root = DBTrieLoader::new(tx.deref_mut())
             .update_root(current_root, from_transition..to_transition)
             .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
@@ -191,6 +191,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+        database::DatabaseGAT,
         mdbx::{Env, WriteMap},
         tables,
         transaction::{DbTx, DbTxMut},
@@ -199,7 +200,7 @@ mod tests {
         random_block, random_block_range, random_contract_account_range, random_transition_range,
     };
     use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, ops::Deref};
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
@@ -262,8 +263,8 @@ mod tests {
 
     fn create_trie_loader<'tx, 'db>(
         tx: &'tx Transaction<'db, Env<WriteMap>>,
-    ) -> DBTrieLoader<'tx, 'db, Env<WriteMap>> {
-        DBTrieLoader::<Env<WriteMap>>::new(tx)
+    ) -> DBTrieLoader<'tx, <Env<WriteMap> as DatabaseGAT<'db>>::TXMut> {
+        DBTrieLoader::new(tx.deref())
     }
 
     struct MerkleTestRunner {

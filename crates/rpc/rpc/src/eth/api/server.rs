@@ -374,17 +374,24 @@ where
     /// Handler for: `eth_getProof`
     async fn get_proof(
         &self,
-        _address: Address,
-        _keys: Vec<H256>,
-        _block_number: Option<BlockId>,
+        address: Address,
+        keys: Vec<H256>,
+        block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        Err(internal_rpc_err("unimplemented"))
+        let res = EthApi::get_proof(self, address, keys, block_number);
+
+        Ok(res.map_err(|e| match e {
+            EthApiError::InvalidBlockRange => {
+                internal_rpc_err("eth_getProof is unimplemented for historical blocks")
+            }
+            _ => e.into(),
+        })?)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::eth::cache::EthStateCache;
+    use crate::{eth::cache::EthStateCache, EthApi};
     use jsonrpsee::{
         core::{error::Error as RpcError, RpcResult},
         types::error::{CallError, INVALID_PARAMS_CODE},
@@ -395,8 +402,6 @@ mod tests {
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-
-    use crate::EthApi;
 
     #[tokio::test]
     /// Handler for: `eth_test_fee_history`

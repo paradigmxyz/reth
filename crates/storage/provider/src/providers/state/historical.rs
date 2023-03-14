@@ -10,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Account, Address, Bytecode, StorageKey, StorageValue, TransitionId, H256, U256,
+    Account, Address, Bytecode, Bytes, StorageKey, StorageValue, TransitionId, H256, U256,
 };
 use std::marker::PhantomData;
 
@@ -118,6 +118,15 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
+    }
+
+    /// Get account and storage proofs.
+    fn proof(
+        &self,
+        _address: Address,
+        _keys: &[H256],
+    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        todo!("this should retrieve past state info and generate proof")
     }
 }
 

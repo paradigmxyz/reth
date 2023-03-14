@@ -25,6 +25,7 @@ use revm::{
     },
     Database,
 };
+use std::ops::Deref;
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
@@ -66,7 +67,7 @@ where
     ) -> EthResult<(ResultAndState, Env)> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        self.call_with(cfg, block_env, request, state, state_overrides)
+        self.call_with(cfg, block_env, request, &*state, state_overrides)
     }
 
     /// Executes the call request using the given environment against the state provider
@@ -106,7 +107,7 @@ where
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        self.estimate_gas_with(cfg, block_env, request, state)
+        self.estimate_gas_with(cfg, block_env, request, &*state)
     }
 
     /// Estimates the gas usage of the `request` with the state.
@@ -295,7 +296,7 @@ where
         cfg.disable_block_gas_limit = true;
 
         let env = build_call_evm_env(cfg, block, request.clone())?;
-        let mut db = SubState::new(State::new(state));
+        let mut db = SubState::new(State::new(state.deref()));
 
         let from = request.from.unwrap_or_default();
         let to = if let Some(to) = request.to {

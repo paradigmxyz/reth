@@ -252,6 +252,14 @@ impl StateProvider for MockEthProvider {
             }
         }))
     }
+
+    fn proof(
+        &self,
+        _address: Address,
+        _keys: &[H256],
+    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+        todo!()
+    }
 }
 
 impl EvmEnvProvider for MockEthProvider {
