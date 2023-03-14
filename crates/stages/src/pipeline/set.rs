@@ -104,16 +104,6 @@ where
         self
     }
 
-    /// Adds the given [`Stage`] to the beginning of this set.
-    ///
-    /// If the stage was already in the group, it is removed from its previous place.
-    pub fn begin_with_stage<S: Stage<DB> + 'static>(mut self, stage: S) -> Self {
-        let target_index = 0;
-        self.order.insert(target_index, stage.id());
-        self.upsert_stage_state(Box::new(stage), target_index);
-        self
-    }
-
     /// Adds the given [`Stage`] at the end of this set.
     ///
     /// If the stage was already in the group, it is removed from its previous place.
@@ -194,11 +184,6 @@ where
             self.stages.get_mut(&stage_id).expect("Cannot disable a stage that is not in the set.");
         entry.enabled = false;
         self
-    }
-
-    /// Takes the given [`Stage`], removing it from the set if it exists.
-    pub fn take(&mut self, stage_id: StageId) -> Option<Box<dyn Stage<DB>>> {
-        self.stages.remove(&stage_id).map(|entry| entry.stage)
     }
 
     /// Consumes the builder and returns the contained [`Stage`]s in the order specified.
