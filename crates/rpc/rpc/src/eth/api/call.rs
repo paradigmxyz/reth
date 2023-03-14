@@ -23,7 +23,12 @@ use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
     primitives::{
+<<<<<<< HEAD
         BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState, TransactTo, OutOfGasError
+=======
+        BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, OutOfGasError, ResultAndState,
+        TransactTo,
+>>>>>>> c9428d22 (cargo fmt)
     },
     Database,
 };
@@ -168,11 +173,18 @@ where
             }
             ExecutionResult::Halt { reason, .. } => {
                 return match reason {
-                    Halt::OutOfGas(OutOfGasError::BasicOutOfGas) => Err(InvalidTransactionError::BasicOutOfGas(gas_limit).into()),
-                    //Halt::OutOfGas(OutOfGasError::MemoryLimit) => Err(InvalidTransactionError::MemoryLimitOutOfGas(gas_limit).into()),
-                    Halt::OutOfGas(OutOfGasError::Memory) => Err(InvalidTransactionError::MemoryOutOfGas(gas_limit).into()),
-                    Halt::OutOfGas(OutOfGasError::Precompile) => Err(InvalidTransactionError::PrecompileOutOfGas(gas_limit).into()),
-                    //Halt::OutOfGas(OutOfGasError::InvalidOperand) => Err(InvalidTransactionError::InvalidOperandOutOfGas(gas_limit).into()),
+                    Halt::OutOfGas(OutOfGasError::BasicOutOfGas) => {
+                        Err(InvalidTransactionError::BasicOutOfGas(gas_limit).into())
+                    }
+                    Halt::OutOfGas(OutOfGasError::Memory) => {
+                        Err(InvalidTransactionError::MemoryOutOfGas(gas_limit).into())
+                    }
+                    Halt::OutOfGas(OutOfGasError::Precompile) => {
+                        Err(InvalidTransactionError::PrecompileOutOfGas(gas_limit).into())
+                    }
+                    Halt::OutOfGas(OutOfGasError::InvalidOperand) => {
+                        Err(InvalidTransactionError::InvalidOperandOutOfGas(gas_limit).into())
+                    }
                     Halt::NonceOverflow => Err(InvalidTransactionError::NonceMaxValue.into()),
                     err => Err(InvalidTransactionError::EvmHalt(err).into()),
                 }
@@ -188,7 +200,8 @@ where
                         ExecutionResult::Success { .. } => {
                             // transaction succeeded by manually increasing the gas limit to
                             // highest, which means the caller lacks funds to pay for the tx
-                            Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into())
+                            Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit))
+                                .into())
                         }
                         ExecutionResult::Revert { .. } => {
                             // reverted again after bumping the limit

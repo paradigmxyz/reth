@@ -159,18 +159,17 @@ pub enum InvalidTransactionError {
     /// Thrown during estimate if caller has insufficient funds to cover the tx.
     #[error("Out of gas: gas required exceeds allowance: {0:?}")]
     BasicOutOfGas(U256),
-    /// TODO?
-    //#[error("Out of gas:")]
-    //MemoryLimitOutOfGas(U256),
     /// As BasicOutOfGas but thrown when gas exhausts during memory expansion.
-    #[error("Out of gas: gas exhausts during memory expansion, gas required exceeds allowance: {0:?}")]
+    #[error(
+        "Out of gas: gas exhausts during memory expansion, gas required exceeds allowance: {0:?}"
+    )]
     MemoryOutOfGas(U256),
     /// As BasicOutOfGas but thrown when gas exhausts during precompiled contract execution.
     #[error("Out of gas: gas exhausts during precompiled contract execution, gas required exceeds allowance: {0:?}")]
     PrecompileOutOfGas(U256),
-    /// TODO?
-    // #[error("Out of gas: {0:?}")]
-    // InvalidOperandOutOfGas(U256),
+    /// revm's Type cast error, U256 casts down to a u64 with overflow
+    #[error("Out of gas: revm's Type cast error, U256 casts down to a u64 with overflow {0:?}")]
+    InvalidOperandOutOfGas(U256),
     /// Thrown if executing a transaction failed during estimate/call
     #[error("{0}")]
     Revert(RevertError),
