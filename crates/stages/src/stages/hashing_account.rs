@@ -1,11 +1,12 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::keccak256;
+use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 use tracing::*;
@@ -27,6 +28,43 @@ pub struct AccountHashingStage {
 impl Default for AccountHashingStage {
     fn default() -> Self {
         Self { clean_threshold: 500_000, commit_threshold: 100_000 }
+    }
+}
+
+impl AccountHashingStage {
+    /// Saves the hashing progress
+    pub fn save_checkpoint<DB: Database>(
+        &mut self,
+        tx: &Transaction<'_, DB>,
+        checkpoint: AccountHashingCheckpoint,
+    ) -> Result<(), StageError> {
+        debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?checkpoint, "Saving inner account hashing checkpoint");
+
+        let mut buf = vec![];
+        checkpoint.to_compact(&mut buf);
+
+        Ok(tx.put::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into(), buf)?)
+    }
+
+    /// Gets the hashing progress
+    pub fn get_checkpoint<DB: Database>(
+        &self,
+        tx: &Transaction<'_, DB>,
+    ) -> Result<AccountHashingCheckpoint, StageError> {
+        let buf =
+            tx.get::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into())?.unwrap_or_default();
+
+        if buf.is_empty() {
+            return Ok(AccountHashingCheckpoint::default())
+        }
+
+        let (checkpoint, _) = AccountHashingCheckpoint::from_compact(&buf, buf.len());
+
+        if checkpoint.address.is_some() {
+            debug!(target: "sync::stages::account_hashing::exec", checkpoint = ?checkpoint, "Continuing inner account hashing checkpoint");
+        }
+
+        Ok(checkpoint)
     }
 }
 
@@ -137,43 +175,58 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
-            // clear table, load all accounts and hash it
-            tx.clear::<tables::HashedAccount>()?;
-            tx.commit()?;
+            let mut checkpoint = self.get_checkpoint(tx)?;
 
-            let mut first_key = None;
-            loop {
-                let next_key = {
-                    let mut accounts = tx.cursor_read::<tables::PlainAccountState>()?;
+            if checkpoint.address.is_none() ||
+                // Checkpoint is no longer valid if the range of transitions changed. 
+                // An already hashed account may have been changed with the new range, and therefore should be hashed again. 
+                checkpoint.to != to_transition ||
+                checkpoint.from != from_transition
+            {
+                // clear table, load all accounts and hash it
+                tx.clear::<tables::HashedAccount>()?;
 
-                    let hashed_batch = accounts
-                        .walk(first_key)?
-                        .take(self.commit_threshold as usize)
-                        .map(|res| res.map(|(address, account)| (keccak256(address), account)))
-                        .collect::<Result<BTreeMap<_, _>, _>>()?;
+                checkpoint = AccountHashingCheckpoint::default();
+                self.save_checkpoint(tx, checkpoint)?;
+            }
 
-                    let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
+            let start_address = checkpoint.address.take();
+            let next_address = {
+                let mut accounts = tx.cursor_read::<tables::PlainAccountState>()?;
 
-                    // iterate and put presorted hashed accounts
-                    if first_key.is_none() {
-                        hashed_batch
-                            .into_iter()
-                            .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
-                    } else {
-                        hashed_batch
-                            .into_iter()
-                            .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
-                    }
+                let hashed_batch = accounts
+                    .walk(start_address)?
+                    .take(self.commit_threshold as usize)
+                    .map(|res| res.map(|(address, account)| (keccak256(address), account)))
+                    .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-                    // next key of iterator
-                    accounts.next()?
-                };
-                tx.commit()?;
-                if let Some((next_key, _)) = next_key {
-                    first_key = Some(next_key);
-                    continue
+                let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
+
+                // iterate and put presorted hashed accounts
+                if start_address.is_none() {
+                    hashed_batch
+                        .into_iter()
+                        .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
+                } else {
+                    hashed_batch
+                        .into_iter()
+                        .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
                 }
-                break
+
+                // next key of iterator
+                accounts.next()?
+            };
+
+            if let Some((next_address, _)) = &next_address {
+                checkpoint.address = Some(*next_address);
+                checkpoint.from = from_transition;
+                checkpoint.to = to_transition;
+            }
+
+            self.save_checkpoint(tx, checkpoint)?;
+
+            if next_address.is_some() {
+                return Ok(ExecOutput { stage_progress, done: false })
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
