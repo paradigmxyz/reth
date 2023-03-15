@@ -50,7 +50,7 @@ reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # misc
 auto_impl = "1"
-aquamarine = "0.2.1" # docs
+aquamarine = "0.3.0"
 tracing = "0.1"
 fnv = "1.0"
 thiserror = "1.0"
