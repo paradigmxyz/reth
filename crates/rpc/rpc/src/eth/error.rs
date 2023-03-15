@@ -52,6 +52,9 @@ pub enum EthApiError {
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
+    /// Error related to signing
+    #[error(transparent)]
+    Signing(#[from] SignError),
 }
 
 impl From<EthApiError> for RpcError {
@@ -65,6 +68,7 @@ impl From<EthApiError> for RpcError {
             EthApiError::ConflictingRequestGasPrice { .. } |
             EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
             EthApiError::RequestLegacyGasPriceAndTipSet { .. } |
+            EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) => {
                 rpc_err(INVALID_PARAMS_CODE, error.to_string(), None)
             }
@@ -310,6 +314,20 @@ impl From<PoolError> for EthApiError {
     fn from(err: PoolError) -> Self {
         EthApiError::PoolError(RpcPoolError::from(err))
     }
+}
+
+/// Errors returned from a sign request.
+#[derive(Debug, thiserror::Error)]
+pub enum SignError {
+    /// Error occured while trying to sign data.
+    #[error("Could not sign")]
+    CouldNotSign,
+    /// Signer for requested account not found.
+    #[error("Unknown account")]
+    NoAccount,
+    /// TypedData has invalid format.
+    #[error("Given typed data is not valid")]
+    TypedData,
 }
 
 /// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.
