@@ -3,7 +3,7 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use crate::eth::{cache::EthStateCache, error::EthResult, signer::EthSigner};
+use crate::eth::{cache::EthStateCache, signer::EthSigner};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
