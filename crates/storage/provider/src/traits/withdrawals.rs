@@ -5,4 +5,7 @@ use reth_primitives::{BlockId, Withdrawal};
 pub trait WithdrawalsProvider: Send + Sync {
     /// Get withdrawals by block id.
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>>;
+
+    /// Get latest withdrawal from this block or earlier .
+    fn latest_withdrawal(&self) -> Result<Option<Withdrawal>>;
 }
