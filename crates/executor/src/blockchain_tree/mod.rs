@@ -4,13 +4,9 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{
-    providers::ChainState, ExecutorFactory, HeaderProvider, StateProvider, StateProviderFactory,
-    Transaction,
+    providers::ChainState, ExecutorFactory, HeaderProvider, StateProviderFactory, Transaction,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::collections::{BTreeMap, HashMap};
 
 pub mod block_indices;
 use block_indices::BlockIndices;
