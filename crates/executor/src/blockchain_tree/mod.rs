@@ -542,7 +542,7 @@ mod tests {
         execution_result::ExecutionResult, insert_block, test_utils::blocks::BlockChainTestData,
         BlockExecutor, StateProvider,
     };
-    use std::collections::HashSet;
+    use std::{collections::HashSet, sync::Arc};
 
     #[derive(Clone)]
     struct TestFactory {
