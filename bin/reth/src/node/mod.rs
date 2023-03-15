@@ -176,13 +176,6 @@ impl Command {
 
         if self.continuous {
             info!(target: "reth::cli", "Continuous sync mode enabled");
-            let fetch_client = network.fetch_client().await?;
-            let tip_header = self.fetch_tip(Arc::clone(&db), fetch_client, 1.into()).await?;
-            forkchoice_state_tx.send(ForkchoiceState {
-                head_block_hash: tip_header.hash(),
-                finalized_block_hash: tip_header.hash(),
-                safe_block_hash: tip_header.hash(),
-            })?;
         }
 
         let engine_api_handle =
