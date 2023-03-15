@@ -8,7 +8,7 @@ use reth_primitives::{
     BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     TransactionSigned, TransactionSignedEcRecovered, H256, U256,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
 use reth_rpc_types::{Index, Transaction, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -17,6 +17,11 @@ use revm::primitives::{BlockEnv, CfgEnv};
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Executes the closure with the state that corresponds to the given [BlockId].
+    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    where
+        F: FnOnce(ChainState<'_>) -> EthResult<T>;
+
     /// Returns the revm evm env for the requested [BlockId]
     ///
     /// If the [BlockId] this will return the [BlockId::Hash] of the block the env was configured
@@ -44,6 +49,13 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
+    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    where
+        F: FnOnce(ChainState<'_>) -> EthResult<T>,
+    {
+        unimplemented!()
+    }
+
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
         // TODO handle Pending state's env
         match at {

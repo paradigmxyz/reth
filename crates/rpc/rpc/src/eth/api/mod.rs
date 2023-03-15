@@ -3,14 +3,13 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
-use crate::eth::{cache::EthStateCache, error::EthResult, signer::EthSigner};
+use crate::eth::{cache::EthStateCache, signer::EthSigner};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U64};
 use reth_provider::{
-    providers::ChainState, BlockProvider, EvmEnvProvider, StateProvider as StateProviderTrait,
-    StateProviderFactory,
+    BlockProvider, EvmEnvProvider, StateProvider as StateProviderTrait, StateProviderFactory,
 };
 use reth_rpc_types::FeeHistoryCache;
 use reth_transaction_pool::TransactionPool;
@@ -132,14 +131,6 @@ where
 {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> Result<Option<u64>> {
         self.client().convert_block_number(num)
-    }
-
-    /// Helper function to execute a closure with the database at a specific block.
-    pub(crate) fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
-    where
-        F: FnOnce(ChainState<'_>) -> T,
-    {
-        unimplemented!()
     }
 
     /// Returns the state at the given [BlockId] enum or the latest.
