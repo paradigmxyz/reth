@@ -17,8 +17,8 @@ use chain::{ChainSplit, SplitAt};
 pub mod config;
 use config::BlockchainTreeConfig;
 
-pub mod factory;
-use factory::TreeExternals;
+pub mod externals;
+use externals::TreeExternals;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -528,7 +528,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blockchain_tree::factory::BlockchainTreeFactory;
     use parking_lot::Mutex;
     use reth_db::{
         mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
@@ -693,8 +692,7 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3);
-        let factory = BlockchainTreeFactory::from_externals(externals).with_config(config);
-        let mut tree = factory.create_tree().expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config).expect("failed to create tree");
 
         // genesis block 10 is already canonical
         assert_eq!(tree.make_canonical(&H256::zero()), Ok(()));

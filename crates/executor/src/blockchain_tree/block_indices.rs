@@ -246,7 +246,7 @@ impl BlockIndices {
     pub fn finalize_canonical_blocks(
         &mut self,
         finalized_block: BlockNumber,
-        num_blocks_to_retain: u64,
+        num_of_additional_canonical_hashes_to_retain: u64,
     ) -> BTreeSet<BlockChainId> {
         // get finalized chains. blocks between [self.last_finalized,finalized_block).
         // Dont remove finalized_block, as sidechain can point to it.
@@ -258,7 +258,8 @@ impl BlockIndices {
             .collect();
 
         // remove unneeded canonical hashes.
-        let remove_until = finalized_block.saturating_sub(num_blocks_to_retain);
+        let remove_until =
+            finalized_block.saturating_sub(num_of_additional_canonical_hashes_to_retain);
         self.canonical_chain.retain(|&number, _| number >= remove_until);
 
         let mut lose_chains = BTreeSet::new();
