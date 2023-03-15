@@ -144,11 +144,11 @@ checksum = "224afbd727c3d6e4b90103ece64b8d1b67fbb1973b1046c2281eed3f3803f800"
 
 [[package]]
 name = "aquamarine"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bf310f0dd77f453bc43ec61506ead8283ab49423686244e474d0cc16226400c"
+checksum = "759d98a5db12e9c9d98ef2b92f794ae5c7ded6ec18d21c3fa485c9c65bec237d"
 dependencies = [
- "itertools 0.9.0",
+ "itertools",
  "proc-macro-error",
  "proc-macro2 1.0.52",
  "quote 1.0.23",
@@ -1009,7 +1009,7 @@ dependencies = [
  "clap 3.2.23",
  "criterion-plot",
  "futures",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "num-traits",
  "oorandom",
@@ -1030,7 +1030,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools 0.10.5",
+ "itertools",
 ]
 
 [[package]]
@@ -2975,15 +2975,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "284f18f85651fe11e8a991b2adb42cb078325c996ed026d994719efcfca1d54b"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
@@ -4126,7 +4117,7 @@ checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
 dependencies = [
  "difflib",
  "float-cmp",
- "itertools 0.10.5",
+ "itertools",
  "normalize-line-endings",
  "predicates-core",
  "regex",
@@ -4724,7 +4715,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-util",
- "itertools 0.10.5",
+ "itertools",
  "metrics",
  "pin-project",
  "rayon",
@@ -5064,7 +5055,7 @@ dependencies = [
  "auto_impl",
  "cita_trie",
  "hasher",
- "itertools 0.10.5",
+ "itertools",
  "parking_lot 0.12.1",
  "proptest",
  "reth-codecs",
@@ -5302,7 +5293,7 @@ dependencies = [
  "async-trait",
  "criterion",
  "futures-util",
- "itertools 0.10.5",
+ "itertools",
  "metrics",
  "num-traits",
  "paste",
