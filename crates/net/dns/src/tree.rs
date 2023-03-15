@@ -27,8 +27,11 @@ use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
 use reth_primitives::{bytes::Bytes, hex};
 use secp256k1::SecretKey;
-use std::{fmt, str::FromStr};
-use std::hash::{Hash, Hasher};
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    str::FromStr,
+};
 
 #[cfg(feature = "serde")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -268,7 +271,7 @@ where
 impl<K> Hash for LinkEntry<K>
 where
     K: EnrKeyUnambiguous,
-    K::PublicKey: Hash
+    K::PublicKey: Hash,
 {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.domain.hash(state);
