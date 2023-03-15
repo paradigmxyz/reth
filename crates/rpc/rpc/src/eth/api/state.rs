@@ -4,7 +4,7 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{Address, BlockId, Bytes, H256, KECCAK_EMPTY, U256};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, H256, KECCAK_EMPTY, U256};
 use reth_provider::{
     AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -58,8 +58,16 @@ where
         keys: Vec<H256>,
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+
+        // TODO: remove when HistoricalStateProviderRef::proof is implemented
+        if !block_id.is_latest() {
+            return Err(EthApiError::InvalidBlockRange)
+        }
+
+        let state = self
+            .state_at_block_id_or_latest(Some(block_id))?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
 
         let (account_proof, storage_hash, stg_proofs) = state.proof(address, &keys)?;
 
