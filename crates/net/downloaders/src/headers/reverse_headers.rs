@@ -662,7 +662,6 @@ where
                 let current_tip_num = self.sync_target.as_ref().and_then(|t| t.number());
                 if Some(num) != current_tip_num {
                     trace!(target: "downloaders::headers", %num, "Updating sync target based on num");
-                    self.metrics.out_of_order_requests.increment(1);
                     // just update the sync target
                     self.sync_target = Some(SyncTargetBlock::from_number(num));
                     self.sync_target_request = Some(
