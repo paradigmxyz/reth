@@ -27,7 +27,11 @@ use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrError, EnrKey, EnrKeyUnambiguous, EnrPublicKey};
 use reth_primitives::{bytes::Bytes, hex};
 use secp256k1::SecretKey;
-use std::{fmt, str::FromStr};
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    str::FromStr,
+};
 
 #[cfg(feature = "serde")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -222,7 +226,7 @@ impl fmt::Display for BranchEntry {
 }
 
 /// A link entry
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(SerializeDisplay, DeserializeFromStr))]
 pub struct LinkEntry<K: EnrKeyUnambiguous = SecretKey> {
     pub domain: String,
@@ -245,6 +249,33 @@ impl<K: EnrKeyUnambiguous> LinkEntry<K> {
         .map_err(|err| ParseDnsEntryError::RlpDecodeError(err.to_string()))?;
 
         Ok(Self { domain: domain.to_string(), pubkey })
+    }
+}
+
+impl<K> PartialEq for LinkEntry<K>
+where
+    K: EnrKeyUnambiguous,
+    K::PublicKey: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.domain == other.domain && self.pubkey == other.pubkey
+    }
+}
+
+impl<K> Eq for LinkEntry<K>
+where
+    K: EnrKeyUnambiguous,
+    K::PublicKey: Eq + PartialEq,
+{
+}
+impl<K> Hash for LinkEntry<K>
+where
+    K: EnrKeyUnambiguous,
+    K::PublicKey: Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.domain.hash(state);
+        self.pubkey.hash(state);
     }
 }
 

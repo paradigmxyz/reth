@@ -14,12 +14,13 @@ reth-net-common = { path = "../common" }
 reth-rlp = { path = "../../rlp" }
 
 # ethereum
-secp256k1 = { version = "0.24", features = [
+secp256k1 = { version = "0.26.0", features = [
     "global-context",
     "rand-std",
     "recovery",
+    "serde"
 ] }
-enr = { version = "0.7.0",  default-features = false, features = ["rust-secp256k1"] }
+enr = { version = "0.8.0", default-features = false, features = ["rust-secp256k1"] }
 
 # async/futures
 tokio = { version = "1", features = ["io-util", "net", "time"] }

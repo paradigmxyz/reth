@@ -59,13 +59,13 @@ async-trait = "0.1"
 linked_hash_set = "0.1"
 linked-hash-map = "0.5.6"
 rand = "0.8"
-secp256k1 = { version = "0.24", features = [
+secp256k1 = { version = "0.26.0", features = [
     "global-context",
     "rand-std",
     "recovery",
 ] }
 
-enr = { version = "0.7.0", features = ["rust-secp256k1"], optional = true }
+enr = { version = "0.8.0", features = ["rust-secp256k1"], optional = true }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
 tempfile = { version = "3.3", optional = true }
 
@@ -87,7 +87,7 @@ ethers-providers = { git = "https://github.com/gakonst/ethers-rs", default-featu
 ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 ethers-middleware = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 
-enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"] }
+enr = { version = "0.8.0", features = ["serde", "rust-secp256k1"] }
 
 # misc
 hex = "0.4"

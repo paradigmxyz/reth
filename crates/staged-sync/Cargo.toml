@@ -44,7 +44,7 @@ rand = { version = "0.8", optional = true }
 thiserror = "1"
 
 # enr
-enr = { version = "0.7.0", features = ["serde", "rust-secp256k1"], optional = true }
+enr = { version = "0.8.0", features = ["serde", "rust-secp256k1"], optional = true }
 
 # ethers
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false, optional = true }
@@ -74,7 +74,7 @@ tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-threa
 tokio-stream = "0.1"
 
 # crypto
-secp256k1 = { version = "0.24", features = [
+secp256k1 = { version = "0.26.0", features = [
     "global-context",
     "rand-std",
     "recovery",
