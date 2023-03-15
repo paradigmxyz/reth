@@ -20,6 +20,7 @@ use reth_db::{
     tables,
     transaction::DbTx,
 };
+use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -52,7 +53,11 @@ use reth_stages::{
     stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::sync::{mpsc::unbounded_channel, watch};
 use tracing::*;
 
@@ -417,6 +422,10 @@ impl Command {
             .network_config(config, self.chain.clone())
             .with_task_executor(Box::new(executor))
             .set_head(head)
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::UNSPECIFIED,
+                self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+            )))
             .build(ShareableDatabase::new(db, self.chain.clone()))
     }
 

@@ -91,6 +91,10 @@ pub struct DiscoveryArgs {
     /// Disable Discv4 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
     disable_discv4_discovery: bool,
+
+    /// The UDP port to use for P2P discovery/networking.
+    #[arg(long = "discovery.port")]
+    pub port: Option<u16>,
 }
 
 impl DiscoveryArgs {
