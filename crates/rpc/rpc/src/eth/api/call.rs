@@ -46,7 +46,7 @@ where
         state_overrides: Option<StateOverride>,
     ) -> EthResult<(ResultAndState, Env)> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
         self.call_with(cfg, block_env, request, state, state_overrides)
     }
 
@@ -86,7 +86,7 @@ where
         at: BlockId,
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
         self.estimate_gas_with(cfg, block_env, request, state)
     }
 
@@ -272,7 +272,7 @@ where
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (mut cfg, block, at) = self.evm_env_at(block_id).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
 
         // we want to disable this in eth_call, since this is common practice used by other node
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>

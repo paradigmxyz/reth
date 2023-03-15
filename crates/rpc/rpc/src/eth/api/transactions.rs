@@ -17,6 +17,9 @@ use revm::primitives::{BlockEnv, CfgEnv};
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Returns the state at the given [BlockId]
+    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>>;
+
     /// Executes the closure with the state that corresponds to the given [BlockId].
     fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
     where
@@ -49,11 +52,15 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
+    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>> {
+        self.state_at_block_id(at)
+    }
+
     fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         F: FnOnce(ChainState<'_>) -> EthResult<T>,
     {
-        let state = self.state_at_block_id(at)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
         f(state)
     }
 
