@@ -14,7 +14,7 @@ mod access_list;
 mod error;
 mod signature;
 mod tx_type;
-mod util;
+pub(crate) mod util;
 
 /// Legacy transaction.
 #[main_codec]
