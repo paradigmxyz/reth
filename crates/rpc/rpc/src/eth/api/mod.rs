@@ -19,6 +19,7 @@ mod server;
 mod sign;
 mod state;
 mod transactions;
+use crate::eth::error::{EthApiError, EthResult};
 pub use transactions::{EthTransactions, TransactionSource};
 
 /// Cache limit of block-level fee history for `eth_feeHistory` RPC method.
@@ -100,23 +101,25 @@ where
         self.client().convert_block_number(num)
     }
 
+    /// Returns the state at the given [BlockId] enum.
+    pub(crate) fn state_at_block_id(&self, at: BlockId) -> EthResult<ChainState<'_>> {
+        match at {
+            BlockId::Hash(hash) => Ok(self.state_at_hash(hash.into()).map(ChainState::boxed)?),
+            BlockId::Number(num) => {
+                self.state_at_block_number(num)?.ok_or(EthApiError::UnknownBlockNumber)
+            }
+        }
+    }
+
     /// Returns the state at the given [BlockId] enum or the latest.
     pub(crate) fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> Result<Option<ChainState<'_>>> {
+    ) -> EthResult<ChainState<'_>> {
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
-            self.latest_state().map(ChainState::boxed).map(Some)
-        }
-    }
-
-    /// Returns the state at the given [BlockId] enum.
-    pub(crate) fn state_at_block_id(&self, block_id: BlockId) -> Result<Option<ChainState<'_>>> {
-        match block_id {
-            BlockId::Hash(hash) => self.state_at_hash(hash.into()).map(ChainState::boxed).map(Some),
-            BlockId::Number(num) => self.state_at_block_number(num),
+            Ok(self.latest_state().map(ChainState::boxed)?)
         }
     }
 

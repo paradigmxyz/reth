@@ -15,15 +15,13 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let code = state.account_code(address)?.unwrap_or_default();
         Ok(code.original_bytes().into())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let balance = state.account_balance(address)?.unwrap_or_default();
         Ok(balance)
     }
@@ -33,8 +31,7 @@ where
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let nonce = U256::from(state.account_nonce(address)?.unwrap_or_default());
         Ok(nonce)
     }
@@ -45,8 +42,7 @@ where
         index: U256,
         block_id: Option<BlockId>,
     ) -> EthResult<H256> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let storage_key = H256(index.to_be_bytes());
         let value = state.storage(address, storage_key)?.unwrap_or_default();
         Ok(H256(value.to_be_bytes()))
@@ -65,9 +61,7 @@ where
             return Err(EthApiError::InvalidBlockRange)
         }
 
-        let state = self
-            .state_at_block_id_or_latest(Some(block_id))?
-            .ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id(block_id)?;
 
         let (account_proof, storage_hash, stg_proofs) = state.proof(address, &keys)?;
 
