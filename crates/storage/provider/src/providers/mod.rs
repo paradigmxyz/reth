@@ -267,6 +267,17 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
         }
         Ok(None)
     }
+
+    fn latest_withdrawal(&self) -> Result<Option<Withdrawal>> {
+        let latest_block_withdrawal =
+            self.db.view(|tx| tx.cursor_read::<tables::BlockWithdrawals>()?.last())?;
+        latest_block_withdrawal
+            .map(|block_withdrawal_pair| {
+                block_withdrawal_pair
+                    .and_then(|(_, block_withdrawal)| block_withdrawal.withdrawals.last().cloned())
+            })
+            .map_err(Into::into)
+    }
 }
 
 impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {

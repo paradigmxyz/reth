@@ -1,9 +1,9 @@
 use rand::{distributions::uniform::SampleRange, seq::SliceRandom, thread_rng, Rng};
 use reth_primitives::{
-    proofs, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature, StorageEntry,
-    Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
+    proofs, sign_message, Account, Address, Bytes, Header, SealedBlock, SealedHeader, Signature,
+    StorageEntry, Transaction, TransactionKind, TransactionSigned, TxLegacy, H160, H256, U256,
 };
-use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey};
+use secp256k1::{KeyPair, Message as SecpMessage, Secp256k1, SecretKey, SECP256K1};
 use std::{collections::BTreeMap, ops::Sub};
 
 // TODO(onbjerg): Maybe we should split this off to its own crate, or move the helpers to the
@@ -70,21 +70,6 @@ pub fn random_signed_tx() -> TransactionSigned {
     let signature =
         sign_message(H256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
     TransactionSigned::from_transaction_and_signature(tx, signature)
-}
-
-/// Signs message with the given secret key.
-/// Returns the corresponding signature.
-pub fn sign_message(secret: H256, message: H256) -> Result<Signature, secp256k1::Error> {
-    let secp = Secp256k1::new();
-    let sec = SecretKey::from_slice(secret.as_ref())?;
-    let s = secp.sign_ecdsa_recoverable(&SecpMessage::from_slice(&message[..])?, &sec);
-    let (rec_id, data) = s.serialize_compact();
-
-    Ok(Signature {
-        r: U256::try_from_be_slice(&data[..32]).unwrap(),
-        s: U256::try_from_be_slice(&data[32..64]).unwrap(),
-        odd_y_parity: rec_id.to_i32() != 0,
-    })
 }
 
 /// Generate a random block filled with signed transactions (generated using

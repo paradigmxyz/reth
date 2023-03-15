@@ -19,6 +19,7 @@ use std::{num::NonZeroUsize, ops::Deref, sync::Arc};
 mod block;
 mod call;
 mod server;
+mod sign;
 mod state;
 mod transactions;
 pub use transactions::{EthTransactions, TransactionSource};
