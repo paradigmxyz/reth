@@ -7,6 +7,8 @@ use reth_rpc_types::{
     trace::geth::{BlockTraceResult, GethDebugTracingOptions, GethTraceFrame, TraceResult},
     CallRequest, RichBlock,
 };
+use crate::eth::error::EthResult;
+use crate::eth::EthTransactions;
 
 /// `debug` API implementation.
 ///
@@ -24,6 +26,28 @@ impl<Eth> DebugApi<Eth> {
     pub fn new(eth: Eth) -> Self {
         Self { eth }
     }
+}
+
+// === impl DebugApi ===
+
+impl<Eth> DebugApi<Eth>
+
+    where Eth: EthTransactions +'static
+{
+
+
+    /// Trace the transaction according to the provided options.
+    ///
+    /// Ref: <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
+   pub async fn debug_trace_transaction(
+        &self,
+        _tx_hash: H256,
+        _opts: GethDebugTracingOptions,
+    ) -> EthResult<GethTraceFrame> {
+
+       todo!()
+    }
+
 }
 
 #[async_trait]
