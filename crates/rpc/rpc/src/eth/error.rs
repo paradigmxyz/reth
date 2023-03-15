@@ -5,7 +5,7 @@ use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
 use reth_primitives::{constants::SELECTOR_LEN, Address, U128, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
-use revm::primitives::{EVMError, Halt};
+use revm::primitives::{EVMError, Halt, OutOfGasError};
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -160,12 +160,10 @@ pub enum InvalidTransactionError {
     #[error("Out of gas: gas required exceeds allowance: {0:?}")]
     BasicOutOfGas(U256),
     /// As BasicOutOfGas but thrown when gas exhausts during memory expansion.
-    #[error(
-        "Out of gas: gas exhausts during memory expansion, gas required exceeds allowance: {0:?}"
-    )]
+    #[error("Out of gas: gas exhausts during memory expansion: {0:?}")]
     MemoryOutOfGas(U256),
     /// As BasicOutOfGas but thrown when gas exhausts during precompiled contract execution.
-    #[error("Out of gas: gas exhausts during precompiled contract execution, gas required exceeds allowance: {0:?}")]
+    #[error("Out of gas: gas exhausts during precompiled contract execution: {0:?}")]
     PrecompileOutOfGas(U256),
     /// revm's Type cast error, U256 casts down to a u64 with overflow
     #[error("Out of gas: revm's Type cast error, U256 casts down to a u64 with overflow {0:?}")]
@@ -190,6 +188,19 @@ impl InvalidTransactionError {
             InvalidTransactionError::GasTooHigh => EthRpcErrorCode::InvalidInput.code(),
             InvalidTransactionError::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
+        }
+    }
+
+    /// Converts the out of gas error
+    pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: U256) -> Self {
+        match reason {
+            OutOfGasError::BasicOutOfGas => InvalidTransactionError::BasicOutOfGas(gas_limit),
+            OutOfGasError::Memory => InvalidTransactionError::MemoryOutOfGas(gas_limit),
+            OutOfGasError::Precompile => InvalidTransactionError::PrecompileOutOfGas(gas_limit),
+            OutOfGasError::InvalidOperand => {
+                InvalidTransactionError::InvalidOperandOutOfGas(gas_limit)
+            }
+            OutOfGasError::MemoryLimit => InvalidTransactionError::MemoryOutOfGas(gas_limit),
         }
     }
 }

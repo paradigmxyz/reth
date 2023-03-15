@@ -23,12 +23,8 @@ use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
     primitives::{
-<<<<<<< HEAD
-        BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState, TransactTo, OutOfGasError
-=======
-        BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, OutOfGasError, ResultAndState,
+        BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState,
         TransactTo,
->>>>>>> c9428d22 (cargo fmt)
     },
     Database,
 };
@@ -173,17 +169,8 @@ where
             }
             ExecutionResult::Halt { reason, .. } => {
                 return match reason {
-                    Halt::OutOfGas(OutOfGasError::BasicOutOfGas) => {
-                        Err(InvalidTransactionError::BasicOutOfGas(gas_limit).into())
-                    }
-                    Halt::OutOfGas(OutOfGasError::Memory) => {
-                        Err(InvalidTransactionError::MemoryOutOfGas(gas_limit).into())
-                    }
-                    Halt::OutOfGas(OutOfGasError::Precompile) => {
-                        Err(InvalidTransactionError::PrecompileOutOfGas(gas_limit).into())
-                    }
-                    Halt::OutOfGas(OutOfGasError::InvalidOperand) => {
-                        Err(InvalidTransactionError::InvalidOperandOutOfGas(gas_limit).into())
+                    Halt::OutOfGas(err) => {
+                        Err(InvalidTransactionError::out_of_gas(err, gas_limit).into())
                     }
                     Halt::NonceOverflow => Err(InvalidTransactionError::NonceMaxValue.into()),
                     err => Err(InvalidTransactionError::EvmHalt(err).into()),
