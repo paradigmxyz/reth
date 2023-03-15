@@ -4,12 +4,13 @@ use criterion::{
 };
 use pprof::criterion::{Output, PProfProfiler};
 use reth_db::mdbx::{Env, WriteMap};
+use reth_interfaces::test_utils::TestConsensus;
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TotalDifficultyStage, TransactionLookupStage},
     test_utils::TestTransaction,
     ExecInput, Stage, StageId, UnwindInput,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 mod setup;
 use setup::StageRange;
@@ -76,7 +77,7 @@ fn total_difficulty(c: &mut Criterion) {
     group.warm_up_time(std::time::Duration::from_millis(2000));
     // don't need to run each stage for that many times
     group.sample_size(10);
-    let stage = TotalDifficultyStage::default();
+    let stage = TotalDifficultyStage::new(Arc::new(TestConsensus::default()));
 
     measure_stage(
         &mut group,

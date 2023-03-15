@@ -1605,7 +1605,7 @@ mod test {
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
 
         tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
-        assert_genesis_block(&tx, data.genesis.clone());
+        assert_genesis_block(&tx, data.genesis);
 
         tx.insert_block(block1.clone(), &chain_spec, exec_res1.clone()).unwrap();
 
@@ -1634,10 +1634,7 @@ mod test {
 
         // take two blocks
         let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();
-        assert_eq!(
-            get,
-            vec![(block1.clone(), exec_res1.clone()), (block2.clone(), exec_res2.clone())]
-        );
+        assert_eq!(get, vec![(block1, exec_res1), (block2, exec_res2)]);
 
         // assert genesis state
         assert_genesis_block(&tx, genesis);
