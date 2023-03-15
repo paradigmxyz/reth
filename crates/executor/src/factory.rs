@@ -25,6 +25,14 @@ impl ExecutorFactory for Factory {
     fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::Executor<SP> {
         let substate = SubState::new(State::new(sp));
         Executor::new(self.chain_spec.clone(), substate)
+
+        ///// Useful for setting inspector for testing ////
+        // use reth_revm::stack::{InspectorStack, InspectorStackConfig, Hook}
+        // Executor::new(self.chain_spec.clone(),
+        // substate).with_stack(InspectorStack::new(InspectorStackConfig{
+        //     use_printer_tracer: true,
+        //     hook: Hook::All,
+        // }))
     }
 
     /// Return internal chainspec
