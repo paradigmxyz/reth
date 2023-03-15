@@ -34,16 +34,10 @@ tracing = "0.1.36"
 metrics = "0.20.1"
 
 # misc
-serde = { version = "1.0", optional = true }
 thiserror = "1.0.37"
 aquamarine = "0.2.1" #docs
-itertools = "0.10.5"
 rayon = "1.6.0"
 num-traits = "0.2.15"
-
-# arbitrary utils
-arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
-proptest = { version = "1.0", optional = true }
 
 [dev-dependencies]
 # reth
@@ -54,8 +48,9 @@ reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
 reth-executor = { path = "../executor" }
 reth-rlp = { path = "../rlp" }
+
+itertools = "0.10.5"
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
-tempfile = "3.3.0"
 assert_matches = "1.5.0"
 rand = "0.8.5"
 paste = "1.0"
@@ -67,13 +62,8 @@ pprof = { version = "0.11", features = [
     "criterion",
 ] }
 criterion = { version = "0.4.0", features = ["async_futures"] }
-proptest = { version = "1.0" }
-arbitrary = { version = "1.1.7", features = ["derive"] }
-eyre = "0.6.8"
 
 [features]
-default = ["serde"]
-serde = ["dep:serde"]
 test-utils = []
 
 

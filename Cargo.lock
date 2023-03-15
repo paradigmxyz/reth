@@ -5298,11 +5298,9 @@ name = "reth-stages"
 version = "0.1.0"
 dependencies = [
  "aquamarine",
- "arbitrary",
  "assert_matches",
  "async-trait",
  "criterion",
- "eyre",
  "futures-util",
  "itertools 0.10.5",
  "metrics",
@@ -5310,7 +5308,6 @@ dependencies = [
  "paste",
  "pin-project",
  "pprof",
- "proptest",
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
@@ -5323,8 +5320,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
- "serde",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
