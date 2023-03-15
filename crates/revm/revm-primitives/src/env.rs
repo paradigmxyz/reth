@@ -1,8 +1,5 @@
 use crate::config::revm_spec;
-use reth_primitives::{
-    Address, ChainSpec, Head, Header, Transaction, TransactionKind, TransactionSigned, TxEip1559,
-    TxEip2930, TxLegacy, U256,
-};
+use reth_primitives::{Address, ChainSpec, Head, Header, Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy, U256};
 use revm::primitives::{AnalysisKind, BlockEnv, CfgEnv, SpecId, TransactTo, TxEnv};
 
 /// Convenience function to call both [fill_cfg_env] and [fill_block_env]
@@ -57,8 +54,22 @@ pub fn fill_block_env(block_env: &mut BlockEnv, header: &Header, after_merge: bo
     block_env.gas_limit = U256::from(header.gas_limit);
 }
 
-/// Fill transaction environment from Transaction.
-pub fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+/// Returns a new [TxEnv] filled with the transaction's data.
+pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEnv  {
+    let mut tx_env = TxEnv::default();
+    fill_tx_env(&mut tx_env, &transaction.transaction, transaction.signer());
+    tx_env
+}
+
+/// Fill transaction environment from [TransactionSignedEcRecovered].
+pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered,) {
+    fill_tx_env(tx_env, &transaction.transaction, transaction.signer())
+}
+
+/// Fill transaction environment from a [Transaction] and the given sender address.
+pub fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
+where T: AsRef<Transaction>
+{
     tx_env.caller = sender;
     match transaction.as_ref() {
         Transaction::Legacy(TxLegacy {

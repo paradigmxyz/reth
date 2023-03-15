@@ -4,7 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, Bytes, H256};
+use reth_primitives::{BlockId, Bytes, H256, TransactionSignedEcRecovered};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
@@ -12,6 +12,11 @@ use reth_rpc_types::{
     CallRequest, Index,
 };
 use std::collections::HashSet;
+use revm::primitives::{Env, TxEnv};
+use reth_revm::database::{State, SubState};
+use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered, tx_env_with_recovered};
+use reth_revm::tracing::{TraceInspectorConfig, TracingInspector};
+use crate::eth::revm_utils::inspect;
 
 /// `trace` API implementation.
 ///
@@ -115,12 +120,32 @@ where
         &self,
         hash: H256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
-        let (_transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
+        let (transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
             None => return Ok(None),
             Some(res) => res,
         };
 
-        let (_cfg, _block_env, _at) = self.eth_api.evm_env_at(at).await?;
+        let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
+
+        let tx = transaction.into_recovered();
+
+        self.eth_api.with_state_at(at, |state| {
+            let tx = tx_env_with_recovered(&tx);
+            let env = Env {
+                cfg,
+                block,
+                tx,
+            };
+            let mut db = SubState::new(State::new(state));
+            let mut inspector = TracingInspector::new(TraceInspectorConfig::default_parity());
+
+            inspect(db, env, &mut inspector)?;
+
+            inspector.finalize().parity_traces();
+
+            Ok(())
+        }).unwrap();
+
 
         Err(internal_rpc_err("unimplemented"))
     }

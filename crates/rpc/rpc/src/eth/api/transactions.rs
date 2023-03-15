@@ -216,6 +216,16 @@ pub enum TransactionSource {
     },
 }
 
+// === impl TransactionSource ===
+
+impl TransactionSource {
+
+    /// Consumes the type and returns the wrapped transaction.
+    pub fn into_recovered(self) -> TransactionSignedEcRecovered {
+        self.into()
+    }
+}
+
 impl From<TransactionSource> for TransactionSignedEcRecovered {
     fn from(value: TransactionSource) -> Self {
         match value {
