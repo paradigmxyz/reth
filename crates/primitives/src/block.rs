@@ -245,6 +245,16 @@ impl BlockId {
             BlockId::Number(_) => None,
         }
     }
+
+    /// Returns true if this is [BlockNumberOrTag::Latest]
+    pub fn is_latest(&self) -> bool {
+        matches!(self, BlockId::Number(BlockNumberOrTag::Latest))
+    }
+
+    /// Returns true if this is [BlockNumberOrTag::Pending]
+    pub fn is_pending(&self) -> bool {
+        matches!(self, BlockId::Number(BlockNumberOrTag::Pending))
+    }
 }
 
 impl From<u64> for BlockId {
