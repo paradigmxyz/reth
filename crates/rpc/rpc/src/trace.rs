@@ -1,22 +1,23 @@
 use crate::{
-    eth::{cache::EthStateCache, EthTransactions},
+    eth::{cache::EthStateCache, revm_utils::inspect, EthTransactions},
     result::internal_rpc_err,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, Bytes, H256, TransactionSignedEcRecovered};
+use reth_primitives::{BlockId, Bytes, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_revm::{
+    database::{State, SubState},
+    env::tx_env_with_recovered,
+    tracing::{TraceInspectorConfig, TracingInspector},
+};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     CallRequest, Index,
 };
+use revm::primitives::Env;
 use std::collections::HashSet;
-use revm::primitives::{Env, TxEnv};
-use reth_revm::database::{State, SubState};
-use reth_revm::env::{fill_tx_env, fill_tx_env_with_recovered, tx_env_with_recovered};
-use reth_revm::tracing::{TraceInspectorConfig, TracingInspector};
-use crate::eth::revm_utils::inspect;
 
 /// `trace` API implementation.
 ///
@@ -127,27 +128,21 @@ where
 
         let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
 
-        let tx = transaction.into_recovered();
+        let (tx, tx_info) = transaction.split();
 
-        self.eth_api.with_state_at(at, |state| {
+        let traces = self.eth_api.with_state_at(at, |state| {
             let tx = tx_env_with_recovered(&tx);
-            let env = Env {
-                cfg,
-                block,
-                tx,
-            };
-            let mut db = SubState::new(State::new(state));
+            let env = Env { cfg, block, tx };
+            let db = SubState::new(State::new(state));
             let mut inspector = TracingInspector::new(TraceInspectorConfig::default_parity());
 
             inspect(db, env, &mut inspector)?;
 
-            inspector.finalize().parity_traces();
+            let traces = inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
 
-            Ok(())
-        }).unwrap();
-
-
-        Err(internal_rpc_err("unimplemented"))
+            Ok(traces)
+        })?;
+        Ok(Some(traces))
     }
 }
 

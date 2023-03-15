@@ -158,7 +158,7 @@ impl CallTraceNode {
     }
 
     /// Returns the `Output` for a parity trace
-    pub(crate) fn parity_result(&self) -> TraceOutput {
+    pub(crate) fn parity_trace_output(&self) -> TraceOutput {
         match self.kind() {
             CallKind::Call | CallKind::StaticCall | CallKind::CallCode | CallKind::DelegateCall => {
                 TraceOutput::Call(CallOutput {
