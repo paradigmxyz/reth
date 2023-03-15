@@ -11,8 +11,8 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{BlockHash, BlockNumber, ChainSpec, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{
-    ExecutorFactory, HeaderProvider, ShareableDatabase, StateProvider, StateProviderFactory,
-    Transaction,
+    providers::ChainState, ExecutorFactory, HeaderProvider, ShareableDatabase,
+    StateProviderFactory, Transaction,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -177,9 +177,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let db = self.externals.sharable_db();
         let provider = if canonical_fork.hash == canonical_tip_hash {
-            Box::new(db.latest()?) as Box<dyn StateProvider>
+            ChainState::boxed(db.latest()?)
         } else {
-            Box::new(db.history_by_block_number(canonical_fork.number)?) as Box<dyn StateProvider>
+            ChainState::boxed(db.history_by_block_number(canonical_fork.number)?)
         };
 
         // append the block if it is continuing the chain.
@@ -226,9 +226,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
 
         let provider = if block.parent_hash == canonical_tip {
-            Box::new(db.latest()?) as Box<dyn StateProvider>
+            ChainState::boxed(db.latest()?)
         } else {
-            Box::new(db.history_by_block_number(block.number - 1)?) as Box<dyn StateProvider>
+            ChainState::boxed(db.history_by_block_number(block.number - 1)?)
         };
 
         let parent_header = parent_header.seal(block.parent_hash);
@@ -554,8 +554,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
     use parking_lot::Mutex;
     use reth_db::{
@@ -566,8 +564,9 @@ mod tests {
     use reth_primitives::{hex_literal::hex, proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
         execution_result::ExecutionResult, insert_block, test_utils::blocks::BlockChainTestData,
-        BlockExecutor,
+        BlockExecutor, StateProvider,
     };
+    use std::collections::HashSet;
 
     struct TestFactory {
         exec_result: Arc<Mutex<Vec<ExecutionResult>>>,
@@ -644,7 +643,7 @@ mod tests {
         genesis.header.header.state_root = EMPTY_ROOT;
         let tx_mut = externals.0.tx_mut().unwrap();
 
-        insert_block(&tx_mut, genesis.clone(), None, false, Some((0, 0))).unwrap();
+        insert_block(&tx_mut, genesis, None, false, Some((0, 0))).unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {
@@ -710,7 +709,7 @@ mod tests {
             H256(hex!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8"));
 
         // test pops execution results from vector, so order is from last to first.ß
-        let externals = externals(vec![exec2.clone(), exec1.clone(), exec2.clone(), exec1.clone()]);
+        let externals = externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
 
         // last finalized block would be number 9.
         setup(data.genesis, &externals);
