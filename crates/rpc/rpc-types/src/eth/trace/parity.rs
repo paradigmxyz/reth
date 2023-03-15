@@ -10,6 +10,20 @@ use std::collections::BTreeMap;
 /// Result type for parity style transaction trace
 pub type TraceResult = crate::trace::common::TraceResult<TraceOutput, String>;
 
+// === impl TraceResult ===
+
+impl TraceResult {
+    /// Wraps the result type in a [TraceResult::Success] variant
+    pub fn parity_success(result: TraceOutput) -> Self {
+        TraceResult::Success { result }
+    }
+
+    /// Wraps the result type in a [TraceResult::Error] variant
+    pub fn parity_error(error: String) -> Self {
+        TraceResult::Error { error }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TraceType {
@@ -190,10 +204,18 @@ pub struct TransactionTrace {
 pub struct LocalizedTransactionTrace {
     #[serde(flatten)]
     pub trace: TransactionTrace,
+    /// Transaction index within the block, None if pending.
     pub transaction_position: Option<usize>,
+    /// Hash of the transaction
     pub transaction_hash: Option<H256>,
-    pub block_number: U64,
-    pub block_hash: H256,
+    /// Block number the transaction is included in, None if pending.
+    ///
+    /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    pub block_number: Option<u64>,
+    /// Hash of the block, if not pending
+    ///
+    /// Note: this deviates from <https://openethereum.github.io/JSONRPC-trace-module#trace_transaction> which always returns a block number
+    pub block_hash: Option<H256>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

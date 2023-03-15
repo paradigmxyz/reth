@@ -1,8 +1,10 @@
+mod common;
 mod receipt;
 mod request;
 mod signature;
 mod typed;
 
+pub use common::TransactionInfo;
 pub use receipt::TransactionReceipt;
 pub use request::TransactionRequest;
 pub use signature::Signature;

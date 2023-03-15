@@ -10,7 +10,7 @@ use reth_primitives::{
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
-use reth_rpc_types::{Index, Transaction, TransactionRequest};
+use reth_rpc_types::{Index, Transaction, TransactionInfo, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::primitives::{BlockEnv, CfgEnv};
 
@@ -214,6 +214,45 @@ pub enum TransactionSource {
         /// Number of the block.
         block_number: u64,
     },
+}
+
+// === impl TransactionSource ===
+
+impl TransactionSource {
+    /// Consumes the type and returns the wrapped transaction.
+    pub fn into_recovered(self) -> TransactionSignedEcRecovered {
+        self.into()
+    }
+
+    /// Returns the transaction and block related info, if not pending
+    pub fn split(self) -> (TransactionSignedEcRecovered, TransactionInfo) {
+        match self {
+            TransactionSource::Pool(tx) => {
+                let hash = tx.hash();
+                (
+                    tx,
+                    TransactionInfo {
+                        hash: Some(hash),
+                        index: None,
+                        block_hash: None,
+                        block_number: None,
+                    },
+                )
+            }
+            TransactionSource::Database { transaction, index, block_hash, block_number } => {
+                let hash = transaction.hash();
+                (
+                    transaction,
+                    TransactionInfo {
+                        hash: Some(hash),
+                        index: Some(index),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                    },
+                )
+            }
+        }
+    }
 }
 
 impl From<TransactionSource> for TransactionSignedEcRecovered {
