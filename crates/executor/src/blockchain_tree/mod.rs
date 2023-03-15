@@ -361,7 +361,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Update canonical hashes. Reads last N canonical blocks from database and update all indices.
-    pub fn update_canonical_hashes(
+    pub fn restore_canonical_hashes(
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> Result<(), Error> {
@@ -875,7 +875,7 @@ mod tests {
             .assert(&tree);
 
         // update canonical block to b2, this would make b2a be removed
-        assert_eq!(tree.update_canonical_hashes(12), Ok(()));
+        assert_eq!(tree.restore_canonical_hashes(12), Ok(()));
         // Trie state:
         // b2 (canon)
         // |
