@@ -5,7 +5,7 @@
 ///
 /// Used to implement provider traits.
 macro_rules! delegate_impls_to_as_ref {
-    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident(&self, $($arg:ident: $argty:path),*) -> $ret:path;)* })* ) => {
+    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident(&self, $($arg:ident: $argty:ty),*) -> $ret:path;)* })* ) => {
 
         $(
           impl<'a, $($($generics)*)?> $trait for $target {
@@ -38,6 +38,7 @@ macro_rules! delegate_provider_impls {
             }
             StateProvider $(where [$($generics)*])?{
                 fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_interfaces::Result<Option<reth_primitives::StorageValue>>;
+                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::H256]) -> reth_interfaces::Result<(Vec<reth_primitives::Bytes>, reth_primitives::H256, Vec<Vec<reth_primitives::Bytes>>)>;
                 fn bytecode_by_hash(&self, code_hash: reth_primitives::H256) -> reth_interfaces::Result<Option<reth_primitives::Bytecode>>;
             }
         );

@@ -6,6 +6,12 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
+[package.metadata.cargo-udeps.ignore]
+normal = [
+    # Used for diagrams in docs
+    "aquamarine",
+]
+
 [dependencies]
 # reth 
 reth-primitives = { path = "../primitives" }
@@ -17,7 +23,7 @@ reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
 # revm
-revm = { version = "3.0.0"}
+revm = { version = "3.0.0" }
 
 # common
 async-trait = "0.1.57"
@@ -25,6 +31,9 @@ thiserror = "1.0.37"
 auto_impl = "1.0"
 tracing = "0.1.37"
 tokio = { version = "1.21.2", features = ["sync"] }
+
+# mics
+aquamarine = "0.2.1" #docs
 
 triehash = "0.8"
 # See to replace hashers to simplify libraries
@@ -38,3 +47,7 @@ sha3 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
+reth-primitives = { path = "../primitives", features = ["test-utils"] }
+reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
+parking_lot = "0.12"

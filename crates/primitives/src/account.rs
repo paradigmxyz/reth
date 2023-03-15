@@ -34,6 +34,15 @@ impl Account {
 
         self.nonce == 0 && self.balance == U256::ZERO && is_bytecode_empty
     }
+
+    /// Returns an account bytecode's hash.
+    /// In case of no bytecode, returns [`KECCAK_EMPTY`].
+    pub fn get_bytecode_hash(&self) -> H256 {
+        match self.bytecode_hash {
+            Some(hash) => hash,
+            None => KECCAK_EMPTY,
+        }
+    }
 }
 
 /// Bytecode for an account.

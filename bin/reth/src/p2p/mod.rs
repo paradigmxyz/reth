@@ -39,7 +39,7 @@ pub struct Command {
         default_value = "mainnet",
         value_parser = chain_spec_value_parser
     )]
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 
     /// Disable the discovery service.
     #[command(flatten)]
@@ -137,7 +137,7 @@ impl Command {
                 };
                 let (_, result) = (move || {
                     let client = fetch_client.clone();
-                    async move { client.get_block_bodies(vec![hash]).await }
+                    client.get_block_bodies(vec![hash])
                 })
                 .retry(&backoff)
                 .notify(|err, _| println!("Error requesting block: {err}. Retrying..."))

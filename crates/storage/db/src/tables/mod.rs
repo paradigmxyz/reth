@@ -32,7 +32,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 26] = [
+pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -59,6 +59,7 @@ pub const TABLES: [(TableType, &str); 26] = [
     (TableType::DupSort, StoragesTrie::const_name()),
     (TableType::Table, TxSenders::const_name()),
     (TableType::Table, SyncStage::const_name()),
+    (TableType::Table, SyncStageProgress::const_name()),
 ];
 
 #[macro_export]
@@ -293,13 +294,18 @@ table!(
     ( SyncStage ) StageId | BlockNumber
 );
 
+table!(
+    /// Stores arbitrary data to keep track of a stage first-sync progress.
+    ( SyncStageProgress ) StageId | Vec<u8>
+);
+
 ///
 /// Alias Types
 
 /// List with transaction numbers.
 pub type TransitionList = IntegerList;
 /// Encoded stage id.
-pub type StageId = Vec<u8>;
+pub type StageId = String;
 
 //
 // TODO: Temporary types, until they're properly defined alongside with the Encode and Decode Trait

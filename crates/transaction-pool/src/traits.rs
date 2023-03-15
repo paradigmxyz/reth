@@ -250,7 +250,9 @@ impl<T> BestTransactions for std::iter::Empty<T> {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
+pub trait PoolTransaction:
+    fmt::Debug + Send + Sync + FromRecoveredTransaction + IntoRecoveredTransaction
+{
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
@@ -295,6 +297,9 @@ pub trait PoolTransaction: fmt::Debug + Send + Sync + FromRecoveredTransaction {
 
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize;
+
+    /// Returns chain_id
+    fn chain_id(&self) -> Option<u64>;
 }
 
 /// The default [PoolTransaction] for the [Pool](crate::Pool).
@@ -396,6 +401,11 @@ impl PoolTransaction for PooledTransaction {
     /// Returns the length of the rlp encoded object
     fn encoded_length(&self) -> usize {
         self.transaction.length()
+    }
+
+    /// Returns chain_id
+    fn chain_id(&self) -> Option<u64> {
+        self.transaction.chain_id()
     }
 }
 

@@ -169,7 +169,7 @@ impl SessionManager {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.executor.spawn(async move { f.await }.boxed());
+        self.executor.spawn(f.boxed());
     }
 
     /// Invoked on a received status update.
@@ -209,20 +209,17 @@ impl SessionManager {
         let hello_message = self.hello_message.clone();
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
-        self.spawn(async move {
-            start_pending_incoming_session(
-                disconnect_rx,
-                session_id,
-                metered_stream,
-                pending_events,
-                remote_addr,
-                secret_key,
-                hello_message,
-                status,
-                fork_filter,
-            )
-            .await
-        });
+        self.spawn(start_pending_incoming_session(
+            disconnect_rx,
+            session_id,
+            metered_stream,
+            pending_events,
+            remote_addr,
+            secret_key,
+            hello_message,
+            status,
+            fork_filter,
+        ));
 
         let handle = PendingSessionHandle {
             disconnect_tx: Some(disconnect_tx),
@@ -243,21 +240,18 @@ impl SessionManager {
         let fork_filter = self.fork_filter.clone();
         let status = self.status;
         let band_with_meter = self.bandwidth_meter.clone();
-        self.spawn(async move {
-            start_pending_outbound_session(
-                disconnect_rx,
-                pending_events,
-                session_id,
-                remote_addr,
-                remote_peer_id,
-                secret_key,
-                hello_message,
-                status,
-                fork_filter,
-                band_with_meter,
-            )
-            .await
-        });
+        self.spawn(start_pending_outbound_session(
+            disconnect_rx,
+            pending_events,
+            session_id,
+            remote_addr,
+            remote_peer_id,
+            secret_key,
+            hello_message,
+            status,
+            fork_filter,
+            band_with_meter,
+        ));
 
         let handle = PendingSessionHandle {
             disconnect_tx: Some(disconnect_tx),

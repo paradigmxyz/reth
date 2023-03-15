@@ -111,9 +111,9 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind tx hash to number
-        let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
-        let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
         let mut rev_walker = body_cursor.walk_back(None)?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {

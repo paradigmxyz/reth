@@ -1,16 +1,24 @@
+use reth_primitives::U256;
 use serde::{
     de::{Error, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::fmt;
 
-/// A hex encoded or decimal index
+/// A hex encoded or decimal index that's intended to be used as a rust index, hence it's
+/// deserialized into a `usize`.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Default)]
 pub struct Index(usize);
 
 impl From<Index> for usize {
     fn from(idx: Index) -> Self {
         idx.0
+    }
+}
+
+impl From<Index> for U256 {
+    fn from(idx: Index) -> Self {
+        U256::from(idx.0)
     }
 }
 

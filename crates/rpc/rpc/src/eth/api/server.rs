@@ -3,7 +3,10 @@
 
 use super::EthApiSpec;
 use crate::{
-    eth::{api::EthApi, error::EthApiError},
+    eth::{
+        api::{EthApi, EthTransactions},
+        error::EthApiError,
+    },
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
@@ -24,10 +27,10 @@ use std::collections::BTreeMap;
 #[async_trait::async_trait]
 impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
 where
-    Self: EthApiSpec,
+    Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
+    Network: Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
@@ -117,29 +120,26 @@ where
     }
 
     /// Handler for: `eth_getTransactionByHash`
-    async fn transaction_by_hash(
-        &self,
-        _hash: H256,
-    ) -> Result<Option<reth_rpc_types::Transaction>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn transaction_by_hash(&self, hash: H256) -> Result<Option<reth_rpc_types::Transaction>> {
+        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
     async fn transaction_by_block_hash_and_index(
         &self,
-        _hash: H256,
-        _index: Index,
+        hash: H256,
+        index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::transaction_by_block_and_tx_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
     async fn transaction_by_block_number_and_index(
         &self,
-        _number: BlockNumberOrTag,
-        _index: Index,
+        number: BlockNumberOrTag,
+        index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
@@ -377,17 +377,24 @@ where
     /// Handler for: `eth_getProof`
     async fn get_proof(
         &self,
-        _address: Address,
-        _keys: Vec<H256>,
-        _block_number: Option<BlockId>,
+        address: Address,
+        keys: Vec<H256>,
+        block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
-        Err(internal_rpc_err("unimplemented"))
+        let res = EthApi::get_proof(self, address, keys, block_number);
+
+        Ok(res.map_err(|e| match e {
+            EthApiError::InvalidBlockRange => {
+                internal_rpc_err("eth_getProof is unimplemented for historical blocks")
+            }
+            _ => e.into(),
+        })?)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::eth::cache::EthStateCache;
+    use crate::{eth::cache::EthStateCache, EthApi};
     use jsonrpsee::{
         core::{error::Error as RpcError, RpcResult},
         types::error::{CallError, INVALID_PARAMS_CODE},
@@ -398,8 +405,6 @@ mod tests {
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
-
-    use crate::EthApi;
 
     #[tokio::test]
     /// Handler for: `eth_test_fee_history`

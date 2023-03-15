@@ -156,6 +156,7 @@ where
                     Entry::Occupied(entry) => {
                         let entry = entry.into_mut();
 
+                        // TODO: Ensure account is removed if unchanged
                         if matches!(entry.account_state, AccountState::NotExisting) {
                             let account = to_reth_acc(&account.info);
                             if !(has_state_clear_eip && account.is_empty()) {
@@ -345,12 +346,13 @@ where
         // Fill revm structure.
         fill_tx_env(&mut self.evm.env.tx, transaction, sender);
 
-        let out = if self.stack.should_inspect(&self.evm.env, transaction.hash()) {
+        let hash = transaction.hash();
+        let out = if self.stack.should_inspect(&self.evm.env, hash) {
             // execution with inspector.
             let output = self.evm.inspect(&mut self.stack);
             tracing::trace!(
                 target: "evm",
-                hash = ?transaction.hash(), ?output, ?transaction, env = ?self.evm.env,
+                ?hash, ?output, ?transaction, env = ?self.evm.env,
                 "Executed transaction"
             );
             output
@@ -358,7 +360,7 @@ where
             // main execution.
             self.evm.transact()
         };
-        out.map_err(|e| Error::EVM(format!("{e:?}")))
+        out.map_err(|e| Error::EVM { hash, message: format!("{e:?}") })
     }
 
     /// Runs the provided transactions and commits their state to the run-time database.
@@ -576,6 +578,14 @@ mod tests {
         fn bytecode_by_hash(&self, code_hash: H256) -> reth_interfaces::Result<Option<Bytecode>> {
             Ok(self.contracts.get(&code_hash).cloned())
         }
+
+        fn proof(
+            &self,
+            _address: Address,
+            _keys: &[H256],
+        ) -> reth_interfaces::Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
+            todo!()
+        }
     }
 
     #[test]
@@ -684,6 +694,23 @@ mod tests {
             post_state.accounts().get(&account1).is_none(),
             "Account should not be present in post-state since it was not changed"
         );
+
+        // TODO: Re-enable these tests
+        // assert_eq!(
+        //     changesets.changeset.get(&account1).unwrap().account,
+        //     AccountInfoChangeSet::NoChange { is_empty: false },
+        //     "No change to account"
+        // );
+        // assert_eq!(
+        //     changesets.changeset.get(&account2).unwrap().account,
+        //     AccountInfoChangeSet::Created { new: account2_info },
+        //     "New account"
+        // );
+        // assert_eq!(
+        //     changesets.changeset.get(&account3).unwrap().account,
+        //     AccountInfoChangeSet::Changed { old: account3_old_info, new: account3_info },
+        //     "Change to account state"
+        // );
 
         // Check changes
         const TX_TRANSITION_ID: u64 = 0;

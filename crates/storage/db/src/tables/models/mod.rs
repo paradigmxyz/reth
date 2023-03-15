@@ -83,3 +83,16 @@ impl Decode for H256 {
         Ok(H256::from_slice(&value.into()[..]))
     }
 }
+
+impl Encode for String {
+    type Encoded = Vec<u8>;
+    fn encode(self) -> Self::Encoded {
+        self.into_bytes()
+    }
+}
+
+impl Decode for String {
+    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
+        String::from_utf8(value.into().to_vec()).map_err(|_| Error::DecodeError)
+    }
+}

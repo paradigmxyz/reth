@@ -13,6 +13,7 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
+reth-codecs = { path = "../codecs" }
 reth-tracing = {path = "../../tracing"}
 reth-rlp = {path = "../../rlp"}
 
@@ -32,6 +33,7 @@ parking_lot = { version = "0.12", optional = true }
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
+reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
 parking_lot = "0.12"
 proptest = { version = "1.0" }
 assert_matches = "1.5"

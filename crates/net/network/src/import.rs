@@ -47,7 +47,7 @@ pub enum BlockValidation {
 pub enum BlockImportError {
     /// Consensus error
     #[error(transparent)]
-    Consensus(#[from] reth_interfaces::consensus::Error),
+    Consensus(#[from] reth_interfaces::consensus::ConsensusError),
 }
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.

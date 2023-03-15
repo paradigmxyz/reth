@@ -490,7 +490,9 @@ mod tests {
         let events = pipeline.events();
 
         // Run pipeline
-        tokio::spawn(async move { pipeline.run(db).await });
+        tokio::spawn(async move {
+            pipeline.run(db).await.unwrap();
+        });
 
         // Check that the stages were run in order
         assert_eq!(
@@ -620,7 +622,7 @@ mod tests {
                 TestStage::new(StageId("B"))
                     .add_exec(Err(StageError::Validation {
                         block: 5,
-                        error: consensus::Error::BaseFeeMissing,
+                        error: consensus::ConsensusError::BaseFeeMissing,
                     }))
                     .add_unwind(Ok(UnwindOutput { stage_progress: 0 }))
                     .add_exec(Ok(ExecOutput { stage_progress: 10, done: true })),

@@ -63,7 +63,7 @@ pub struct ImportCommand {
         default_value = "mainnet",
         value_parser = genesis_value_parser
     )]
-    chain: ChainSpec,
+    chain: Arc<ChainSpec>,
 
     /// The path to a block file for import.
     ///
@@ -140,7 +140,7 @@ impl ImportCommand {
             .build(file_client.clone(), consensus.clone(), db)
             .into_task();
 
-        let factory = reth_executor::Factory::new(Arc::new(self.chain.clone()));
+        let factory = reth_executor::Factory::new(self.chain.clone());
 
         let mut pipeline = Pipeline::builder()
             .with_sync_state_updater(file_client)
@@ -152,10 +152,10 @@ impl ImportCommand {
                     NoopStatusUpdater::default(),
                     factory.clone(),
                 )
-                .set(TotalDifficultyStage {
-                    chain_spec: self.chain.clone(),
-                    commit_threshold: config.stages.total_difficulty.commit_threshold,
-                })
+                .set(
+                    TotalDifficultyStage::new(consensus.clone())
+                        .with_commit_threshold(config.stages.total_difficulty.commit_threshold),
+                )
                 .set(SenderRecoveryStage {
                     commit_threshold: config.stages.sender_recovery.commit_threshold,
                 })

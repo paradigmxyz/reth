@@ -2,6 +2,7 @@ use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
+pub use error::InvalidTransactionError;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
@@ -10,6 +11,7 @@ pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
 mod access_list;
+mod error;
 mod signature;
 mod tx_type;
 mod util;
@@ -173,6 +175,8 @@ pub enum Transaction {
     /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
     Eip1559(TxEip1559),
 }
+
+// === impl Transaction ===
 
 impl Transaction {
     /// Heavy operation that return signature hash over rlp encoded transaction.
@@ -549,7 +553,7 @@ impl TransactionSigned {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid.
+    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn recover_signer(&self) -> Option<Address> {
         let signature_hash = self.signature_hash();
         self.signature.recover_signer(signature_hash)
@@ -557,7 +561,7 @@ impl TransactionSigned {
 
     /// Devour Self, recover signer and return [`TransactionSignedEcRecovered`]
     ///
-    /// Returns `None` if the transaction's signature is invalid.
+    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
     pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
@@ -854,6 +858,8 @@ pub struct TransactionSignedEcRecovered {
     signed_transaction: TransactionSigned,
 }
 
+// === impl TransactionSignedEcRecovered ===
+
 impl TransactionSignedEcRecovered {
     /// Signer of transaction recovered from signature
     pub fn signer(&self) -> Address {
@@ -865,27 +871,15 @@ impl TransactionSignedEcRecovered {
         self.signed_transaction
     }
 
+    /// Desolve Self to its component
+    pub fn to_components(self) -> (TransactionSigned, Address) {
+        (self.signed_transaction, self.signer)
+    }
+
     /// Create [`TransactionSignedEcRecovered`] from [`TransactionSigned`] and [`Address`] of the
     /// signer.
     pub fn from_signed_transaction(signed_transaction: TransactionSigned, signer: Address) -> Self {
         Self { signed_transaction, signer }
-    }
-}
-
-/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
-///
-/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
-/// transaction type that the transaction pool uses.
-pub trait FromRecoveredTransaction {
-    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
-}
-
-// Noop conversion
-impl FromRecoveredTransaction for TransactionSignedEcRecovered {
-    #[inline]
-    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
-        tx
     }
 }
 
@@ -906,6 +900,23 @@ impl Decodable for TransactionSignedEcRecovered {
             .recover_signer()
             .ok_or(DecodeError::Custom("Unable to recover decoded transaction signer."))?;
         Ok(TransactionSignedEcRecovered { signer, signed_transaction })
+    }
+}
+
+/// A transaction type that can be created from a [`TransactionSignedEcRecovered`] transaction.
+///
+/// This is a conversion trait that'll ensure transactions received via P2P can be converted to the
+/// transaction type that the transaction pool uses.
+pub trait FromRecoveredTransaction {
+    /// Converts to this type from the given [`TransactionSignedEcRecovered`].
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self;
+}
+
+// Noop conversion
+impl FromRecoveredTransaction for TransactionSignedEcRecovered {
+    #[inline]
+    fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
+        tx
     }
 }
 

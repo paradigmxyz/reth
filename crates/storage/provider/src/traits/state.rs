@@ -3,17 +3,22 @@ use crate::BlockHashProvider;
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, Bytecode, StorageKey, StorageValue, H256, KECCAK_EMPTY, U256,
+    Address, BlockHash, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256, KECCAK_EMPTY,
+    U256,
 };
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Box)]
 pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
-    /// Get storage.
+    /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;
 
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>>;
+
+    /// Get account and storage proofs.
+    fn proof(&self, address: Address, keys: &[H256])
+        -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)>;
 
     /// Get account code by its address.
     ///
