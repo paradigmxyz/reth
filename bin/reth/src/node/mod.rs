@@ -177,7 +177,7 @@ impl Command {
         if self.continuous {
             info!(target: "reth::cli", "Continuous sync mode enabled");
             let fetch_client = network.fetch_client().await?;
-            let tip_header = self.fetch_tip(fetch_client, 1.into()).await?;
+            let tip_header = self.fetch_tip(Arc::clone(&db), fetch_client, 1.into()).await?;
             forkchoice_state_tx.send(ForkchoiceState {
                 head_block_hash: tip_header.hash(),
                 finalized_block_hash: tip_header.hash(),
@@ -404,12 +404,7 @@ impl Command {
         fetch_client: FetchClient,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error> {
-        if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {
-            info!(target: "reth::cli", ?tip, number, "Successfully looked up tip block number in the database");
-            return Ok(number)
-        }
-
-        Ok(self.fetch_tip(fetch_client, BlockHashOrNumber::Hash(tip)).await?.number)
+        Ok(self.fetch_tip(db, fetch_client, BlockHashOrNumber::Hash(tip)).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -417,9 +412,24 @@ impl Command {
     /// NOTE: The download is attempted with infinite retries.
     async fn fetch_tip(
         &self,
+        db: Arc<Env<WriteMap>>,
         fetch_client: FetchClient,
         tip: BlockHashOrNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error> {
+        let tip_num = match tip {
+            BlockHashOrNumber::Hash(hash) => {
+                info!(target: "reth::cli", ?hash, "Fetching tip block from the network.");
+                db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??.unwrap()
+            }
+            BlockHashOrNumber::Number(number) => number,
+        };
+
+        // try to look up the header in the database
+        if let Some(header) = db.view(|tx| tx.get::<tables::Headers>(tip_num))?? {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.seal_slow())
+        }
+
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
             match get_single_header(fetch_client.clone(), tip).await {
