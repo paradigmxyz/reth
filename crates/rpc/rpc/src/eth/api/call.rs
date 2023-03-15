@@ -23,8 +23,7 @@ use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
     primitives::{
-        BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState,
-        TransactTo,
+        BlockEnv, Bytecode, CfgEnv, Env, ExecutionResult, Halt, ResultAndState, TransactTo,
     },
     Database,
 };
