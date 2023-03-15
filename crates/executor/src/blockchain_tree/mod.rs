@@ -462,15 +462,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 unreachable!("all chains should point to canonical chain.");
             }
 
-            // revert `N` blocks from current canonical chain and put them inside BlockchanTree
-            // This is main reorgs on tables.
             let old_canon_chain = self.revert_canonical(canon_fork.number)?;
+            // commit new canonical chain.
             self.commit_canonical(new_canon_chain)?;
-
-            // TODO we can potentially merge now reverted canonical chain with
-            // one of the chain from the tree. Low priority.
-
-            // insert old canonical chain to BlockchainTree.
+            // insert old canon chain
             self.insert_chain(old_canon_chain);
         }
 
@@ -493,6 +488,26 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
         tx.commit()?;
+
+        Ok(())
+    }
+
+    /// Unwind tables and put it inside state
+    pub fn unwind(&mut self, unwind_to: BlockNumber) -> Result<(), Error> {
+        // nothing to be done if unwind_to is higher then the tip
+        if self.block_indices.canonical_tip().number <= unwind_to {
+            return Ok(())
+        }
+        // revert `N` blocks from current canonical chain and put them inside BlockchanTree
+        let old_canon_chain = self.revert_canonical(unwind_to)?;
+
+        // check if there is block in chain
+        if old_canon_chain.blocks().is_empty() {
+            return Ok(())
+        }
+        self.block_indices.unwind_canonical_chain(unwind_to);
+        // insert old canonical chain to BlockchainTree.
+        self.insert_chain(old_canon_chain);
 
         Ok(())
     }
@@ -860,6 +875,43 @@ mod tests {
 
         // finalize b1 that would make b1a removed from tree
         tree.finalize_block(11);
+        // Trie state:
+        // b2   b2a (side chain)
+        // |   /
+        // | /
+        // b1 (canon)
+        // |
+        // g1 (10)
+        // |
+        TreeTester::default()
+            .with_chain_num(1)
+            .with_block_to_chain(HashMap::from([(block2a_hash, 4)]))
+            .with_fork_to_child(HashMap::from([(block1.hash(), HashSet::from([block2a_hash]))]))
+            .assert(&tree);
+
+        // unwind canonical
+        assert_eq!(tree.unwind(block1.number), Ok(()));
+        // Trie state:
+        //    b2   b2a (pending block)
+        //   /    /
+        //  /   /
+        // /  /
+        // b1 (canonical block)
+        // |
+        // |
+        // g1 (canonical blocks)
+        // |
+        TreeTester::default()
+            .with_chain_num(2)
+            .with_block_to_chain(HashMap::from([(block2a_hash, 4), (block2.hash, 6)]))
+            .with_fork_to_child(HashMap::from([(
+                block1.hash(),
+                HashSet::from([block2a_hash, block2.hash]),
+            )]))
+            .assert(&tree);
+
+        // commit b2a
+        assert_eq!(tree.make_canonical(&block2.hash), Ok(()));
         // Trie state:
         // b2   b2a (side chain)
         // |   /
