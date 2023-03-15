@@ -49,11 +49,12 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
-    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         F: FnOnce(ChainState<'_>) -> EthResult<T>,
     {
-        unimplemented!()
+        let state = self.state_at_block_id(at)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        f(state)
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
