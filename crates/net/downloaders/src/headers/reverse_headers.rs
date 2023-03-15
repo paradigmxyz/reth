@@ -665,7 +665,6 @@ where
                     self.metrics.out_of_order_requests.increment(1);
                     // just update the sync target
                     self.sync_target = Some(SyncTargetBlock::from_number(num));
-                    // self.on_block_number_update(num, num);
                     self.sync_target_request = Some(
                         self.request_fut(self.get_sync_target_request(num.into()), Priority::High),
                     );
@@ -940,16 +939,24 @@ impl SyncTargetBlock {
     }
 
     /// Replace the target block number, and return the old block number, if it was set.
+    ///
+    /// If the target block is a hash, this be converted into a `HashAndNumber`, but return `None`.
+    /// The semantics should be equivalent to that of `Option::replace`.
     fn replace_number(&mut self, number: u64) -> Option<u64> {
         match self {
-            Self::Hash(_) => None,
-            Self::Number(old_number) => {
-                *old_number = number;
-                Some(number)
+            Self::Hash(hash) => {
+                *self = Self::HashAndNumber { hash: *hash, number };
+                None
             }
-            Self::HashAndNumber { number: old_number, .. } => {
-                *old_number = number;
-                Some(number)
+            Self::Number(old_number) => {
+                let res = Some(*old_number);
+                *self = Self::Number(number);
+                res
+            }
+            Self::HashAndNumber { number: old_number, hash } => {
+                let res = Some(*old_number);
+                *self = Self::HashAndNumber { hash: *hash, number };
+                res
             }
         }
     }
@@ -1117,6 +1124,65 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
+
+    /// Tests that `replace_number` works the same way as Option::replace
+    #[test]
+    fn test_replace_number_semantics() {
+        struct Fixture {
+            // input fields (both SyncTargetBlock and Option<u64>)
+            sync_target_block: SyncTargetBlock,
+            sync_target_option: Option<u64>,
+
+            // option to replace
+            replace_number: u64,
+
+            // expected method result
+            expected_result: Option<u64>,
+
+            // output state
+            new_number: u64,
+        }
+
+        let fixtures = vec![
+            Fixture {
+                sync_target_block: SyncTargetBlock::Hash(H256::random()),
+                // Hash maps to None here, all other variants map to Some
+                sync_target_option: None,
+                replace_number: 1,
+                expected_result: None,
+                new_number: 1,
+            },
+            Fixture {
+                sync_target_block: SyncTargetBlock::Number(1),
+                sync_target_option: Some(1),
+                replace_number: 2,
+                expected_result: Some(1),
+                new_number: 2,
+            },
+            Fixture {
+                sync_target_block: SyncTargetBlock::HashAndNumber {
+                    hash: H256::random(),
+                    number: 1,
+                },
+                sync_target_option: Some(1),
+                replace_number: 2,
+                expected_result: Some(1),
+                new_number: 2,
+            },
+        ];
+
+        for fixture in fixtures {
+            let mut sync_target_block = fixture.sync_target_block;
+            let result = sync_target_block.replace_number(fixture.replace_number);
+            assert_eq!(result, fixture.expected_result);
+            assert_eq!(sync_target_block.number(), Some(fixture.new_number));
+
+            let mut sync_target_option = fixture.sync_target_option;
+            let option_result = sync_target_option.replace(fixture.replace_number);
+            assert_eq!(option_result, fixture.expected_result);
+            assert_eq!(sync_target_option, Some(fixture.new_number));
+        }
+    }
 
     /// Tests that request calc works
     #[test]
