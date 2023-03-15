@@ -168,7 +168,9 @@ where
             }
             ExecutionResult::Halt { reason, .. } => {
                 return match reason {
-                    Halt::OutOfGas(_) => Err(InvalidTransactionError::OutOfGas(gas_limit).into()),
+                    Halt::OutOfGas(err) => {
+                        Err(InvalidTransactionError::out_of_gas(err, gas_limit).into())
+                    }
                     Halt::NonceOverflow => Err(InvalidTransactionError::NonceMaxValue.into()),
                     err => Err(InvalidTransactionError::EvmHalt(err).into()),
                 }
@@ -184,7 +186,8 @@ where
                         ExecutionResult::Success { .. } => {
                             // transaction succeeded by manually increasing the gas limit to
                             // highest, which means the caller lacks funds to pay for the tx
-                            Err(InvalidTransactionError::OutOfGas(U256::from(req_gas_limit)).into())
+                            Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit))
+                                .into())
                         }
                         ExecutionResult::Revert { .. } => {
                             // reverted again after bumping the limit
