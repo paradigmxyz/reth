@@ -1,5 +1,5 @@
 use crate::{
-    eth::{cache::EthStateCache, revm_utils::inspect, EthTransactions},
+    eth::{cache::EthStateCache, error::EthResult, revm_utils::inspect, EthTransactions},
     result::internal_rpc_err,
 };
 use async_trait::async_trait;
@@ -38,6 +38,58 @@ impl<Client, Eth> TraceApi<Client, Eth> {
     /// Create a new instance of the [TraceApi]
     pub fn new(client: Client, eth_api: Eth, eth_cache: EthStateCache) -> Self {
         Self { client, eth_api, eth_cache }
+    }
+}
+
+// === impl TraceApi ===
+
+impl<Client, Eth> TraceApi<Client, Eth>
+where
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Eth: EthTransactions + 'static,
+{
+    /// Returns transaction trace with the given address.
+    pub async fn trace_get(
+        &self,
+        hash: H256,
+        trace_address: Vec<usize>,
+    ) -> EthResult<Option<LocalizedTransactionTrace>> {
+        match self.trace_transaction(hash).await? {
+            None => Ok(None),
+            Some(traces) => {
+                let trace =
+                    traces.into_iter().find(|trace| trace.trace.trace_address == trace_address);
+                Ok(trace)
+            }
+        }
+    }
+
+    /// Returns all traces for the given transaction hash
+    pub async fn trace_transaction(
+        &self,
+        hash: H256,
+    ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
+        let (transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
+
+        let (tx, tx_info) = transaction.split();
+
+        self.eth_api.with_state_at(at, |state| {
+            let tx = tx_env_with_recovered(&tx);
+            let env = Env { cfg, block, tx };
+            let db = SubState::new(State::new(state));
+            let mut inspector = TracingInspector::new(TraceInspectorConfig::default_parity());
+
+            inspect(db, env, &mut inspector)?;
+
+            let traces = inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+
+            Ok(Some(traces))
+        })
     }
 }
 
@@ -107,13 +159,14 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
+    /// Returns transaction trace at given index.
     /// Handler for `trace_get`
     async fn trace_get(
         &self,
-        _hash: H256,
-        _indices: Vec<Index>,
+        hash: H256,
+        indices: Vec<Index>,
     ) -> Result<Option<LocalizedTransactionTrace>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(TraceApi::trace_get(self, hash, indices.into_iter().map(Into::into).collect()).await?)
     }
 
     /// Handler for `trace_transaction`
@@ -121,28 +174,7 @@ where
         &self,
         hash: H256,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>> {
-        let (transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
-            None => return Ok(None),
-            Some(res) => res,
-        };
-
-        let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
-
-        let (tx, tx_info) = transaction.split();
-
-        let traces = self.eth_api.with_state_at(at, |state| {
-            let tx = tx_env_with_recovered(&tx);
-            let env = Env { cfg, block, tx };
-            let db = SubState::new(State::new(state));
-            let mut inspector = TracingInspector::new(TraceInspectorConfig::default_parity());
-
-            inspect(db, env, &mut inspector)?;
-
-            let traces = inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-
-            Ok(traces)
-        })?;
-        Ok(Some(traces))
+        Ok(TraceApi::trace_transaction(self, hash).await?)
     }
 }
 
