@@ -18,9 +18,11 @@ use revm::{
 use types::{CallTrace, CallTraceStep};
 
 mod arena;
+mod builder;
 mod config;
 mod types;
 mod utils;
+pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
 pub use config::TraceInspectorConfig;
 
 /// An inspector that collects call traces.
@@ -60,9 +62,14 @@ impl TracingInspector {
         }
     }
 
-    /// Consumes the Inspector and returns the recorded.
-    pub fn finalize(self) -> CallTraceArena {
-        self.traces
+    /// Consumes the Inspector and returns a [ParityTraceBuilder].
+    pub fn into_parity_builder(self) -> ParityTraceBuilder {
+        ParityTraceBuilder::new(self.traces.arena, self.config)
+    }
+
+    /// Consumes the Inspector and returns a [GethTraceBuilder].
+    pub fn into_geth_builder(self) -> GethTraceBuilder {
+        GethTraceBuilder::new(self.traces.arena, self.config)
     }
 
     /// Configures a [GasInspector]
