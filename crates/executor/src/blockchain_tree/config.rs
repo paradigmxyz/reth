@@ -16,9 +16,13 @@ pub struct BlockchainTreeConfig {
 
 impl Default for BlockchainTreeConfig {
     fn default() -> Self {
+        // The defaults for Ethereum mainnet
         Self {
+            // Gasper allows reorgs of any length from 1 to 64.
             max_reorg_depth: 64,
+            // This default is just an assumption. Has to be greater than the `max_reorg_depth`.
             max_blocks_in_chain: 65,
+            // EVM requires that last 256 block hashes are available.
             num_of_additional_canonical_block_hashes: 256,
         }
     }
