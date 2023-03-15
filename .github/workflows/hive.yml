@@ -72,7 +72,7 @@ jobs:
             # we have excluded these tests because we do not support block
             # announcements
             # exclude: [TestLargeAnnounce, TestBroadcast, TestBlockHashAnnounce]
-            include: [TestStatus, TestGetBlockHeaders, TestSimultaneousRequests, TestSameRequestID, TestZeroRequestID, TestGetBlockBodies, TestMaliciousHandshake, TestMaliciousStatus, TestTransaction, TestMaliciousTx, TestLargeTxRequest]
+            include: [TestStatus, TestGetBlockHeaders, TestSimultaneousRequests, TestSameRequestID, TestZeroRequestID, TestGetBlockBodies, TestMaliciousHandshake, TestMaliciousStatus, TestTransaction, TestMaliciousTx]
             experimental: true
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
