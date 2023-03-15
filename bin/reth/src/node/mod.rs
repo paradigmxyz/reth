@@ -424,7 +424,7 @@ impl Command {
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
-                self.network.discovery_port.unwrap_or_else(|| DEFAULT_DISCOVERY_PORT),
+                self.network.discovery_port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
             .build(ShareableDatabase::new(db, self.chain.clone()))
     }
