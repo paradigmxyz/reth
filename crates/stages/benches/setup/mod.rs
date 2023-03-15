@@ -18,6 +18,7 @@ use reth_stages::{
 };
 use std::{
     collections::BTreeMap,
+    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -124,7 +125,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
 
         // make first block after genesis have valid state root
         let root =
-            DBTrieLoader::default().calculate_root(&tx.inner()).and_then(|e| e.root()).unwrap();
+            DBTrieLoader::new(tx.inner().deref()).calculate_root().and_then(|e| e.root()).unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
         let mut updated_header = cloned_second.header.unseal();
@@ -146,7 +147,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> PathBuf {
         let root = {
             let mut tx_mut = tx.inner();
             let root =
-                DBTrieLoader::default().calculate_root(&tx_mut).and_then(|e| e.root()).unwrap();
+                DBTrieLoader::new(tx_mut.deref()).calculate_root().and_then(|e| e.root()).unwrap();
             tx_mut.commit().unwrap();
             root
         };
