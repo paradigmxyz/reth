@@ -348,7 +348,7 @@ mod tests {
         let mut block1 = block.clone();
         let mut block2 = block.clone();
         let mut block3 = block.clone();
-        let mut block4 = block.clone();
+        let mut block4 = block;
 
         block1.block.header.hash = block1_hash;
         block2.block.header.hash = block2_hash;
@@ -360,13 +360,13 @@ mod tests {
         let mut chain1 = Chain {
             substate: Default::default(),
             changesets: vec![],
-            blocks: BTreeMap::from([(1, block1.clone()), (2, block2.clone())]),
+            blocks: BTreeMap::from([(1, block1), (2, block2)]),
         };
 
         let chain2 = Chain {
             substate: Default::default(),
             changesets: vec![],
-            blocks: BTreeMap::from([(3, block3.clone()), (4, block4.clone())]),
+            blocks: BTreeMap::from([(3, block3), (4, block4)]),
         };
 
         assert_eq!(chain1.append_chain(chain2.clone()), Ok(()));
@@ -418,7 +418,7 @@ mod tests {
         // split in two
         assert_eq!(
             chain.clone().split(SplitAt::Hash(block1_hash)),
-            ChainSplit::Split { canonical: chain_split1.clone(), pending: chain_split2.clone() }
+            ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
         );
 
         // split at unknown block hash
@@ -433,9 +433,6 @@ mod tests {
             ChainSplit::NoSplitCanonical(chain.clone())
         );
         // split at lower number
-        assert_eq!(
-            chain.clone().split(SplitAt::Number(0)),
-            ChainSplit::NoSplitPending(chain.clone())
-        );
+        assert_eq!(chain.clone().split(SplitAt::Number(0)), ChainSplit::NoSplitPending(chain));
     }
 }
