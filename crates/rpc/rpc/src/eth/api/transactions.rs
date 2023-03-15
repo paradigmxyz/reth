@@ -145,8 +145,8 @@ where
 {
     pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
         // Conversion from TransactionRequest -> TypedTransactionRequest -> primitive::Transaction
-        let request = match _request.into_typed_request().unwrap() {
-            TypedTransactionRequest::Legacy(tx) => PrimitiveTransaction::Legacy(TxLegacy {
+        let request = match _request.into_typed_request() {
+            Some(TypedTransactionRequest::Legacy(tx)) => PrimitiveTransaction::Legacy(TxLegacy {
                 chain_id: tx.chain_id,
                 nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
                 gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
@@ -155,7 +155,7 @@ where
                 value: u128::from_be_bytes(tx.value.to_be_bytes()),
                 input: tx.input,
             }),
-            TypedTransactionRequest::EIP2930(tx) => PrimitiveTransaction::Eip2930(TxEip2930 {
+            Some(TypedTransactionRequest::EIP2930(tx)) => PrimitiveTransaction::Eip2930(TxEip2930 {
                 chain_id: tx.chain_id,
                 nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
                 gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
@@ -165,7 +165,7 @@ where
                 input: tx.input,
                 access_list: tx.access_list,
             }),
-            TypedTransactionRequest::EIP1559(tx) => PrimitiveTransaction::Eip1559(TxEip1559 {
+            Some(TypedTransactionRequest::EIP1559(tx)) => PrimitiveTransaction::Eip1559(TxEip1559 {
                 chain_id: tx.chain_id,
                 nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
                 max_fee_per_gas: u128::from_be_bytes(tx.max_fee_per_gas.to_be_bytes()),
@@ -178,6 +178,7 @@ where
                     tx.max_priority_fee_per_gas.to_be_bytes(),
                 ),
             }),
+           None => return Err(EthApiError::InvalidTransactionSignature.into()),
         };
 
         // Submit to the pool

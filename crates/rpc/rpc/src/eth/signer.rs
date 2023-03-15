@@ -75,14 +75,7 @@ impl EthSigner for DevSigner {
         _request: TypedTransactionRequest,
         _address: &Address,
     ) -> Result<TransactionSigned> {
-
-        // let hash = 
-
-        Ok(TransactionSigned {
-            hash: H256::zero(),
-            signature: Signature::default(),
-            transaction: Default::default(),
-        })
+        unimplemented!()
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
