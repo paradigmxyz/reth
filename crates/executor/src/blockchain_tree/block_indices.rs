@@ -12,10 +12,6 @@ use std::collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet};
 pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,
-    /// For EVM's "BLOCKHASH" opcode we require last 256 block hashes. So we need to specify
-    /// at least `additional_canonical_block_hashes`+`max_reorg_depth`, for eth that would be
-    /// 256+64.
-    num_of_additional_canonical_block_hashes: u64,
     /// Canonical chain. Contains N number (depends on `finalization_depth`) of blocks.
     /// These blocks are found in fork_to_child but not inside `blocks_to_chain` or
     /// `number_to_block` as those are chain specific indices.
@@ -34,23 +30,15 @@ impl BlockIndices {
     /// Create new block indices structure
     pub fn new(
         last_finalized_block: BlockNumber,
-        num_of_additional_canonical_block_hashes: u64,
         canonical_chain: BTreeMap<BlockNumber, BlockHash>,
     ) -> Self {
         Self {
             last_finalized_block,
-            num_of_additional_canonical_block_hashes,
-            fork_to_child: Default::default(),
             canonical_chain,
+            fork_to_child: Default::default(),
             blocks_to_chain: Default::default(),
             index_number_to_block: Default::default(),
         }
-    }
-
-    /// Return number of additional canonical block hashes that we need
-    /// to have to be able to have enought information for EVM execution.
-    pub fn num_of_additional_canonical_block_hashes(&self) -> u64 {
-        self.num_of_additional_canonical_block_hashes
     }
 
     /// Return fork to child indices
@@ -258,6 +246,7 @@ impl BlockIndices {
     pub fn finalize_canonical_blocks(
         &mut self,
         finalized_block: BlockNumber,
+        num_of_additional_canonical_hashes_to_retain: u64,
     ) -> BTreeSet<BlockChainId> {
         // get finalized chains. blocks between [self.last_finalized,finalized_block).
         // Dont remove finalized_block, as sidechain can point to it.
@@ -270,7 +259,7 @@ impl BlockIndices {
 
         // remove unneeded canonical hashes.
         let remove_until =
-            finalized_block.saturating_sub(self.num_of_additional_canonical_block_hashes);
+            finalized_block.saturating_sub(num_of_additional_canonical_hashes_to_retain);
         self.canonical_chain.retain(|&number, _| number >= remove_until);
 
         let mut lose_chains = BTreeSet::new();
