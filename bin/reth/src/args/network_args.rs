@@ -13,10 +13,6 @@ use std::path::PathBuf;
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Networking")]
 pub struct NetworkArgs {
-    /// The port to listen for incoming connections.
-    #[arg(long = "discovery.port")]
-    pub discovery_port: Option<u16>,
-
     /// Disable the discovery service.
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
@@ -91,6 +87,10 @@ pub struct DiscoveryArgs {
     /// Disable Discv4 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
     disable_discv4_discovery: bool,
+
+    /// The UDP port to use for P2P discovery/networking.
+    #[arg(long = "discovery.port")]
+    pub port: Option<u16>,
 }
 
 impl DiscoveryArgs {
