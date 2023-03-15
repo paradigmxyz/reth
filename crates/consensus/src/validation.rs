@@ -739,7 +739,7 @@ mod tests {
         assert!(res.is_ok());
 
         // Withdrawal index should be the last withdrawal index + 1
-        let mut provider = Provider::new(Some(parent.clone()));
+        let mut provider = Provider::new(Some(parent));
         let block = create_block_with_withdrawals(&[4, 5, 6]);
         provider
             .withdrawals_provider

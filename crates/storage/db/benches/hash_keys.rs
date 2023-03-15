@@ -134,6 +134,7 @@ where
 
 /// Generates two batches. The first is to be inserted into the database before running the
 /// benchmark. The second is to be benchmarked with.
+#[allow(clippy::type_complexity)]
 fn generate_batches<T>(size: usize) -> (Vec<(T::Key, T::Value)>, Vec<(T::Key, T::Value)>)
 where
     T: Table + Default,
