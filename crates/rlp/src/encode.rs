@@ -79,6 +79,13 @@ pub trait Encodable {
 }
 
 impl<'a> Encodable for &'a [u8] {
+    fn encode(&self, out: &mut dyn BufMut) {
+        if self.len() != 1 || self[0] >= EMPTY_STRING_CODE {
+            Header { list: false, payload_length: self.len() }.encode(out);
+        }
+        out.put_slice(self);
+    }
+
     fn length(&self) -> usize {
         let mut len = self.len();
         if self.len() != 1 || self[0] >= EMPTY_STRING_CODE {
@@ -86,22 +93,15 @@ impl<'a> Encodable for &'a [u8] {
         }
         len
     }
-
-    fn encode(&self, out: &mut dyn BufMut) {
-        if self.len() != 1 || self[0] >= EMPTY_STRING_CODE {
-            Header { list: false, payload_length: self.len() }.encode(out);
-        }
-        out.put_slice(self);
-    }
 }
 
 impl<const LEN: usize> Encodable for [u8; LEN] {
-    fn length(&self) -> usize {
-        (self as &[u8]).length()
-    }
-
     fn encode(&self, out: &mut dyn BufMut) {
         (self as &[u8]).encode(out)
+    }
+
+    fn length(&self) -> usize {
+        (self as &[u8]).length()
     }
 }
 
@@ -164,12 +164,12 @@ encodable_uint!(u128);
 max_encoded_len_uint!(u128);
 
 impl Encodable for bool {
-    fn length(&self) -> usize {
-        (*self as u8).length()
-    }
-
     fn encode(&self, out: &mut dyn BufMut) {
         (*self as u8).encode(out)
+    }
+
+    fn length(&self) -> usize {
+        (*self as u8).length()
     }
 }
 
@@ -340,12 +340,12 @@ mod alloc_support {
     where
         T: Encodable,
     {
-        fn length(&self) -> usize {
-            list_length(self)
-        }
-
         fn encode(&self, out: &mut dyn BufMut) {
             encode_list(self, out)
+        }
+
+        fn length(&self) -> usize {
+            list_length(self)
         }
     }
 
@@ -583,7 +583,7 @@ mod tests {
                 "0100020003000400050006000700080009000A0B4B000C000D000E010100020003000400050006000700080009000A0B4B000C000D000E01",
                 16,
             )
-            .unwrap(),
+                .unwrap(),
             &hex!("b8380100020003000400050006000700080009000A0B4B000C000D000E010100020003000400050006000700080009000A0B4B000C000D000E01")[..],
         )])
     }
