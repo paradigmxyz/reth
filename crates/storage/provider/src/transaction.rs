@@ -21,8 +21,8 @@ use reth_db::{
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork,
-    Header, Receipt, SealedBlock, SealedBlockWithSenders, StorageEntry,
-    TransactionSignedEcRecovered, TransitionId, TxNumber, H256, U256,
+    Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
+    TransitionId, TxNumber, H256, U256,
 };
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
@@ -871,7 +871,7 @@ where
         // add storage changeset changes
         let mut storage_changes: BTreeMap<TransitionIdAddress, StorageChangeset> = BTreeMap::new();
         for (transition_and_address, storage_entry) in storage_changeset.into_iter().rev() {
-            let TransitionIdAddress((transition_id, address)) = transition_and_address;
+            let TransitionIdAddress((_, address)) = transition_and_address;
             let new_storage =
                 match local_plain_state.entry(address).or_default().1.entry(storage_entry.key) {
                     Entry::Vacant(entry) => {
