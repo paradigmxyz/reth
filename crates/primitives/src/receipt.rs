@@ -106,6 +106,9 @@ impl Receipt {
 }
 
 impl Encodable for Receipt {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.encode_inner(out, true)
+    }
     fn length(&self) -> usize {
         let mut payload_len = self.receipt_length();
         // account for eip-2718 type prefix and set the list
@@ -116,9 +119,6 @@ impl Encodable for Receipt {
         }
 
         payload_len
-    }
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.encode_inner(out, true)
     }
 }
 
