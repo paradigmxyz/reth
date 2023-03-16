@@ -277,9 +277,12 @@ impl PostState {
         self.current_transition_id = next_transition_id + 1;
     }
 
-    /// TODO: Docs
+    /// Reverts each change up to and including any change that is part of `transition_id`.
+    ///
+    /// The reverted changes are removed from this post-state, and their effects are reverted.
+    ///
+    /// The reverted changes are returned.
     pub fn revert_to(&mut self, transition_id: usize) -> Vec<Change> {
-        // TODO: Add a `changes_count` instead and use that so we can slice instead.
         let mut changes_to_revert = Vec::new();
         self.changes.retain(|change| {
             if change.transition_id() >= transition_id as u64 {
