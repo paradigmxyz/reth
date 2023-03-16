@@ -1,4 +1,4 @@
-//! A chain in a [`BlockchainTree`].
+//! A chain in a [`BlockchainTree`][super::BlockchainTree].
 //!
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
@@ -8,7 +8,7 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders, SealedHead
 use reth_provider::{BlockExecutor, ExecutorFactory, StateProvider};
 use std::collections::BTreeMap;
 
-/// The ID of a sidechain internally in a [`BlockchainTree`].
+/// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
 pub(crate) type BlockChainId = u64;
 
 /// A side chain.
@@ -16,7 +16,7 @@ pub(crate) type BlockChainId = u64;
 /// The sidechain contains the state of accounts after execution of its blocks,
 /// changesets for those blocks (and their transactions), as well as the blocks themselves.
 ///
-/// Each chain in the tree are identified using a unique [`BlockChainId`].
+/// Each chain in the tree are identified using a unique ID.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Chain {
     /// The state of accounts after execution of the blocks in this chain.
