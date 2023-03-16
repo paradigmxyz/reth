@@ -1,7 +1,7 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, InvalidTransactionError};
-use reth_primitives::{AccessList, Address, U128, U256};
+use reth_primitives::{AccessList, Address, U256};
 use reth_rpc_types::CallRequest;
 use revm::{
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
@@ -83,8 +83,12 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
         chain_id,
     } = request;
 
-    let CallFees { max_priority_fee_per_gas, gas_price } =
-        CallFees::ensure_fees(gas_price, max_fee_per_gas, max_priority_fee_per_gas)?;
+    let CallFees { max_priority_fee_per_gas, gas_price } = CallFees::ensure_fees(
+        gas_price,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
+        block_env.basefee,
+    )?;
 
     let gas_limit = gas.unwrap_or(block_env.gas_limit.min(U256::from(u64::MAX)));
 
@@ -112,7 +116,7 @@ pub(crate) struct CallFees {
     max_priority_fee_per_gas: Option<U256>,
     /// Unified gas price setting
     ///
-    /// Will be `0` if unset in request
+    /// Will be the configured `basefee` if unset in the request
     ///
     /// `gasPrice` for legacy,
     /// `maxFeePerGas` for EIP-1559
@@ -122,22 +126,26 @@ pub(crate) struct CallFees {
 // === impl CallFees ===
 
 impl CallFees {
-    /// Ensures the fields of a [CallRequest] are not conflicting
+    /// Ensures the fields of a [CallRequest] are not conflicting.
+    ///
+    /// If no `gasPrice` or `maxFeePerGas` is set, then the `gas_price` in the response will
+    /// fallback to the given `basefee`.
     fn ensure_fees(
-        call_gas_price: Option<U128>,
-        call_max_fee: Option<U128>,
-        call_priority_fee: Option<U128>,
+        call_gas_price: Option<U256>,
+        call_max_fee: Option<U256>,
+        call_priority_fee: Option<U256>,
+        base_fee: U256,
     ) -> EthResult<CallFees> {
         match (call_gas_price, call_max_fee, call_priority_fee) {
             (gas_price, None, None) => {
                 // request for a legacy transaction
                 // set everything to zero
-                let gas_price = gas_price.unwrap_or_default();
-                Ok(CallFees { gas_price: U256::from(gas_price), max_priority_fee_per_gas: None })
+                let gas_price = gas_price.unwrap_or(base_fee);
+                Ok(CallFees { gas_price, max_priority_fee_per_gas: None })
             }
             (None, max_fee_per_gas, max_priority_fee_per_gas) => {
                 // request for eip-1559 transaction
-                let max_fee = max_fee_per_gas.unwrap_or_default();
+                let max_fee = max_fee_per_gas.unwrap_or(base_fee);
 
                 if let Some(max_priority) = max_priority_fee_per_gas {
                     if max_priority > max_fee {
@@ -148,10 +156,7 @@ impl CallFees {
                         )
                     }
                 }
-                Ok(CallFees {
-                    gas_price: U256::from(max_fee),
-                    max_priority_fee_per_gas: max_priority_fee_per_gas.map(U256::from),
-                })
+                Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas })
             }
             (Some(gas_price), Some(max_fee_per_gas), Some(max_priority_fee_per_gas)) => {
                 Err(EthApiError::ConflictingRequestGasPriceAndTipSet {

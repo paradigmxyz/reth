@@ -1,4 +1,4 @@
-use reth_primitives::{AccessList, Address, Bytes, U128, U256, U64};
+use reth_primitives::{AccessList, Address, Bytes, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Call request
@@ -10,11 +10,11 @@ pub struct CallRequest {
     /// To
     pub to: Option<Address>,
     /// Gas Price
-    pub gas_price: Option<U128>,
+    pub gas_price: Option<U256>,
     /// EIP-1559 Max base fee the caller is willing to pay
-    pub max_fee_per_gas: Option<U128>,
+    pub max_fee_per_gas: Option<U256>,
     /// EIP-1559 Priority fee the caller is paying to the block author
-    pub max_priority_fee_per_gas: Option<U128>,
+    pub max_priority_fee_per_gas: Option<U256>,
     /// Gas
     pub gas: Option<U256>,
     /// Value
