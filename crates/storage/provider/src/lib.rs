@@ -29,8 +29,6 @@ pub mod trie;
 /// Execution result
 pub mod post_state;
 
-pub mod execution_result;
-
 /// Helper types for interacting with the database
 mod transaction;
 pub use transaction::{Transaction, TransactionError};

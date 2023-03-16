@@ -589,11 +589,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         tx.commit()?;
 
-        // TODO
-        //let chain = Chain::new(blocks_and_execution);
-        //
-        //Ok(chain)
-        Ok(Chain::new(vec![]))
+        Ok(Chain::new(blocks_and_execution))
     }
 }
 

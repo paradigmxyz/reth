@@ -1,3 +1,8 @@
+use crate::{
+    insert_canonical_block,
+    post_state::PostState,
+    trie::{DBTrieLoader, TrieError},
+};
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -23,16 +28,6 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds},
-};
-
-use crate::post_state::PostState;
-use crate::{
-    // TODO: Figure out how to deduplicate these with the post-state types
-    execution_result::{
-        AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
-    },
-    insert_canonical_block,
-    trie::{DBTrieLoader, TrieError},
 };
 
 /// A container for any DB transaction that will open a new inner transaction when the current
