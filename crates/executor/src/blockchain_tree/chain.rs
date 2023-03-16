@@ -426,14 +426,23 @@ mod tests {
             (block2.clone(), block_state2.clone()),
         ]);
 
+        let mut split1_state = chain.state.clone();
+        let reverted_changes = split1_state.revert_to(*chain.block_transitions.get(&1).unwrap());
+        let new_transition_id =
+            reverted_changes.last().map(|c| c.transition_id()).unwrap_or_default();
+
+        let mut split2_state = chain.state.clone();
+        split2_state.changes = reverted_changes;
+        split2_state.current_transition_id = new_transition_id + 1;
+
         let chain_split1 = Chain {
-            state: PostState::default(),
+            state: split1_state,
             block_transitions: BTreeMap::new(),
             blocks: BTreeMap::from([(1, block1.clone())]),
         };
 
         let chain_split2 = Chain {
-            state: chain.state.clone(),
+            state: split2_state,
             block_transitions: chain.block_transitions.clone(),
             blocks: BTreeMap::from([(2, block2.clone())]),
         };
