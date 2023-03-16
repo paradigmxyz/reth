@@ -73,7 +73,9 @@ pub enum Change {
     ///
     /// This removes all of the information associated with the account. An accompanying
     /// [Change::StorageWiped] will also be present to mark the deletion of storage.
-    // TODO: Note on state clear EIP
+    ///
+    /// If a change to an account satisfies the conditions for EIP-158, this change variant is also
+    /// applied instead of the change that would otherwise have happened.
     AccountDestroyed {
         /// The ID of the transition this change is a part of.
         id: TransitionId,
@@ -194,7 +196,6 @@ const BEST_GUESS_CHANGES_PER_TX: usize = 8;
 /// - Each transaction having some amount of changes
 const PREALLOC_CHANGES_SIZE: usize = 256 * BEST_GUESS_CHANGES_PER_TX;
 
-// TODO: Reduce clones and deallocations
 impl PostState {
     /// Create an empty [PostState].
     pub fn new() -> Self {

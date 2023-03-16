@@ -50,10 +50,6 @@ impl<'a, SP: StateProvider> BlockHashProvider for PostStateProvider<'a, SP> {
 
 impl<'a, SP: StateProvider> AccountProvider for PostStateProvider<'a, SP> {
     fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        // TODO(onbjerg): Double check this logic (not in poststate vs deleted)
-        // If deleted -> Default account
-        // If not deleted -> Account
-        // If not in state -> Look up
         if let Some(account) = self.state.account(&address) {
             Ok(*account)
         } else {
