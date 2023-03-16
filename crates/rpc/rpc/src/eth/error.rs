@@ -2,7 +2,7 @@
 
 use crate::result::{internal_rpc_err, rpc_err};
 use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
-use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U128, U256};
+use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
 use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError, Output};
@@ -31,15 +31,15 @@ pub enum EthApiError {
     #[error("Prevrandao not in th EVM's environment after merge")]
     PrevrandaoNotSet,
     #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} and maxFeePerGas {max_fee_per_gas} set")]
-    ConflictingRequestGasPrice { gas_price: U128, max_fee_per_gas: U128 },
+    ConflictingRequestGasPrice { gas_price: U256, max_fee_per_gas: U256 },
     #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} maxFeePerGas {max_fee_per_gas} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
     ConflictingRequestGasPriceAndTipSet {
-        gas_price: U128,
-        max_fee_per_gas: U128,
-        max_priority_fee_per_gas: U128,
+        gas_price: U256,
+        max_fee_per_gas: U256,
+        max_priority_fee_per_gas: U256,
     },
     #[error("Conflicting fee values in request. Legacy gasPrice {gas_price} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
-    RequestLegacyGasPriceAndTipSet { gas_price: U128, max_priority_fee_per_gas: U128 },
+    RequestLegacyGasPriceAndTipSet { gas_price: U256, max_priority_fee_per_gas: U256 },
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
     /// Thrown when constructing an RPC block from a primitive block data failed.
