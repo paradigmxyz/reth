@@ -33,7 +33,7 @@ metrics = "0.20.1"
 reth-metrics-derive = { path = "../metrics/metrics-derive" }
 
 # misc
-aquamarine = "0.2.1" # docs
+aquamarine = "0.3.0"
 thiserror = "1.0"
 tracing = "0.1"
 serde = { version = "1.0", features = ["derive", "rc"], optional = true }

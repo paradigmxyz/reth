@@ -44,9 +44,16 @@ pub fn logs_dir() -> Option<PathBuf> {
 
 /// Returns the path to the reth jwtsecret directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [dirs_next::data_dir] for cross-platform behavior.
 pub fn jwt_secret_dir() -> Option<PathBuf> {
     data_dir().map(|root| root.join("jwtsecret"))
+}
+
+/// Returns the path to the reth net directory.
+///
+/// Refer to [dirs_next::data_dir]
+pub fn net_dir() -> Option<PathBuf> {
+    data_dir().map(|root| root.join("net"))
 }
 
 /// Returns the path to the reth database.
@@ -90,14 +97,14 @@ impl XdgPath for ConfigPath {
 
 /// Returns the path to the default reth known peers file.
 ///
-/// Refer to [dirs_next::config_dir] for cross-platform behavior.
+/// Refer to [dirs_next::data_dir] for cross-platform behavior.
 #[derive(Default, Debug, Clone)]
 #[non_exhaustive]
 pub struct KnownPeersPath;
 
 impl XdgPath for KnownPeersPath {
     fn resolve() -> Option<PathBuf> {
-        database_path().map(|p| p.join("known-peers.json"))
+        net_dir().map(|p| p.join("known-peers.json"))
     }
 }
 

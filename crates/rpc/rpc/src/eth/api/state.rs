@@ -1,14 +1,13 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::{
-    eth::{
-        api::StateProvider,
-        error::{EthApiError, EthResult},
-    },
+    eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{Address, BlockId, Bytes, H256, KECCAK_EMPTY, U256};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, H256, KECCAK_EMPTY, U256};
+use reth_provider::{
+    AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
+};
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
@@ -16,15 +15,13 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let code = state.account_code(address)?.unwrap_or_default();
         Ok(code.original_bytes().into())
     }
 
     pub(crate) fn balance(&self, address: Address, block_id: Option<BlockId>) -> EthResult<U256> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let balance = state.account_balance(address)?.unwrap_or_default();
         Ok(balance)
     }
@@ -34,8 +31,7 @@ where
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let nonce = U256::from(state.account_nonce(address)?.unwrap_or_default());
         Ok(nonce)
     }
@@ -46,8 +42,7 @@ where
         index: U256,
         block_id: Option<BlockId>,
     ) -> EthResult<H256> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at_block_id_or_latest(block_id)?;
         let storage_key = H256(index.to_be_bytes());
         let value = state.storage(address, storage_key)?.unwrap_or_default();
         Ok(H256(value.to_be_bytes()))
@@ -59,13 +54,14 @@ where
         keys: Vec<H256>,
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
-        let state =
-            self.state_at_block_id_or_latest(block_id)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
 
         // TODO: remove when HistoricalStateProviderRef::proof is implemented
-        if matches!(state, StateProvider::History(_)) {
+        if !block_id.is_latest() {
             return Err(EthApiError::InvalidBlockRange)
         }
+
+        let state = self.state_at_block_id(block_id)?;
 
         let (account_proof, storage_hash, stg_proofs) = state.proof(address, &keys)?;
 

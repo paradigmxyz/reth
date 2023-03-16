@@ -27,7 +27,6 @@ use revm::{
     },
     Database,
 };
-use std::ops::Deref;
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
@@ -47,8 +46,8 @@ where
         state_overrides: Option<StateOverride>,
     ) -> EthResult<(ResultAndState, Env)> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        self.call_with(cfg, block_env, request, &*state, state_overrides)
+        let state = self.state_at(at)?;
+        self.call_with(cfg, block_env, request, state, state_overrides)
     }
 
     /// Executes the call request using the given environment against the state provider
@@ -87,8 +86,8 @@ where
         at: BlockId,
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-        self.estimate_gas_with(cfg, block_env, request, &*state)
+        let state = self.state_at(at)?;
+        self.estimate_gas_with(cfg, block_env, request, state)
     }
 
     /// Estimates the gas usage of the `request` with the state.
@@ -168,7 +167,9 @@ where
             }
             ExecutionResult::Halt { reason, .. } => {
                 return match reason {
-                    Halt::OutOfGas(_) => Err(InvalidTransactionError::OutOfGas(gas_limit).into()),
+                    Halt::OutOfGas(err) => {
+                        Err(InvalidTransactionError::out_of_gas(err, gas_limit).into())
+                    }
                     Halt::NonceOverflow => Err(InvalidTransactionError::NonceMaxValue.into()),
                     err => Err(InvalidTransactionError::EvmHalt(err).into()),
                 }
@@ -184,7 +185,8 @@ where
                         ExecutionResult::Success { .. } => {
                             // transaction succeeded by manually increasing the gas limit to
                             // highest, which means the caller lacks funds to pay for the tx
-                            Err(InvalidTransactionError::OutOfGas(U256::from(req_gas_limit)).into())
+                            Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit))
+                                .into())
                         }
                         ExecutionResult::Revert { .. } => {
                             // reverted again after bumping the limit
@@ -270,14 +272,14 @@ where
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (mut cfg, block, at) = self.evm_env_at(block_id).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
 
         // we want to disable this in eth_call, since this is common practice used by other node
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
 
         let env = build_call_evm_env(cfg, block, request.clone())?;
-        let mut db = SubState::new(State::new(state.deref()));
+        let mut db = SubState::new(State::new(state));
 
         let from = request.from.unwrap_or_default();
         let to = if let Some(to) = request.to {
