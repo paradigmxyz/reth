@@ -525,7 +525,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let first_transition_id =
             tx.get_block_transition(chain.first().number.saturating_sub(1))
                 .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
+        let expected_state_root = chain.tip().state_root;
+        let fork_block = chain.fork_block_number();
         let (blocks, state) = chain.into_inner();
+        let num_transitions = state.transitions_count();
 
         // Write state and changesets to the database
         state
@@ -537,6 +540,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             tx.insert_block(block)
                 .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
         }
+        tx.insert_hashes(
+            fork_block,
+            first_transition_id,
+            first_transition_id + num_transitions as u64,
+            expected_state_root,
+        )
+        .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
 
         // Update pipeline progress
         tx.update_pipeline_stages(new_tip)

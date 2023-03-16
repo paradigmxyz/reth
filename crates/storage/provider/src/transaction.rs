@@ -529,6 +529,28 @@ where
         let (from, to) =
             insert_canonical_block(self.deref_mut(), block, Some(senders), false).unwrap();
 
+        // account history stage
+        {
+            let indices = self.get_account_transition_ids_from_changeset(from, to)?;
+            self.insert_account_history_index(indices)?;
+        }
+
+        // storage history stage
+        {
+            let indices = self.get_storage_transition_ids_from_changeset(from, to)?;
+            self.insert_storage_history_index(indices)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn insert_hashes(
+        &mut self,
+        parent_block_number: BlockNumber,
+        from: TransitionId,
+        to: TransitionId,
+        expected_state_root: H256,
+    ) -> Result<(), TransactionError> {
         // storage hashing stage
         {
             let lists = self.get_addresses_and_keys_of_changed_storages(from, to)?;
@@ -548,26 +570,17 @@ where
             let current_root = self.get_header(parent_block_number)?.state_root;
             let mut loader = DBTrieLoader::new(self.deref_mut());
             let root = loader.update_root(current_root, from..to).and_then(|e| e.root())?;
-            if root != block_state_root {
+            println!("Root: {:?}, expected: {:?}", root, expected_state_root);
+            if root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
-                    expected: block_state_root,
-                    block_number,
-                    block_hash,
+                    expected: expected_state_root,
+                    // TODO
+                    block_number: parent_block_number + 1,
+                    // TODO
+                    block_hash: H256::zero(),
                 })
             }
-        }
-
-        // account history stage
-        {
-            let indices = self.get_account_transition_ids_from_changeset(from, to)?;
-            self.insert_account_history_index(indices)?;
-        }
-
-        // storage history stage
-        {
-            let indices = self.get_storage_transition_ids_from_changeset(from, to)?;
-            self.insert_storage_history_index(indices)?;
         }
 
         Ok(())
