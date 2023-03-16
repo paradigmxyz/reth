@@ -3,11 +3,12 @@
 /// The configuration for the blockchain tree.
 #[derive(Clone, Debug)]
 pub struct BlockchainTreeConfig {
-    /// Finalization windows. Number of blocks that can be reorged
-    max_reorg_depth: u64,
-    /// Number of block after finalized block that we are storing. It should be more then
-    /// finalization window
+    /// Number of blocks after the last finalized block that we are storing.
+    ///
+    /// It should be more than the finalization window for the canonical chain.
     max_blocks_in_chain: u64,
+    /// The number of blocks that can be re-orged (finalization windows)
+    max_reorg_depth: u64,
     /// For EVM's "BLOCKHASH" opcode we require last 256 block hashes. So we need to specify
     /// at least `additional_canonical_block_hashes`+`max_reorg_depth`, for eth that would be
     /// 256+64.
