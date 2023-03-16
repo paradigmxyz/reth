@@ -146,12 +146,6 @@ impl GenesisAccount {
 }
 
 impl Encodable for GenesisAccount {
-    fn length(&self) -> usize {
-        let len = self.payload_len();
-        // RLP header length + payload length
-        len + length_of_length(len)
-    }
-
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         let header = RlpHeader { list: true, payload_length: self.payload_len() };
         header.encode(out);
@@ -173,6 +167,12 @@ impl Encodable for GenesisAccount {
             })
             .encode(out);
         self.code.as_ref().map_or(KECCAK_EMPTY, keccak256).encode(out);
+    }
+
+    fn length(&self) -> usize {
+        let len = self.payload_len();
+        // RLP header length + payload length
+        len + length_of_length(len)
     }
 }
 
