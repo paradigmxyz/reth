@@ -70,7 +70,12 @@ macro_rules! impl_max_encoded_len {
 #[auto_impl(&)]
 #[cfg_attr(feature = "alloc", auto_impl(Box, Arc))]
 pub trait Encodable {
+    /// Appends the rlp encoded object to the specified output buffer.
     fn encode(&self, out: &mut dyn BufMut);
+
+    /// Returns the length of the encoded object.
+    ///
+    /// NOTE: This includes the length of the rlp [Header].
     fn length(&self) -> usize {
         let mut out = BytesMut::new();
         self.encode(&mut out);
