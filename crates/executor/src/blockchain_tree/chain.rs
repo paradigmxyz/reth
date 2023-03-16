@@ -242,10 +242,6 @@ impl Chain {
 
         // Insert blocks from other chain
         self.blocks.extend(chain.blocks.into_iter());
-
-        // TODO(onbjerg): Is this correct, or are the chains we are appending here *always* forked
-        // directly from this chain? If they are, then they *should* hold the latest `state`, and
-        // the latest `block_transitions`, in which case we can just take them.
         let current_transition_count = self.state.transitions_count();
         self.state.extend(chain.state);
 
@@ -267,9 +263,12 @@ impl Chain {
     ///
     /// # Note
     ///
-    /// TODO: Update this (it's no longer true)
-    /// The current state of accounts will only be found in the second chain. The state of accounts
-    /// for the first chain will be invalid.
+    /// The block number to transition ID mapping is only found in the second chain, making it
+    /// impossible to perform any state reverts on the first chain.
+    ///
+    /// The second chain only contains the changes that were reverted on the first chain; however,
+    /// it retains the up to date state as if the chains were one, i.e. the second chain is an
+    /// extension of the first.
     pub fn split(mut self, split_at: SplitAt) -> ChainSplit {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
         let block_number = match split_at {
@@ -429,14 +428,12 @@ mod tests {
 
         let chain_split1 = Chain {
             state: PostState::default(),
-            // TODO: Is this right??
             block_transitions: BTreeMap::new(),
             blocks: BTreeMap::from([(1, block1.clone())]),
         };
 
         let chain_split2 = Chain {
             state: chain.state.clone(),
-            // TODO: Is this right??
             block_transitions: chain.block_transitions.clone(),
             blocks: BTreeMap::from([(2, block2.clone())]),
         };

@@ -521,7 +521,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
         let mut tx = Transaction::new(&self.externals.db)?;
-        let new_tip = chain.tip().number;
+        let new_tip_number = chain.tip().number;
+        let new_tip_hash = chain.tip().hash;
         let first_transition_id =
             tx.get_block_transition(chain.first().number.saturating_sub(1))
                 .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
@@ -544,12 +545,14 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             fork_block,
             first_transition_id,
             first_transition_id + num_transitions as u64,
+            new_tip_number,
+            new_tip_hash,
             expected_state_root,
         )
         .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
 
         // Update pipeline progress
-        tx.update_pipeline_stages(new_tip)
+        tx.update_pipeline_stages(new_tip_number)
             .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
         tx.commit()?;
@@ -612,9 +615,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_primitives::{
-        hex_literal::hex, proofs::EMPTY_ROOT, ChainSpec, ChainSpecBuilder, H256, MAINNET,
-    };
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpec, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
         insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData, BlockExecutor,
         StateProvider,

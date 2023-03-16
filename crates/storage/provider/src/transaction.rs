@@ -510,9 +510,11 @@ where
         Ok(())
     }
 
-    /// Insert full block and make it canonical
+    /// Insert full block and make it canonical.
     ///
-    /// This is atomic operation and transaction will do one commit at the end of the function.
+    /// This inserts the block and builds history related indexes. Once all blocks in a chain have
+    /// been committed, the state root needs to be inserted separately with
+    /// [`Transaction::insert_hashes`].
     ///
     /// # Note
     ///
@@ -521,10 +523,6 @@ where
     pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<(), TransactionError> {
         // Header, Body, SenderRecovery, TD, TxLookup stages
         let (block, senders) = block.into_components();
-        let block_number = block.number;
-        let block_state_root = block.state_root;
-        let block_hash = block.hash();
-        let parent_block_number = block.number.saturating_sub(1);
 
         let (from, to) =
             insert_canonical_block(self.deref_mut(), block, Some(senders), false).unwrap();
@@ -544,41 +542,51 @@ where
         Ok(())
     }
 
+    /// Calculate the hashes of all changed accounts and storages, and finally calculate the state
+    /// root.
+    ///
+    /// The chain goes from `fork_block_number + 1` to `current_block_number`, and hashes are
+    /// calculated from `from_transition_id` to `to_transition_id`.
+    ///
+    /// The resulting state root is compared with `expected_state_root`.
     pub fn insert_hashes(
         &mut self,
-        parent_block_number: BlockNumber,
-        from: TransitionId,
-        to: TransitionId,
+        fork_block_number: BlockNumber,
+        from_transition_id: TransitionId,
+        to_transition_id: TransitionId,
+        current_block_number: BlockNumber,
+        current_block_hash: H256,
         expected_state_root: H256,
     ) -> Result<(), TransactionError> {
         // storage hashing stage
         {
-            let lists = self.get_addresses_and_keys_of_changed_storages(from, to)?;
+            let lists = self
+                .get_addresses_and_keys_of_changed_storages(from_transition_id, to_transition_id)?;
             let storages = self.get_plainstate_storages(lists.into_iter())?;
             self.insert_storage_for_hashing(storages.into_iter())?;
         }
 
         // account hashing stage
         {
-            let lists = self.get_addresses_of_changed_accounts(from, to)?;
+            let lists =
+                self.get_addresses_of_changed_accounts(from_transition_id, to_transition_id)?;
             let accounts = self.get_plainstate_accounts(lists.into_iter())?;
             self.insert_account_for_hashing(accounts.into_iter())?;
         }
 
         // merkle tree
         {
-            let current_root = self.get_header(parent_block_number)?.state_root;
+            let current_root = self.get_header(fork_block_number)?.state_root;
             let mut loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader.update_root(current_root, from..to).and_then(|e| e.root())?;
-            println!("Root: {:?}, expected: {:?}", root, expected_state_root);
+            let root = loader
+                .update_root(current_root, from_transition_id..to_transition_id)
+                .and_then(|e| e.root())?;
             if root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
                     expected: expected_state_root,
-                    // TODO
-                    block_number: parent_block_number + 1,
-                    // TODO
-                    block_hash: H256::zero(),
+                    block_number: current_block_number,
+                    block_hash: current_block_hash,
                 })
             }
         }
