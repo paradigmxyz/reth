@@ -9,6 +9,7 @@ use std::collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet};
 ///
 /// It contains list of canonical block hashes, forks to childs blocks
 /// and block hash to chain id.
+#[derive(Debug)]
 pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,
@@ -239,6 +240,16 @@ impl BlockIndices {
 
         // insert new canonical
         self.canonical_chain.extend(blocks.iter().map(|(number, block)| (*number, block.hash())))
+    }
+
+    /// this is function that is going to remove N number of last canonical hashes.
+    ///
+    /// NOTE: This is not safe standalone, as it will not disconnect
+    /// blocks that deppends on unwinded canonical chain. And should be
+    /// used when canonical chain is reinserted inside Tree.
+    fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
+        // this will remove all blocks numbers that are going to be replaced.
+        self.canonical_chain.retain(|num, _| *num <= unwind_to);
     }
 
     /// Used for finalization of block.
