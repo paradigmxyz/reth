@@ -969,7 +969,8 @@ where
             for _ in 0..block_body.tx_count {
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
-                        change.set_transition_id(block_exec_res.current_transition_id);
+                        change
+                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
                         block_exec_res.add_and_apply(change);
                     }
                 }
@@ -983,7 +984,8 @@ where
             if block_transition == next_transition_id + 1 {
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
-                        change.set_transition_id(block_exec_res.current_transition_id);
+                        change
+                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
                         block_exec_res.add_and_apply(change);
                     }
                     block_exec_res.finish_transition();

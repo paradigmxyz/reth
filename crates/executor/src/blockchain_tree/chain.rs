@@ -299,16 +299,12 @@ impl Chain {
         };
 
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
-        let mut canonical_state = self.state.clone();
-        let reverted_changes = canonical_state.revert_to(
+
+        let mut canonical_state = std::mem::take(&mut self.state);
+        let new_state = canonical_state.split_at(
             *self.block_transitions.get(&(block_number)).expect("Unknown block transition ID"),
         );
-
-        // TODO: This is really bad. There should be a `split_at` or something for PostState
-        let new_transition_id =
-            reverted_changes.last().map(|c| c.transition_id()).unwrap_or_default();
-        self.state.changes = reverted_changes;
-        self.state.current_transition_id = new_transition_id + 1;
+        self.state = new_state;
 
         ChainSplit::Split {
             canonical: Chain {
@@ -427,13 +423,7 @@ mod tests {
         ]);
 
         let mut split1_state = chain.state.clone();
-        let reverted_changes = split1_state.revert_to(*chain.block_transitions.get(&1).unwrap());
-        let new_transition_id =
-            reverted_changes.last().map(|c| c.transition_id()).unwrap_or_default();
-
-        let mut split2_state = chain.state.clone();
-        split2_state.changes = reverted_changes;
-        split2_state.current_transition_id = new_transition_id + 1;
+        let split2_state = split1_state.split_at(*chain.block_transitions.get(&1).unwrap());
 
         let chain_split1 = Chain {
             state: split1_state,

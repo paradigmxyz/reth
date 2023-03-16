@@ -166,7 +166,7 @@ impl Change {
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
-    pub current_transition_id: TransitionId,
+    current_transition_id: TransitionId,
     /// The state of all modified accounts after execution.
     ///
     /// If the value contained is `None`, then the account should be deleted.
@@ -177,7 +177,7 @@ pub struct PostState {
     /// from the database.
     storage: BTreeMap<Address, Storage>,
     /// The changes to state that happened during execution
-    pub changes: Vec<Change>,
+    changes: Vec<Change>,
     /// New code created during the execution
     bytecode: BTreeMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
@@ -299,6 +299,34 @@ impl PostState {
         }
         self.current_transition_id = transition_id as TransitionId;
         changes_to_revert
+    }
+
+    /// Reverts each change up to and including any change that is part of `transition_id`.
+    ///
+    /// The reverted changes are removed from this post-state, and their effects are reverted.
+    ///
+    /// A new post-state containing the pre-revert state, as well as the reverted changes *only* is
+    /// returned.
+    ///
+    /// This effectively splits the post state in two:
+    ///
+    /// 1. This post-state has the changes reverted
+    /// 2. The returned post-state does *not* have the changes reverted, but only contains the
+    /// descriptions of the changes that were reverted in the first post-state.
+    pub fn split_at(&mut self, transition_id: usize) -> Self {
+        // Clone ourselves
+        let mut non_reverted_state = self.clone();
+
+        // Revert the desired changes
+        let reverted_changes = self.revert_to(transition_id);
+
+        // Compute the new `current_transition_id` for `non_reverted_state`.
+        let new_transition_id =
+            reverted_changes.last().map(|c| c.transition_id()).unwrap_or_default();
+        non_reverted_state.changes = reverted_changes;
+        non_reverted_state.current_transition_id = new_transition_id + 1;
+
+        non_reverted_state
     }
 
     /// Add a newly created account to the post-state.
