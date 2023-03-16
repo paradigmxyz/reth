@@ -362,7 +362,7 @@ impl PostState {
     }
 
     /// Add a new change, and apply its transformations to the current state
-    fn add_and_apply(&mut self, change: Change) {
+    pub fn add_and_apply(&mut self, change: Change) {
         match &change {
             Change::AccountCreated { address, account, .. } |
             Change::AccountChanged { address, new: account, .. } => {

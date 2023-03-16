@@ -1,6 +1,6 @@
 use crate::{
     insert_canonical_block,
-    post_state::PostState,
+    post_state::{Change, PostState, StorageChangeset},
     trie::{DBTrieLoader, TrieError},
 };
 use itertools::{izip, Itertools};
@@ -11,7 +11,7 @@ use reth_db::{
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
-        ShardedKey, StoredBlockBody, TransitionIdAddress,
+        AccountBeforeTx, ShardedKey, StoredBlockBody, TransitionIdAddress,
     },
     table::Table,
     tables,
@@ -813,10 +813,7 @@ where
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
         type LocalPlainState = BTreeMap<Address, (Option<Option<Account>>, BTreeMap<H256, U256>)>;
-        type Changesets = BTreeMap<
-            TransitionId,
-            BTreeMap<Address, (AccountInfoChangeSet, BTreeMap<H256, (U256, U256)>)>,
-        >;
+        type Changesets = BTreeMap<TransitionId, Vec<Change>>;
 
         let mut local_plain_state: LocalPlainState = BTreeMap::new();
 
@@ -830,31 +827,49 @@ where
 
         // add account changeset changes
         for (transition_id, account_before) in account_changeset.into_iter().rev() {
-            let new_info = match local_plain_state.entry(account_before.address) {
+            let AccountBeforeTx { info: old_info, address } = account_before;
+            let new_info = match local_plain_state.entry(address) {
                 Entry::Vacant(entry) => {
-                    let new_account =
-                        plain_accounts_cursor.seek(account_before.address)?.map(|(_s, i)| i);
-                    entry.insert((Some(account_before.info), BTreeMap::new()));
+                    let new_account = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    entry.insert((Some(old_info), BTreeMap::new()));
                     new_account
                 }
                 Entry::Occupied(mut entry) => {
-                    let new_account =
-                        std::mem::replace(&mut entry.get_mut().0, Some(account_before.info));
+                    let new_account = std::mem::replace(&mut entry.get_mut().0, Some(old_info));
                     new_account.expect("As we are stacking account first, account would always be Some(Some) or Some(None)")
                 }
             };
-            let account_info_changeset = AccountInfoChangeSet::new(account_before.info, new_info);
-            // insert changeset to transition id. Multiple account for same transition Id are not
-            // possible.
-            all_changesets
-                .entry(transition_id)
-                .or_default()
-                .entry(account_before.address)
-                .or_default()
-                .0 = account_info_changeset
+
+            let change = match (old_info, new_info) {
+                (Some(old), Some(new)) => {
+                    if new != old {
+                        Change::AccountChanged {
+                            id: transition_id,
+                            address,
+                            old,
+                            new,
+                        }
+                    } else {
+                        unreachable!("Junk data in database: an account changeset did not represent any change");
+                    }
+                }
+                (None, Some(account)) => Change::AccountCreated {
+                    id: transition_id,
+                    address,
+                    account
+                },
+                (Some(old), None) => Change::AccountDestroyed {
+                    id: transition_id,
+                    address,
+                    old
+                },
+                (None, None) => unreachable!("Junk data in database: an account changeset transitioned from no account to no account"),
+            };
+            all_changesets.entry(transition_id).or_default().push(change);
         }
 
         // add storage changeset changes
+        let mut storage_changes: BTreeMap<TransitionIdAddress, StorageChangeset> = BTreeMap::new();
         for (transition_and_address, storage_entry) in storage_changeset.into_iter().rev() {
             let TransitionIdAddress((transition_id, address)) = transition_and_address;
             let new_storage =
@@ -871,13 +886,20 @@ where
                         std::mem::replace(entry.get_mut(), storage_entry.value)
                     }
                 };
-            all_changesets
-                .entry(transition_id)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .insert(storage_entry.key, (storage_entry.value, new_storage));
+            storage_changes.entry(transition_and_address).or_default().insert(
+                U256::from_be_bytes(storage_entry.key.0),
+                (storage_entry.value, new_storage),
+            );
+        }
+
+        for (TransitionIdAddress((transition_id, address)), storage_changeset) in
+            storage_changes.into_iter()
+        {
+            all_changesets.entry(transition_id).or_default().push(Change::StorageChanged {
+                id: transition_id,
+                address,
+                changeset: storage_changeset,
+            });
         }
 
         if TAKE {
@@ -892,10 +914,12 @@ where
                         plain_accounts_cursor.delete_current()?;
                     }
                 }
+
                 // revert storages
                 for (storage_key, storage_value) in storage.into_iter() {
                     let storage_entry = StorageEntry { key: storage_key, value: storage_value };
                     // delete previous value
+                    // TODO: This does not use dupsort features
                     if plain_storage_cursor
                         .seek_by_key_subkey(address, storage_key)?
                         .filter(|s| s.key == storage_key)
@@ -903,6 +927,8 @@ where
                     {
                         plain_storage_cursor.delete_current()?
                     }
+
+                    // TODO: This does not use dupsort features
                     // insert value if needed
                     if storage_value != U256::ZERO {
                         plain_storage_cursor.insert(address, storage_entry)?;
@@ -911,73 +937,37 @@ where
             }
         }
 
-        // NOTE: Some storage changesets can be empty,
-        // all account changeset have at least beneficiary fee transfer.
-
         // iterate over block body and create ExecutionResult
         let mut block_exec_results = Vec::new();
-
-        let mut changeset_iter = all_changesets.into_iter();
         let mut block_transition_iter = block_transition.into_iter();
         let mut next_transition_id = from;
 
-        let mut next_changeset = changeset_iter.next().unwrap_or_default();
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies.into_iter() {
-            let mut block_exec_res = ExecutionResult::default();
+            let mut block_exec_res = PostState::new();
             for _ in 0..block_body.tx_count {
-                // only if next_changeset
-                let changeset = if next_transition_id == next_changeset.0 {
-                    let changeset = next_changeset
-                        .1
-                        .into_iter()
-                        .map(|(address, (account, storage))| {
-                            (
-                                address,
-                                AccountChangeSet {
-                                    account,
-                                    storage: storage
-                                        .into_iter()
-                                        .map(|(key, val)| (U256::from_be_bytes(key.0), val))
-                                        .collect(),
-                                    wipe_storage: false, /* it is always false as all storage
-                                                          * changesets for selfdestruct are
-                                                          * already accounted. */
-                                },
-                            )
-                        })
-                        .collect();
-                    next_changeset = changeset_iter.next().unwrap_or_default();
-                    changeset
-                } else {
-                    BTreeMap::new()
-                };
-
+                if let Some(changes) = all_changesets.remove(&next_transition_id) {
+                    for mut change in changes.into_iter() {
+                        change.set_transition_id(block_exec_res.current_transition_id);
+                        block_exec_res.add_and_apply(change);
+                    }
+                }
+                block_exec_res.finish_transition();
                 next_transition_id += 1;
-                block_exec_res.tx_changesets.push(TransactionChangeSet {
-                    receipt: Receipt::default(), /* TODO(receipt) when they are saved, load them
-                                                  * from db */
-                    changeset,
-                    new_bytecodes: Default::default(), /* TODO(bytecode), bytecode is not cleared
-                                                        * so it is same sa previous. */
-                });
             }
 
             let Some((_,block_transition)) = block_transition_iter.next() else { break};
             // if block transition points to 1+next transition id it means that there is block
             // changeset.
             if block_transition == next_transition_id + 1 {
-                // assert last_transition_id == block_transition
-                if next_transition_id == next_changeset.0 {
-                    // take block changeset
-                    block_exec_res.block_changesets = next_changeset
-                        .1
-                        .into_iter()
-                        .map(|(address, (account, _))| (address, account))
-                        .collect();
-                    next_changeset = changeset_iter.next().unwrap_or_default();
+                if let Some(changes) = all_changesets.remove(&next_transition_id) {
+                    for mut change in changes.into_iter() {
+                        change.set_transition_id(block_exec_res.current_transition_id);
+                        block_exec_res.add_and_apply(change);
+                    }
+                    block_exec_res.finish_transition();
+                    next_transition_id += 1;
                 }
-                next_transition_id += 1;
             }
             block_exec_results.push(block_exec_res)
         }
@@ -1471,7 +1461,7 @@ mod test {
     use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, MAINNET};
     use std::ops::DerefMut;
 
-    /*#[test]
+    #[test]
     fn insert_get_take() {
         let db = create_test_rw_db();
 
@@ -1493,7 +1483,8 @@ mod test {
         tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
-        tx.insert_block(block1.clone(), &chain_spec, exec_res1.clone()).unwrap();
+        exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
+        tx.insert_block(block1.clone()).unwrap();
 
         // get one block
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
@@ -1504,8 +1495,10 @@ mod test {
         assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
         assert_genesis_block(&tx, genesis.clone());
 
-        tx.insert_block(block1.clone(), &chain_spec, exec_res1.clone()).unwrap();
-        tx.insert_block(block2.clone(), &chain_spec, exec_res2.clone()).unwrap();
+        exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
+        tx.insert_block(block1.clone()).unwrap();
+        exec_res2.clone().write_to_db(tx.deref_mut(), exec_res1.current_transition_id).unwrap();
+        tx.insert_block(block2.clone()).unwrap();
 
         // get second block
         let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
@@ -1524,5 +1517,5 @@ mod test {
 
         // assert genesis state
         assert_genesis_block(&tx, genesis);
-    }*/
+    }
 }

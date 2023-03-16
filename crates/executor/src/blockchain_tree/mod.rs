@@ -576,7 +576,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let mut tx = Transaction::new(&self.externals.db)?;
 
         // read block and execution result from database. and remove traces of block from tables.
-        let _blocks_and_execution = tx
+        let blocks_and_execution = tx
             .take_block_and_execution_range(
                 self.externals.chain_spec.as_ref(),
                 (revert_until + 1)..,
