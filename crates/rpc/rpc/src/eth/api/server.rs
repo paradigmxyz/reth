@@ -5,7 +5,7 @@ use super::EthApiSpec;
 use crate::{
     eth::{
         api::{EthApi, EthTransactions},
-        error::EthApiError,
+        error::{ensure_success, EthApiError},
     },
     result::{internal_rpc_err, ToRpcResult},
 };
@@ -179,11 +179,19 @@ where
     /// Handler for: `eth_call`
     async fn call(
         &self,
-        _request: CallRequest,
-        _block_number: Option<BlockId>,
-        _state_overrides: Option<StateOverride>,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
     ) -> Result<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+        let (res, _env) = self
+            .execute_call_at(
+                request,
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)),
+                state_overrides,
+            )
+            .await?;
+
+        Ok(ensure_success(res.result)?)
     }
 
     /// Handler for: `eth_createAccessList`
@@ -192,7 +200,7 @@ where
         mut request: CallRequest,
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
         let access_list = self.create_access_list_at(request.clone(), block_number).await?;
         request.access_list = Some(access_list.clone());
         let gas_used = self.estimate_gas_at(request, block_id).await?;
@@ -202,10 +210,15 @@ where
     /// Handler for: `eth_estimateGas`
     async fn estimate_gas(
         &self,
-        _request: CallRequest,
-        _block_number: Option<BlockId>,
+        request: CallRequest,
+        block_number: Option<BlockId>,
     ) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::estimate_gas_at(
+            self,
+            request,
+            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)),
+        )
+        .await?)
     }
 
     /// Handler for: `eth_gasPrice`
