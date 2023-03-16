@@ -9,7 +9,8 @@ use crate::{
     EthApi,
 };
 use ethers_core::utils::get_contract_address;
-use reth_primitives::{AccessList, Address, BlockId, BlockNumberOrTag, U256};
+use jsonrpsee::core::RpcResult as Result;
+use reth_primitives::{AccessList, Address, BlockId, BlockNumberOrTag, Bytes, U256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
 use reth_revm::{
     access_list::AccessListInspector,
@@ -38,6 +39,24 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
+    /// Driver for eth_call
+    pub(crate) async fn call(
+        &self,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+    ) -> Result<Bytes> {
+        let block_id = match block_number {
+            Some(id) => id,
+            None => BlockId::Number(BlockNumberOrTag::Latest),
+        };
+
+        let call_result = EthApi::call_at(self, request, block_id, state_overrides).await?;
+        let result = serde_json::to_string(&call_result.0.result)?;
+        let result_bytes = result.as_bytes().into();
+        Ok(result_bytes)
+    }
+
     /// Executes the call request at the given [BlockId]
     pub(crate) async fn call_at(
         &self,

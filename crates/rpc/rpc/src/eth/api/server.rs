@@ -179,11 +179,11 @@ where
     /// Handler for: `eth_call`
     async fn call(
         &self,
-        _request: CallRequest,
-        _block_number: Option<BlockId>,
-        _state_overrides: Option<StateOverride>,
+        request: CallRequest,
+        block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
     ) -> Result<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(EthApi::call(self, request, block_number, state_overrides).await?)
     }
 
     /// Handler for: `eth_createAccessList`
