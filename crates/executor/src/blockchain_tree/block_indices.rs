@@ -247,7 +247,7 @@ impl BlockIndices {
     /// NOTE: This is not safe standalone, as it will not disconnect
     /// blocks that deppends on unwinded canonical chain. And should be
     /// used when canonical chain is reinserted inside Tree.
-    fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
+    pub(crate) fn unwind_canonical_chain(&mut self, unwind_to: BlockNumber) {
         // this will remove all blocks numbers that are going to be replaced.
         self.canonical_chain.retain(|num, _| *num <= unwind_to);
     }
