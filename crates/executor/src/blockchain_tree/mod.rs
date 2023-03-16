@@ -528,18 +528,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let (blocks, state) = chain.into_inner();
 
         // Write state and changesets to the database
-        println!("New tip: {}", new_tip);
-        println!("Accounts: {:#?}", state.accounts());
-        println!("Storage: {:#?}", state.storage());
-        println!("Bytecode: {:#?}", state.bytecodes());
-        println!("Changes: {:#?}", state.changes);
         state
             .write_to_db(tx.deref_mut(), first_transition_id)
             .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
 
         // Insert the blocks
         for block in blocks.into_values() {
-            println!("Inserting block: {:#?}", block);
             tx.insert_block(block)
                 .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
         }
