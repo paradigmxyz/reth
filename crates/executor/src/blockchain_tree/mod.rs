@@ -59,50 +59,60 @@ use std::{
 ///   reorg in tables if canonical chain if needed.
 
 pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
-    /// chains and present data
+    /// The tracked chains and their current data.
     chains: HashMap<BlockChainId, Chain>,
-    /// Static blockchain id generator
+    /// Static blockchain ID generator
     block_chain_id_generator: u64,
-    /// Indices to block and their connection.
+    /// Indices to block and their connection to the canonical chain.
     block_indices: BlockIndices,
-    /// Number of block after finalized block that we are storing. It should be more then
-    /// finalization window
+    /// Number of blocks after the last finalized block that we are storing.
+    ///
+    /// It should be more than the finalization window for the canonical chain.
     max_blocks_in_chain: u64,
-    /// Finalization windows. Number of blocks that can be reorged
+    /// The number of blocks that can be re-orged (finalization windows)
     max_reorg_depth: u64,
-    /// Externals
+    /// External components (the database, consensus engine etc.)
     externals: Externals<DB, C, EF>,
 }
 
-/// Container for external abstractions.
+/// A container for external components.
+///
+/// This is a simple container for external components used throughout the blockchain tree
+/// implementation:
+///
+/// - A handle to the database
+/// - A handle to the consensus engine
+/// - The executor factory to exexcute blocks with
+/// - The chain spec
 struct Externals<DB: Database, C: Consensus, EF: ExecutorFactory> {
-    /// Save sidechain, do reorgs and push new block to canonical chain that is inside db.
+    /// The database, used to commit the canonical chain, or unwind it.
     db: DB,
-    /// Consensus checks
+    /// The consensus engine.
     consensus: C,
-    /// Create executor to execute blocks.
+    /// The executor factory to execute blocks with.
     executor_factory: EF,
-    /// Chain spec
+    /// The chain spec.
     chain_spec: Arc<ChainSpec>,
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> Externals<DB, C, EF> {
-    /// Return sharable database helper structure.
+    /// Get a [`ShareableDatabase`] instance pointing to the underlying database.
     fn sharable_db(&self) -> ShareableDatabase<&DB> {
         ShareableDatabase::new(&self.db, self.chain_spec.clone())
     }
 }
 
-/// Helper structure that wraps chains and indices to search for block hash accross the chains.
+/// A container that wraps chains and block indices to allow searching for block hashes across all
+/// sidechains.
 pub struct BlockHashes<'a> {
-    /// Chains
+    /// The current tracked chains.
     pub chains: &'a mut HashMap<BlockChainId, Chain>,
-    /// Indices
+    /// The block indices for all chains.
     pub indices: &'a BlockIndices,
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> {
-    /// New blockchain tree
+    /// Create a new blockchain tree.
     pub fn new(
         db: DB,
         consensus: C,
@@ -150,7 +160,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         })
     }
 
-    /// Fork side chain or append the block if parent is the top of the chain
+    /// Create a new sidechain by forking the given chain, or append the block if the parent block
+    /// is the top of the given chain.
     fn fork_side_chain(
         &mut self,
         block: SealedBlockWithSenders,
@@ -213,7 +224,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Fork canonical chain by creating new chain
+    /// Create a new sidechain by forking the canonical chain.
+    // TODO(onbjerg): Is this not a specialized case of [`fork_side_chain`]? If so, can we merge?
     pub fn fork_canonical_chain(&mut self, block: SealedBlockWithSenders) -> Result<(), Error> {
         let canonical_block_hashes = self.block_indices.canonical_chain();
         let (_, canonical_tip) =
@@ -245,8 +257,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Get all block hashes from chain that are not canonical. This is one time operation per
-    /// block. Reason why this is not caches is to save memory.
+    /// Get all block hashes from a sidechain that are not part of the canonical chain.
+    ///
+    /// This is a one time operation per block.
+    ///
+    /// # Note
+    ///
+    /// This is not cached in order to save memory.
     fn all_chain_hashes(&self, chain_id: BlockChainId) -> BTreeMap<BlockNumber, BlockHash> {
         // find chain and iterate over it,
         let mut chain_id = chain_id;
@@ -267,9 +284,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         hashes
     }
 
-    /// Getting the canonical fork would tell use what kind of Provider we should execute block on.
-    /// If it is latest state provider or history state provider
-    /// Return None if chain_id is not known.
+    /// Get the block at which the given chain forked from the current canonical chain.
+    ///
+    /// This is used to figure out what kind of state provider the executor should use to execute
+    /// the block.
+    ///
+    /// Returns `None` if the chain is not known.
     fn canonical_fork(&self, chain_id: BlockChainId) -> Option<ForkBlock> {
         let mut chain_id = chain_id;
         let mut fork;
@@ -290,8 +310,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Insert chain to tree and ties the blocks to it.
-    /// Helper function that handles indexing and inserting.
+    /// Insert a chain into the tree.
+    ///
+    /// Inserts a chain into the tree and builds the block indices.
     fn insert_chain(&mut self, chain: Chain) -> BlockChainId {
         let chain_id = self.block_chain_id_generator;
         self.block_chain_id_generator += 1;
@@ -301,22 +322,35 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         chain_id
     }
 
-    /// Insert block inside tree. recover transaction signers and
-    /// internaly call [`BlockchainTree::insert_block_with_senders`] fn.
+    /// Insert a new block in the tree.
+    ///
+    /// # Note
+    ///
+    /// This recovers transaction signers (unlike [`BlockchainTree::insert_block_with_senders`]).
     pub fn insert_block(&mut self, block: SealedBlock) -> Result<bool, Error> {
         let block = block.seal_with_senders().ok_or(ExecError::SenderRecoveryError)?;
         self.insert_block_with_senders(&block)
     }
 
-    /// Insert block with senders inside tree.
+    /// Insert a block (with senders recovered) in the tree.
+    ///
     /// Returns `true` if:
-    /// 1. It is part of the blockchain tree
-    /// 2. It is part of the canonical chain
-    /// 3. Its parent is part of the blockchain tree and we can fork at the parent
-    /// 4. Its parent is part of the canonical chain and we can fork at the parent
-    /// Otherwise will return `false`, indicating that neither the block nor its parent
-    /// is part of the chain or any sidechains. This means that if block becomes canonical
-    /// we need to fetch the missing blocks over p2p.
+    ///
+    /// - The block is already part of a sidechain in the tree, or
+    /// - The block is already part of the canonical chain, or
+    /// - The parent is part of a sidechain in the tree, and we can fork at this block, or
+    /// - The parent is part of the canonical chain, and we can fork at this block
+    ///
+    /// Otherwise `false` is returned, indicating that neither the block nor its parent is part of
+    /// the chain or any sidechains.
+    ///
+    /// This means that if the block becomes canonical, we need to fetch the missing blocks over
+    /// P2P.
+    ///
+    /// # Note
+    ///
+    /// If the senders have not already been recovered, call [`BlockchainTree::insert_block`]
+    /// instead.
     pub fn insert_block_with_senders(
         &mut self,
         block: &SealedBlockWithSenders,
@@ -376,7 +410,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(false)
     }
 
-    /// Do finalization of blocks. Remove them from tree
+    /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
     pub fn finalize_block(&mut self, finalized_block: BlockNumber) {
         let mut remove_chains = self.block_indices.finalize_canonical_blocks(finalized_block);
 
@@ -387,7 +421,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Update canonical hashes. Reads last N canonical blocks from database and update all indices.
+    /// Reads the last `N` canonical hashes from the database and updates the block indices of the
+    /// tree.
+    ///
+    /// `N` is the `max_reorg_depth` plus the number of block hashes needed to satisfy the
+    /// `BLOCKHASH` opcode in the EVM.
+    ///
+    /// # Note
+    ///
+    /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
+    /// [`BlockchainTree::finalize_block`]).
     pub fn update_canonical_hashes(
         &mut self,
         last_finalized_block: BlockNumber,
@@ -418,8 +461,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Split chain and return canonical part of it. Pending part reinsert inside tree
-    /// with same chain_id.
+    /// Split a sidechain at the given point, and return the canonical part of it.
+    ///
+    /// The pending part of the chain is reinserted into the tree with the same `chain_id`.
     fn split_chain(&mut self, chain_id: BlockChainId, chain: Chain, split_at: SplitAt) -> Chain {
         match chain.split(split_at) {
             ChainSplit::Split { canonical, pending } => {
@@ -435,9 +479,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         }
     }
 
-    /// Make block and its parent canonical. Unwind chains to database if necessary.
+    /// Make a block and its parent part of the canonical chain.
     ///
-    /// If block is already part of canonical chain return Ok.
+    /// # Note
+    ///
+    /// This unwinds the database if necessary, i.e. if parts of the canonical chain have been
+    /// re-orged.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
         let chain_id = if let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) {
             chain_id
@@ -504,7 +555,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Commit chain for it to become canonical. Assume we are doing pending operation to db.
+    /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
         let mut tx = Transaction::new(&self.externals.db)?;
 
@@ -524,9 +575,9 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
-    /// Revert canonical blocks from database and insert them to pending table
-    /// Revert should be non inclusive, and revert_until should stay in db.
-    /// Return the chain that represent reverted canonical blocks.
+    /// Revert canonical blocks from the database and return them.
+    ///
+    /// The block, `revert_until`, is non-inclusive, i.e. `revert_until` stays in the database.
     fn revert_canonical(&mut self, revert_until: BlockNumber) -> Result<Chain, Error> {
         // read data that is needed for new sidechain
 
