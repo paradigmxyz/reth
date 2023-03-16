@@ -34,7 +34,7 @@ pub struct Chain {
 }
 
 /// Describes a fork block by its number and hash.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct ForkBlock {
     /// Block number of block that chains branches from
     pub number: u64,

@@ -39,7 +39,7 @@ where
     Network: Send + Sync + 'static,
 {
     /// Executes the call request at the given [BlockId]
-    pub(crate) async fn call_at(
+    pub(crate) async fn execute_call_at(
         &self,
         request: CallRequest,
         at: BlockId,
@@ -165,14 +165,8 @@ where
             ExecutionResult::Success { .. } => {
                 // succeeded
             }
-            ExecutionResult::Halt { reason, .. } => {
-                return match reason {
-                    Halt::OutOfGas(err) => {
-                        Err(InvalidTransactionError::out_of_gas(err, gas_limit).into())
-                    }
-                    Halt::NonceOverflow => Err(InvalidTransactionError::NonceMaxValue.into()),
-                    err => Err(InvalidTransactionError::EvmHalt(err).into()),
-                }
+            ExecutionResult::Halt { reason, gas_used } => {
+                return Err(InvalidTransactionError::halt(reason, gas_used).into())
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
