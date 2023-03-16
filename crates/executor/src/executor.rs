@@ -1,10 +1,8 @@
-use crate::execution_result::{
-    AccountChangeSet, AccountInfoChangeSet, ExecutionResult, TransactionChangeSet,
-};
+use crate::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Block, Bloom, ChainSpec, Hardfork, Header, Log, Receipt,
-    TransactionSigned, H256, U256,
+    bloom::logs_bloom, Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log,
+    Receipt, TransactionSigned, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
 use reth_revm::{
@@ -18,7 +16,7 @@ use revm::{
     db::AccountState,
     primitives::{
         hash_map::{self, Entry},
-        Account as RevmAccount, AccountInfo, Bytecode, ResultAndState,
+        Account as RevmAccount, AccountInfo, ResultAndState,
     },
     EVM,
 };
@@ -100,22 +98,16 @@ where
         );
     }
 
-    /// Commit change to database and return change diff that is used to update state and create
-    /// history index
-    ///
-    /// ChangeDiff consists of:
-    ///     address->AccountChangeSet (It contains old and new account info,storage wipe flag, and
-    /// old/new storage)     bytecode_hash->bytecodes mapping
-    ///
-    /// BTreeMap is used to have sorted values
+    /// Commit change to the run-time database, and update the given [PostState] with the changes
+    /// made in the transaction, which can be persisted to the database.
     fn commit_changes(
         &mut self,
         changes: hash_map::HashMap<Address, RevmAccount>,
-    ) -> (BTreeMap<Address, AccountChangeSet>, BTreeMap<H256, Bytecode>) {
+        has_state_clear_eip: bool,
+        post_state: &mut PostState,
+    ) {
         let db = self.db();
 
-        let mut change = BTreeMap::new();
-        let mut new_bytecodes = BTreeMap::new();
         // iterate over all changed accounts
         for (address, account) in changes {
             if account.is_destroyed {
@@ -128,16 +120,8 @@ where
                 };
                 // Insert into `change` a old account and None for new account
                 // and mark storage to be mapped
-                change.insert(
-                    address,
-                    AccountChangeSet {
-                        account: AccountInfoChangeSet::Destroyed {
-                            old: to_reth_acc(&db_account.info),
-                        },
-                        storage: BTreeMap::new(),
-                        wipe_storage: true,
-                    },
-                );
+                post_state.destroy_account(address, to_reth_acc(&db_account.info));
+
                 // clear cached DB and mark account as not existing
                 db_account.storage.clear();
                 db_account.account_state = AccountState::NotExisting;
@@ -149,53 +133,54 @@ where
                 // does it exist inside cached contracts if it doesn't it is new bytecode that
                 // we are inserting inside `change`
                 if let Some(ref code) = account.info.code {
-                    if !code.is_empty() {
-                        match db.contracts.entry(account.info.code_hash) {
-                            Entry::Vacant(entry) => {
-                                entry.insert(code.clone());
-                                new_bytecodes.insert(H256(account.info.code_hash.0), code.clone());
-                            }
-                            Entry::Occupied(mut entry) => {
-                                entry.insert(code.clone());
-                            }
-                        }
+                    if !code.is_empty() && !db.contracts.contains_key(&account.info.code_hash) {
+                        db.contracts.insert(account.info.code_hash, code.clone());
+                        post_state.add_bytecode(account.info.code_hash, Bytecode(code.clone()));
                     }
                 }
 
                 // get old account that is going to be overwritten or none if it does not exist
                 // and get new account that was just inserted. new account mut ref is used for
                 // inserting storage
-                let (account_info_changeset, new_account) = match db.accounts.entry(address) {
+                let cached_account = match db.accounts.entry(address) {
                     Entry::Vacant(entry) => {
                         let entry = entry.insert(Default::default());
                         entry.info = account.info.clone();
-                        // account was not existing, so this means new account is created
-                        (AccountInfoChangeSet::Created { new: to_reth_acc(&entry.info) }, entry)
+
+                        let account = to_reth_acc(&entry.info);
+                        if !(has_state_clear_eip && account.is_empty()) {
+                            post_state.create_account(address, account);
+                        }
+                        entry
                     }
                     Entry::Occupied(entry) => {
                         let entry = entry.into_mut();
 
-                        // account is present inside cache but is marked as NotExisting.
-                        let account_changeset =
-                            if matches!(entry.account_state, AccountState::NotExisting) {
-                                AccountInfoChangeSet::Created { new: to_reth_acc(&account.info) }
-                            } else if entry.info != account.info {
-                                AccountInfoChangeSet::Changed {
-                                    old: to_reth_acc(&entry.info),
-                                    new: to_reth_acc(&account.info),
-                                }
-                            } else {
-                                AccountInfoChangeSet::NoChange { is_empty: account.is_empty() }
-                            };
+                        if matches!(entry.account_state, AccountState::NotExisting) {
+                            let account = to_reth_acc(&account.info);
+                            if !(has_state_clear_eip && account.is_empty()) {
+                                post_state.create_account(address, account);
+                            }
+                        } else if entry.info != account.info {
+                            post_state.change_account(
+                                address,
+                                to_reth_acc(&entry.info),
+                                to_reth_acc(&account.info),
+                            );
+                        } else if has_state_clear_eip && account.is_empty() {
+                            // The account was touched, but it is empty, so it should be deleted.
+                            post_state.destroy_account(address, to_reth_acc(&account.info));
+                        }
+
                         entry.info = account.info.clone();
-                        (account_changeset, entry)
+                        entry
                     }
                 };
 
-                new_account.account_state = if account.storage_cleared {
-                    new_account.storage.clear();
+                cached_account.account_state = if account.storage_cleared {
+                    cached_account.storage.clear();
                     AccountState::StorageCleared
-                } else if new_account.account_state.is_storage_cleared() {
+                } else if cached_account.account_state.is_storage_cleared() {
                     // the account already exists and its storage was cleared, preserve its previous
                     // state
                     AccountState::StorageCleared
@@ -204,32 +189,28 @@ where
                 };
 
                 // Insert storage.
-                let mut storage = BTreeMap::new();
+                let mut storage_changeset = BTreeMap::new();
 
                 // insert storage into new db account.
-                new_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                    storage.insert(key, (value.original_value(), value.present_value()));
+                cached_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
+                    storage_changeset.insert(key, (value.original_value(), value.present_value()));
                     (key, value.present_value())
                 }));
 
                 // Insert into change.
-                change.insert(
-                    address,
-                    AccountChangeSet {
-                        account: account_info_changeset,
-                        storage,
-                        wipe_storage: false,
-                    },
-                );
+                if !storage_changeset.is_empty() {
+                    post_state.change_storage(address, storage_changeset);
+                }
             }
         }
-        (change, new_bytecodes)
     }
 
-    /// Collect all balance changes at the end of the block. Balance changes might include block
-    /// reward, uncle rewards, withdrawals or irregular state changes (DAO fork).
+    /// Collect all balance changes at the end of the block.
+    ///
+    /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
+    /// state changes (DAO fork).
     fn post_block_balance_increments(
-        &mut self,
+        &self,
         block: &Block,
         td: U256,
     ) -> Result<HashMap<Address, U256>, Error> {
@@ -291,48 +272,36 @@ where
     }
 
     /// Irregular state change at Ethereum DAO hardfork
-    fn dao_fork_changeset(&mut self) -> Result<BTreeMap<Address, AccountInfoChangeSet>, Error> {
+    fn apply_dao_fork_changes(&mut self, post_state: &mut PostState) -> Result<(), Error> {
         let db = self.db();
 
         let mut drained_balance = U256::ZERO;
 
         // drain all accounts ether
-        let mut changesets = crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS
-            .iter()
-            .map(|&address| {
-                let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
-                let old = to_reth_acc(&db_account.info);
-                // drain balance
-                drained_balance += core::mem::take(&mut db_account.info.balance);
-                let new = to_reth_acc(&db_account.info);
-                // assume it is changeset as it is irregular state change
-                Ok((address, AccountInfoChangeSet::Changed { new, old }))
-            })
-            .collect::<Result<BTreeMap<Address, AccountInfoChangeSet>, _>>()?;
+        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
+            let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
+            let old = to_reth_acc(&db_account.info);
+            // drain balance
+            drained_balance += core::mem::take(&mut db_account.info.balance);
+            let new = to_reth_acc(&db_account.info);
+            // assume it is changeset as it is irregular state change
+            post_state.change_account(address, old, new);
+        }
 
         // add drained ether to beneficiary.
         let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
+        self.increment_account_balance(beneficiary, drained_balance, post_state)?;
 
-        let beneficiary_db_account =
-            db.load_account(beneficiary).map_err(|_| Error::ProviderError)?;
-        let old = to_reth_acc(&beneficiary_db_account.info);
-        beneficiary_db_account.info.balance += drained_balance;
-        let new = to_reth_acc(&beneficiary_db_account.info);
-
-        let beneficiary_changeset = AccountInfoChangeSet::Changed { new, old };
-
-        // insert changeset
-        changesets.insert(beneficiary, beneficiary_changeset);
-
-        Ok(changesets)
+        Ok(())
     }
 
-    /// Generate balance increment account changeset and mutate account database entry in place.
-    fn account_balance_increment_changeset(
+    /// Increment the balance for the given account in the [PostState].
+    fn increment_account_balance(
         &mut self,
         address: Address,
         increment: U256,
-    ) -> Result<AccountInfoChangeSet, Error> {
+        post_state: &mut PostState,
+    ) -> Result<(), Error> {
         let db = self.db();
         let beneficiary = db.load_account(address).map_err(|_| Error::ProviderError)?;
         let old = to_reth_acc(&beneficiary.info);
@@ -346,9 +315,10 @@ where
                 beneficiary.account_state = AccountState::StorageCleared;
 
                 // if account was not present append `Created` changeset
-                Ok(AccountInfoChangeSet::Created {
-                    new: Account { nonce: 0, balance: new.balance, bytecode_hash: None },
-                })
+                post_state.create_account(
+                    address,
+                    Account { nonce: 0, balance: new.balance, bytecode_hash: None },
+                )
             }
 
             AccountState::StorageCleared | AccountState::Touched | AccountState::None => {
@@ -359,9 +329,11 @@ where
                     beneficiary.account_state = AccountState::Touched;
                 }
                 // if account was present, append changed changeset.
-                Ok(AccountInfoChangeSet::Changed { new, old })
+                post_state.change_account(address, old, new);
             }
         }
+
+        Ok(())
     }
 
     /// Runs a single transaction in the configured environment and proceeds
@@ -393,23 +365,26 @@ where
         out.map_err(|e| Error::EVM { hash, message: format!("{e:?}") })
     }
 
-    /// Runs the provided transactions and commits their state. Will proceed
-    /// to return the total gas used by this batch of transaction as well as the
-    /// changesets generated by each tx.
+    /// Runs the provided transactions and commits their state to the run-time database.
+    ///
+    /// The returned [PostState] can be used to persist the changes to disk, and contains the
+    /// changes made by each transaction.
+    ///
+    /// The changes in [PostState] have a transition ID associated with them: there is one
+    /// transition ID for each transaction (with the first executed tx having transition ID 0, and
+    /// so on).
     pub fn execute_transactions(
         &mut self,
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<(Vec<TransactionChangeSet>, u64), Error> {
+    ) -> Result<(PostState, u64), Error> {
         let senders = self.recover_senders(&block.body, senders)?;
 
         self.init_env(&block.header, total_difficulty);
 
         let mut cumulative_gas_used = 0;
-        // output of execution
-        let mut tx_changesets = Vec::with_capacity(block.body.len());
-
+        let mut post_state = PostState::with_tx_capacity(block.body.len());
         for (transaction, sender) in block.body.iter().zip(senders.into_iter()) {
             // The sum of the transaction’s gas limit, Tg, and the gas utilised in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -424,7 +399,11 @@ where
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
 
             // commit changes
-            let (changeset, new_bytecodes) = self.commit_changes(state);
+            self.commit_changes(
+                state,
+                self.chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block.number),
+                &mut post_state,
+            );
 
             // append gas used
             cumulative_gas_used += result.gas_used();
@@ -433,22 +412,19 @@ where
             let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            tx_changesets.push(TransactionChangeSet {
-                receipt: Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    bloom: logs_bloom(logs.iter()),
-                    logs,
-                },
-                changeset,
-                new_bytecodes,
+            post_state.add_receipt(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                bloom: logs_bloom(logs.iter()),
+                logs,
             });
+            post_state.finish_transition();
         }
 
-        Ok((tx_changesets, cumulative_gas_used))
+        Ok((post_state, cumulative_gas_used))
     }
 }
 
@@ -461,8 +437,8 @@ where
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<ExecutionResult, Error> {
-        let (tx_changesets, cumulative_gas_used) =
+    ) -> Result<PostState, Error> {
+        let (mut post_state, cumulative_gas_used) =
             self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
@@ -470,21 +446,22 @@ where
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
         }
 
-        let mut block_changesets = BTreeMap::default();
         let balance_increments = self.post_block_balance_increments(block, total_difficulty)?;
-        for (address, increment) in balance_increments {
-            let changeset = self.account_balance_increment_changeset(address, increment)?;
-            block_changesets.insert(address, changeset);
+        let mut includes_block_transition = !balance_increments.is_empty();
+        for (address, increment) in balance_increments.into_iter() {
+            self.increment_account_balance(address, increment, &mut post_state)?;
         }
 
         if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
-            for (address, changeset) in self.dao_fork_changeset()? {
-                // No account collision between rewarded accounts and DAO fork related accounts.
-                block_changesets.insert(address, changeset);
-            }
+            includes_block_transition = true;
+            self.apply_dao_fork_changes(&mut post_state)?;
         }
 
-        Ok(ExecutionResult { tx_changesets, block_changesets })
+        if includes_block_transition {
+            post_state.finish_transition();
+        }
+
+        Ok(post_state)
     }
 
     fn execute_and_verify_receipt(
@@ -492,14 +469,15 @@ where
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<ExecutionResult, Error> {
-        let execution_result = self.execute(block, total_difficulty, senders)?;
-
-        let receipts_iter =
-            execution_result.tx_changesets.iter().map(|changeset| &changeset.receipt);
+    ) -> Result<PostState, Error> {
+        let post_state = self.execute(block, total_difficulty, senders)?;
 
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
-            verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts_iter)?;
+            verify_receipt(
+                block.header.receipts_root,
+                block.header.logs_bloom,
+                post_state.receipts().iter(),
+            )?;
         }
 
         // TODO Before Byzantium, receipts contained state root that would mean that expensive
@@ -507,7 +485,7 @@ where
         // transaction This was replaced with is_success flag.
         // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
 
-        Ok(execution_result)
+        Ok(post_state)
     }
 }
 
@@ -541,7 +519,10 @@ mod tests {
         hex_literal::hex, keccak256, Account, Address, Bytecode, Bytes, ChainSpecBuilder,
         ForkCondition, StorageKey, H256, MAINNET, U256,
     };
-    use reth_provider::{AccountProvider, BlockHashProvider, StateProvider};
+    use reth_provider::{
+        post_state::{Change, Storage},
+        AccountProvider, BlockHashProvider, StateProvider,
+    };
     use reth_revm::database::State;
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
@@ -661,17 +642,21 @@ mod tests {
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
-        let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
+        let post_state = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
-        assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
+        assert_eq!(post_state.transitions_count(), 2, "Should executed one transaction");
 
-        let changesets = out.tx_changesets[0].clone();
-        assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
+        let block_reward = U256::from(WEI_2ETH + (WEI_2ETH >> 5));
 
         let account1_info = Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None };
         let account2_info = Account {
-            balance: U256::from(0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128), /* decrease for
-                                                                                   * block reward */
+            // Block reward decrease
+            balance: U256::from(0x1bc16d674ece94bau128 - 0x1bc16d674ec80000u128),
+            nonce: 0x00,
+            bytecode_hash: None,
+        };
+        let account2_info_with_block_reward = Account {
+            balance: account2_info.balance + block_reward,
             nonce: 0x00,
             bytecode_hash: None,
         };
@@ -680,8 +665,8 @@ mod tests {
             nonce: 0x01,
             bytecode_hash: None,
         };
-
-        let block_reward = U256::from(WEI_2ETH + (WEI_2ETH >> 5));
+        let ommer_beneficiary_info =
+            Account { nonce: 0, balance: U256::from((8 * WEI_2ETH) >> 3), bytecode_hash: None };
 
         // Check if cache is set
         // account1
@@ -707,60 +692,88 @@ mod tests {
         assert_eq!(cached_acc3.account_state, AccountState::Touched);
         assert_eq!(cached_acc3.storage.len(), 0);
 
-        assert_eq!(
-            changesets.changeset.get(&account1).unwrap().account,
-            AccountInfoChangeSet::NoChange { is_empty: false },
-            "No change to account"
-        );
-        assert_eq!(
-            changesets.changeset.get(&account2).unwrap().account,
-            AccountInfoChangeSet::Created { new: account2_info },
-            "New account"
-        );
-        assert_eq!(
-            changesets.changeset.get(&account3).unwrap().account,
-            AccountInfoChangeSet::Changed { old: account3_old_info, new: account3_info },
-            "Change to account state"
+        assert!(
+            post_state.accounts().get(&account1).is_none(),
+            "Account should not be present in post-state since it was not changed"
         );
 
-        // check block rewards changeset.
-        let mut block_rewarded_acc_info = account2_info;
-        // add Blocks 2 eth reward and 2>>5 for one ommer
-        block_rewarded_acc_info.balance += block_reward;
+        // Check changes
+        const TX_TRANSITION_ID: u64 = 0;
+        const BLOCK_TRANSITION_ID: u64 = 1;
 
-        // check block reward changeset
+        // Clone and sort to make the test deterministic
+        let mut changes = post_state.changes().to_vec();
+        changes.sort_by_key(|change| (change.transition_id(), change.address()));
         assert_eq!(
-            out.block_changesets,
-            BTreeMap::from([
-                (
-                    account2,
-                    AccountInfoChangeSet::Changed {
-                        new: block_rewarded_acc_info,
-                        old: account2_info
-                    }
-                ),
-                (
-                    ommer_beneficiary,
-                    AccountInfoChangeSet::Created {
-                        new: Account {
-                            nonce: 0,
-                            balance: U256::from((8 * WEI_2ETH) >> 3),
-                            bytecode_hash: None
-                        }
-                    }
-                )
-            ])
+            changes,
+            &[
+                // Storage changes on account 1
+                Change::StorageChanged {
+                    id: TX_TRANSITION_ID,
+                    address: account1,
+                    changeset: [(U256::from(1), (U256::ZERO, U256::from(2)))].into()
+                },
+                // New account
+                Change::AccountCreated {
+                    id: TX_TRANSITION_ID,
+                    address: account2,
+                    account: account2_info
+                },
+                // Changed account
+                Change::AccountChanged {
+                    id: TX_TRANSITION_ID,
+                    address: account3,
+                    old: account3_old_info,
+                    new: account3_info
+                },
+                // Block reward
+                Change::AccountChanged {
+                    id: BLOCK_TRANSITION_ID,
+                    address: account2,
+                    old: account2_info,
+                    new: account2_info_with_block_reward
+                },
+                // Ommer reward
+                Change::AccountCreated {
+                    id: BLOCK_TRANSITION_ID,
+                    address: ommer_beneficiary,
+                    account: ommer_beneficiary_info
+                },
+            ],
+            "Changeset did not match"
         );
 
-        assert_eq!(changesets.new_bytecodes.len(), 0, "No new bytecodes");
-
-        // check storage
-        let storage = &changesets.changeset.get(&account1).unwrap().storage;
-        assert_eq!(storage.len(), 1, "Only one storage change");
+        // Check final post-state
         assert_eq!(
-            storage.get(&U256::from(1)),
-            Some(&(U256::ZERO, U256::from(2))),
-            "Storage change from 0 to 2 on slot 1"
+            post_state.storage(),
+            &BTreeMap::from([(
+                account1,
+                Storage { wiped: false, storage: BTreeMap::from([(U256::from(1), U256::from(2))]) }
+            )]),
+            "Should have changed 1 storage slot"
+        );
+        assert_eq!(post_state.bytecodes().len(), 0, "Should have zero new bytecodes");
+
+        let accounts = post_state.accounts();
+        assert_eq!(
+            accounts.len(),
+            3,
+            "Should have 4 accounts (account 2, 3 and the ommer beneficiary)"
+        );
+        assert_eq!(
+            accounts.get(&account2).unwrap(),
+            &Some(account2_info_with_block_reward),
+            "Account 2 state is wrong"
+        );
+        assert_eq!(
+            accounts.get(&account3).unwrap(),
+            &Some(account3_info),
+            "Account 3 state is wrong"
+        );
+        assert_eq!(
+            accounts.get(&ommer_beneficiary).unwrap(),
+            &Some(ommer_beneficiary_info),
+            "Ommer beneficiary state is wrong"
         );
     }
 
@@ -798,7 +811,11 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(out.tx_changesets.len(), 0, "No tx");
+        assert_eq!(
+            out.transitions_count(),
+            1,
+            "Should only have 1 transition (the block transition)"
+        );
 
         // Check if cache is set
         // beneficiary
@@ -813,24 +830,15 @@ mod tests {
         }
 
         // check changesets
-        let change_set =
-            out.block_changesets.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+        let beneficiary_state =
+            out.accounts().get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap().unwrap();
         assert_eq!(
-            *change_set,
-            AccountInfoChangeSet::Changed {
-                new: Account { balance: U256::from(beneficiary_balance), ..Default::default() },
-                old: Account { balance: U256::ZERO, ..Default::default() }
-            }
+            beneficiary_state,
+            Account { balance: U256::from(beneficiary_balance), ..Default::default() },
         );
-        for (i, address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
-            let change_set = out.block_changesets.get(address).unwrap();
-            assert_eq!(
-                *change_set,
-                AccountInfoChangeSet::Changed {
-                    new: Account { balance: U256::ZERO, ..Default::default() },
-                    old: Account { balance: U256::from(i), ..Default::default() }
-                }
-            );
+        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+            let updated_account = out.accounts().get(address).unwrap().unwrap();
+            assert_eq!(updated_account, Account { balance: U256::ZERO, ..Default::default() });
         }
     }
 
@@ -885,10 +893,12 @@ mod tests {
         let mut executor = Executor::new(chain_spec, db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
-        assert_eq!(out.tx_changesets.len(), 1, "Should executed one transaction");
-
-        let changesets = out.tx_changesets[0].clone();
-        assert_eq!(changesets.new_bytecodes.len(), 0, "Should have zero new bytecodes");
+        assert_eq!(
+            out.transitions_count(),
+            2,
+            "Should only have two transitions (the transaction and the block)"
+        );
+        assert_eq!(out.bytecodes().len(), 0, "Should have zero new bytecodes");
 
         let post_account_caller = Account {
             balance: U256::from(0x0de0b6b3a761cf60u64),
@@ -897,21 +907,20 @@ mod tests {
         };
 
         assert_eq!(
-            changesets.changeset.get(&address_caller).unwrap().account,
-            AccountInfoChangeSet::Changed { new: post_account_caller, old: pre_account_caller },
+            out.accounts().get(&address_caller).unwrap().unwrap(),
+            post_account_caller,
             "Caller account has changed and fee is deduced"
         );
 
-        let selfdestroyer_changeset = changesets.changeset.get(&address_selfdestruct).unwrap();
-
-        // check account
         assert_eq!(
-            selfdestroyer_changeset.account,
-            AccountInfoChangeSet::Destroyed { old: pre_account_selfdestroyed },
-            "Selfdestroyed account"
+            out.accounts().get(&address_selfdestruct).unwrap(),
+            &None,
+            "Selfdestructed account should have been deleted"
         );
-
-        assert!(selfdestroyer_changeset.wipe_storage);
+        assert!(
+            out.storage().get(&address_selfdestruct).unwrap().wiped,
+            "Selfdestructed account should have its storage wiped"
+        );
     }
 
     // Test vector from https://github.com/ethereum/tests/blob/3156db5389921125bb9e04142d18e0e7b0cf8d64/BlockchainTests/EIPTests/bc4895-withdrawals/twoIdenticalIndexDifferentValidator.json
@@ -933,7 +942,7 @@ mod tests {
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
-        assert_eq!(out.tx_changesets.len(), 0, "No tx");
+        assert_eq!(out.transitions_count(), 1, "Only one transition (the block transition)");
 
         let withdrawal_sum = withdrawals.iter().fold(U256::ZERO, |sum, w| sum + w.amount_wei());
         let beneficiary_account = executor.db().accounts.get(&withdrawal_beneficiary).unwrap();
@@ -941,29 +950,28 @@ mod tests {
         assert_eq!(beneficiary_account.info.nonce, 0);
         assert_eq!(beneficiary_account.account_state, AccountState::StorageCleared);
 
-        assert_eq!(out.block_changesets.len(), 1);
         assert_eq!(
-            out.block_changesets.get(&withdrawal_beneficiary),
-            Some(&AccountInfoChangeSet::Created {
-                new: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
-            })
+            out.accounts().get(&withdrawal_beneficiary).unwrap(),
+            &Some(Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None }),
+            "Withdrawal account should have gotten its balance set"
         );
 
         // Execute same block again
         let out = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
-        assert_eq!(out.tx_changesets.len(), 0, "No tx");
-
-        assert_eq!(out.block_changesets.len(), 1);
         assert_eq!(
-            out.block_changesets.get(&withdrawal_beneficiary),
-            Some(&AccountInfoChangeSet::Changed {
-                old: Account { nonce: 0, balance: withdrawal_sum, bytecode_hash: None },
-                new: Account {
-                    nonce: 0,
-                    balance: withdrawal_sum + withdrawal_sum,
-                    bytecode_hash: None
-                },
-            })
+            out.transitions_count(),
+            1,
+            "Should only have one transition (the block transition)"
+        );
+
+        assert_eq!(
+            out.accounts().get(&withdrawal_beneficiary).unwrap(),
+            &Some(Account {
+                nonce: 0,
+                balance: withdrawal_sum + withdrawal_sum,
+                bytecode_hash: None
+            }),
+            "Withdrawal account should have gotten its balance set"
         );
     }
 
@@ -987,23 +995,35 @@ mod tests {
         };
         let mut executor = Executor::new(chain_spec, db);
         // touch account
-        executor.commit_changes(hash_map::HashMap::from([(
-            account,
-            RevmAccount { ..default_acc.clone() },
-        )]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(account, RevmAccount { ..default_acc.clone() })]),
+            true,
+            &mut PostState::default(),
+        );
         // destroy account
-        executor.commit_changes(hash_map::HashMap::from([(
-            account,
-            RevmAccount { is_destroyed: true, is_touched: true, ..default_acc.clone() },
-        )]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(
+                account,
+                RevmAccount { is_destroyed: true, is_touched: true, ..default_acc.clone() },
+            )]),
+            true,
+            &mut PostState::default(),
+        );
         // re-create account
-        executor.commit_changes(hash_map::HashMap::from([(
-            account,
-            RevmAccount { is_touched: true, storage_cleared: true, ..default_acc.clone() },
-        )]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(
+                account,
+                RevmAccount { is_touched: true, storage_cleared: true, ..default_acc.clone() },
+            )]),
+            true,
+            &mut PostState::default(),
+        );
         // touch account
-        executor
-            .commit_changes(hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]));
+        executor.commit_changes(
+            hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]),
+            true,
+            &mut PostState::default(),
+        );
 
         let db = executor.db();
 

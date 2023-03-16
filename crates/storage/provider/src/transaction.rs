@@ -1,3 +1,8 @@
+use crate::{
+    insert_canonical_block,
+    post_state::{Change, PostState, StorageChangeset},
+    trie::{DBTrieLoader, TrieError},
+};
 use itertools::{izip, Itertools};
 use reth_db::{
     common::KeyValue,
@@ -6,7 +11,7 @@ use reth_db::{
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
-        ShardedKey, StoredBlockBody, TransitionIdAddress,
+        AccountBeforeTx, ShardedKey, StoredBlockBody, TransitionIdAddress,
     },
     table::Table,
     tables,
@@ -15,24 +20,15 @@ use reth_db::{
 };
 use reth_interfaces::{db::Error as DbError, provider::ProviderError};
 use reth_primitives::{
-    keccak256, proofs::EMPTY_ROOT, Account, Address, BlockHash, BlockNumber, Bytecode, ChainSpec,
-    Hardfork, Header, Receipt, SealedBlock, SealedBlockWithSenders, StorageEntry,
-    TransactionSignedEcRecovered, TransitionId, TxNumber, H256, U256,
+    keccak256, proofs::EMPTY_ROOT, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork,
+    Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
+    TransitionId, TxNumber, H256, U256,
 };
-use reth_tracing::tracing::{info, trace};
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Bound, Deref, DerefMut, Range, RangeBounds},
 };
-
-use crate::{
-    execution_result::{AccountInfoChangeSet, TransactionChangeSet},
-    insert_canonical_block,
-    trie::{DBTrieLoader, TrieError},
-};
-
-use crate::execution_result::{AccountChangeSet, ExecutionResult};
 
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.
@@ -317,7 +313,7 @@ where
     pub fn get_block_execution_result_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<ExecutionResult>, TransactionError> {
+    ) -> Result<Vec<PostState>, TransactionError> {
         self.get_take_block_execution_result_range::<false>(range)
     }
 
@@ -327,7 +323,7 @@ where
     pub fn take_block_execution_result_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<ExecutionResult>, TransactionError> {
+    ) -> Result<Vec<PostState>, TransactionError> {
         self.get_take_block_execution_result_range::<true>(range)
     }
 
@@ -336,7 +332,7 @@ where
         &self,
         chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         self.get_take_block_and_execution_range::<false>(chain_spec, range)
     }
 
@@ -345,7 +341,7 @@ where
         &self,
         chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         self.get_take_block_and_execution_range::<true>(chain_spec, range)
     }
 
@@ -514,56 +510,22 @@ where
         Ok(())
     }
 
-    /// Insert full block and make it canonical
+    /// Insert full block and make it canonical.
     ///
-    /// This is atomic operation and transaction will do one commit at the end of the function.
-    pub fn insert_block(
-        &mut self,
-        block: SealedBlockWithSenders,
-        chain_spec: &ChainSpec,
-        changeset: ExecutionResult,
-    ) -> Result<(), TransactionError> {
+    /// This inserts the block and builds history related indexes. Once all blocks in a chain have
+    /// been committed, the state root needs to be inserted separately with
+    /// [`Transaction::insert_hashes`].
+    ///
+    /// # Note
+    ///
+    /// This assumes that we are using beacon consensus and that the block is post-merge, which
+    /// means that the block will have no block reward.
+    pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<(), TransactionError> {
         // Header, Body, SenderRecovery, TD, TxLookup stages
         let (block, senders) = block.into_components();
-        let block_number = block.number;
-        let block_state_root = block.state_root;
-        let block_hash = block.hash();
-        let parent_block_number = block.number.saturating_sub(1);
 
         let (from, to) =
             insert_canonical_block(self.deref_mut(), block, Some(senders), false).unwrap();
-
-        // execution stage
-        self.insert_execution_result(vec![changeset], chain_spec, parent_block_number)?;
-
-        // storage hashing stage
-        {
-            let lists = self.get_addresses_and_keys_of_changed_storages(from, to)?;
-            let storages = self.get_plainstate_storages(lists.into_iter())?;
-            self.insert_storage_for_hashing(storages.into_iter())?;
-        }
-
-        // account hashing stage
-        {
-            let lists = self.get_addresses_of_changed_accounts(from, to)?;
-            let accounts = self.get_plainstate_accounts(lists.into_iter())?;
-            self.insert_account_for_hashing(accounts.into_iter())?;
-        }
-
-        // merkle tree
-        {
-            let current_root = self.get_header(parent_block_number)?.state_root;
-            let mut loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader.update_root(current_root, from..to).and_then(|e| e.root())?;
-            if root != block_state_root {
-                return Err(TransactionError::StateTrieRootMismatch {
-                    got: root,
-                    expected: block_state_root,
-                    block_number,
-                    block_hash,
-                })
-            }
-        }
 
         // account history stage
         {
@@ -575,6 +537,58 @@ where
         {
             let indices = self.get_storage_transition_ids_from_changeset(from, to)?;
             self.insert_storage_history_index(indices)?;
+        }
+
+        Ok(())
+    }
+
+    /// Calculate the hashes of all changed accounts and storages, and finally calculate the state
+    /// root.
+    ///
+    /// The chain goes from `fork_block_number + 1` to `current_block_number`, and hashes are
+    /// calculated from `from_transition_id` to `to_transition_id`.
+    ///
+    /// The resulting state root is compared with `expected_state_root`.
+    pub fn insert_hashes(
+        &mut self,
+        fork_block_number: BlockNumber,
+        from_transition_id: TransitionId,
+        to_transition_id: TransitionId,
+        current_block_number: BlockNumber,
+        current_block_hash: H256,
+        expected_state_root: H256,
+    ) -> Result<(), TransactionError> {
+        // storage hashing stage
+        {
+            let lists = self
+                .get_addresses_and_keys_of_changed_storages(from_transition_id, to_transition_id)?;
+            let storages = self.get_plainstate_storages(lists.into_iter())?;
+            self.insert_storage_for_hashing(storages.into_iter())?;
+        }
+
+        // account hashing stage
+        {
+            let lists =
+                self.get_addresses_of_changed_accounts(from_transition_id, to_transition_id)?;
+            let accounts = self.get_plainstate_accounts(lists.into_iter())?;
+            self.insert_account_for_hashing(accounts.into_iter())?;
+        }
+
+        // merkle tree
+        {
+            let current_root = self.get_header(fork_block_number)?.state_root;
+            let mut loader = DBTrieLoader::new(self.deref_mut());
+            let root = loader
+                .update_root(current_root, from_transition_id..to_transition_id)
+                .and_then(|e| e.root())?;
+            if root != expected_state_root {
+                return Err(TransactionError::StateTrieRootMismatch {
+                    got: root,
+                    expected: expected_state_root,
+                    block_number: current_block_number,
+                    block_hash: current_block_hash,
+                })
+            }
         }
 
         Ok(())
@@ -764,27 +778,32 @@ where
         Ok(blocks)
     }
 
-    /// Transverse over changesets and plain state and recreated the execution results.
+    /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
+    /// of blocks.
     ///
-    /// Iterate over [tables::BlockTransitionIndex] and take all transitions.
-    /// Then iterate over all [tables::StorageChangeSet] and [tables::AccountChangeSet] in reverse
-    /// order and populate all changesets. To be able to populate changesets correctly and to
-    /// have both, new and old value of account/storage, we needs to have local state and access
-    /// to [tables::PlainAccountState] [tables::PlainStorageState].
-    /// While iteration over acocunt/storage changesets.
-    /// At first instance of account/storage we are taking old value from changeset,
-    /// new value from plain state and saving old value to local state.
-    /// As second accounter of same account/storage we are again taking old value from changeset,
-    /// but new value is taken from local state and old value is again updated to local state.
+    /// 1. Iterate over the [BlockTransitionIndex][tables::BlockTransitionIndex] table to get all
+    /// the transitions
+    /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
+    /// and the [AccountChangeSet][tables::AccountChangeSet] tables in reverse order to reconstruct
+    /// the changesets.
+    ///     - In order to have both the old and new values in the changesets, we also access the
+    ///       plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    /// we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    /// have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
     ///
-    /// Now if TAKE is true we will use local state and update all old values to plain state tables.
-    ///
-    /// After that, iterate over [`tables::BlockBodies`] and pack created changesets in block chunks
-    /// taking care if block has block changesets or not.
+    /// If `TAKE` is `true`, the local state will be written to the plain state tables.
     fn get_take_block_execution_result_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<ExecutionResult>, TransactionError> {
+    ) -> Result<Vec<PostState>, TransactionError> {
         let block_transition =
             self.get_or_take::<tables::BlockTransitionIndex, TAKE>(range.clone())?;
 
@@ -815,10 +834,7 @@ where
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
         type LocalPlainState = BTreeMap<Address, (Option<Option<Account>>, BTreeMap<H256, U256>)>;
-        type Changesets = BTreeMap<
-            TransitionId,
-            BTreeMap<Address, (AccountInfoChangeSet, BTreeMap<H256, (U256, U256)>)>,
-        >;
+        type Changesets = BTreeMap<TransitionId, Vec<Change>>;
 
         let mut local_plain_state: LocalPlainState = BTreeMap::new();
 
@@ -832,33 +848,51 @@ where
 
         // add account changeset changes
         for (transition_id, account_before) in account_changeset.into_iter().rev() {
-            let new_info = match local_plain_state.entry(account_before.address) {
+            let AccountBeforeTx { info: old_info, address } = account_before;
+            let new_info = match local_plain_state.entry(address) {
                 Entry::Vacant(entry) => {
-                    let new_account =
-                        plain_accounts_cursor.seek(account_before.address)?.map(|(_s, i)| i);
-                    entry.insert((Some(account_before.info), BTreeMap::new()));
+                    let new_account = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    entry.insert((Some(old_info), BTreeMap::new()));
                     new_account
                 }
                 Entry::Occupied(mut entry) => {
-                    let new_account =
-                        std::mem::replace(&mut entry.get_mut().0, Some(account_before.info));
+                    let new_account = std::mem::replace(&mut entry.get_mut().0, Some(old_info));
                     new_account.expect("As we are stacking account first, account would always be Some(Some) or Some(None)")
                 }
             };
-            let account_info_changeset = AccountInfoChangeSet::new(account_before.info, new_info);
-            // insert changeset to transition id. Multiple account for same transition Id are not
-            // possible.
-            all_changesets
-                .entry(transition_id)
-                .or_default()
-                .entry(account_before.address)
-                .or_default()
-                .0 = account_info_changeset
+
+            let change = match (old_info, new_info) {
+                (Some(old), Some(new)) => {
+                    if new != old {
+                        Change::AccountChanged {
+                            id: transition_id,
+                            address,
+                            old,
+                            new,
+                        }
+                    } else {
+                        unreachable!("Junk data in database: an account changeset did not represent any change");
+                    }
+                }
+                (None, Some(account)) => Change::AccountCreated {
+                    id: transition_id,
+                    address,
+                    account
+                },
+                (Some(old), None) => Change::AccountDestroyed {
+                    id: transition_id,
+                    address,
+                    old
+                },
+                (None, None) => unreachable!("Junk data in database: an account changeset transitioned from no account to no account"),
+            };
+            all_changesets.entry(transition_id).or_default().push(change);
         }
 
         // add storage changeset changes
+        let mut storage_changes: BTreeMap<TransitionIdAddress, StorageChangeset> = BTreeMap::new();
         for (transition_and_address, storage_entry) in storage_changeset.into_iter().rev() {
-            let TransitionIdAddress((transition_id, address)) = transition_and_address;
+            let TransitionIdAddress((_, address)) = transition_and_address;
             let new_storage =
                 match local_plain_state.entry(address).or_default().1.entry(storage_entry.key) {
                     Entry::Vacant(entry) => {
@@ -873,13 +907,20 @@ where
                         std::mem::replace(entry.get_mut(), storage_entry.value)
                     }
                 };
-            all_changesets
-                .entry(transition_id)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .insert(storage_entry.key, (storage_entry.value, new_storage));
+            storage_changes.entry(transition_and_address).or_default().insert(
+                U256::from_be_bytes(storage_entry.key.0),
+                (storage_entry.value, new_storage),
+            );
+        }
+
+        for (TransitionIdAddress((transition_id, address)), storage_changeset) in
+            storage_changes.into_iter()
+        {
+            all_changesets.entry(transition_id).or_default().push(Change::StorageChanged {
+                id: transition_id,
+                address,
+                changeset: storage_changeset,
+            });
         }
 
         if TAKE {
@@ -894,10 +935,12 @@ where
                         plain_accounts_cursor.delete_current()?;
                     }
                 }
+
                 // revert storages
                 for (storage_key, storage_value) in storage.into_iter() {
                     let storage_entry = StorageEntry { key: storage_key, value: storage_value };
                     // delete previous value
+                    // TODO: This does not use dupsort features
                     if plain_storage_cursor
                         .seek_by_key_subkey(address, storage_key)?
                         .filter(|s| s.key == storage_key)
@@ -905,6 +948,8 @@ where
                     {
                         plain_storage_cursor.delete_current()?
                     }
+
+                    // TODO: This does not use dupsort features
                     // insert value if needed
                     if storage_value != U256::ZERO {
                         plain_storage_cursor.insert(address, storage_entry)?;
@@ -913,73 +958,39 @@ where
             }
         }
 
-        // NOTE: Some storage changesets can be empty,
-        // all account changeset have at least beneficiary fee transfer.
-
         // iterate over block body and create ExecutionResult
         let mut block_exec_results = Vec::new();
-
-        let mut changeset_iter = all_changesets.into_iter();
         let mut block_transition_iter = block_transition.into_iter();
         let mut next_transition_id = from;
 
-        let mut next_changeset = changeset_iter.next().unwrap_or_default();
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies.into_iter() {
-            let mut block_exec_res = ExecutionResult::default();
+            let mut block_exec_res = PostState::new();
             for _ in 0..block_body.tx_count {
-                // only if next_changeset
-                let changeset = if next_transition_id == next_changeset.0 {
-                    let changeset = next_changeset
-                        .1
-                        .into_iter()
-                        .map(|(address, (account, storage))| {
-                            (
-                                address,
-                                AccountChangeSet {
-                                    account,
-                                    storage: storage
-                                        .into_iter()
-                                        .map(|(key, val)| (U256::from_be_bytes(key.0), val))
-                                        .collect(),
-                                    wipe_storage: false, /* it is always false as all storage
-                                                          * changesets for selfdestruct are
-                                                          * already accounted. */
-                                },
-                            )
-                        })
-                        .collect();
-                    next_changeset = changeset_iter.next().unwrap_or_default();
-                    changeset
-                } else {
-                    BTreeMap::new()
-                };
-
+                if let Some(changes) = all_changesets.remove(&next_transition_id) {
+                    for mut change in changes.into_iter() {
+                        change
+                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
+                        block_exec_res.add_and_apply(change);
+                    }
+                }
+                block_exec_res.finish_transition();
                 next_transition_id += 1;
-                block_exec_res.tx_changesets.push(TransactionChangeSet {
-                    receipt: Receipt::default(), /* TODO(receipt) when they are saved, load them
-                                                  * from db */
-                    changeset,
-                    new_bytecodes: Default::default(), /* TODO(bytecode), bytecode is not cleared
-                                                        * so it is same sa previous. */
-                });
             }
 
             let Some((_,block_transition)) = block_transition_iter.next() else { break};
             // if block transition points to 1+next transition id it means that there is block
             // changeset.
             if block_transition == next_transition_id + 1 {
-                // assert last_transition_id == block_transition
-                if next_transition_id == next_changeset.0 {
-                    // take block changeset
-                    block_exec_res.block_changesets = next_changeset
-                        .1
-                        .into_iter()
-                        .map(|(address, (account, _))| (address, account))
-                        .collect();
-                    next_changeset = changeset_iter.next().unwrap_or_default();
+                if let Some(changes) = all_changesets.remove(&next_transition_id) {
+                    for mut change in changes.into_iter() {
+                        change
+                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
+                        block_exec_res.add_and_apply(change);
+                    }
+                    block_exec_res.finish_transition();
+                    next_transition_id += 1;
                 }
-                next_transition_id += 1;
             }
             block_exec_results.push(block_exec_res)
         }
@@ -991,7 +1002,7 @@ where
         &self,
         chain_spec: &ChainSpec,
         range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> Result<Vec<(SealedBlockWithSenders, ExecutionResult)>, TransactionError> {
+    ) -> Result<Vec<(SealedBlockWithSenders, PostState)>, TransactionError> {
         if TAKE {
             let (from_transition, parent_number, parent_state_root) = match range.start_bound() {
                 Bound::Included(n) => {
@@ -1355,134 +1366,6 @@ where
         Ok(())
     }
 
-    /// Used inside execution stage to commit created account storage changesets for transaction or
-    /// block state change.
-    pub fn insert_execution_result(
-        &self,
-        changesets: Vec<ExecutionResult>,
-        chain_spec: &ChainSpec,
-        parent_block_number: u64,
-    ) -> Result<(), TransactionError> {
-        // Get last tx count so that we can know amount of transaction in the block.
-        let mut current_transition_id = self
-            .get::<tables::BlockTransitionIndex>(parent_block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number: parent_block_number })?;
-
-        info!(target: "sync::stages::execution", current_transition_id, blocks = changesets.len(), "Inserting execution results");
-
-        // apply changes to plain database.
-        let mut block_number = parent_block_number;
-        for results in changesets.into_iter() {
-            block_number += 1;
-            let spurious_dragon_active =
-                chain_spec.fork(Hardfork::SpuriousDragon).active_at_block(block_number);
-            // insert state change set
-            for result in results.tx_changesets.into_iter() {
-                for (address, account_change_set) in result.changeset.into_iter() {
-                    let AccountChangeSet { account, wipe_storage, storage } = account_change_set;
-                    // apply account change to db. Updates AccountChangeSet and PlainAccountState
-                    // tables.
-                    trace!(target: "sync::stages::execution", ?address, current_transition_id, ?account, wipe_storage, "Applying account changeset");
-                    account.apply_to_db(
-                        &**self,
-                        address,
-                        current_transition_id,
-                        spurious_dragon_active,
-                    )?;
-
-                    let storage_id = TransitionIdAddress((current_transition_id, address));
-
-                    // cast key to H256 and trace the change
-                    let storage = storage
-                                .into_iter()
-                                .map(|(key, (old_value,new_value))| {
-                                    let hkey = H256(key.to_be_bytes());
-                                    trace!(target: "sync::stages::execution", ?address, current_transition_id, ?hkey, ?old_value, ?new_value, "Applying storage changeset");
-                                    (hkey, old_value,new_value)
-                                })
-                                .collect::<Vec<_>>();
-
-                    let mut cursor_storage_changeset =
-                        self.cursor_write::<tables::StorageChangeSet>()?;
-                    cursor_storage_changeset.seek_exact(storage_id)?;
-
-                    if wipe_storage {
-                        // iterate over storage and save them before entry is deleted.
-                        self.cursor_read::<tables::PlainStorageState>()?
-                            .walk(Some(address))?
-                            .take_while(|res| {
-                                res.as_ref().map(|(k, _)| *k == address).unwrap_or_default()
-                            })
-                            .try_for_each(|entry| {
-                                let (_, old_value) = entry?;
-                                cursor_storage_changeset.append(storage_id, old_value)
-                            })?;
-
-                        // delete all entries
-                        self.delete::<tables::PlainStorageState>(address, None)?;
-
-                        // insert storage changeset
-                        for (key, _, new_value) in storage {
-                            // old values are already cleared.
-                            if new_value != U256::ZERO {
-                                self.put::<tables::PlainStorageState>(
-                                    address,
-                                    StorageEntry { key, value: new_value },
-                                )?;
-                            }
-                        }
-                    } else {
-                        // insert storage changeset
-                        for (key, old_value, new_value) in storage {
-                            let old_entry = StorageEntry { key, value: old_value };
-                            let new_entry = StorageEntry { key, value: new_value };
-                            // insert into StorageChangeSet
-                            cursor_storage_changeset.append(storage_id, old_entry)?;
-
-                            // Always delete old value as duplicate table, put will not override it
-                            self.delete::<tables::PlainStorageState>(address, Some(old_entry))?;
-                            if new_value != U256::ZERO {
-                                self.put::<tables::PlainStorageState>(address, new_entry)?;
-                            }
-                        }
-                    }
-                }
-                // insert bytecode
-                for (hash, bytecode) in result.new_bytecodes.into_iter() {
-                    // make different types of bytecode. Checked and maybe even analyzed (needs to
-                    // be packed). Currently save only raw bytes.
-                    let bytes = bytecode.bytes();
-                    trace!(target: "sync::stages::execution", ?hash, ?bytes, len = bytes.len(), "Inserting bytecode");
-                    self.put::<tables::Bytecodes>(hash, Bytecode(bytecode))?;
-                    // NOTE: bytecode bytes are not inserted in change set and can be found in
-                    // separate table
-                }
-                current_transition_id += 1;
-            }
-
-            let have_block_changeset = !results.block_changesets.is_empty();
-
-            // If there are any post block changes, we will add account changesets to db.
-            for (address, changeset) in results.block_changesets.into_iter() {
-                trace!(target: "sync::stages::execution", ?address, current_transition_id, "Applying block reward");
-                changeset.apply_to_db(
-                    &**self,
-                    address,
-                    current_transition_id,
-                    spurious_dragon_active,
-                )?;
-            }
-
-            // Transition is incremeneted every time before Paris hardfork and after
-            // Shanghai only if there are Withdrawals in the block. So it is correct to
-            // to increment transition id every time there is a block changeset present.
-            if have_block_changeset {
-                current_transition_id += 1;
-            }
-        }
-        Ok(())
-    }
-
     /// Return full table as Vec
     pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DbError>
     where
@@ -1598,7 +1481,7 @@ pub enum TransactionError {
 mod test {
     use crate::{insert_canonical_block, test_utils::blocks::*, Transaction};
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, MAINNET};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, TransitionId, MAINNET};
     use std::ops::DerefMut;
 
     #[test]
@@ -1623,7 +1506,17 @@ mod test {
         tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
-        tx.insert_block(block1.clone(), &chain_spec, exec_res1.clone()).unwrap();
+        exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
+        tx.insert_block(block1.clone()).unwrap();
+        tx.insert_hashes(
+            genesis.number,
+            0,
+            exec_res1.transitions_count() as TransitionId,
+            block1.number,
+            block1.hash,
+            block1.state_root,
+        )
+        .unwrap();
 
         // get one block
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
@@ -1634,8 +1527,32 @@ mod test {
         assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
         assert_genesis_block(&tx, genesis.clone());
 
-        tx.insert_block(block1.clone(), &chain_spec, exec_res1.clone()).unwrap();
-        tx.insert_block(block2.clone(), &chain_spec, exec_res2.clone()).unwrap();
+        exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
+        tx.insert_block(block1.clone()).unwrap();
+        tx.insert_hashes(
+            genesis.number,
+            0,
+            exec_res1.transitions_count() as TransitionId,
+            block1.number,
+            block1.hash,
+            block1.state_root,
+        )
+        .unwrap();
+
+        exec_res2
+            .clone()
+            .write_to_db(tx.deref_mut(), exec_res1.transitions_count() as TransitionId)
+            .unwrap();
+        tx.insert_block(block2.clone()).unwrap();
+        tx.insert_hashes(
+            block1.number,
+            exec_res1.transitions_count() as TransitionId,
+            exec_res2.transitions_count() as TransitionId,
+            2,
+            block2.hash,
+            block2.state_root,
+        )
+        .unwrap();
 
         // get second block
         let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
