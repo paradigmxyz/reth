@@ -63,6 +63,7 @@ use externals::TreeExternals;
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of block that we want to finalize
 ///   and commit it to db. If we dont have the block, pipeline syncing should start to fetch the
 ///   blocks from p2p. Do reorg in tables if canonical chain if needed.
+#[derive(Debug)]
 pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// The tracked chains and their current data.
     chains: HashMap<BlockChainId, Chain>,
@@ -527,12 +528,18 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let (blocks, state) = chain.into_inner();
 
         // Write state and changesets to the database
+        println!("New tip: {}", new_tip);
+        println!("Accounts: {:#?}", state.accounts());
+        println!("Storage: {:#?}", state.storage());
+        println!("Bytecode: {:#?}", state.bytecodes());
+        println!("Changes: {:#?}", state.changes);
         state
             .write_to_db(tx.deref_mut(), first_transition_id)
             .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
 
         // Insert the blocks
-        for (_, block) in blocks.into_iter() {
+        for block in blocks.into_values() {
+            println!("Inserting block: {:#?}", block);
             tx.insert_block(block)
                 .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
         }
@@ -614,7 +621,7 @@ mod tests {
     };
     use std::{collections::HashSet, sync::Arc};
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct TestFactory {
         exec_result: Arc<Mutex<Vec<PostState>>>,
         chain_spec: Arc<ChainSpec>,
@@ -748,12 +755,8 @@ mod tests {
         let data = BlockChainTestData::default();
         let (mut block1, exec1) = data.blocks[0].clone();
         block1.number = 11;
-        block1.state_root =
-            H256(hex!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd"));
         let (mut block2, exec2) = data.blocks[1].clone();
         block2.number = 12;
-        block2.state_root =
-            H256(hex!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8"));
 
         // test pops execution results from vector, so order is from last to first.ß
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);

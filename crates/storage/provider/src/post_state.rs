@@ -164,7 +164,7 @@ impl Change {
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
-    current_transition_id: TransitionId,
+    pub current_transition_id: TransitionId,
     /// The state of all modified accounts after execution.
     ///
     /// If the value contained is `None`, then the account should be deleted.
@@ -175,7 +175,7 @@ pub struct PostState {
     /// from the database.
     storage: BTreeMap<Address, Storage>,
     /// The changes to state that happened during execution
-    changes: Vec<Change>,
+    pub changes: Vec<Change>,
     /// New code created during the execution
     bytecode: BTreeMap<H256, Bytecode>,
     /// The receipt(s) of the executed transaction(s).
@@ -277,7 +277,7 @@ impl PostState {
     }
 
     /// TODO: Docs
-    pub fn revert_to(&mut self, transition_id: usize) {
+    pub fn revert_to(&mut self, transition_id: usize) -> Vec<Change> {
         // TODO: Add a `changes_count` instead and use that so we can slice instead.
         let mut changes_to_revert = Vec::new();
         self.changes.retain(|change| {
@@ -289,9 +289,12 @@ impl PostState {
             }
         });
 
-        for change in changes_to_revert.into_iter().rev() {
-            self.revert(change);
+        for change in changes_to_revert.iter_mut().rev() {
+            change.set_transition_id(change.transition_id() - transition_id as TransitionId);
+            self.revert(change.clone());
         }
+        self.current_transition_id = transition_id as TransitionId;
+        changes_to_revert
     }
 
     /// Add a newly created account to the post-state.
@@ -765,5 +768,29 @@ mod tests {
             None,
             "Account A should only be in the changeset 2 times on deletion"
         );
+    }
+
+    #[test]
+    fn revert_to() {
+        let mut state = PostState::new();
+        state.create_account(
+            Address::repeat_byte(0),
+            Account { nonce: 1, balance: U256::from(1), bytecode_hash: None },
+        );
+        state.finish_transition();
+        let revert_to = state.current_transition_id;
+        state.create_account(
+            Address::repeat_byte(0xff),
+            Account { nonce: 2, balance: U256::from(2), bytecode_hash: None },
+        );
+        state.finish_transition();
+
+        assert_eq!(state.transitions_count(), 2);
+        assert_eq!(state.accounts().len(), 2);
+
+        let reverted_changes = state.revert_to(revert_to as usize);
+        assert_eq!(state.accounts().len(), 1);
+        assert_eq!(state.transitions_count(), 1);
+        assert_eq!(reverted_changes.len(), 1);
     }
 }

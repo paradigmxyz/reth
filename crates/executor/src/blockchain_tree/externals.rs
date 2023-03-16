@@ -14,6 +14,7 @@ use std::sync::Arc;
 /// - A handle to the consensus engine
 /// - The executor factory to exexcute blocks with
 /// - The chain spec
+#[derive(Debug)]
 pub struct TreeExternals<DB, C, EF> {
     /// The database, used to commit the canonical chain, or unwind it.
     pub db: DB,

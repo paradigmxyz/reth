@@ -267,6 +267,7 @@ impl Chain {
     ///
     /// # Note
     ///
+    /// TODO: Update this (it's no longer true)
     /// The current state of accounts will only be found in the second chain. The state of accounts
     /// for the first chain will be invalid.
     pub fn split(mut self, split_at: SplitAt) -> ChainSplit {
@@ -299,19 +300,26 @@ impl Chain {
         };
 
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
-        //let (first_changesets, second_changeset) = self.changesets.split_at(self.blocks.len());
+        let mut canonical_state = self.state.clone();
+        let reverted_changes = canonical_state.revert_to(
+            *self.block_transitions.get(&(block_number)).expect("Unknown block transition ID"),
+        );
+
+        // TODO: This is really bad. There should be a `split_at` or something for PostState
+        let new_transition_id =
+            reverted_changes.last().map(|c| c.transition_id()).unwrap_or_default();
+        self.state.changes = reverted_changes;
+        self.state.current_transition_id = new_transition_id + 1;
 
         ChainSplit::Split {
             canonical: Chain {
-                state: PostState::default(),
+                state: canonical_state,
                 block_transitions: BTreeMap::new(),
-                //changesets: first_changesets.to_vec(),
                 blocks: self.blocks,
             },
             pending: Chain {
                 state: self.state,
                 block_transitions: self.block_transitions,
-                //changesets: second_changeset.to_vec(),
                 blocks: higher_number_blocks,
             },
         }
