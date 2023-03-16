@@ -52,11 +52,6 @@ impl BlockIndices {
         &self.blocks_to_chain
     }
 
-    /// Returns `true` if the Tree knowns the block hash.
-    pub fn contains_pending_block_hash(&self, block_hash: BlockHash) -> bool {
-        self.blocks_to_chain.contains_key(&block_hash)
-    }
-
     /// Check if block hash belongs to canonical chain.
     pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
         self.canonical_chain.range(self.last_finalized_block..).any(|(_, &h)| h == *block_hash)
