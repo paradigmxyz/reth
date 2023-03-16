@@ -740,18 +740,18 @@ mod tests {
                     address: account2,
                     account: account2_info
                 },
-                // Ommer reward
-                Change::AccountCreated {
-                    id: BLOCK_TRANSITION_ID,
-                    address: ommer_beneficiary,
-                    account: ommer_beneficiary_info
-                },
                 // Block reward
                 Change::AccountChanged {
                     id: BLOCK_TRANSITION_ID,
                     address: account2,
                     old: account2_info,
                     new: account2_info_with_block_reward
+                },
+                // Ommer reward
+                Change::AccountCreated {
+                    id: BLOCK_TRANSITION_ID,
+                    address: ommer_beneficiary,
+                    account: ommer_beneficiary_info
                 },
             ],
             "Changeset did not match"
