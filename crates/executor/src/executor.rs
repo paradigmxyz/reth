@@ -156,7 +156,6 @@ where
                     Entry::Occupied(entry) => {
                         let entry = entry.into_mut();
 
-                        // TODO: Ensure account is removed if unchanged
                         if matches!(entry.account_state, AccountState::NotExisting) {
                             let account = to_reth_acc(&account.info);
                             if !(has_state_clear_eip && account.is_empty()) {
@@ -697,23 +696,6 @@ mod tests {
             post_state.accounts().get(&account1).is_none(),
             "Account should not be present in post-state since it was not changed"
         );
-
-        // TODO: Re-enable these tests
-        // assert_eq!(
-        //     changesets.changeset.get(&account1).unwrap().account,
-        //     AccountInfoChangeSet::NoChange { is_empty: false },
-        //     "No change to account"
-        // );
-        // assert_eq!(
-        //     changesets.changeset.get(&account2).unwrap().account,
-        //     AccountInfoChangeSet::Created { new: account2_info },
-        //     "New account"
-        // );
-        // assert_eq!(
-        //     changesets.changeset.get(&account3).unwrap().account,
-        //     AccountInfoChangeSet::Changed { old: account3_old_info, new: account3_info },
-        //     "Change to account state"
-        // );
 
         // Check changes
         const TX_TRANSITION_ID: u64 = 0;
