@@ -161,7 +161,7 @@ impl Change {
 /// Since most [PostState]s in reth are for multiple blocks it is better to pre-allocate capacity
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
     current_transition_id: TransitionId,
@@ -215,9 +215,25 @@ impl PostState {
         &self.accounts
     }
 
+    /// Get the latest state for a specific account.
+    ///
+    /// # Returns
+    ///
+    /// - `None` if the account does not exist
+    /// - `Some(&None)` if the account existed, but has since been deleted.
+    /// - `Some(..)` if the account currently exists
+    pub fn account(&self, address: &Address) -> Option<&Option<Account>> {
+        self.accounts.get(address)
+    }
+
     /// Get the latest state of storage.
     pub fn storage(&self) -> &BTreeMap<Address, Storage> {
         &self.storage
+    }
+
+    /// Get the storage for an account.
+    pub fn account_storage(&self, address: &Address) -> Option<&Storage> {
+        self.storage.get(address)
     }
 
     /// Get the changes causing this [PostState].
@@ -226,8 +242,13 @@ impl PostState {
     }
 
     /// Get the newly created bytecodes
-    pub fn bytecode(&self) -> &BTreeMap<H256, Bytecode> {
+    pub fn bytecodes(&self) -> &BTreeMap<H256, Bytecode> {
         &self.bytecode
+    }
+
+    /// Get a bytecode in the post-state.
+    pub fn bytecode(&self, code_hash: &H256) -> Option<&Bytecode> {
+        self.bytecode.get(code_hash)
     }
 
     /// Get the receipts for the transactions executed to form this [PostState].
@@ -253,6 +274,24 @@ impl PostState {
         self.receipts.extend(other.receipts);
         self.bytecode.extend(other.bytecode);
         self.current_transition_id = next_transition_id + 1;
+    }
+
+    /// TODO: Docs
+    pub fn revert_to(&mut self, transition_id: usize) {
+        // TODO: Add a `changes_count` instead and use that so we can slice instead.
+        let mut changes_to_revert = Vec::new();
+        self.changes.retain(|change| {
+            if change.transition_id() >= transition_id as u64 {
+                changes_to_revert.push(change.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        for change in changes_to_revert.into_iter().rev() {
+            self.revert(change);
+        }
     }
 
     /// Add a newly created account to the post-state.
@@ -343,6 +382,32 @@ impl PostState {
         }
 
         self.changes.push(change);
+    }
+
+    /// Revert a change, applying the inverse of its transformations to the current state.
+    fn revert(&mut self, change: Change) {
+        match &change {
+            Change::AccountCreated { address, .. } => {
+                self.accounts.remove(address);
+            }
+            Change::AccountChanged { address, old, .. } => {
+                self.accounts.insert(*address, Some(*old));
+            }
+            Change::AccountDestroyed { address, old, .. } => {
+                self.accounts.insert(*address, Some(*old));
+            }
+            Change::StorageChanged { address, changeset, .. } => {
+                let storage = self.storage.entry(*address).or_default();
+                storage.wiped = false;
+                for (slot, (old_value, _)) in changeset {
+                    storage.storage.insert(*slot, *old_value);
+                }
+            }
+            Change::StorageWiped { address, .. } => {
+                let storage = self.storage.entry(*address).or_default();
+                storage.wiped = false;
+            }
+        }
     }
 
     /// Write the post state to the database.

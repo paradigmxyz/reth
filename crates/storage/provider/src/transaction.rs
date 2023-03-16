@@ -34,8 +34,6 @@ use crate::{
     trie::{DBTrieLoader, TrieError},
 };
 
-use crate::post_state::PostState;
-
 /// A container for any DB transaction that will open a new inner transaction when the current
 /// one is committed.
 // NOTE: This container is needed since `Transaction::commit` takes `mut self`, so methods in
@@ -519,12 +517,12 @@ where
     /// Insert full block and make it canonical
     ///
     /// This is atomic operation and transaction will do one commit at the end of the function.
-    pub fn insert_block(
-        &mut self,
-        block: SealedBlockWithSenders,
-        _chain_spec: &ChainSpec,
-        _changeset: ExecutionResult,
-    ) -> Result<(), TransactionError> {
+    ///
+    /// # Note
+    ///
+    /// This assumes that we are using beacon consensus and that the block is post-merge, which
+    /// means that the block will have no block reward.
+    pub fn insert_block(&mut self, block: SealedBlockWithSenders) -> Result<(), TransactionError> {
         // Header, Body, SenderRecovery, TD, TxLookup stages
         let (block, senders) = block.into_components();
         let block_number = block.number;
@@ -534,12 +532,6 @@ where
 
         let (from, to) =
             insert_canonical_block(self.deref_mut(), block, Some(senders), false).unwrap();
-
-        // TODO: Convert this to use `changeset`
-        // // execution stage
-        // {
-        //     changeset.write_to_db(&**self, self.get_block_transition(parent_block_number)?)?;
-        // }
 
         // storage hashing stage
         {

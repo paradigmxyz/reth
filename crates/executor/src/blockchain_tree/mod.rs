@@ -16,6 +16,7 @@ use reth_provider::{
 };
 use std::{
     collections::{BTreeMap, HashMap},
+    ops::DerefMut,
     sync::Arc,
 };
 
@@ -558,15 +559,24 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
         let mut tx = Transaction::new(&self.externals.db)?;
-
         let new_tip = chain.tip().number;
-        let (blocks, changesets, _) = chain.into_inner();
-        for item in blocks.into_iter().zip(changesets.into_iter()) {
-            let ((_, block), changeset) = item;
-            tx.insert_block(block, self.externals.chain_spec.as_ref(), changeset)
+        let first_transition_id =
+            tx.get_block_transition(chain.first().number.saturating_sub(1))
+                .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
+        let (blocks, state) = chain.into_inner();
+
+        // Write state and changesets to the database
+        state
+            .write_to_db(tx.deref_mut(), first_transition_id)
+            .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
+
+        // Insert the blocks
+        for (_, block) in blocks.into_iter() {
+            tx.insert_block(block)
                 .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
         }
-        // update pipeline progress.
+
+        // Update pipeline progress
         tx.update_pipeline_stages(new_tip)
             .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
@@ -597,9 +607,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         tx.commit()?;
 
-        let chain = Chain::new(blocks_and_execution);
-
-        Ok(chain)
+        // TODO
+        //let chain = Chain::new(blocks_and_execution);
+        //
+        //Ok(chain)
+        Ok(Chain::new(vec![]))
     }
 }
 
@@ -614,13 +626,13 @@ mod tests {
     use reth_interfaces::test_utils::TestConsensus;
     use reth_primitives::{hex_literal::hex, proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        execution_result::ExecutionResult, insert_block, post_state::PostState,
-        test_utils::blocks::BlockChainTestData, BlockExecutor, StateProvider,
+        insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData, BlockExecutor,
+        StateProvider,
     };
     use std::collections::HashSet;
 
     struct TestFactory {
-        exec_result: Arc<Mutex<Vec<ExecutionResult>>>,
+        exec_result: Arc<Mutex<Vec<PostState>>>,
         chain_spec: Arc<ChainSpec>,
     }
 
@@ -629,12 +641,12 @@ mod tests {
             Self { exec_result: Arc::new(Mutex::new(Vec::new())), chain_spec }
         }
 
-        fn extend(&self, exec_res: Vec<ExecutionResult>) {
+        fn extend(&self, exec_res: Vec<PostState>) {
             self.exec_result.lock().extend(exec_res.into_iter());
         }
     }
 
-    struct TestExecutor(Option<ExecutionResult>);
+    struct TestExecutor(Option<PostState>);
 
     impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
         fn execute(
@@ -671,7 +683,7 @@ mod tests {
 
     type TestExternals = (Arc<Env<WriteMap>>, TestConsensus, TestFactory, Arc<ChainSpec>);
 
-    fn externals(exec_res: Vec<ExecutionResult>) -> TestExternals {
+    fn externals(exec_res: Vec<PostState>) -> TestExternals {
         let db = create_test_rw_db();
         let consensus = TestConsensus::default();
         let chain_spec = Arc::new(

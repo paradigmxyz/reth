@@ -766,7 +766,7 @@ mod tests {
             )]),
             "Should have changed 1 storage slot"
         );
-        assert_eq!(post_state.bytecode().len(), 0, "Should have zero new bytecodes");
+        assert_eq!(post_state.bytecodes().len(), 0, "Should have zero new bytecodes");
 
         let accounts = post_state.accounts();
         assert_eq!(
@@ -912,7 +912,7 @@ mod tests {
             2,
             "Should only have two transitions (the transaction and the block)"
         );
-        assert_eq!(out.bytecode().len(), 0, "Should have zero new bytecodes");
+        assert_eq!(out.bytecodes().len(), 0, "Should have zero new bytecodes");
 
         let post_account_caller = Account {
             balance: U256::from(0x0de0b6b3a761cf60u64),
