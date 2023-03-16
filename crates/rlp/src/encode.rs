@@ -190,38 +190,6 @@ impl Encodable for smol_str::SmolStr {
     }
 }
 
-#[cfg(feature = "enr")]
-impl<K> Encodable for enr::Enr<K>
-where
-    K: enr::EnrKey,
-{
-    fn encode(&self, out: &mut dyn BufMut) {
-        let payload_length = self.signature().length() +
-            self.seq().length() +
-            self.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
-
-        let header = Header { list: true, payload_length };
-        header.encode(out);
-
-        self.signature().encode(out);
-        self.seq().encode(out);
-
-        for (k, v) in self.iter() {
-            // Keys are byte data
-            k.as_slice().encode(out);
-            // Values are raw RLP encoded data
-            out.put_slice(v);
-        }
-    }
-
-    fn length(&self) -> usize {
-        let payload_length = self.signature().length() +
-            self.seq().length() +
-            self.iter().fold(0, |acc, (k, v)| acc + k.as_slice().length() + v.len());
-        payload_length + length_of_length(payload_length)
-    }
-}
-
 #[cfg(feature = "std")]
 impl Encodable for std::net::IpAddr {
     fn encode(&self, out: &mut dyn BufMut) {
@@ -648,38 +616,5 @@ mod tests {
         let mut b = BytesMut::new();
         "abcdefgh".to_string().encode(&mut b);
         assert_eq!(&encoded(SmolStr::new("abcdefgh"))[..], b.as_ref());
-    }
-
-    // test vector from the enr library rlp encoding tests
-    // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#L1019>
-    #[cfg(feature = "enr")]
-    #[test]
-    fn encode_known_rlp_enr() {
-        use crate::Decodable;
-        use enr::{secp256k1::SecretKey, Enr, EnrPublicKey};
-        use std::net::Ipv4Addr;
-
-        let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
-        let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
-        let expected_pubkey =
-            hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
-
-        let enr = Enr::<SecretKey>::decode(&mut &valid_record[..]).unwrap();
-        let pubkey = enr.public_key().encode();
-
-        assert_eq!(enr.ip4(), Some(Ipv4Addr::new(127, 0, 0, 1)));
-        assert_eq!(enr.id(), Some(String::from("v4")));
-        assert_eq!(enr.udp4(), Some(30303));
-        assert_eq!(enr.tcp4(), None);
-        assert_eq!(enr.signature(), &signature[..]);
-        assert_eq!(pubkey.to_vec(), expected_pubkey);
-        assert!(enr.verify());
-
-        let mut encoded = BytesMut::new();
-        enr.encode(&mut encoded);
-        assert_eq!(&encoded[..], &valid_record[..]);
-
-        // ensure the length is equal
-        assert_eq!(enr.length(), valid_record.len());
     }
 }
