@@ -1481,7 +1481,7 @@ pub enum TransactionError {
 mod test {
     use crate::{insert_canonical_block, test_utils::blocks::*, Transaction};
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, MAINNET};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, TransitionId, MAINNET};
     use std::ops::DerefMut;
 
     #[test]
@@ -1508,6 +1508,15 @@ mod test {
 
         exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
         tx.insert_block(block1.clone()).unwrap();
+        tx.insert_hashes(
+            genesis.number,
+            0,
+            exec_res1.transitions_count() as TransitionId,
+            block1.number,
+            block1.hash,
+            block1.state_root,
+        )
+        .unwrap();
 
         // get one block
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
@@ -1520,8 +1529,30 @@ mod test {
 
         exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
         tx.insert_block(block1.clone()).unwrap();
-        exec_res2.clone().write_to_db(tx.deref_mut(), exec_res1.current_transition_id).unwrap();
+        tx.insert_hashes(
+            genesis.number,
+            0,
+            exec_res1.transitions_count() as TransitionId,
+            block1.number,
+            block1.hash,
+            block1.state_root,
+        )
+        .unwrap();
+
+        exec_res2
+            .clone()
+            .write_to_db(tx.deref_mut(), exec_res1.transitions_count() as TransitionId)
+            .unwrap();
         tx.insert_block(block2.clone()).unwrap();
+        tx.insert_hashes(
+            block1.number,
+            exec_res1.transitions_count() as TransitionId,
+            exec_res2.transitions_count() as TransitionId,
+            2,
+            block2.hash,
+            block2.state_root,
+        )
+        .unwrap();
 
         // get second block
         let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
