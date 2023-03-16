@@ -765,6 +765,22 @@ where
     }
 
     /// Transverse over changesets and plain state and recreated the execution results.
+    ///
+    /// Iterate over [tables::BlockTransitionIndex] and take all transitions.
+    /// Then iterate over all [tables::StorageChangeSet] and [tables::AccountChangeSet] in reverse
+    /// order and populate all changesets. To be able to populate changesets correctly and to
+    /// have both, new and old value of account/storage, we needs to have local state and access
+    /// to [tables::PlainAccountState] [tables::PlainStorageState].
+    /// While iteration over acocunt/storage changesets.
+    /// At first instance of account/storage we are taking old value from changeset,
+    /// new value from plain state and saving old value to local state.
+    /// As second accounter of same account/storage we are again taking old value from changeset,
+    /// but new value is taken from local state and old value is again updated to local state.
+    ///
+    /// Now if TAKE is true we will use local state and update all old values to plain state tables.
+    ///
+    /// After that, iterate over [`tables::BlockBodies`] and pack created changesets in block chunks
+    /// taking care if block has block changesets or not.
     fn get_take_block_execution_result_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
