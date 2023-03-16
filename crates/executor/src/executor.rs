@@ -700,16 +700,13 @@ mod tests {
         // Check changes
         const TX_TRANSITION_ID: u64 = 0;
         const BLOCK_TRANSITION_ID: u64 = 1;
+
+        // Clone and sort to make the test deterministic
+        let mut changes = post_state.changes().to_vec();
+        changes.sort_by_key(|change| (change.transition_id(), change.address()));
         assert_eq!(
-            post_state.changes(),
+            changes,
             &[
-                // Changed account
-                Change::AccountChanged {
-                    id: TX_TRANSITION_ID,
-                    address: account3,
-                    old: account3_old_info,
-                    new: account3_info
-                },
                 // Storage changes on account 1
                 Change::StorageChanged {
                     id: TX_TRANSITION_ID,
@@ -721,6 +718,13 @@ mod tests {
                     id: TX_TRANSITION_ID,
                     address: account2,
                     account: account2_info
+                },
+                // Changed account
+                Change::AccountChanged {
+                    id: TX_TRANSITION_ID,
+                    address: account3,
+                    old: account3_old_info,
+                    new: account3_info
                 },
                 // Block reward
                 Change::AccountChanged {
