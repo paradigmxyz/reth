@@ -211,6 +211,10 @@ pub struct Neighbours {
     pub expire: u64,
 }
 
+/// Passthrough newtype to [`Enr`].
+///
+/// We need to wrap the ENR type because of Rust's orphan rules not allowing
+/// implementing a foreign trait on a foreign type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EnrWrapper<K: EnrKey>(Enr<K>);
 
