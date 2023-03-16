@@ -4,13 +4,11 @@ use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx}
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{
-    providers::ChainState, ExecutorFactory, HeaderProvider, ShareableDatabase,
-    StateProviderFactory, Transaction,
+    providers::ChainState, ExecutorFactory, HeaderProvider, StateProviderFactory, Transaction,
 };
 use std::{
     collections::{BTreeMap, HashMap},
     ops::DerefMut,
-    sync::Arc,
 };
 
 pub mod block_indices;
@@ -577,7 +575,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let mut tx = Transaction::new(&self.externals.db)?;
 
         // read block and execution result from database. and remove traces of block from tables.
-        let blocks_and_execution = tx
+        let _blocks_and_execution = tx
             .take_block_and_execution_range(
                 self.externals.chain_spec.as_ref(),
                 (revert_until + 1)..,

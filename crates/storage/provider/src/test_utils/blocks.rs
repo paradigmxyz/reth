@@ -3,8 +3,8 @@
 use crate::{post_state::PostState, Transaction};
 use reth_db::{database::Database, models::StoredBlockBody, tables};
 use reth_primitives::{
-    hex_literal::hex, proofs::EMPTY_ROOT, Account, Header, Receipt, SealedBlock,
-    SealedBlockWithSenders, Withdrawal, H160, H256, U256,
+    hex_literal::hex, proofs::EMPTY_ROOT, Account, Header, SealedBlock, SealedBlockWithSenders,
+    Withdrawal, H160, H256, U256,
 };
 use reth_rlp::Decodable;
 use std::collections::BTreeMap;
