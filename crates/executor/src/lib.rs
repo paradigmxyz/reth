@@ -11,8 +11,10 @@ pub mod eth_dao_fork;
 pub mod substate;
 
 /// Execution result types.
-pub use reth_provider::execution_result;
+pub use reth_provider::post_state;
+
 pub mod blockchain_tree;
+
 /// Executor
 pub mod executor;
 

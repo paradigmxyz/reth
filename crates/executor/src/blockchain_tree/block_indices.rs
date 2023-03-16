@@ -4,11 +4,12 @@ use super::chain::{BlockChainId, Chain, ForkBlock};
 use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
 use std::collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet};
 
-/// Internal indices of the blocks and chains.  This is main connection
-/// between blocks, chains and canonical chain.
+/// Internal indices of the blocks and chains.
 ///
-/// It contains list of canonical block hashes, forks to childs blocks
-/// and block hash to chain id.
+/// This is main connection between blocks, chains and canonical chain.
+///
+/// It contains a list of canonical block hashes, forks to child blocks, and a mapping of block hash
+/// to chain ID.
 #[derive(Debug)]
 pub struct BlockIndices {
     /// Last finalized block.
