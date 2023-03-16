@@ -45,10 +45,10 @@ pub(crate) fn stage_unwind<S: Clone + Stage<Env<WriteMap>>>(
             .unwind(&mut db_tx, unwind)
             .await
             .map_err(|e| {
-                eyre::eyre!(format!(
+                format!(
                     "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
                     tx.path.as_ref().unwrap().display()
-                ))
+                )
             })
             .unwrap();
 
