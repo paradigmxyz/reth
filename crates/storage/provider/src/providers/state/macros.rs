@@ -5,12 +5,12 @@
 ///
 /// Used to implement provider traits.
 macro_rules! delegate_impls_to_as_ref {
-    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident(&self, $($arg:ident: $argty:ty),*) -> $ret:path;)* })* ) => {
+    (for $target:ty => $($trait:ident $(where [$($generics:tt)*])? {  $(fn $func:ident$(<$($generic_arg:ident: $generic_arg_ty:path),*>)?(&self, $($arg:ident: $argty:ty),*) -> $ret:path;)* })* ) => {
 
         $(
           impl<'a, $($($generics)*)?> $trait for $target {
               $(
-                  fn $func(&self, $($arg: $argty),*) -> $ret {
+                  fn $func$(<$($generic_arg: $generic_arg_ty),*>)?(&self, $($arg: $argty),*) -> $ret {
                     self.as_ref().$func($($arg),*)
                   }
               )*
@@ -34,7 +34,8 @@ macro_rules! delegate_provider_impls {
                 fn basic_account(&self, address: reth_primitives::Address) -> reth_interfaces::Result<Option<reth_primitives::Account>>;
             }
             BlockHashProvider $(where [$($generics)*])? {
-                fn block_hash(&self, number: reth_primitives::U256) -> reth_interfaces::Result<Option<reth_primitives::H256>>;
+                fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<reth_primitives::H256>>;
+                fn canonical_hashes_range(&self, start: reth_primitives::BlockNumber, end: reth_primitives::BlockNumber) -> reth_interfaces::Result<Vec<reth_primitives::H256>>;
             }
             StateProvider $(where [$($generics)*])?{
                 fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_interfaces::Result<Option<reth_primitives::StorageValue>>;
