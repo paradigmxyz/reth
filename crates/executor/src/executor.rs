@@ -168,6 +168,9 @@ where
                                 to_reth_acc(&entry.info),
                                 to_reth_acc(&account.info),
                             );
+                        } else if has_state_clear_eip && account.is_empty() {
+                            // The account was touched, but it is empty, so it should be deleted.
+                            post_state.destroy_account(address, to_reth_acc(&account.info));
                         }
 
                         entry.info = account.info.clone();
