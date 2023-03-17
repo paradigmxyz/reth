@@ -200,28 +200,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-stream"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad445822218ce64be7a341abfb0b1ea43b5c23aa83902542a4542e78309d8e5e"
-dependencies = [
- "async-stream-impl",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-stream-impl"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4655ae1a7b0cdf149156f780c5bf3f1352bc53cbd9e0a361a7ef7b22947e965"
-dependencies = [
- "proc-macro2 1.0.52",
- "quote 1.0.23",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5269,15 +5247,11 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
- "reth-interfaces",
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
- "reth-staged-sync",
- "reth-stages",
- "reth-tasks",
  "reth-tracing",
  "secp256k1",
  "serde",
@@ -5286,8 +5260,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "tokio-stream",
- "tokio-test",
  "tracing",
  "walkdir",
 ]
@@ -6590,19 +6562,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util 0.7.7",
-]
-
-[[package]]
-name = "tokio-test"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53474327ae5e166530d17f2d956afcb4f8a004de581b3cae10f12006bc8163e3"
-dependencies = [
- "async-stream",
- "bytes",
- "futures-core",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
