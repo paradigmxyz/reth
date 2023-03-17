@@ -5,7 +5,7 @@ use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
 use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
-use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError, Output};
+use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError};
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -368,13 +368,7 @@ pub enum SignError {
 /// [ExecutionResult::Success].
 pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
     match result {
-        ExecutionResult::Success { output, .. } => {
-            let data = match output {
-                Output::Call(data) => data,
-                Output::Create(data, _) => data,
-            };
-            Ok(data.into())
-        }
+        ExecutionResult::Success { output, .. } => Ok(output.into_data().into()),
         ExecutionResult::Revert { output, .. } => {
             Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
         }
