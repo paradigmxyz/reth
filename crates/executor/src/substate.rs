@@ -36,7 +36,7 @@ impl<'a, SP: StateProvider> BlockHashProvider for PostStateProvider<'a, SP> {
     fn block_hash(&self, block_number: BlockNumber) -> Result<Option<H256>> {
         if let Some(sidechain_block_hash) = self.sidechain_block_hashes.get(&block_number).cloned()
         {
-            return Ok(Some(sidechain_block_hash));
+            return Ok(Some(sidechain_block_hash))
         }
 
         Ok(Some(
@@ -70,13 +70,13 @@ impl<'a, SP: StateProvider> StateProvider for PostStateProvider<'a, SP> {
     ) -> Result<Option<reth_primitives::StorageValue>> {
         if let Some(storage) = self.state.account_storage(&account) {
             if storage.wiped {
-                return Ok(Some(U256::ZERO));
+                return Ok(Some(U256::ZERO))
             }
 
             if let Some(value) =
                 storage.storage.get(&U256::from_be_bytes(storage_key.to_fixed_bytes()))
             {
-                return Ok(Some(*value));
+                return Ok(Some(*value))
             }
         }
 
@@ -85,7 +85,7 @@ impl<'a, SP: StateProvider> StateProvider for PostStateProvider<'a, SP> {
 
     fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
         if let Some(bytecode) = self.state.bytecode(&code_hash).cloned() {
-            return Ok(Some(bytecode));
+            return Ok(Some(bytecode))
         }
 
         self.provider.bytecode_by_hash(code_hash)
