@@ -14,9 +14,6 @@ reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../rlp" }
 reth-network-api = { path = "../../net/network-api"}
 
-# for geth tracing types
-ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
-
 # errors
 thiserror = "1.0"
 

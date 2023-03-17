@@ -5215,7 +5215,6 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
- "ethers-core",
  "jsonrpsee-types",
  "lru 0.9.0",
  "rand 0.8.5",
