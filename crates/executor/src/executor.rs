@@ -573,7 +573,7 @@ mod tests {
             Ok(self
                 .block_hash
                 .iter()
-                .filter_map(|(block, hash)| if range.contains(block) { Some(*hash) } else { None })
+                .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
                 .collect())
         }
     }
