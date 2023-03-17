@@ -337,7 +337,7 @@ impl Command {
             message_rx,
             forkchoice_state_tx,
         );
-        task_executor.spawn(engine_api);
+        task_executor.spawn_critical("engine API task", engine_api);
         message_tx
     }
 
