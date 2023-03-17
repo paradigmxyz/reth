@@ -350,6 +350,9 @@ pub enum SignError {
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
     TypedData,
+    /// No chainid
+    #[error("No chainid")]
+    NoChainId,
 }
 
 /// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.

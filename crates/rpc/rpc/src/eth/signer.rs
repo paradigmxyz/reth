@@ -2,11 +2,24 @@
 
 use crate::eth::error::SignError;
 use ethers_core::{
-    types::transaction::eip712::{Eip712, TypedData},
-    utils::hash_message,
+    types::{
+        transaction::{
+            eip2718::TypedTransaction,
+            eip2930::Eip2930TransactionRequest,
+            eip712::{Eip712, TypedData},
+            request::TransactionRequest,
+            rlp_opt,
+        },
+        Bytes, NameOrAddress,
+    },
+    utils::{hash_message, keccak256},
 };
-use reth_primitives::{sign_message, Address, Signature, TransactionSigned, H256};
+use reth_primitives::{
+    sign_message, Address, Signature, Transaction as PrimitiveTransaction, TransactionKind,
+    TransactionSigned, TxEip1559, TxEip2930, TxLegacy, H160, H256, U256, U64,
+};
 use reth_rpc_types::TypedTransactionRequest;
+use rlp::RlpStream;
 use secp256k1::SecretKey;
 use std::collections::HashMap;
 
@@ -41,6 +54,7 @@ pub(crate) trait EthSigner: Send + Sync {
 pub(crate) struct DevSigner {
     addresses: Vec<Address>,
     accounts: HashMap<Address, SecretKey>,
+    chain_ids: HashMap<Address, u64>,
 }
 
 impl DevSigner {
@@ -51,6 +65,9 @@ impl DevSigner {
         let secret = self.get_key(account)?;
         let signature = sign_message(H256::from_slice(secret.as_ref()), hash);
         signature.map_err(|_| SignError::CouldNotSign)
+    }
+    fn get_chain_id(&self, account: Address) -> Result<u64> {
+        self.chain_ids.get(&account).cloned().ok_or(SignError::NoChainId)
     }
 }
 #[async_trait::async_trait]
@@ -75,6 +92,57 @@ impl EthSigner for DevSigner {
         _request: TypedTransactionRequest,
         _address: &Address,
     ) -> Result<TransactionSigned> {
+        // convert to primitive transaction
+        let mut _transaction = match _request {
+            TypedTransactionRequest::Legacy(tx) => PrimitiveTransaction::Legacy(TxLegacy {
+                chain_id: tx.chain_id,
+                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
+                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
+                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
+                to: tx.kind.into(),
+                value: u128::from_be_bytes(tx.value.to_be_bytes()),
+                input: tx.input,
+            }),
+            TypedTransactionRequest::EIP2930(tx) => PrimitiveTransaction::Eip2930(TxEip2930 {
+                chain_id: tx.chain_id,
+                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
+                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
+                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
+                to: tx.kind.into(),
+                value: u128::from_be_bytes(tx.value.to_be_bytes()),
+                input: tx.input,
+                access_list: tx.access_list,
+            }),
+            TypedTransactionRequest::EIP1559(tx) => PrimitiveTransaction::Eip1559(TxEip1559 {
+                chain_id: tx.chain_id,
+                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
+                max_fee_per_gas: u128::from_be_bytes(tx.max_fee_per_gas.to_be_bytes()),
+                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
+                to: tx.kind.into(),
+                value: u128::from_be_bytes(tx.value.to_be_bytes()),
+                input: tx.input,
+                access_list: tx.access_list,
+                max_priority_fee_per_gas: u128::from_be_bytes(
+                    tx.max_priority_fee_per_gas.to_be_bytes(),
+                ),
+            }),
+        };
+
+        // set chain id if not set
+        if _transaction.chain_id().is_none() {
+            _transaction.set_chain_id(self.get_chain_id(*_address)?);
+        }
+
+        // // Hashes the transaction's data with the provided chain id
+        // let sighash = match _transaction.chain_id() {
+        //     Some(_) => keccak256(self.rlp().as_ref()).into(),
+        //     None => keccak256(self.rlp_unsigned().as_ref()).into(),
+        // };
+        // let sig = self.sign_hash(sighash, *_address)?;
+
+        //  let tx_hash = keccak256(sig);
+
+        // Ok(TransactionSigned { hash: tx_hash, signature: sig, transaction: _transaction })
         unimplemented!()
     }
 
@@ -94,7 +162,8 @@ mod test {
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
                 .unwrap();
         let accounts = HashMap::from([(Address::default(), secret)]);
-        DevSigner { addresses, accounts }
+        let chain_ids = HashMap::from([(Address::default(), 1)]);
+        DevSigner { addresses, accounts, chain_ids }
     }
 
     #[tokio::test]

@@ -4,6 +4,7 @@ use crate::{
     EthApi,
 };
 use async_trait::async_trait;
+
 use reth_primitives::{
     BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     Transaction as PrimitiveTransaction, TransactionSigned, TransactionSignedEcRecovered,
@@ -144,43 +145,7 @@ where
     Network: 'static,
 {
     pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
-        // Conversion from TransactionRequest -> TypedTransactionRequest -> primitive::Transaction
-        let request = match _request.into_typed_request() {
-            Some(TypedTransactionRequest::Legacy(tx)) => PrimitiveTransaction::Legacy(TxLegacy {
-                chain_id: tx.chain_id,
-                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
-                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
-                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
-                to: tx.kind.into(),
-                value: u128::from_be_bytes(tx.value.to_be_bytes()),
-                input: tx.input,
-            }),
-            Some(TypedTransactionRequest::EIP2930(tx)) => PrimitiveTransaction::Eip2930(TxEip2930 {
-                chain_id: tx.chain_id,
-                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
-                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
-                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
-                to: tx.kind.into(),
-                value: u128::from_be_bytes(tx.value.to_be_bytes()),
-                input: tx.input,
-                access_list: tx.access_list,
-            }),
-            Some(TypedTransactionRequest::EIP1559(tx)) => PrimitiveTransaction::Eip1559(TxEip1559 {
-                chain_id: tx.chain_id,
-                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
-                max_fee_per_gas: u128::from_be_bytes(tx.max_fee_per_gas.to_be_bytes()),
-                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
-                to: tx.kind.into(),
-                value: u128::from_be_bytes(tx.value.to_be_bytes()),
-                input: tx.input,
-                access_list: tx.access_list,
-                max_priority_fee_per_gas: u128::from_be_bytes(
-                    tx.max_priority_fee_per_gas.to_be_bytes(),
-                ),
-            }),
-           None => return Err(EthApiError::InvalidTransactionSignature.into()),
-        };
-
+        // Sign the transaction
         // Submit to the pool
 
         // let hash = self.pool().add_transaction(TransactionOrigin::Local, transaction).await?;
