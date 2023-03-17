@@ -516,8 +516,8 @@ pub fn verify_receipt<'a>(
 mod tests {
     use super::*;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, Bytecode, Bytes, ChainSpecBuilder,
-        ForkCondition, StorageKey, H256, MAINNET, U256,
+        hex_literal::hex, keccak256, Account, Address, BlockNumber, Bytecode, Bytes,
+        ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
         post_state::{Change, Storage},
@@ -531,7 +531,7 @@ mod tests {
     struct StateProviderTest {
         accounts: HashMap<Address, (HashMap<StorageKey, U256>, Account)>,
         contracts: HashMap<H256, Bytecode>,
-        block_hash: HashMap<U256, H256>,
+        block_hash: HashMap<u64, H256>,
     }
 
     impl StateProviderTest {
@@ -560,8 +560,21 @@ mod tests {
     }
 
     impl BlockHashProvider for StateProviderTest {
-        fn block_hash(&self, number: U256) -> reth_interfaces::Result<Option<H256>> {
+        fn block_hash(&self, number: u64) -> reth_interfaces::Result<Option<H256>> {
             Ok(self.block_hash.get(&number).cloned())
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            start: BlockNumber,
+            end: BlockNumber,
+        ) -> reth_interfaces::Result<Vec<H256>> {
+            let range = start..end;
+            Ok(self
+                .block_hash
+                .iter()
+                .filter_map(|(block, hash)| if range.contains(block) { Some(*hash) } else { None })
+                .collect())
         }
     }
 

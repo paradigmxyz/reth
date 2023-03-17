@@ -94,10 +94,20 @@ impl<DB: Database> HeaderProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> BlockHashProvider for ShareableDatabase<DB> {
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        // TODO: This unwrap is potentially unsafe
+    fn block_hash(&self, number: u64) -> Result<Option<H256>> {
+        self.db.view(|tx| tx.get::<tables::CanonicalHeaders>(number))?.map_err(Into::into)
+    }
+
+    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>> {
+        let range = start..end;
         self.db
-            .view(|tx| tx.get::<tables::CanonicalHeaders>(number.try_into().unwrap()))?
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::CanonicalHeaders>()?;
+                cursor
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
             .map_err(Into::into)
     }
 }
@@ -109,7 +119,7 @@ impl<DB: Database> BlockIdProvider for ShareableDatabase<DB> {
             .view(|tx| tx.get::<tables::SyncStage>("Finish".to_string()))?
             .map_err(Into::<reth_interfaces::db::Error>::into)?
             .unwrap_or_default();
-        let best_hash = self.block_hash(U256::from(best_number))?.unwrap_or_default();
+        let best_hash = self.block_hash(best_number)?.unwrap_or_default();
         Ok(ChainInfo { best_hash, best_number, last_finalized: None, safe_finalized: None })
     }
 

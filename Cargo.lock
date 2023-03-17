@@ -5109,7 +5109,6 @@ dependencies = [
  "auto_impl",
  "bytes",
  "criterion",
- "enr 0.8.0",
  "ethereum-types",
  "ethnum",
  "hex-literal",

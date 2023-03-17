@@ -462,7 +462,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         }
 
         // Attempt to look up terminal block hash
-        let local_hash = self.client.block_hash(U256::from(terminal_block_number.as_u64()))?;
+        let local_hash = self.client.block_hash(terminal_block_number.as_u64())?;
 
         // Transition configuration exchange is successful if block hashes match
         match local_hash {

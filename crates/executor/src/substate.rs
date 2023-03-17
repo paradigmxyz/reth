@@ -30,10 +30,10 @@ impl<'a, SP: StateProvider> PostStateProvider<'a, SP> {
     }
 }
 
+/* Implement StateProvider traits */
+
 impl<'a, SP: StateProvider> BlockHashProvider for PostStateProvider<'a, SP> {
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        // All block numbers fit inside u64 and revm checks if it is last 256 block numbers.
-        let block_number = number.as_limbs()[0];
+    fn block_hash(&self, block_number: BlockNumber) -> Result<Option<H256>> {
         if let Some(sidechain_block_hash) = self.sidechain_block_hashes.get(&block_number).cloned()
         {
             return Ok(Some(sidechain_block_hash))
@@ -45,6 +45,10 @@ impl<'a, SP: StateProvider> BlockHashProvider for PostStateProvider<'a, SP> {
                 .cloned()
                 .ok_or(ProviderError::BlockchainTreeBlockHash { block_number })?,
         ))
+    }
+
+    fn canonical_hashes_range(&self, _start: BlockNumber, _end: BlockNumber) -> Result<Vec<H256>> {
+        unimplemented!()
     }
 }
 
