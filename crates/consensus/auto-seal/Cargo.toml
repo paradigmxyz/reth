@@ -1,0 +1,25 @@
+[package]
+name = "reth-auto-seal-consensus"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "A consensus impl for local testing purposes"
+
+[dependencies]
+# reth 
+reth-consensus-common = { path = "../common" }
+reth-primitives = { path = "../../primitives" }
+reth-interfaces = { path = "../../interfaces" }
+
+# async
+futures-util = "0.3"
+tokio = { version = "1", features = ["sync", "time"] }
+tokio-stream = { version = "0.1", feautres = ["tokio-util"] }
+
+# misc
+tracing = "0.1"
+
+[dev-dependencies]
+reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
