@@ -3,6 +3,8 @@
 mod jsonu256;
 pub use jsonu256::*;
 
+pub mod num;
+
 /// serde functions for handling primitive `u64` as [U64](crate::U64)
 pub mod u64_hex {
     use crate::U64;
