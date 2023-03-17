@@ -9,22 +9,22 @@ readme = "README.md"
 [dependencies]
 # reth
 reth-primitives = { path = "../../crates/primitives", features = ["arbitrary"] }
-reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
+reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
 reth-staged-sync = { path = "../../crates/staged-sync" }
 reth-stages = { path = "../../crates/stages"}
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../crates/transaction-pool", features = ["test-utils"] }
-reth-consensus = { path = "../../crates/consensus" }
+reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
 reth-executor = { path = "../../crates/executor" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }
 reth-rpc = { path = "../../crates/rpc/rpc" }
 reth-rlp = { path = "../../crates/rlp" }
-reth-network = {path = "../../crates/net/network", features = ["serde"] }
-reth-network-api = {path = "../../crates/net/network-api" }
-reth-downloaders = {path = "../../crates/net/downloaders", features = ["test-utils"] }
+reth-network = { path = "../../crates/net/network", features = ["serde"] }
+reth-network-api = { path = "../../crates/net/network-api" }
+reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-utils"] }
 reth-tracing = { path = "../../crates/tracing" }
 reth-tasks = { path = "../../crates/tasks" }
 reth-net-nat = { path = "../../crates/net/nat" }

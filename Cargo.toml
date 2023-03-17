@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "bin/reth",
-    "crates/consensus",
+    "crates/consensus/beacon",
+    "crates/consensus/common",
     "crates/executor",
     "crates/interfaces",
     "crates/metrics/metrics-derive",
