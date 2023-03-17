@@ -21,7 +21,6 @@ use std::{
 /// reexports for convenience
 #[doc(hidden)]
 mod __reexport {
-    pub use reth_discv4::bootnodes::*;
     pub use secp256k1::SecretKey;
 }
 pub use __reexport::*;
