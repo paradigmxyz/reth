@@ -1,5 +1,3 @@
-#![warn(missing_docs, unreachable_pub)]
-
 //! Common helpers for staged sync integration testing.
 
 pub mod clique;

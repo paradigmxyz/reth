@@ -7,12 +7,6 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 description = "Puts together all the Reth stages in a unified abstraction"
 
-[package.metadata.cargo-udeps.ignore]
-normal = [
-    # Used for config loading
-    "confy"
-]
-
 [dependencies]
 # reth
 reth-db = {path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
@@ -23,13 +17,10 @@ reth-downloaders = { path = "../../crates/net/downloaders" }
 reth-primitives = { path = "../../crates/primitives" }
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
 reth-net-nat = { path = "../../crates/net/nat" }
-reth-interfaces = { path = "../interfaces", optional = true }
-reth-tasks = { path = "../../crates/tasks" }
 
 # io
 serde = "1.0"
 serde_json = "1.0.91"
-confy = "0.5"
 
 # misc
 walkdir = "2.3.2"
@@ -55,23 +46,18 @@ ethers-signers = { git = "https://github.com/gakonst/ethers-rs", default-feature
 # async / futures
 async-trait = { version = "0.1", optional = true }
 tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"], optional = true }
-tokio-test = { version = "0.4", optional = true }
 
 # misc
-tempfile = { version = "3.3", optional = true }
 hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
 # reth crates
 reth-tracing = { path = "../tracing" }
-reth-stages = { path = "../stages" }
 reth-downloaders = { path = "../net/downloaders" }
-reth-staged-sync = { path = ".", features = ["test-utils"] }
 
 # async/futures
 futures = "0.3"
 tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
-tokio-stream = "0.1"
 
 # crypto
 secp256k1 = { version = "0.26.0", features = [
@@ -80,19 +66,20 @@ secp256k1 = { version = "0.26.0", features = [
     "recovery",
 ] }
 
+confy = "0.5"
+
+tempfile = "3.4"
+
 [features]
 test-utils = [
     "reth-network/test-utils",
-    "reth-interfaces/test-utils",
     "reth-network/test-utils",
     "reth-provider/test-utils",
     "dep:enr",
     "dep:ethers-core",
-    "dep:tempfile",
     "dep:hex",
     "dep:rand",
     "dep:tokio",
-    "dep:tokio-test",
     "dep:ethers-signers",
     "dep:ethers-providers",
     "dep:ethers-middleware",
