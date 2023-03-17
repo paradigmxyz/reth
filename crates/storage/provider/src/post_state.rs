@@ -468,17 +468,21 @@ impl PostState {
             });
 
         // Write account changes
+        tracing::trace!(target: "provider::post_state", len = account_changes.len(), "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         for changeset in account_changes.into_iter() {
             match changeset {
                 Change::AccountDestroyed { id, address, old } |
                 Change::AccountChanged { id, address, old, .. } => {
+                    let destroyed = matches!(changeset, Change::AccountDestroyed { .. });
+                    tracing::trace!(target: "provider::post_state", id, ?address, ?old, destroyed, "Account changed");
                     account_changeset_cursor.append_dup(
                         first_transition_id + id,
                         AccountBeforeTx { address, info: Some(old) },
                     )?;
                 }
                 Change::AccountCreated { id, address, .. } => {
+                    tracing::trace!(target: "provider::post_state", id, ?address, "Account created");
                     account_changeset_cursor.append_dup(
                         first_transition_id + id,
                         AccountBeforeTx { address, info: None },
@@ -489,6 +493,7 @@ impl PostState {
         }
 
         // Write storage changes
+        tracing::trace!(target: "provider::post_state", len = storage_changes.len(), "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
         for changeset in storage_changes.into_iter() {
@@ -497,6 +502,7 @@ impl PostState {
                     let storage_id = TransitionIdAddress((first_transition_id + id, address));
 
                     for (key, (old_value, _)) in changeset {
+                        tracing::trace!(target: "provider::post_state", ?storage_id, ?key, ?old_value, "Storage changed");
                         storage_changeset_cursor.append_dup(
                             storage_id,
                             StorageEntry { key: H256(key.to_be_bytes()), value: old_value },
@@ -507,6 +513,7 @@ impl PostState {
                     let storage_id = TransitionIdAddress((first_transition_id + id, address));
 
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
+                        tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
                         storage_changeset_cursor.append_dup(storage_id, entry)?;
 
                         while let Some(entry) = storages_cursor.next_dup_val()? {
@@ -521,6 +528,7 @@ impl PostState {
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
             if storage.wiped {
+                tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
                 }
@@ -532,6 +540,7 @@ impl PostState {
             }
 
             for (key, value) in storage.storage {
+                tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
                 let key = H256(key.to_be_bytes());
                 if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
                     if entry.key == key {
@@ -546,16 +555,20 @@ impl PostState {
         }
 
         // Write new account state
+        tracing::trace!(target: "provider::post_state", len = self.accounts.len(), "Writing new account state");
         let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
         for (address, account) in self.accounts.into_iter() {
             if let Some(account) = account {
+                tracing::trace!(target: "provider::post_state", ?address, "Updating plain state account");
                 accounts_cursor.upsert(address, account)?;
             } else if accounts_cursor.seek_exact(address)?.is_some() {
+                tracing::trace!(target: "provider::post_state", ?address, "Deleting plain state account");
                 accounts_cursor.delete_current()?;
             }
         }
 
         // Write bytecode
+        tracing::trace!(target: "provider::post_state", len = self.bytecode.len(), "Writing bytecods");
         let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in self.bytecode.into_iter() {
             bytecodes_cursor.upsert(hash, bytecode)?;

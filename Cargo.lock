@@ -5054,6 +5054,7 @@ dependencies = [
  "reth-tracing",
  "revm-primitives",
  "thiserror",
+ "tracing",
  "triehash",
 ]
 
