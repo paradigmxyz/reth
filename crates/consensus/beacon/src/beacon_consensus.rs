@@ -1,9 +1,8 @@
 //! Consensus for ethereum network
-use std::sync::Arc;
-
-use crate::validation;
+use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError, ForkchoiceState};
 use reth_primitives::{ChainSpec, Hardfork, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256};
+use std::sync::Arc;
 use tokio::sync::watch;
 
 use super::BeaconConsensusBuilder;
