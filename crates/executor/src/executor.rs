@@ -373,6 +373,8 @@ where
     /// The changes in [PostState] have a transition ID associated with them: there is one
     /// transition ID for each transaction (with the first executed tx having transition ID 0, and
     /// so on).
+    ///
+    /// The second returned value represents the total gas used by this block of transactions.
     pub fn execute_transactions(
         &mut self,
         block: &Block,
@@ -657,7 +659,11 @@ mod tests {
         let mut executor = Executor::new(chain_spec, db);
         let post_state = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
-        assert_eq!(post_state.transitions_count(), 2, "Should executed one transaction");
+        assert_eq!(
+            post_state.transitions_count(),
+            2,
+            "Should executed two transitions (1 tx and 1 block reward)"
+        );
 
         let block_reward = U256::from(WEI_2ETH + (WEI_2ETH >> 5));
 
