@@ -5105,7 +5105,6 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "revm-primitives",
- "rlp",
  "secp256k1",
  "smol_str",
 ]
