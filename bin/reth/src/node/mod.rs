@@ -551,7 +551,8 @@ async fn run_network_until_shutdown<C>(
         let known_peers = network.all_peers().collect::<Vec<_>>();
         if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
             trace!(target : "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            match std::fs::write(&file_path, known_peers) {
+            let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
+            match parent_dir.and_then(|_| std::fs::write(&file_path, known_peers)) {
                 Ok(_) => {
                     info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
                 }
