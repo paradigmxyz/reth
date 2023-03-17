@@ -3,6 +3,7 @@
 use reth_primitives::{InvalidTransactionError, U256};
 use revm::primitives::EVMError;
 
+/// Result alias
 pub type RevmResult<T> = Result<T, RevmError>;
 
 /// List of JSON-RPC error codes
