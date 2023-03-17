@@ -7,7 +7,7 @@ use crate::{
     prometheus_exporter,
 };
 use clap::{Parser, ValueEnum};
-use reth_consensus::beacon::BeaconConsensus;
+use reth_beacon_consensus::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
 use reth_provider::{ShareableDatabase, Transaction};

@@ -13,7 +13,7 @@ use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
-use reth_consensus::beacon::BeaconConsensus;
+use reth_beacon_consensus::BeaconConsensus;
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},

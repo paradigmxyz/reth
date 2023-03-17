@@ -4569,7 +4569,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "proptest",
- "reth-consensus",
+ "reth-beacon-consensus",
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
@@ -4599,6 +4599,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-beacon-consensus"
+version = "0.1.0"
+dependencies = [
+ "reth-consensus-common",
+ "reth-interfaces",
+ "reth-primitives",
+ "tokio",
+]
+
+[[package]]
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
@@ -4614,7 +4624,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-consensus"
+name = "reth-consensus-common"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
@@ -4622,7 +4632,6 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "tokio",
 ]
 
 [[package]]

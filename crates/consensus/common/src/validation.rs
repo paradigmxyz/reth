@@ -1,16 +1,14 @@
 //! Collection of methods for block validation.
 use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
 use reth_primitives::{
-    BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock, SealedHeader,
-    Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
+    constants, BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock,
+    SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
 use reth_provider::{AccountProvider, HeaderProvider, WithdrawalsProvider};
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::SystemTime,
 };
-
-use reth_primitives::constants;
 
 /// Validate header standalone
 pub fn validate_header_standalone(

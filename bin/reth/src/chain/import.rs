@@ -5,7 +5,7 @@ use crate::{
 use clap::{crate_version, Parser};
 use eyre::Context;
 use futures::{Stream, StreamExt};
-use reth_consensus::beacon::BeaconConsensus;
+use reth_beacon_consensus::BeaconConsensus;
 use reth_db::mdbx::{Env, WriteMap};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
