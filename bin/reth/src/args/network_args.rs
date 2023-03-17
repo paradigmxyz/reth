@@ -2,10 +2,9 @@
 
 use crate::dirs::{KnownPeersPath, PlatformPath};
 use clap::Args;
-use reth_discv4::bootnodes::{goerli_nodes, mainnet_nodes, sepolia_nodes};
 use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
-use reth_primitives::{rpc::Chain, ChainSpec, NodeRecord};
+use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
 use std::{path::PathBuf, sync::Arc};
 
@@ -55,12 +54,7 @@ impl NetworkArgs {
         config: &Config,
         chain_spec: Arc<ChainSpec>,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = match chain_spec.chain.try_into() {
-            Ok(Chain::Mainnet) => mainnet_nodes(),
-            Ok(Chain::Goerli) => goerli_nodes(),
-            Ok(Chain::Sepolia) => sepolia_nodes(),
-            _ => mainnet_nodes(),
-        };
+        let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or(mainnet_nodes);
 
         let network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file())

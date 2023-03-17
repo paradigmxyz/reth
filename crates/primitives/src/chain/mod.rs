@@ -1,4 +1,7 @@
-use crate::U256;
+use crate::{
+    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
+    NodeRecord, U256,
+};
 use ethers_core::types::U64;
 use reth_codecs::add_arbitrary_tests;
 use reth_rlp::{Decodable, Encodable};
@@ -71,6 +74,17 @@ impl Chain {
             return Some(format!("{DNS_PREFIX}all.{}.ethdisco.net", named.as_ref().to_lowercase()))
         }
         None
+    }
+
+    /// Returns bootnodes for the given chain.
+    pub fn bootnodes(self) -> Option<Vec<NodeRecord>> {
+        use ethers_core::types::Chain::*;
+        match self.try_into().ok()? {
+            Mainnet => Some(mainnet_nodes()),
+            Goerli => Some(goerli_nodes()),
+            Sepolia => Some(sepolia_nodes()),
+            _ => None,
+        }
     }
 }
 
