@@ -57,7 +57,10 @@ pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use log::Log;
-pub use net::NodeRecord;
+pub use net::{
+    goerli_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES, MAINNET_BOOTNODES,
+    SEPOLIA_BOOTNODES,
+};
 pub use peer::{PeerId, WithPeerId};
 pub use receipt::Receipt;
 pub use revm_primitives::JumpMap;

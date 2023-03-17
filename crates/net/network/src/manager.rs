@@ -240,7 +240,7 @@ where
     /// ```
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
-    /// use reth_discv4::bootnodes::mainnet_nodes;
+    /// use reth_primitives::mainnet_nodes;
     /// use reth_network::config::rng_secret_key;
     /// use reth_network::{NetworkConfig, NetworkManager};
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {

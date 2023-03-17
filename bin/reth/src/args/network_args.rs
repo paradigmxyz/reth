@@ -2,10 +2,9 @@
 
 use crate::dirs::{KnownPeersPath, PlatformPath};
 use clap::Args;
-use reth_discv4::bootnodes::mainnet_nodes;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
-use reth_primitives::{ChainSpec, NodeRecord};
+use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
 use std::{path::PathBuf, sync::Arc};
 
@@ -55,9 +54,11 @@ impl NetworkArgs {
         config: &Config,
         chain_spec: Arc<ChainSpec>,
     ) -> NetworkConfigBuilder {
+        let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
+
         let network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file())
-            .boot_nodes(self.bootnodes.clone().unwrap_or_else(mainnet_nodes))
+            .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec);
 
         self.discovery.apply_to_builder(network_config_builder)
