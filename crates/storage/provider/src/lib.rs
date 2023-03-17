@@ -27,7 +27,7 @@ pub use providers::{
 pub mod trie;
 
 /// Execution result
-pub mod execution_result;
+pub mod post_state;
 
 /// Helper types for interacting with the database
 mod transaction;

@@ -2,10 +2,10 @@
 
 use crate::result::{internal_rpc_err, rpc_err};
 use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
-use reth_primitives::{constants::SELECTOR_LEN, Address, U128, U256};
+use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
-use revm::primitives::{EVMError, Halt, OutOfGasError};
+use revm::primitives::{EVMError, ExecutionResult, Halt, OutOfGasError, Output};
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -31,15 +31,15 @@ pub enum EthApiError {
     #[error("Prevrandao not in th EVM's environment after merge")]
     PrevrandaoNotSet,
     #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} and maxFeePerGas {max_fee_per_gas} set")]
-    ConflictingRequestGasPrice { gas_price: U128, max_fee_per_gas: U128 },
+    ConflictingRequestGasPrice { gas_price: U256, max_fee_per_gas: U256 },
     #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} maxFeePerGas {max_fee_per_gas} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
     ConflictingRequestGasPriceAndTipSet {
-        gas_price: U128,
-        max_fee_per_gas: U128,
-        max_priority_fee_per_gas: U128,
+        gas_price: U256,
+        max_fee_per_gas: U256,
+        max_priority_fee_per_gas: U256,
     },
     #[error("Conflicting fee values in request. Legacy gasPrice {gas_price} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
-    RequestLegacyGasPriceAndTipSet { gas_price: U128, max_priority_fee_per_gas: U128 },
+    RequestLegacyGasPriceAndTipSet { gas_price: U256, max_priority_fee_per_gas: U256 },
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
     /// Thrown when constructing an RPC block from a primitive block data failed.
@@ -191,8 +191,20 @@ impl InvalidTransactionError {
         }
     }
 
+    /// Converts the halt error
+    ///
+    /// Takes the configured gas limit of the transaction which is attached to the error
+    pub(crate) fn halt(reason: Halt, gas_limit: u64) -> Self {
+        match reason {
+            Halt::OutOfGas(err) => InvalidTransactionError::out_of_gas(err, gas_limit),
+            Halt::NonceOverflow => InvalidTransactionError::NonceMaxValue,
+            err => InvalidTransactionError::EvmHalt(err),
+        }
+    }
+
     /// Converts the out of gas error
-    pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: U256) -> Self {
+    pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
+        let gas_limit = U256::from(gas_limit);
         match reason {
             OutOfGasError::BasicOutOfGas => InvalidTransactionError::BasicOutOfGas(gas_limit),
             OutOfGasError::Memory => InvalidTransactionError::MemoryOutOfGas(gas_limit),
@@ -350,6 +362,26 @@ pub enum SignError {
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
     TypedData,
+}
+
+/// Converts the evm [ExecutionResult] into a result where `Ok` variant is the output bytes if it is
+/// [ExecutionResult::Success].
+pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
+    match result {
+        ExecutionResult::Success { output, .. } => {
+            let data = match output {
+                Output::Call(data) => data,
+                Output::Create(data, _) => data,
+            };
+            Ok(data.into())
+        }
+        ExecutionResult::Revert { output, .. } => {
+            Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
+        }
+        ExecutionResult::Halt { reason, gas_used } => {
+            Err(InvalidTransactionError::halt(reason, gas_used).into())
+        }
+    }
 }
 
 /// Returns the revert reason from the `revm::TransactOut` data, if it's an abi encoded String.

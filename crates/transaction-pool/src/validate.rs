@@ -7,12 +7,12 @@ use crate::{
     MAX_INIT_CODE_SIZE, TX_MAX_SIZE,
 };
 use reth_primitives::{
-    Address, IntoRecoveredTransaction, InvalidTransactionError, TransactionKind,
+    Address, ChainSpec, IntoRecoveredTransaction, InvalidTransactionError, TransactionKind,
     TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID, U256,
 };
 use reth_provider::AccountProvider;
-use std::{fmt, time::Instant};
+use std::{fmt, sync::Arc, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -85,8 +85,8 @@ pub trait TransactionValidator: Send + Sync {
 /// A [TransactionValidator] implementation that validates ethereum transaction.
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidator<Client> {
-    /// Chain id
-    chain_id: u64,
+    /// Spec of the chain
+    chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
     client: Client,
     /// Fork indicator whether we are in the Shanghai stage.
@@ -97,8 +97,32 @@ pub struct EthTransactionValidator<Client> {
     eip1559: bool,
     /// The current max gas limit
     current_max_gas_limit: u64,
-    /// gasprice
-    gas_price: Option<u128>,
+    /// Current base fee.
+    base_fee: Option<u128>,
+}
+
+// === impl EthTransactionValidator ===
+
+impl<Client> EthTransactionValidator<Client> {
+    /// Creates a new instance for the given [ChainSpec]
+    pub fn new(client: Client, chain_spec: Arc<ChainSpec>) -> Self {
+        // TODO(mattsse): improve these settings by checking against hardfork
+        // See [reth_consensus::validation::validate_transaction_regarding_header]
+        Self {
+            chain_spec,
+            client,
+            shanghai: true,
+            eip2718: true,
+            eip1559: true,
+            current_max_gas_limit: 30_000_000,
+            base_fee: None,
+        }
+    }
+
+    /// Returns the configured chain id
+    pub fn chain_id(&self) -> u64 {
+        self.chain_spec.chain().id()
+    }
 }
 
 #[async_trait::async_trait]
@@ -183,7 +207,7 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
         }
 
         // Drop non-local transactions under our own minimal accepted gas price or tip
-        if !origin.is_local() && transaction.max_fee_per_gas() < self.gas_price {
+        if !origin.is_local() && transaction.max_fee_per_gas() < self.base_fee {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::MaxFeeLessThenBaseFee.into(),
@@ -191,7 +215,7 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
         }
 
         // Checks for chainid
-        if transaction.chain_id() != Some(self.chain_id) {
+        if transaction.chain_id() != Some(self.chain_id()) {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::ChainIdMismatch.into(),

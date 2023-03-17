@@ -5,15 +5,24 @@ use reth_primitives::ChainSpec;
 use reth_provider::ShareableDatabase;
 use std::sync::Arc;
 
-/// Container for external abstractions.
+/// A container for external components.
+///
+/// This is a simple container for external components used throughout the blockchain tree
+/// implementation:
+///
+/// - A handle to the database
+/// - A handle to the consensus engine
+/// - The executor factory to exexcute blocks with
+/// - The chain spec
+#[derive(Debug)]
 pub struct TreeExternals<DB, C, EF> {
-    /// Save sidechain, do reorgs and push new block to canonical chain that is inside db.
+    /// The database, used to commit the canonical chain, or unwind it.
     pub db: DB,
-    /// Consensus checks
+    /// The consensus engine.
     pub consensus: C,
-    /// Create executor to execute blocks.
+    /// The executor factory to execute blocks with.
     pub executor_factory: EF,
-    /// Chain spec
+    /// The chain spec.
     pub chain_spec: Arc<ChainSpec>,
 }
 

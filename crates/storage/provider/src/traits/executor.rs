@@ -1,6 +1,6 @@
 //! Executor Factory
 
-use crate::{execution_result::ExecutionResult, StateProvider};
+use crate::{post_state::PostState, StateProvider};
 use reth_interfaces::executor::Error;
 use reth_primitives::{Address, Block, ChainSpec, U256};
 
@@ -33,7 +33,7 @@ pub trait BlockExecutor<SP: StateProvider> {
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<ExecutionResult, Error>;
+    ) -> Result<PostState, Error>;
 
     /// Executes the block and checks receipts
     fn execute_and_verify_receipt(
@@ -41,5 +41,5 @@ pub trait BlockExecutor<SP: StateProvider> {
         block: &Block,
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
-    ) -> Result<ExecutionResult, Error>;
+    ) -> Result<PostState, Error>;
 }

@@ -83,16 +83,16 @@ impl TransactionKind {
 }
 
 impl Encodable for TransactionKind {
-    fn length(&self) -> usize {
-        match self {
-            TransactionKind::Call(to) => to.length(),
-            TransactionKind::Create => ([]).length(),
-        }
-    }
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             TransactionKind::Call(to) => to.encode(out),
             TransactionKind::Create => ([]).encode(out),
+        }
+    }
+    fn length(&self) -> usize {
+        match self {
+            TransactionKind::Call(to) => to.length(),
+            TransactionKind::Create => ([]).length(),
         }
     }
 }

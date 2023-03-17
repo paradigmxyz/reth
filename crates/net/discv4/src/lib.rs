@@ -30,7 +30,7 @@ use discv5::{
     ConnectionDirection, ConnectionState,
 };
 use enr::{Enr, EnrBuilder};
-use proto::{EnrRequest, EnrResponse};
+use proto::{EnrRequest, EnrResponse, EnrWrapper};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     ForkId, PeerId, H256,
@@ -1125,7 +1125,7 @@ impl Discv4Service {
             self.send_packet(
                 Message::EnrResponse(EnrResponse {
                     request_hash,
-                    enr: self.local_eip_868_enr.clone(),
+                    enr: EnrWrapper::new(self.local_eip_868_enr.clone()),
                 }),
                 remote_addr,
             );
