@@ -55,6 +55,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<ExecOutput, StageError> {
         let ((start_block, end_block), capped) =
             exec_or_return!(input, self.commit_threshold, "sync::stages::sender_recovery");
+        let done = !capped;
 
         // Look up the start index for the transaction range
         let start_tx_index = tx.get_block_body(start_block)?.start_tx_id;
@@ -65,7 +66,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // No transactions to walk over
         if start_tx_index > end_tx_index {
             info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Target transaction already reached");
-            return Ok(ExecOutput { stage_progress: end_block, done: true })
+            return Ok(ExecOutput { stage_progress: end_block, done })
         }
 
         // Acquire the cursor for inserting elements
@@ -107,7 +108,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             senders_cursor.append(id, sender)?;
         }
 
-        let done = !capped;
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done })
     }
