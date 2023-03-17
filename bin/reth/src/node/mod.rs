@@ -37,7 +37,7 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -414,16 +414,16 @@ impl Command {
         fetch_client: FetchClient,
         tip: BlockHashOrNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error> {
-        let tip_num = match tip {
-            BlockHashOrNumber::Hash(hash) => {
-                info!(target: "reth::cli", ?hash, "Fetching tip block from the network.");
-                db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??.unwrap()
-            }
-            BlockHashOrNumber::Number(number) => number,
-        };
+        let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
+            let number = match tip {
+                BlockHashOrNumber::Hash(hash) => tx.get::<tables::HeaderNumbers>(hash)?,
+                BlockHashOrNumber::Number(number) => Some(number),
+            };
+            Ok(number.map(|number| tx.get::<tables::Headers>(number)).transpose()?.flatten())
+        })??;
 
         // try to look up the header in the database
-        if let Some(header) = db.view(|tx| tx.get::<tables::Headers>(tip_num))?? {
+        if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
             return Ok(header.seal_slow())
         }
