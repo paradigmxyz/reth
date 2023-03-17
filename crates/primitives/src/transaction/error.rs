@@ -44,4 +44,48 @@ pub enum InvalidTransactionError {
     /// Thrown if the sender of a transaction is a contract.
     #[error("Transaction signer has bytecode set.")]
     SignerAccountHasBytecode,
+
+    #[error("MaxInitCodeSizeExceeded.")]
+    MaxInitCodeSizeExceeded,
+
+    #[error("nonce too low")]
+    NonceTooLow,
+
+    #[error("Nonce too high")]
+    NonceTooHigh,
+}
+
+impl From<revm::primitives::InvalidTransaction> for InvalidTransactionError {
+    fn from(err: revm::primitives::InvalidTransaction) -> Self {
+        use revm::primitives::InvalidTransaction;
+        match err {
+            InvalidTransaction::InvalidChainId => InvalidTransactionError::ChainIdMismatch,
+            InvalidTransaction::GasMaxFeeGreaterThanPriorityFee => {
+                InvalidTransactionError::TipAboveFeeCap
+            }
+            InvalidTransaction::GasPriceLessThanBasefee => InvalidTransactionError::FeeCapTooLow,
+            InvalidTransaction::CallerGasLimitMoreThanBlock => InvalidTransactionError::GasTooHigh,
+            InvalidTransaction::CallGasCostMoreThanGasLimit => InvalidTransactionError::GasTooHigh,
+            InvalidTransaction::RejectCallerWithCode => {
+                InvalidTransactionError::SignerAccountHasBytecode
+            }
+            InvalidTransaction::LackOfFundForGasLimit { .. } => {
+                InvalidTransactionError::InsufficientFunds {
+                    max_fee: 0,
+                    available_funds: U256::from(0),
+                }
+            }
+            InvalidTransaction::OverflowPaymentInTransaction => {
+                InvalidTransactionError::GasUintOverflow
+            }
+            InvalidTransaction::NonceOverflowInTransaction => {
+                InvalidTransactionError::NonceNotConsistent
+            }
+            InvalidTransaction::CreateInitcodeSizeLimit => {
+                InvalidTransactionError::MaxInitCodeSizeExceeded
+            }
+            InvalidTransaction::NonceTooHigh { .. } => InvalidTransactionError::NonceTooHigh,
+            InvalidTransaction::NonceTooLow { .. } => InvalidTransactionError::NonceTooLow,
+        }
+    }
 }

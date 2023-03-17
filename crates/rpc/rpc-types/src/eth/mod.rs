@@ -18,7 +18,9 @@ mod work;
 
 pub use account::*;
 pub use block::*;
-pub use call::CallRequest;
+pub use call::{
+    build_call_evm_env, create_txn_env, get_precompiles, inspect, transact, CallRequest,
+};
 pub use fee::{FeeHistory, FeeHistoryCache, FeeHistoryCacheItem};
 pub use filter::*;
 pub use index::Index;

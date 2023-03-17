@@ -94,6 +94,40 @@ where
     }
 }
 
+impl From<reth_rpc_types::error::RevmError> for EthApiError {
+    fn from(value: reth_rpc_types::error::RevmError) -> Self {
+        use reth_rpc_types::error::RevmError;
+        match value {
+            RevmError::InvalidTransaction(err) => InvalidTransactionError::from(err).into(),
+            RevmError::PrevrandaoNotSet => EthApiError::PrevrandaoNotSet,
+            RevmError::EmptyRawTransactionData => EthApiError::EmptyRawTransactionData,
+            RevmError::FailedToDecodeSignedTransaction => {
+                EthApiError::FailedToDecodeSignedTransaction
+            }
+            RevmError::InvalidTransactionSignature => EthApiError::InvalidTransactionSignature,
+            RevmError::PoolError => EthApiError::PoolError(RpcPoolError::AlreadyKnown),
+            RevmError::UnknownBlockNumber => EthApiError::UnknownBlockNumber,
+            RevmError::InvalidBlockRange => EthApiError::InvalidBlockRange,
+            RevmError::ConflictingRequestGasPrice { gas_price, max_fee_per_gas } => {
+                EthApiError::ConflictingRequestGasPrice { gas_price, max_fee_per_gas }
+            }
+            RevmError::ConflictingRequestGasPriceAndTipSet {
+                gas_price,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+            } => EthApiError::ConflictingRequestGasPriceAndTipSet {
+                gas_price,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+            },
+            RevmError::RequestLegacyGasPriceAndTipSet { gas_price, max_priority_fee_per_gas } => {
+                EthApiError::RequestLegacyGasPriceAndTipSet { gas_price, max_priority_fee_per_gas }
+            }
+            RevmError::Internal => EthApiError::Internal(RevmError::Internal.into()),
+        }
+    }
+}
+
 /// An error due to invalid transaction.
 ///
 /// This adds compatibility with geth.
@@ -259,6 +293,69 @@ impl From<revm::primitives::InvalidTransaction> for InvalidTransactionError {
             }
             InvalidTransaction::NonceTooHigh { .. } => InvalidTransactionError::NonceTooHigh,
             InvalidTransaction::NonceTooLow { .. } => InvalidTransactionError::NonceTooLow,
+        }
+    }
+}
+
+impl From<reth_primitives::InvalidTransactionError> for InvalidTransactionError {
+    fn from(err: reth_primitives::InvalidTransactionError) -> Self {
+        match err {
+            reth_primitives::InvalidTransactionError::PriorityFeeMoreThenMaxFee => {
+                InvalidTransactionError::TipAboveFeeCap
+            }
+            reth_primitives::InvalidTransactionError::InsufficientFunds { .. } => {
+                InvalidTransactionError::InsufficientFunds
+            }
+            reth_primitives::InvalidTransactionError::NonceNotConsistent => {
+                InvalidTransactionError::InvalidChainId
+            }
+            reth_primitives::InvalidTransactionError::OldLegacyChainId => {
+                InvalidTransactionError::InvalidChainId
+            }
+
+            reth_primitives::InvalidTransactionError::TipAboveFeeCap => {
+                InvalidTransactionError::TipAboveFeeCap
+            }
+            reth_primitives::InvalidTransactionError::FeeCapTooLow => {
+                InvalidTransactionError::FeeCapTooLow
+            }
+            reth_primitives::InvalidTransactionError::GasTooHigh => {
+                InvalidTransactionError::GasTooHigh
+            }
+            reth_primitives::InvalidTransactionError::GasTooLow => {
+                InvalidTransactionError::GasTooLow
+            }
+            reth_primitives::InvalidTransactionError::SignerAccountHasBytecode => {
+                InvalidTransactionError::SenderNoEOA
+            }
+
+            reth_primitives::InvalidTransactionError::MaxInitCodeSizeExceeded => {
+                InvalidTransactionError::MaxInitCodeSizeExceeded
+            }
+            reth_primitives::InvalidTransactionError::ChainIdMismatch => {
+                InvalidTransactionError::InvalidChainId
+            }
+            reth_primitives::InvalidTransactionError::Eip1559Disabled => {
+                InvalidTransactionError::InvalidChainId
+            }
+            reth_primitives::InvalidTransactionError::Eip2930Disabled => {
+                InvalidTransactionError::InvalidChainId
+            }
+            reth_primitives::InvalidTransactionError::MaxFeeLessThenBaseFee => {
+                InvalidTransactionError::FeeCapTooLow
+            }
+            reth_primitives::InvalidTransactionError::GasUintOverflow => {
+                InvalidTransactionError::GasUintOverflow
+            }
+            reth_primitives::InvalidTransactionError::TxTypeNotSupported => {
+                InvalidTransactionError::TxTypeNotSupported
+            }
+            reth_primitives::InvalidTransactionError::NonceTooHigh => {
+                InvalidTransactionError::NonceTooHigh
+            }
+            reth_primitives::InvalidTransactionError::NonceTooLow => {
+                InvalidTransactionError::NonceTooLow
+            }
         }
     }
 }

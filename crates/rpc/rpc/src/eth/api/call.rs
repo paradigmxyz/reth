@@ -3,7 +3,6 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
-        revm_utils::{build_call_evm_env, get_precompiles, inspect, transact},
         EthTransactions,
     },
     EthApi,
@@ -16,8 +15,9 @@ use reth_revm::{
     database::{State, SubState},
 };
 use reth_rpc_types::{
+    build_call_evm_env, get_precompiles, inspect,
     state::{AccountOverride, StateOverride},
-    CallRequest,
+    transact, CallRequest,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{
@@ -76,7 +76,7 @@ where
             apply_state_overrides(state_overrides, &mut db)?;
         }
 
-        transact(&mut db, env)
+        Ok(transact(&mut db, env)?)
     }
 
     /// Estimate gas needed for execution of the `request` at the [BlockId].

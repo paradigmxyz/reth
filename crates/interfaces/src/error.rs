@@ -19,4 +19,13 @@ pub enum Error {
 
     #[error(transparent)]
     Network(#[from] reth_network_api::NetworkError),
+
+    #[error(transparent)]
+    Revm(#[from] reth_rpc_types::error::RevmError),
+}
+
+impl From<Error> for reth_rpc_types::error::RevmError {
+    fn from(_: Error) -> Self {
+        Self::Internal
+    }
 }

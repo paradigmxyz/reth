@@ -1,5 +1,5 @@
 use crate::{
-    eth::{cache::EthStateCache, error::EthResult, revm_utils::inspect, EthTransactions},
+    eth::{cache::EthStateCache, error::EthResult, EthTransactions},
     result::internal_rpc_err,
 };
 use async_trait::async_trait;
@@ -13,6 +13,7 @@ use reth_revm::{
 };
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
+    inspect,
     trace::{filter::TraceFilter, parity::*},
     CallRequest, Index,
 };

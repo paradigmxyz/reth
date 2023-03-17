@@ -16,6 +16,7 @@ reth-codecs = { version = "0.1.0", path = "../storage/codecs" }
 revm-primitives = { version = "1.0", features = ["serde"] }
 
 # ethereum
+revm = { version = "3.0.0", features = ["optional_block_gas_limit"] }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", default-features = false }
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 crunchy = { version = "0.2.2", default-features = false, features = ["limit_256"] }
