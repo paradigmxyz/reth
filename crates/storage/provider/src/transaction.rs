@@ -510,6 +510,49 @@ where
         Ok(())
     }
 
+    /// Append blocks and insert its post state.
+    /// This will insert block data to all related tables and will update pipeline progress.
+    pub fn append_blocks_with_post_state(
+        &mut self,
+        blocks: Vec<SealedBlockWithSenders>,
+        state: PostState,
+    ) -> Result<(), TransactionError> {
+        if blocks.is_empty() {
+            return Ok(())
+        }
+        let tip = blocks.last().unwrap();
+        let new_tip_number = tip.number;
+        let new_tip_hash = tip.hash;
+        let expected_state_root = tip.state_root;
+
+        let fork_block_number = blocks.first().unwrap().number.saturating_sub(1);
+
+        let first_transition_id = self.get_block_transition(fork_block_number)?;
+
+        let num_transitions = state.transitions_count();
+
+        // Write state and changesets to the database
+        state.write_to_db(self.deref_mut(), first_transition_id)?;
+
+        // Insert the blocks
+        for block in blocks {
+            self.insert_block(block)?;
+        }
+        self.insert_hashes(
+            fork_block_number,
+            first_transition_id,
+            first_transition_id + num_transitions as u64,
+            new_tip_number,
+            new_tip_hash,
+            expected_state_root,
+        )?;
+
+        // Update pipeline progress
+        self.update_pipeline_stages(new_tip_number)?;
+
+        Ok(())
+    }
+
     /// Insert full block and make it canonical.
     ///
     /// This inserts the block and builds history related indexes. Once all blocks in a chain have
@@ -800,6 +843,7 @@ where
     ///     3. Set the local state to the value in the changeset
     ///
     /// If `TAKE` is `true`, the local state will be written to the plain state tables.
+    /// 5. Get all receipts from table
     fn get_take_block_execution_result_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
@@ -1058,6 +1102,7 @@ where
         }
         // get blocks
         let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
+        let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
         // get execution res
         let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
         // combine them
@@ -1069,6 +1114,11 @@ where
         if TAKE {
             // rm block bodies
             self.get_or_take::<tables::BlockBodies, TAKE>(range)?;
+
+            // Update pipeline progress
+            if let Some(fork_number) = unwind_to {
+                self.update_pipeline_stages(fork_number)?;
+            }
         }
 
         // return them

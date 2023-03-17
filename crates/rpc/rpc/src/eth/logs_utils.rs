@@ -1,4 +1,5 @@
-use reth_primitives::{filter::FilteredParams, Receipt, TxHash, U256};
+use reth_primitives::{filter::FilteredParams, TxHash, U256};
+use reth_provider::StoredReceipt;
 use reth_rpc_types::Log;
 use revm::primitives::B256 as H256;
 
@@ -10,7 +11,7 @@ pub(crate) fn matching_block_logs<I>(
     tx_and_receipts: I,
 ) -> Vec<Log>
 where
-    I: IntoIterator<Item = (TxHash, Receipt)>,
+    I: IntoIterator<Item = (TxHash, StoredReceipt)>,
 {
     let mut all_logs = Vec::new();
     append_matching_block_logs(&mut all_logs, filter, block_hash, block_number, tx_and_receipts);
@@ -25,7 +26,7 @@ pub(crate) fn append_matching_block_logs<I>(
     block_number: u64,
     tx_and_receipts: I,
 ) where
-    I: IntoIterator<Item = (TxHash, Receipt)>,
+    I: IntoIterator<Item = (TxHash, StoredReceipt)>,
 {
     let block_number_u256 = U256::from(block_number);
     // tracks the index of a log in the entire block
