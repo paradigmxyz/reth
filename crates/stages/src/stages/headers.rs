@@ -11,7 +11,7 @@ use reth_interfaces::{
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
     provider::ProviderError,
 };
-use reth_primitives::{BlockNumber, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader};
 use reth_provider::Transaction;
 use std::sync::Arc;
 use tracing::*;
@@ -38,6 +38,8 @@ pub struct HeaderStage<D: HeaderDownloader> {
     downloader: D,
     /// Consensus client implementation
     consensus: Arc<dyn Consensus>,
+    /// Whether or not the stage should download continuously, or wait for the fork choice state
+    continuous: bool,
 }
 
 // === impl HeaderStage ===
@@ -48,7 +50,7 @@ where
 {
     /// Create a new header stage
     pub fn new(downloader: D, consensus: Arc<dyn Consensus>) -> Self {
-        Self { downloader, consensus }
+        Self { downloader, consensus, continuous: false }
     }
 
     fn is_stage_done<DB: Database>(
@@ -62,6 +64,12 @@ where
             .ok_or(ProviderError::CanonicalHeader { block_number: stage_progress })?;
         // Check if the next entry is congruent
         Ok(header_cursor.next()?.map(|(next_num, _)| head_num + 1 == next_num).unwrap_or_default())
+    }
+
+    /// Set the stage to download continuously
+    pub fn continuous(mut self) -> Self {
+        self.continuous = true;
+        self
     }
 
     /// Get the head and tip of the range we need to sync
@@ -104,7 +112,14 @@ where
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
             Some(header) if stage_progress + 1 != header.number => SyncTarget::Gap(header),
-            None => SyncTarget::Tip(self.next_fork_choice_state().await.head_block_hash),
+            None => {
+                if self.continuous {
+                    tracing::trace!(target: "sync::stages::headers", ?head_num, "No next header found, using continuous sync strategy");
+                    SyncTarget::TipNum(head_num + 1)
+                } else {
+                    SyncTarget::Tip(self.next_fork_choice_state().await.head_block_hash)
+                }
+            }
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
 
@@ -250,7 +265,10 @@ impl SyncGap {
     /// Returns `true` if the gap from the head to the target was closed
     #[inline]
     pub fn is_closed(&self) -> bool {
-        self.local_head.hash() == self.target.tip()
+        match self.target.tip() {
+            BlockHashOrNumber::Hash(hash) => self.local_head.hash() == hash,
+            BlockHashOrNumber::Number(num) => self.local_head.number == num,
+        }
     }
 }
 
@@ -326,6 +344,7 @@ mod tests {
                 HeaderStage {
                     consensus: self.consensus.clone(),
                     downloader: (*self.downloader_factory)(),
+                    continuous: false,
                 }
             }
         }
@@ -510,7 +529,7 @@ mod tests {
 
         let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
         assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), consensus_tip);
+        assert_eq!(gap.target.tip(), consensus_tip.into());
 
         // Checkpoint and gap
         tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
@@ -520,7 +539,7 @@ mod tests {
 
         let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
         assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), gap_tip.parent_hash);
+        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
 
         // Checkpoint and gap closed
         tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())

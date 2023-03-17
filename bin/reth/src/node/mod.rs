@@ -37,7 +37,7 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -50,7 +50,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
+    stages::{ExecutionStage, HeaderStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -105,6 +105,12 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
+
+    /// Prompt the downloader to download blocks one at a time.
+    ///
+    /// NOTE: This is for testing purposes only.
+    #[arg(long = "debug.continuous", help_heading = "Debug")]
+    continuous: bool,
 
     /// Set the chain tip manually for testing purposes.
     ///
@@ -172,6 +178,10 @@ impl Command {
             )
             .await?;
         info!(target: "reth::cli", "Started RPC server");
+
+        if self.continuous {
+            info!(target: "reth::cli", "Continuous sync mode enabled");
+        }
 
         let engine_api_handle =
             self.init_engine_api(Arc::clone(&db), forkchoice_state_tx, &ctx.task_executor);
@@ -259,6 +269,7 @@ impl Command {
                 network.clone(),
                 consensus,
                 max_block,
+                self.continuous,
             )
             .await?;
 
@@ -391,17 +402,38 @@ impl Command {
         fetch_client: FetchClient,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error> {
-        if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {
-            info!(target: "reth::cli", ?tip, number, "Successfully looked up tip block number in the database");
-            return Ok(number)
+        Ok(self.fetch_tip(db, fetch_client, BlockHashOrNumber::Hash(tip)).await?.number)
+    }
+
+    /// Attempt to look up the block with the given number and return the header.
+    ///
+    /// NOTE: The download is attempted with infinite retries.
+    async fn fetch_tip(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        fetch_client: FetchClient,
+        tip: BlockHashOrNumber,
+    ) -> Result<SealedHeader, reth_interfaces::Error> {
+        let tip_num = match tip {
+            BlockHashOrNumber::Hash(hash) => {
+                info!(target: "reth::cli", ?hash, "Fetching tip block from the network.");
+                db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??.unwrap()
+            }
+            BlockHashOrNumber::Number(number) => number,
+        };
+
+        // try to look up the header in the database
+        if let Some(header) = db.view(|tx| tx.get::<tables::Headers>(tip_num))?? {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.seal_slow())
         }
 
-        info!(target: "reth::cli", ?tip, "Fetching tip block number from the network.");
+        info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
-            match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
+            match get_single_header(fetch_client.clone(), tip).await {
                 Ok(tip_header) => {
-                    info!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip block number");
-                    return Ok(tip_header.number)
+                    info!(target: "reth::cli", ?tip, "Successfully fetched tip");
+                    return Ok(tip_header)
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -429,6 +461,7 @@ impl Command {
             .build(ShareableDatabase::new(db, self.chain.clone()))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn build_pipeline<H, B, U>(
         &self,
         config: &Config,
@@ -437,6 +470,7 @@ impl Command {
         updater: U,
         consensus: &Arc<dyn Consensus>,
         max_block: Option<u64>,
+        continuous: bool,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
     where
         H: HeaderDownloader + 'static,
@@ -453,24 +487,43 @@ impl Command {
         }
 
         let factory = reth_executor::Factory::new(self.chain.clone());
+
+        let default_stages = if continuous {
+            let continuous_headers =
+                HeaderStage::new(header_downloader, consensus.clone()).continuous();
+            let online_builder = OnlineStages::builder_with_headers(
+                continuous_headers,
+                consensus.clone(),
+                body_downloader,
+            );
+            DefaultStages::<H, B, U, reth_executor::Factory>::add_offline_stages(
+                online_builder,
+                updater.clone(),
+                factory.clone(),
+            )
+        } else {
+            DefaultStages::new(
+                consensus.clone(),
+                header_downloader,
+                body_downloader,
+                updater.clone(),
+                factory.clone(),
+            )
+            .builder()
+        };
+
         let pipeline = builder
-            .with_sync_state_updater(updater.clone())
+            .with_sync_state_updater(updater)
             .add_stages(
-                DefaultStages::new(
-                    consensus.clone(),
-                    header_downloader,
-                    body_downloader,
-                    updater,
-                    factory.clone(),
-                )
-                .set(
-                    TotalDifficultyStage::new(consensus.clone())
-                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
-                )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold)),
+                default_stages
+                    .set(
+                        TotalDifficultyStage::new(consensus.clone())
+                            .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
+                    )
+                    .set(SenderRecoveryStage {
+                        commit_threshold: stage_conf.sender_recovery.commit_threshold,
+                    })
+                    .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold)),
             )
             .build();
 

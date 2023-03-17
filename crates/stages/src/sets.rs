@@ -94,6 +94,23 @@ impl<H, B, S, EF> DefaultStages<H, B, S, EF> {
     }
 }
 
+impl<H, B, S, EF> DefaultStages<H, B, S, EF>
+where
+    S: StatusUpdater + 'static,
+    EF: ExecutorFactory,
+{
+    /// Appends the default offline stages and default finish stage to the given builder.
+    pub fn add_offline_stages<DB: Database>(
+        default_offline: StageSetBuilder<DB>,
+        status_updater: S,
+        executor_factory: EF,
+    ) -> StageSetBuilder<DB> {
+        default_offline
+            .add_set(OfflineStages::new(executor_factory))
+            .add_stage(FinishStage::new(status_updater))
+    }
+}
+
 impl<DB, H, B, S, EF> StageSet<DB> for DefaultStages<H, B, S, EF>
 where
     DB: Database,
@@ -103,10 +120,7 @@ where
     EF: ExecutorFactory,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        self.online
-            .builder()
-            .add_set(OfflineStages::new(self.executor_factory))
-            .add_stage(FinishStage::new(self.status_updater))
+        Self::add_offline_stages(self.online.builder(), self.status_updater, self.executor_factory)
     }
 }
 
@@ -128,6 +142,36 @@ impl<H, B> OnlineStages<H, B> {
     /// Create a new set of online stages with default values.
     pub fn new(consensus: Arc<dyn Consensus>, header_downloader: H, body_downloader: B) -> Self {
         Self { consensus, header_downloader, body_downloader }
+    }
+}
+
+impl<H, B> OnlineStages<H, B>
+where
+    H: HeaderDownloader + 'static,
+    B: BodyDownloader + 'static,
+{
+    /// Create a new builder using the given headers stage.
+    pub fn builder_with_headers<DB: Database>(
+        headers: HeaderStage<H>,
+        consensus: Arc<dyn Consensus>,
+        body_downloader: B,
+    ) -> StageSetBuilder<DB> {
+        StageSetBuilder::default()
+            .add_stage(headers)
+            .add_stage(TotalDifficultyStage::new(consensus.clone()))
+            .add_stage(BodyStage { downloader: body_downloader, consensus })
+    }
+
+    /// Create a new builder using the given bodies stage.
+    pub fn builder_with_bodies<DB: Database>(
+        bodies: BodyStage<B>,
+        consensus: Arc<dyn Consensus>,
+        header_downloader: H,
+    ) -> StageSetBuilder<DB> {
+        StageSetBuilder::default()
+            .add_stage(HeaderStage::new(header_downloader, consensus.clone()))
+            .add_stage(TotalDifficultyStage::new(consensus.clone()))
+            .add_stage(bodies)
     }
 }
 
