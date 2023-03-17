@@ -23,6 +23,9 @@ revm-primitives = "1.0.0"
 cita_trie = "4.0.0"
 hasher = "0.1.4"
 
+# tracing
+tracing = "0.1"
+
 # misc
 thiserror = "1.0.37"
 auto_impl = "1.0"
