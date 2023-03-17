@@ -54,7 +54,7 @@ impl NetworkArgs {
         config: &Config,
         chain_spec: Arc<ChainSpec>,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or(mainnet_nodes);
+        let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
 
         let network_config_builder = config
             .network_config(self.nat, self.persistent_peers_file())
