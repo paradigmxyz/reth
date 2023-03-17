@@ -7,7 +7,7 @@ use reth_eth_wire::{
     GetReceipts, NodeData, Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, PeerId, U256};
+use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, PeerId};
 use reth_provider::{BlockProvider, HeaderProvider};
 use std::{
     borrow::Borrow,
@@ -82,7 +82,7 @@ where
         let mut block: BlockHashOrNumber = match start_block {
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
-                if let Some(hash) = self.client.block_hash(U256::from(num)).unwrap_or_default() {
+                if let Some(hash) = self.client.block_hash(num).unwrap_or_default() {
                     hash.into()
                 } else {
                     return headers

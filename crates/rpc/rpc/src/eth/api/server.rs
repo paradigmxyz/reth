@@ -310,8 +310,7 @@ where
             }
         }
 
-        let oldest_block_hash =
-            self.inner.client.block_hash(start_block.try_into().unwrap()).to_rpc_result()?.unwrap();
+        let oldest_block_hash = self.inner.client.block_hash(start_block).to_rpc_result()?.unwrap();
 
         fee_history_cache_items.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
         fee_history_cache.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);

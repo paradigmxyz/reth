@@ -18,8 +18,12 @@ pub struct NoopProvider;
 
 /// Noop implementation for testing purposes
 impl BlockHashProvider for NoopProvider {
-    fn block_hash(&self, _number: U256) -> Result<Option<H256>> {
+    fn block_hash(&self, _number: u64) -> Result<Option<H256>> {
         Ok(None)
+    }
+
+    fn canonical_hashes_range(&self, _start: BlockNumber, _end: BlockNumber) -> Result<Vec<H256>> {
+        Ok(vec![])
     }
 }
 

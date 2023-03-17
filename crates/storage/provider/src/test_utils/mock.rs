@@ -124,7 +124,12 @@ impl HeaderProvider for MockEthProvider {
         range: impl RangeBounds<reth_primitives::BlockNumber>,
     ) -> Result<Vec<Header>> {
         let lock = self.headers.lock();
-        Ok(lock.values().filter(|header| range.contains(&header.number)).cloned().collect())
+
+        let mut headers: Vec<_> =
+            lock.values().filter(|header| range.contains(&header.number)).cloned().collect();
+        headers.sort_by_key(|header| header.number);
+
+        Ok(headers)
     }
 }
 
@@ -171,20 +176,23 @@ impl ReceiptProvider for MockEthProvider {
 }
 
 impl BlockHashProvider for MockEthProvider {
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
+    fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         let lock = self.blocks.lock();
 
         let hash =
-            lock.iter().find_map(
-                |(hash, b)| {
-                    if b.number == number.to::<u64>() {
-                        Some(*hash)
-                    } else {
-                        None
-                    }
-                },
-            );
+            lock.iter().find_map(|(hash, b)| if b.number == number { Some(*hash) } else { None });
         Ok(hash)
+    }
+
+    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>> {
+        let range = start..end;
+        let lock = self.blocks.lock();
+
+        let mut hashes: Vec<_> =
+            lock.iter().filter(|(_, block)| range.contains(&block.number)).collect();
+        hashes.sort_by_key(|(_, block)| block.number);
+
+        Ok(hashes.into_iter().map(|(hash, _)| *hash).collect())
     }
 }
 
