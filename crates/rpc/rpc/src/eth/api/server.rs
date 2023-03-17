@@ -446,8 +446,7 @@ mod tests {
             let hash = H256::random();
             let gas_limit: u64 = random();
             let gas_used: u64 = random();
-            let base_fee_per_gas: Option<u64> =
-                if random::<bool>() { Some(random()) } else { None };
+            let base_fee_per_gas: Option<u64> = random::<bool>().then(|| random());
 
             let header = Header {
                 number: newest_block - i,

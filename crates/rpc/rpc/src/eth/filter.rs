@@ -202,8 +202,7 @@ where
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        let topics =
-            if filter.has_topics() { Some(filter_params.flat_topics.clone()) } else { None };
+        let topics = filter.has_topics().then(|| filter_params.flat_topics.clone());
 
         // derive bloom filters from filter input
         let address_filter = FilteredParams::address_filter(&filter.address);
