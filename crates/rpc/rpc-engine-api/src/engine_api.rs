@@ -349,8 +349,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         }
 
         let Some(head) = self.client.header(&head_block_hash)? else {
- // Block is not known, nothing to do
- return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing)) };
+            // Block is not known, nothing to do
+            return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
+        };
 
         // The finalized block hash is not known, we are still syncing
         if !finalized_block_hash.is_zero() && !self.client.is_known(&finalized_block_hash)? {
@@ -358,8 +359,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         }
 
         let Some(head_td) = self.client.header_td(&head_block_hash)? else {
- // internal error - we have the head block but not the total difficulty
- return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
+            // internal error - we have the head block but not the total difficulty
+            return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::Internal(
                     reth_interfaces::provider::ProviderError::TotalDifficulty {
                         number: head.number,
@@ -367,7 +368,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
                     .into(),
                 )
                 .to_string(),
-            })) };
+            }))
+        };
 
         // From the Engine API spec:
         //
