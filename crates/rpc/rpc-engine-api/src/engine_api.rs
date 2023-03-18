@@ -368,7 +368,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
                     .into(),
                 )
                 .to_string(),
-                }))
+            }))
         };
 
         // From the Engine API spec:
