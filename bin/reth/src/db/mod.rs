@@ -29,7 +29,7 @@ pub struct Command {
     /// - Linux: `$XDG_DATA_HOME/reth/db` or `$HOME/.local/share/reth/db`
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
-    #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
+    #[arg(global = true, long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: PlatformPath<DbPath>,
 
     #[clap(subcommand)]
