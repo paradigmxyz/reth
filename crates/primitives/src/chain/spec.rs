@@ -139,20 +139,14 @@ impl ChainSpec {
     /// Get the header for the genesis block.
     pub fn genesis_header(&self) -> Header {
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        let base_fee_per_gas = if self.fork(Hardfork::London).active_at_block(0) {
-            Some(EIP1559_INITIAL_BASE_FEE)
-        } else {
-            None
-        };
+        let base_fee_per_gas =
+            (self.fork(Hardfork::London).active_at_block(0)).then_some(EIP1559_INITIAL_BASE_FEE);
 
         // If shanghai is activated, initialize the header with an empty withdrawals hash, and
         // empty withdrawals list.
         let withdrawals_root =
-            if self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp) {
-                Some(EMPTY_WITHDRAWALS)
-            } else {
-                None
-            };
+            (self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp))
+                .then_some(EMPTY_WITHDRAWALS);
 
         Header {
             gas_limit: self.genesis.gas_limit,

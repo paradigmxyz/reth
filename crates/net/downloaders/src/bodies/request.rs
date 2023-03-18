@@ -94,11 +94,7 @@ where
     /// Retrieve header hashes for the next request.
     fn next_request(&self) -> Option<Vec<H256>> {
         let mut hashes = self.headers.iter().filter(|h| !h.is_empty()).map(|h| h.hash()).peekable();
-        if hashes.peek().is_some() {
-            Some(hashes.collect())
-        } else {
-            None
-        }
+        hashes.peek().is_some().then(|| hashes.collect())
     }
 
     /// Submit the request.

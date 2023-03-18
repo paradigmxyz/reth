@@ -205,10 +205,9 @@ async fn lookup_with_timeout<R: Resolver>(
     query: &str,
     timeout: Duration,
 ) -> LookupResult<Option<String>> {
-    match tokio::time::timeout(timeout, r.lookup_txt(query)).await {
-        Ok(res) => Ok(res),
-        Err(_) => Err(LookupError::RequestTimedOut),
-    }
+    tokio::time::timeout(timeout, r.lookup_txt(query))
+        .await
+        .map_err(|_| LookupError::RequestTimedOut)
 }
 
 #[cfg(test)]
