@@ -128,7 +128,7 @@ where
                     let _ = rx.changed().await; // TODO: remove this await?
                     let tip = rx.borrow();
                     if !tip.is_zero() {
-                        return SyncTarget::Tip(tip.clone())
+                        return SyncTarget::Tip(*tip)
                     }
                 }
             }
