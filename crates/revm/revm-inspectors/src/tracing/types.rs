@@ -262,7 +262,7 @@ impl CallTraceStep {
 
     /// Returns the error message if it is an erroneous result.
     pub fn as_error(&self) -> Option<String> {
-        (self.is_error()).then(|| format!("{:?}", self.status))
+        self.is_error().then(|| format!("{:?}", self.status))
     }
 }
 
