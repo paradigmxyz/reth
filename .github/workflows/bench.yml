@@ -64,4 +64,4 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Check if benchmarks build
-        run: cargo bench --all --no-run
+        run: cargo bench --all --all-features --all-targets --no-run
