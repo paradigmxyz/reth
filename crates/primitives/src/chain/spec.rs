@@ -42,6 +42,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
                 total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
             },
         ),
+        (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
     ]),
 });
 
