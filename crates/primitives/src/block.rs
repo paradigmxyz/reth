@@ -125,7 +125,7 @@ pub struct SealedBlockWithSenders {
 impl SealedBlockWithSenders {
     /// New sealed block with sender. Return none if len of tx and senders does not match
     pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
-        (!block.body.len() != senders.len()).then(|| Self { block, senders })
+        (!block.body.len() != senders.len()).then_some(Self { block, senders })
     }
 
     /// Split Structure to its components
