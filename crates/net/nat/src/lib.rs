@@ -82,13 +82,10 @@ impl FromStr for NatResolver {
             "none" => NatResolver::None,
             "publicip" | "public-ip" => NatResolver::PublicIp,
             s => {
-                if let Some(ip) = s.strip_prefix("extip:") {
-                    NatResolver::ExternalIp(ip.parse::<IpAddr>()?)
-                } else {
-                    return Err(ParseNatResolverError::UnknonwVariant(format!(
+                let Some(ip) = s.strip_prefix("extip:") else { return Err(ParseNatResolverError::UnknonwVariant(format!(
                         "Unknown Nat Resolver: {s}"
-                    )))
-                }
+                    ))) };
+                NatResolver::ExternalIp(ip.parse::<IpAddr>()?)
             }
         };
         Ok(r)

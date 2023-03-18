@@ -82,11 +82,8 @@ where
         let mut block: BlockHashOrNumber = match start_block {
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
-                if let Some(hash) = self.client.block_hash(num).unwrap_or_default() {
-                    hash.into()
-                } else {
-                    return headers
-                }
+                let Some(hash) = self.client.block_hash(num).unwrap_or_default() else { return headers };
+                hash.into()
             }
         };
 
