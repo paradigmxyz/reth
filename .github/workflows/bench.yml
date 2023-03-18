@@ -53,3 +53,15 @@ jobs:
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
         run: |
           ./.github/scripts/compare_iai.sh
+
+  # Checks that benchmarks not run in CI compile
+  bench-check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check if benchmarks build
+        run: cargo bench --all --all-features --all-targets --no-run
