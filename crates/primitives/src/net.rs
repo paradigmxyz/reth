@@ -199,14 +199,10 @@ impl FromStr for NodeRecord {
             .port()
             .ok_or_else(|| NodeRecordParseError::InvalidUrl("no port specified".to_string()))?;
 
-        let udp_port = if let Some(discovery_port) =
-            url.query_pairs().find_map(|(maybe_disc, port)| {
-                if maybe_disc.as_ref() == "discport" {
-                    Some(port)
-                } else {
-                    None
-                }
-            }) {
+        let udp_port = if let Some(discovery_port) = url
+            .query_pairs()
+            .find_map(|(maybe_disc, port)| (maybe_disc.as_ref() == "discport").then_some(port))
+        {
             discovery_port.parse::<u16>().map_err(NodeRecordParseError::Discport)?
         } else {
             port

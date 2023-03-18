@@ -69,10 +69,7 @@ macro_rules! impl_to_rpc_result {
                 F: FnOnce($err) -> M,
                 M: Into<String>,
             {
-                match self {
-                    Ok(t) => Ok(t),
-                    Err(err) => Err($crate::result::internal_rpc_err(op(err))),
-                }
+                self.map_err(|err| $crate::result::internal_rpc_err(op(err)))
             }
 
             #[inline]
@@ -122,10 +119,7 @@ impl ToRpcResultExt for RethResult<Option<Block>> {
 
     fn map_ok_or_rpc_err(self) -> RpcResult<<Self as ToRpcResultExt>::Ok> {
         match self {
-            Ok(block) => match block {
-                Some(value) => Ok(value),
-                None => Err(EthApiError::UnknownBlockNumber.into()),
-            },
+            Ok(block) => block.ok_or_else(|| EthApiError::UnknownBlockNumber.into()),
             Err(err) => Err(internal_rpc_err(err.to_string())),
         }
     }

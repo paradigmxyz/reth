@@ -262,11 +262,7 @@ impl CallTraceStep {
 
     /// Returns the error message if it is an erroneous result.
     pub fn as_error(&self) -> Option<String> {
-        if self.is_error() {
-            Some(format!("{:?}", self.status))
-        } else {
-            None
-        }
+        self.is_error().then(|| format!("{:?}", self.status))
     }
 }
 
@@ -280,11 +276,7 @@ impl From<&CallTraceStep> for StructLog {
             memory: Some(convert_memory(step.memory.data())),
             op: step.op.to_string(),
             pc: step.pc as u64,
-            refund_counter: if step.gas_refund_counter > 0 {
-                Some(step.gas_refund_counter)
-            } else {
-                None
-            },
+            refund_counter: (step.gas_refund_counter > 0).then_some(step.gas_refund_counter),
             stack: Some(step.stack.data().clone()),
             // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
             storage: None,

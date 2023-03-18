@@ -291,11 +291,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
             break
         }
-        if self.block_indices.canonical_hash(&fork.number) == Some(fork.hash) {
-            Some(fork)
-        } else {
-            None
-        }
+        (self.block_indices.canonical_hash(&fork.number) == Some(fork.hash)).then_some(fork)
     }
 
     /// Insert a chain into the tree.
