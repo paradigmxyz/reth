@@ -131,8 +131,7 @@ where
 /// themselves offline.
 #[derive(Debug)]
 pub struct OnlineStages<H, B> {
-    /// The tip receiver for the first stage.
-    /// The download mode for the f
+    /// The sync mode for the headers stage.
     header_mode: HeaderSyncMode,
     /// The consensus engine used to validate incoming data.
     consensus: Arc<dyn Consensus>,
