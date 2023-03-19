@@ -1,6 +1,6 @@
 //! Geth trace builder
 
-use crate::tracing::{types::CallTraceNode, TraceInspectorConfig};
+use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
 use reth_primitives::{Address, JsonU256, H256, U256};
 use reth_rpc_types::trace::geth::*;
 use revm::interpreter::opcode;
@@ -12,12 +12,12 @@ pub struct GethTraceBuilder {
     /// Recorded trace nodes.
     nodes: Vec<CallTraceNode>,
     /// How the traces were recorded
-    _config: TraceInspectorConfig,
+    _config: TracingInspectorConfig,
 }
 
 impl GethTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TraceInspectorConfig) -> Self {
+    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
         Self { nodes, _config }
     }
 
@@ -29,7 +29,7 @@ impl GethTraceBuilder {
         storage: &mut HashMap<Address, BTreeMap<H256, H256>>,
         trace_node: &CallTraceNode,
         struct_logs: &mut Vec<StructLog>,
-        opts: &GethDebugTracingOptions,
+        opts: &GethDefaultTracingOptions,
     ) {
         let mut child_id = 0;
         // Iterate over the steps inside the given trace
@@ -80,7 +80,7 @@ impl GethTraceBuilder {
         &self,
         // TODO(mattsse): This should be the total gas used, or gas used by last CallTrace?
         receipt_gas_used: U256,
-        opts: GethDebugTracingOptions,
+        opts: GethDefaultTracingOptions,
     ) -> DefaultFrame {
         if self.nodes.is_empty() {
             return Default::default()

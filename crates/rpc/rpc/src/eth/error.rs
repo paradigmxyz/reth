@@ -1,7 +1,7 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
-use crate::result::{internal_rpc_err, rpc_err};
-use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
+use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err};
+use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
@@ -55,6 +55,15 @@ pub enum EthApiError {
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
+    /// Thrown when a transaction was requested but not matching transaction exists
+    #[error("transaction not found")]
+    TransactionNotFound,
+    /// Some feature is unsupported
+    #[error("unsupported")]
+    Unsupported(&'static str),
+    /// When tracer config does not match the tracer
+    #[error("invalid tracer config")]
+    InvalidTracerConfig,
 }
 
 impl From<EthApiError> for RpcError {
@@ -69,14 +78,15 @@ impl From<EthApiError> for RpcError {
             EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
             EthApiError::RequestLegacyGasPriceAndTipSet { .. } |
             EthApiError::Signing(_) |
-            EthApiError::BothStateAndStateDiffInOverride(_) => {
-                rpc_err(INVALID_PARAMS_CODE, error.to_string(), None)
-            }
+            EthApiError::BothStateAndStateDiffInOverride(_) |
+            EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(_) |
             EthApiError::PrevrandaoNotSet |
             EthApiError::InvalidBlockData(_) |
-            EthApiError::Internal(_) => internal_rpc_err(error.to_string()),
+            EthApiError::Internal(_) |
+            EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
+            EthApiError::Unsupported(msg) => internal_rpc_err(msg),
         }
     }
 }

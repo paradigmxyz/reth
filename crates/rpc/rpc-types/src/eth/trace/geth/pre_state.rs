@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn test_serialize_pre_state_trace() {
         let mut opts = GethDebugTracingCallOptions::default();
-        opts.tracing_options.disable_storage = Some(false);
+        opts.tracing_options.config.disable_storage = Some(false);
         opts.tracing_options.tracer =
             Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::PreStateTracer));
         opts.tracing_options.tracer_config = Some(GethDebugTracerConfig::BuiltInTracer(
