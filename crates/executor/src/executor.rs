@@ -767,7 +767,10 @@ mod tests {
             post_state.storage(),
             &BTreeMap::from([(
                 account1,
-                Storage { wiped: false, storage: BTreeMap::from([(U256::from(1), U256::from(2))]) }
+                Storage {
+                    was_wiped: false,
+                    storage: BTreeMap::from([(U256::from(1), U256::from(2))])
+                }
             )]),
             "Should have changed 1 storage slot"
         );
@@ -937,7 +940,7 @@ mod tests {
             "Selfdestructed account should have been deleted"
         );
         assert!(
-            out.storage().get(&address_selfdestruct).unwrap().wiped,
+            out.storage().get(&address_selfdestruct).unwrap().was_wiped,
             "Selfdestructed account should have its storage wiped"
         );
     }

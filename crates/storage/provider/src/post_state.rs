@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Storage {
     /// Whether the storage was wiped or not.
-    pub wiped: bool,
+    pub was_wiped: bool,
     /// The storage slots.
     pub storage: BTreeMap<U256, U256>,
 }
@@ -405,14 +405,14 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (_, current_value)) in changeset {
                     storage.storage.insert(*slot, *current_value);
                 }
             }
             Change::StorageWiped { address, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = true;
+                storage.was_wiped = true;
+                storage.storage.clear();
             }
         }
 
@@ -433,14 +433,13 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (old_value, _)) in changeset {
                     storage.storage.insert(*slot, *old_value);
                 }
             }
             Change::StorageWiped { address, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
+                storage.was_wiped = false;
             }
         }
     }
@@ -527,16 +526,12 @@ impl PostState {
 
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
-            if storage.wiped {
+            // If the storage was wiped, remove all previous entries from the database.
+            if storage.was_wiped {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
                 }
-
-                // If the storage is marked as wiped, it might still contain values. This is to
-                // avoid deallocating where possible, but these values should not be written to the
-                // database.
-                continue
             }
 
             for (key, value) in storage.storage {
