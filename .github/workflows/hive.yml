@@ -172,6 +172,8 @@ jobs:
           path: hivetests
 
       - name: Run ethereum/sync simulator
+        env:
+          CONTINUOUS: true
         run: |
           cd hivetests
           hive --sim ethereum/sync --client reth
