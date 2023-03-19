@@ -133,13 +133,28 @@ pub struct Command {
     #[arg(long = "debug.print-inspector", help_heading = "Debug")]
     print_inspector: bool,
 
-    #[arg(long = "debug.hook-block", help_heading = "Debug")]
+    #[arg(
+        long = "debug.hook-block",
+        help_heading = "Debug",
+        conflicts_with = "hook_transaction",
+        conflicts_with = "hook_all"
+    )]
     hook_block: Option<u64>,
 
-    #[arg(long = "debug.hook-transaction", help_heading = "Debug")]
+    #[arg(
+        long = "debug.hook-transaction",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_all"
+    )]
     hook_transaction: Option<TxHash>,
 
-    #[arg(long = "debug.hook-all", help_heading = "Debug")]
+    #[arg(
+        long = "debug.hook-all",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_transaction"
+    )]
     hook_all: bool,
 }
 
