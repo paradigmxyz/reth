@@ -4,7 +4,6 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-#![allow(unused)]
 
 //! Configure reth RPC
 //!
@@ -26,13 +25,13 @@
 //!
 //! ```
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{BlockProvider, HeaderProvider, StateProviderFactory, EvmEnvProvider};
+//! use reth_provider::{BlockProvider, StateProviderFactory, EvmEnvProvider};
 //! use reth_rpc_builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! pub async fn launch<Client, Pool, Network>(client: Client, pool: Pool, network: Network)
 //! where
-//!     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
+//!     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //! {
@@ -52,18 +51,14 @@
 //! }
 //! ```
 
-use hyper::{http::HeaderValue, Method};
 use jsonrpsee::{
-    core::{
-        server::{host_filtering::AllowHosts, rpc_module::Methods},
-        Error as RpcError,
-    },
+    core::{server::rpc_module::Methods, Error as RpcError},
     server::{IdProvider, Server, ServerHandle},
     RpcModule,
 };
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
     AdminApi, DebugApi, EthApi, EthFilter, EthSubscriptionIdProvider, NetApi, TraceApi, Web3Api,
 };
@@ -71,7 +66,7 @@ use reth_rpc_api::servers::*;
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
@@ -109,13 +104,7 @@ pub async fn launch<Client, Pool, Network, Tasks>(
     executor: Tasks,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Client: BlockProvider
-        + HeaderProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + Clone
-        + Unpin
-        + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -190,13 +179,7 @@ impl<Client, Pool, Network, Tasks> RpcModuleBuilder<Client, Pool, Network, Tasks
 
 impl<Client, Pool, Network, Tasks> RpcModuleBuilder<Client, Pool, Network, Tasks>
 where
-    Client: BlockProvider
-        + HeaderProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + Clone
-        + Unpin
-        + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -345,13 +328,7 @@ impl RpcModuleSelection {
         config: RpcModuleConfig,
     ) -> RpcModule<()>
     where
-        Client: BlockProvider
-            + HeaderProvider
-            + StateProviderFactory
-            + EvmEnvProvider
-            + Clone
-            + Unpin
-            + 'static,
+        Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
@@ -499,13 +476,7 @@ where
 
 impl<Client, Pool, Network, Tasks> RethModuleRegistry<Client, Pool, Network, Tasks>
 where
-    Client: BlockProvider
-        + HeaderProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + Clone
-        + Unpin
-        + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -721,7 +692,7 @@ impl RpcServerConfig {
     ///
     /// Note: this always configures an [EthSubscriptionIdProvider] [IdProvider] for convenience.
     /// To set a custom [IdProvider], please use [Self::with_id_provider].
-    pub fn with_ipc(mut self, mut config: IpcServerBuilder) -> Self {
+    pub fn with_ipc(mut self, config: IpcServerBuilder) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -963,12 +934,12 @@ impl RpcServer {
     }
 
     /// Returns the [`SocketAddr`] of the http server if started.
-    fn http_local_addr(&self) -> Option<SocketAddr> {
+    pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.http_local_addr
     }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
-    fn ws_local_addr(&self) -> Option<SocketAddr> {
+    pub fn ws_local_addr(&self) -> Option<SocketAddr> {
         self.ws_local_addr
     }
 
@@ -1046,12 +1017,12 @@ pub struct RpcServerHandle {
 
 impl RpcServerHandle {
     /// Returns the [`SocketAddr`] of the http server if started.
-    fn http_local_addr(&self) -> Option<SocketAddr> {
+    pub fn http_local_addr(&self) -> Option<SocketAddr> {
         self.http_local_addr
     }
 
     /// Returns the [`SocketAddr`] of the ws server if started.
-    fn ws_local_addr(&self) -> Option<SocketAddr> {
+    pub fn ws_local_addr(&self) -> Option<SocketAddr> {
         self.ws_local_addr
     }
 
