@@ -645,7 +645,7 @@ mod tests {
 
     fn setup_externals(
         exec_res: Vec<PostState>,
-    ) -> TreeExternals<Arc<Env<WriteMap>>, Arc<TestConsensus>, TestExecutorFactory> {
+    ) -> TreeExternals<Env<WriteMap>, Arc<TestConsensus>, TestExecutorFactory> {
         let db = create_test_rw_db();
         let consensus = Arc::new(TestConsensus::default());
         let chain_spec = Arc::new(
