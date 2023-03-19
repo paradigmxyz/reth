@@ -259,22 +259,13 @@ impl HeadersClient for TestHeadersClient {
 /// Consensus engine implementation for testing
 #[derive(Debug)]
 pub struct TestConsensus {
-    /// Watcher over the forkchoice state
-    channel: (watch::Sender<ForkchoiceState>, watch::Receiver<ForkchoiceState>),
     /// Flag whether the header validation should purposefully fail
     fail_validation: AtomicBool,
 }
 
 impl Default for TestConsensus {
     fn default() -> Self {
-        Self {
-            channel: watch::channel(ForkchoiceState {
-                head_block_hash: H256::zero(),
-                finalized_block_hash: H256::zero(),
-                safe_block_hash: H256::zero(),
-            }),
-            fail_validation: AtomicBool::new(false),
-        }
+        Self { fail_validation: AtomicBool::new(false) }
     }
 }
 
@@ -287,14 +278,6 @@ impl TestConsensus {
     /// Update the validation flag.
     pub fn set_fail_validation(&self, val: bool) {
         self.fail_validation.store(val, Ordering::SeqCst)
-    }
-
-    /// Update the forkchoice state.
-    pub fn notify_fork_choice_state(
-        &self,
-        state: ForkchoiceState,
-    ) -> Result<(), SendError<ForkchoiceState>> {
-        self.channel.0.send(state)
     }
 }
 
@@ -323,10 +306,6 @@ impl StatusUpdater for TestStatusUpdater {
 
 #[async_trait::async_trait]
 impl Consensus for TestConsensus {
-    fn fork_choice_state(&self) -> watch::Receiver<ForkchoiceState> {
-        self.channel.1.clone()
-    }
-
     fn pre_validate_header(
         &self,
         header: &SealedHeader,

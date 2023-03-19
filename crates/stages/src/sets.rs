@@ -40,7 +40,7 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
+        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage, HeaderSyncMode,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
         StorageHashingStage, TotalDifficultyStage, TransactionLookupStage,
     },
@@ -77,6 +77,7 @@ pub struct DefaultStages<H, B, S, EF> {
 impl<H, B, S, EF> DefaultStages<H, B, S, EF> {
     /// Create a new set of default stages with default values.
     pub fn new(
+        header_mode: HeaderSyncMode,
         consensus: Arc<dyn Consensus>,
         header_downloader: H,
         body_downloader: B,
@@ -87,7 +88,7 @@ impl<H, B, S, EF> DefaultStages<H, B, S, EF> {
         EF: ExecutorFactory,
     {
         Self {
-            online: OnlineStages::new(consensus, header_downloader, body_downloader),
+            online: OnlineStages::new(header_mode, consensus, header_downloader, body_downloader),
             executor_factory,
             status_updater,
         }
@@ -130,6 +131,8 @@ where
 /// themselves offline.
 #[derive(Debug)]
 pub struct OnlineStages<H, B> {
+    /// The sync mode for the headers stage.
+    header_mode: HeaderSyncMode,
     /// The consensus engine used to validate incoming data.
     consensus: Arc<dyn Consensus>,
     /// The block header downloader
@@ -140,8 +143,13 @@ pub struct OnlineStages<H, B> {
 
 impl<H, B> OnlineStages<H, B> {
     /// Create a new set of online stages with default values.
-    pub fn new(consensus: Arc<dyn Consensus>, header_downloader: H, body_downloader: B) -> Self {
-        Self { consensus, header_downloader, body_downloader }
+    pub fn new(
+        header_mode: HeaderSyncMode,
+        consensus: Arc<dyn Consensus>,
+        header_downloader: H,
+        body_downloader: B,
+    ) -> Self {
+        Self { header_mode, consensus, header_downloader, body_downloader }
     }
 }
 
@@ -153,8 +161,8 @@ where
     /// Create a new builder using the given headers stage.
     pub fn builder_with_headers<DB: Database>(
         headers: HeaderStage<H>,
-        consensus: Arc<dyn Consensus>,
         body_downloader: B,
+        consensus: Arc<dyn Consensus>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
             .add_stage(headers)
@@ -165,11 +173,12 @@ where
     /// Create a new builder using the given bodies stage.
     pub fn builder_with_bodies<DB: Database>(
         bodies: BodyStage<B>,
-        consensus: Arc<dyn Consensus>,
+        mode: HeaderSyncMode,
         header_downloader: H,
+        consensus: Arc<dyn Consensus>,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(header_downloader, consensus.clone()))
+            .add_stage(HeaderStage::new(header_downloader, mode))
             .add_stage(TotalDifficultyStage::new(consensus.clone()))
             .add_stage(bodies)
     }
@@ -183,7 +192,7 @@ where
 {
     fn builder(self) -> StageSetBuilder<DB> {
         StageSetBuilder::default()
-            .add_stage(HeaderStage::new(self.header_downloader, self.consensus.clone()))
+            .add_stage(HeaderStage::new(self.header_downloader, self.header_mode))
             .add_stage(TotalDifficultyStage::new(self.consensus.clone()))
             .add_stage(BodyStage { downloader: self.body_downloader, consensus: self.consensus })
     }

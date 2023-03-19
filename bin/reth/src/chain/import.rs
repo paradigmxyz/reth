@@ -12,11 +12,9 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder, test_utils::FileClient,
 };
 use reth_interfaces::{
-    consensus::{Consensus, ForkchoiceState},
-    p2p::headers::client::NoopStatusUpdater,
-    sync::SyncStateUpdater,
+    consensus::Consensus, p2p::headers::client::NoopStatusUpdater, sync::SyncStateUpdater,
 };
-use reth_primitives::ChainSpec;
+use reth_primitives::{ChainSpec, H256};
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -26,9 +24,10 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage},
+    stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage},
 };
 use std::sync::Arc;
+use tokio::sync::watch;
 use tracing::{debug, info};
 
 /// Syncs RLP encoded blocks from a file.
@@ -89,6 +88,9 @@ impl ImportCommand {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
+        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
+        info!(target: "reth::cli", "Consensus engine initialized");
+
         // create a new FileClient
         info!(target: "reth::cli", "Importing chain file");
         let file_client = Arc::new(FileClient::new(&self.path).await?);
@@ -97,17 +99,12 @@ impl ImportCommand {
         let tip = file_client.tip().expect("file client has no tip");
         info!(target: "reth::cli", "Chain file imported");
 
-        let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
-        debug!(target: "reth::cli", %tip, "Tip manually set");
-        notifier.send(ForkchoiceState {
-            head_block_hash: tip,
-            safe_block_hash: tip,
-            finalized_block_hash: tip,
-        })?;
-        info!(target: "reth::cli", "Consensus engine initialized");
-
         let (mut pipeline, events) =
             self.build_import_pipeline(config, db.clone(), &consensus, file_client).await?;
+
+        // override the tip
+        pipeline.set_tip(tip);
+        debug!(target: "reth::cli", %tip, "Tip manually set");
 
         tokio::spawn(handle_events(None, events));
 
@@ -140,12 +137,15 @@ impl ImportCommand {
             .build(file_client.clone(), consensus.clone(), db)
             .into_task();
 
+        let (tip_tx, tip_rx) = watch::channel(H256::zero());
         let factory = reth_executor::Factory::new(self.chain.clone());
 
         let mut pipeline = Pipeline::builder()
+            .with_tip_sender(tip_tx)
             .with_sync_state_updater(file_client)
             .add_stages(
                 DefaultStages::new(
+                    HeaderSyncMode::Tip(tip_rx),
                     consensus.clone(),
                     header_downloader,
                     body_downloader,

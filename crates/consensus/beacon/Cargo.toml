@@ -12,8 +12,5 @@ reth-consensus-common = { path = "../common" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 
-# async
-tokio = { version = "1", features = ["sync"] }
-
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

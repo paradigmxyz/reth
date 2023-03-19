@@ -3,7 +3,7 @@ use metrics::Gauge;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
 use reth_metrics_derive::Metrics;
-use reth_primitives::BlockNumber;
+use reth_primitives::{BlockNumber, H256};
 use reth_provider::Transaction;
 use std::{
     collections::HashMap,
@@ -11,6 +11,7 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
+use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
@@ -80,6 +81,7 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
     progress: PipelineProgress,
+    tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
 }
 
@@ -91,6 +93,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
             listeners: PipelineEventListeners::default(),
             sync_state_updater: None,
             progress: PipelineProgress::default(),
+            tip_tx: None,
             metrics: Metrics::default(),
         }
     }
@@ -109,6 +112,11 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     /// Construct a pipeline using a [`PipelineBuilder`].
     pub fn builder() -> PipelineBuilder<DB, U> {
         PipelineBuilder::default()
+    }
+
+    /// Set tip for reverse sync.
+    pub fn set_tip(&self, tip: H256) {
+        self.tip_tx.as_ref().expect("tip sender is set").send(tip).expect("tip channel closed");
     }
 
     /// Listen for events on the pipeline.

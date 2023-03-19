@@ -4583,7 +4583,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
- "tokio",
 ]
 
 [[package]]
