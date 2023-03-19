@@ -63,7 +63,7 @@ impl Signature {
     pub fn v(&self, chain_id: Option<u64>) -> u64 {
         #[cfg(feature = "optimism")]
         if self.r == U256::ZERO && self.s == U256::ZERO {
-            return 0;
+            return 0
         }
 
         if let Some(chain_id) = chain_id {

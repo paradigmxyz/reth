@@ -16,6 +16,7 @@ pub const EIP1559_TX_TYPE_ID: u8 = 2;
 pub const EIP4844_TX_TYPE_ID: u8 = 3;
 
 /// Identifier for [TxDeposit](crate::TxDeposit) transaction.
+#[cfg(feature = "optimism")]
 pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 
 /// Transaction Type

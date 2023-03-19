@@ -86,6 +86,7 @@ impl XdgPath for LogsDir {
 /// A small helper trait for unit structs that represent a standard path following the XDG
 /// path specification.
 pub trait XdgPath {
+    /// Resolve the standard path.
     fn resolve() -> Option<PathBuf>;
 }
 

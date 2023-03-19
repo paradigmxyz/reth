@@ -16,5 +16,4 @@ revm.workspace = true
 
 
 [features]
-optimism = []
-
+optimism = ["reth-primitives/optimism"]
