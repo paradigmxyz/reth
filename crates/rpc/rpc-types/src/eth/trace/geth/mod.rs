@@ -50,23 +50,39 @@ pub struct DefaultFrame {
 /// <https://github.com/ethereum/go-ethereum/blob/366d2169fbc0e0f803b68c042b77b6b480836dbc/eth/tracers/logger/logger.go#L413-L426>
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructLog {
-    pub depth: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    /// program counter
+    pub pc: u64,
+    /// opcode to be executed
+    pub op: String,
+    /// remaining gas
     pub gas: u64,
+    /// cost for executing op
     #[serde(rename = "gasCost")]
     pub gas_cost: u64,
     /// ref <https://github.com/ethereum/go-ethereum/blob/366d2169fbc0e0f803b68c042b77b6b480836dbc/eth/tracers/logger/logger.go#L450-L452>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<Vec<String>>,
-    pub op: String,
-    pub pc: u64,
-    #[serde(default, rename = "refund", skip_serializing_if = "Option::is_none")]
-    pub refund_counter: Option<u64>,
+    /// Size of memory.
+    #[serde(rename = "memSize")]
+    pub memory_size: u64,
+    /// EVM stack
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack: Option<Vec<U256>>,
+    /// Last call's return data. Enabled via enableReturnData
+    #[serde(default, rename = "refund", skip_serializing_if = "Option::is_none")]
+    pub return_data: Option<Bytes>,
+    /// Storage slots of current contract read from and written to. Only emitted for SLOAD and
+    /// SSTORE. Disabled via disableStorage
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub storage: Option<BTreeMap<H256, H256>>,
+    /// Current call depth
+    pub depth: u64,
+    /// Refund counter
+    #[serde(default, rename = "refund", skip_serializing_if = "Option::is_none")]
+    pub refund_counter: Option<u64>,
+    /// Error message if any
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Tracing response
