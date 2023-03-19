@@ -28,9 +28,11 @@
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient, TestStatusUpdater};
 //! # use reth_executor::Factory;
-//! # use reth_primitives::{PeerId,MAINNET};
+//! # use reth_primitives::{PeerId, MAINNET, H256};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
+//! # use reth_stages::stages::HeaderSyncMode;
+//! # use tokio::sync::watch;
 //! # let consensus: Arc<dyn Consensus> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
@@ -41,13 +43,15 @@
 //! #    consensus.clone(),
 //! #    create_test_rw_db()
 //! # );
+//! # let (tip_tx, tip_rx) = watch::channel(H256::default());
 //! # let factory = Factory::new(Arc::new(MAINNET.clone()));
 //! # let (status_updater, _) = TestStatusUpdater::new();
 //! // Create a pipeline that can fully sync
 //! # let pipeline: Pipeline<Env<WriteMap>, NoopSyncStateUpdate> =
 //! Pipeline::builder()
+//!     .with_tip_sender(tip_tx)
 //!     .add_stages(
-//!         DefaultStages::new(consensus, headers_downloader, bodies_downloader, status_updater, factory)
+//!         DefaultStages::new(HeaderSyncMode::Tip(tip_rx), consensus, headers_downloader, bodies_downloader, status_updater, factory)
 //!     )
 //!     .build();
 //! ```

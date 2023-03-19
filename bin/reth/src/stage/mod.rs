@@ -123,7 +123,7 @@ impl Command {
 
         match self.stage {
             StageEnum::Bodies => {
-                let (consensus, _) = BeaconConsensus::builder().build(self.chain.clone());
+                let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
