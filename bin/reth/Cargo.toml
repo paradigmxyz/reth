@@ -12,6 +12,7 @@ reth-primitives = { path = "../../crates/primitives", features = ["arbitrary"] }
 reth-db = { path = "../../crates/storage/db", features = ["mdbx", "test-utils"] }
 # TODO: Temporary use of the test-utils feature
 reth-provider = { path = "../../crates/storage/provider", features = ["test-utils"] }
+reth-revm-inspectors = { path = "../../crates/revm/revm-inspectors" }
 reth-staged-sync = { path = "../../crates/staged-sync" }
 reth-stages = { path = "../../crates/stages"}
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }

@@ -37,8 +37,9 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, TxHash, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
+use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
     utils::{
@@ -128,6 +129,33 @@ pub struct Command {
 
     #[clap(flatten)]
     rpc: RpcServerArgs,
+
+    #[arg(long = "debug.print-inspector", help_heading = "Debug")]
+    print_inspector: bool,
+
+    #[arg(
+        long = "debug.hook-block",
+        help_heading = "Debug",
+        conflicts_with = "hook_transaction",
+        conflicts_with = "hook_all"
+    )]
+    hook_block: Option<u64>,
+
+    #[arg(
+        long = "debug.hook-transaction",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_all"
+    )]
+    hook_transaction: Option<TxHash>,
+
+    #[arg(
+        long = "debug.hook-all",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_transaction"
+    )]
+    hook_all: bool,
 }
 
 impl Command {
@@ -478,7 +506,23 @@ impl Command {
         }
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        use reth_revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_executor::Factory::new(self.chain.clone());
+
+        let stack_config = InspectorStackConfig {
+            use_printer_tracer: self.print_inspector,
+            hook: if let Some(hook_block) = self.hook_block {
+                Hook::Block(hook_block)
+            } else if let Some(tx) = self.hook_transaction {
+                Hook::Transaction(tx)
+            } else if self.hook_all {
+                Hook::All
+            } else {
+                Hook::None
+            },
+        };
+
+        let factory = factory.with_stack_config(stack_config);
 
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };

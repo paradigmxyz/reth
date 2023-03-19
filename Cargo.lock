@@ -4558,6 +4558,7 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-revm-inspectors",
  "reth-rlp",
  "reth-rpc",
  "reth-rpc-builder",
