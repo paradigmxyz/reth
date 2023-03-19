@@ -143,7 +143,8 @@ impl Command {
         let mut config: Config = self.load_config()?;
 
         // add network name to db directory
-        let db_path = self.db.as_ref().join(self.chain.chain.to_string());
+
+        let db_path = self.db.join(self.chain.chain.to_string());
 
         info!(target: "reth::cli", path = ?db_path, "Configuration loaded");
 

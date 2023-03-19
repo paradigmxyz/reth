@@ -184,3 +184,10 @@ impl<D> From<PlatformPath<D>> for PathBuf {
         value.0
     }
 }
+
+impl<D> PlatformPath<D> {
+    /// Returns the path joined with another path
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> PathBuf {
+        self.0.join(path)
+    }
+}
