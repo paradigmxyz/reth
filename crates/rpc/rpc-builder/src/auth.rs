@@ -1,36 +1,15 @@
-use crate::{constants::DEFAULT_AUTH_PORT, RpcServerConfig};
-use hyper::{http::HeaderValue, Method};
 pub use jsonrpsee::server::ServerBuilder;
-use jsonrpsee::{
-    core::{
-        server::{host_filtering::AllowHosts, rpc_module::Methods},
-        Error as RpcError,
-    },
-    server::{middleware, Server, ServerHandle},
-    RpcModule,
-};
-use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
+use jsonrpsee::{core::Error as RpcError, server::ServerHandle, RpcModule};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{
-    eth::cache::EthStateCache, AdminApi, AuthLayer, DebugApi, EngineApi, EthApi, JwtAuthValidator,
-    JwtSecret, NetApi, TraceApi, Web3Api,
+    eth::cache::EthStateCache, AuthLayer, EngineApi, EthApi, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_engine_api::EngineApiHandle;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use serde::{Deserialize, Serialize, Serializer};
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    fmt,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    str::FromStr,
-};
-use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
-use tower::layer::util::{Identity, Stack};
-use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use std::net::SocketAddr;
 
 /// Configure and launch an auth server with `engine` and a _new_ `eth` namespace.
 pub async fn launch<Client, Pool, Network, Tasks>(
@@ -80,8 +59,8 @@ where
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
-    module.merge(EngineApi::new(handle).into_rpc());
-    module.merge(eth_api.into_rpc());
+    module.merge(EngineApi::new(handle).into_rpc()).expect("No conflicting methods");
+    module.merge(eth_api.into_rpc()).expect("No conflicting methods");
 
     // Create auth middleware.
     let middleware =
