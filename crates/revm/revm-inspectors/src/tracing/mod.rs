@@ -23,7 +23,7 @@ mod config;
 mod types;
 mod utils;
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
-pub use config::TraceInspectorConfig;
+pub use config::TracingInspectorConfig;
 
 /// An inspector that collects call traces.
 ///
@@ -36,7 +36,7 @@ pub use config::TraceInspectorConfig;
 #[derive(Debug, Clone)]
 pub struct TracingInspector {
     /// Configures what and how the inspector records traces.
-    config: TraceInspectorConfig,
+    config: TracingInspectorConfig,
     /// Records all call traces
     traces: CallTraceArena,
     trace_stack: Vec<usize>,
@@ -52,7 +52,7 @@ pub struct TracingInspector {
 
 impl TracingInspector {
     /// Returns a new instance for the given config
-    pub fn new(config: TraceInspectorConfig) -> Self {
+    pub fn new(config: TracingInspectorConfig) -> Self {
         Self {
             config,
             traces: Default::default(),
