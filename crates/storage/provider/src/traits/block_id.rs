@@ -1,6 +1,6 @@
 use super::BlockHashProvider;
 use reth_interfaces::Result;
-use reth_primitives::{BlockId, BlockNumberOrTag, ChainInfo, H256, U256};
+use reth_primitives::{BlockId, BlockNumberOrTag, ChainInfo, H256};
 
 /// Client trait for transforming [BlockId].
 #[auto_impl::auto_impl(&, Arc)]
@@ -33,7 +33,7 @@ pub trait BlockIdProvider: BlockHashProvider + Send + Sync {
                     return Ok(Some(self.chain_info()?.best_hash))
                 }
                 self.convert_block_number(num)?
-                    .map(|num| self.block_hash(U256::from(num)))
+                    .map(|num| self.block_hash(num))
                     .transpose()
                     .map(|maybe_hash| maybe_hash.flatten())
             }

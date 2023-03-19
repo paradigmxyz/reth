@@ -11,7 +11,9 @@ use reth_db::{
 };
 use reth_interfaces::provider::ProviderError;
 use reth_primitives::{Address, Block, U256};
-use reth_provider::{BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction};
+use reth_provider::{
+    post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
+};
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
@@ -112,7 +114,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Fetch transactions, execute them and generate results
-        let mut changesets = Vec::with_capacity(block_batch.len());
+        let mut changesets = PostState::default();
         for (header, td, body, ommers, withdrawals) in block_batch.into_iter() {
             let block_number = header.number;
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
@@ -154,11 +156,12 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     Some(signers),
                 )
                 .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
-            changesets.push(changeset);
+            changesets.extend(changeset);
         }
 
         // put execution results to database
-        tx.insert_execution_result(changesets, self.executor_factory.chain_spec(), last_block)?;
+        let first_transition_id = tx.get_block_transition(last_block)?;
+        changesets.write_to_db(&**tx, first_transition_id)?;
 
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");

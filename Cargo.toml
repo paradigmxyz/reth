@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "bin/reth",
-    "crates/consensus",
+    "crates/consensus/beacon",
+    "crates/consensus/common",
     "crates/executor",
     "crates/interfaces",
     "crates/metrics/metrics-derive",
@@ -47,7 +48,7 @@ inherits = "release"
 debug = true
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "afc3066" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "afc3066" }
+revm = { git = "https://github.com/bluealloy/revm" }
+revm-primitives = { git = "https://github.com/bluealloy/revm" }
 # patched for quantity U256 responses <https://github.com/recmo/uint/issues/224>
 ruint = { git = "https://github.com/paradigmxyz/uint" }

@@ -13,7 +13,7 @@ use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
-use reth_consensus::beacon::BeaconConsensus;
+use reth_beacon_consensus::BeaconConsensus;
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -37,7 +37,7 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -50,7 +50,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
+    stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -106,6 +106,12 @@ pub struct Command {
     #[clap(flatten)]
     network: NetworkArgs,
 
+    /// Prompt the downloader to download blocks one at a time.
+    ///
+    /// NOTE: This is for testing purposes only.
+    #[arg(long = "debug.continuous", help_heading = "Debug")]
+    continuous: bool,
+
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
@@ -148,7 +154,7 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let (consensus, forkchoice_state_tx) = self.init_consensus()?;
+        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone())) as Arc<dyn Consensus>;
         info!(target: "reth::cli", "Consensus engine initialized");
 
         self.init_trusted_nodes(&mut config);
@@ -173,8 +179,13 @@ impl Command {
             .await?;
         info!(target: "reth::cli", "Started RPC server");
 
-        let engine_api_handle =
-            self.init_engine_api(Arc::clone(&db), forkchoice_state_tx, &ctx.task_executor);
+        if self.continuous {
+            info!(target: "reth::cli", "Continuous sync mode enabled");
+        }
+
+        // TODO: This will be fixed with the sync controller (https://github.com/paradigmxyz/reth/pull/1662)
+        let (tx, _rx) = watch::channel(ForkchoiceState::default());
+        let engine_api_handle = self.init_engine_api(Arc::clone(&db), tx, &ctx.task_executor);
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let _auth_server = self
@@ -198,6 +209,16 @@ impl Command {
                 &ctx.task_executor,
             )
             .await?;
+
+        if let Some(tip) = self.tip {
+            pipeline.set_tip(tip);
+            debug!(target: "reth::cli", %tip, "Tip manually set");
+        } else {
+            let warn_msg = "No tip specified. \
+                    reth cannot communicate with consensus clients, \
+                    so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
+            warn!(target: "reth::cli", warn_msg);
+        }
 
         ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
 
@@ -259,6 +280,7 @@ impl Command {
                 network.clone(),
                 consensus,
                 max_block,
+                self.continuous,
             )
             .await?;
 
@@ -293,26 +315,6 @@ impl Command {
         }
     }
 
-    fn init_consensus(&self) -> eyre::Result<(Arc<dyn Consensus>, watch::Sender<ForkchoiceState>)> {
-        let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
-
-        if let Some(tip) = self.tip {
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            notifier.send(ForkchoiceState {
-                head_block_hash: tip,
-                safe_block_hash: tip,
-                finalized_block_hash: tip,
-            })?;
-        } else {
-            let warn_msg = "No tip specified. \
-            reth cannot communicate with consensus clients, \
-            so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
-            warn!(target: "reth::cli", warn_msg);
-        }
-
-        Ok((consensus, notifier))
-    }
-
     fn init_engine_api(
         &self,
         db: Arc<Env<WriteMap>>,
@@ -326,7 +328,7 @@ impl Command {
             message_rx,
             forkchoice_state_tx,
         );
-        task_executor.spawn(engine_api);
+        task_executor.spawn_critical("engine API task", engine_api);
         message_tx
     }
 
@@ -391,17 +393,38 @@ impl Command {
         fetch_client: FetchClient,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error> {
-        if let Some(number) = db.view(|tx| tx.get::<tables::HeaderNumbers>(tip))?? {
-            info!(target: "reth::cli", ?tip, number, "Successfully looked up tip block number in the database");
-            return Ok(number)
+        Ok(self.fetch_tip(db, fetch_client, BlockHashOrNumber::Hash(tip)).await?.number)
+    }
+
+    /// Attempt to look up the block with the given number and return the header.
+    ///
+    /// NOTE: The download is attempted with infinite retries.
+    async fn fetch_tip(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        fetch_client: FetchClient,
+        tip: BlockHashOrNumber,
+    ) -> Result<SealedHeader, reth_interfaces::Error> {
+        let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
+            let number = match tip {
+                BlockHashOrNumber::Hash(hash) => tx.get::<tables::HeaderNumbers>(hash)?,
+                BlockHashOrNumber::Number(number) => Some(number),
+            };
+            Ok(number.map(|number| tx.get::<tables::Headers>(number)).transpose()?.flatten())
+        })??;
+
+        // try to look up the header in the database
+        if let Some(header) = header {
+            info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
+            return Ok(header.seal_slow())
         }
 
-        info!(target: "reth::cli", ?tip, "Fetching tip block number from the network.");
+        info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
-            match get_single_header(fetch_client.clone(), BlockHashOrNumber::Hash(tip)).await {
+            match get_single_header(fetch_client.clone(), tip).await {
                 Ok(tip_header) => {
-                    info!(target: "reth::cli", ?tip, number = tip_header.number, "Successfully fetched tip block number");
-                    return Ok(tip_header.number)
+                    info!(target: "reth::cli", ?tip, "Successfully fetched tip");
+                    return Ok(tip_header)
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -429,6 +452,7 @@ impl Command {
             .build(ShareableDatabase::new(db, self.chain.clone()))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn build_pipeline<H, B, U>(
         &self,
         config: &Config,
@@ -437,6 +461,7 @@ impl Command {
         updater: U,
         consensus: &Arc<dyn Consensus>,
         max_block: Option<u64>,
+        continuous: bool,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
     where
         H: HeaderDownloader + 'static,
@@ -452,11 +477,17 @@ impl Command {
             builder = builder.with_max_block(max_block)
         }
 
+        let (tip_tx, tip_rx) = watch::channel(H256::zero());
         let factory = reth_executor::Factory::new(self.chain.clone());
+
+        let header_mode =
+            if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
             .with_sync_state_updater(updater.clone())
+            .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
+                    header_mode,
                     consensus.clone(),
                     header_downloader,
                     body_downloader,
@@ -498,7 +529,8 @@ async fn run_network_until_shutdown<C>(
         let known_peers = network.all_peers().collect::<Vec<_>>();
         if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
             trace!(target : "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            match std::fs::write(&file_path, known_peers) {
+            let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
+            match parent_dir.and_then(|_| std::fs::write(&file_path, known_peers)) {
                 Ok(_) => {
                     info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
                 }

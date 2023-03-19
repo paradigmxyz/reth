@@ -5,10 +5,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
-use reth_primitives::{
-    filter::{Filter, FilterBlockOption, FilteredParams},
-    U256,
-};
+use reth_primitives::filter::{Filter, FilterBlockOption, FilteredParams};
 use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_types::{FilterChanges, FilterId, Log};
@@ -96,7 +93,7 @@ where
                     let block_hash = self
                         .inner
                         .client
-                        .block_hash(U256::from(block_num))
+                        .block_hash(block_num)
                         .to_rpc_result()?
                         .ok_or(EthApiError::UnknownBlockNumber)?;
                     block_hashes.push(block_hash);
@@ -205,8 +202,7 @@ where
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
-        let topics =
-            if filter.has_topics() { Some(filter_params.flat_topics.clone()) } else { None };
+        let topics = filter.has_topics().then(|| filter_params.flat_topics.clone());
 
         // derive bloom filters from filter input
         let address_filter = FilteredParams::address_filter(&filter.address);

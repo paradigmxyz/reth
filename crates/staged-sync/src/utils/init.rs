@@ -12,10 +12,7 @@ use tracing::debug;
 /// Opens up an existing database or creates a new one at the specified path.
 pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
     std::fs::create_dir_all(path.as_ref())?;
-    let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-        path.as_ref(),
-        reth_db::mdbx::EnvKind::RW,
-    )?;
+    let db = Env::<WriteMap>::open(path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
     db.create_tables()?;
 
     Ok(db)
@@ -26,7 +23,12 @@ pub fn init_db<P: AsRef<Path>>(path: P) -> eyre::Result<Env<WriteMap>> {
 pub enum InitDatabaseError {
     /// Attempted to reinitialize database with inconsistent genesis block
     #[error("Genesis hash mismatch: expected {expected}, got {actual}")]
-    GenesisHashMismatch { expected: H256, actual: H256 },
+    GenesisHashMismatch {
+        /// Expected genesis hash.
+        expected: H256,
+        /// Actual genesis hash.
+        actual: H256,
+    },
 
     /// Low-level database error.
     #[error(transparent)]

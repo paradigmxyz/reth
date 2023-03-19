@@ -39,14 +39,14 @@ where
     Network: Send + Sync + 'static,
 {
     /// Executes the call request at the given [BlockId]
-    pub(crate) async fn call_at(
+    pub(crate) async fn execute_call_at(
         &self,
         request: CallRequest,
         at: BlockId,
         state_overrides: Option<StateOverride>,
     ) -> EthResult<(ResultAndState, Env)> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
         self.call_with(cfg, block_env, request, state, state_overrides)
     }
 
@@ -86,7 +86,7 @@ where
         at: BlockId,
     ) -> EthResult<U256> {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
         self.estimate_gas_with(cfg, block_env, request, state)
     }
 
@@ -165,14 +165,8 @@ where
             ExecutionResult::Success { .. } => {
                 // succeeded
             }
-            ExecutionResult::Halt { reason, .. } => {
-                return match reason {
-                    Halt::OutOfGas(err) => {
-                        Err(InvalidTransactionError::out_of_gas(err, gas_limit).into())
-                    }
-                    Halt::NonceOverflow => Err(InvalidTransactionError::NonceMaxValue.into()),
-                    err => Err(InvalidTransactionError::EvmHalt(err).into()),
-                }
+            ExecutionResult::Halt { reason, gas_used } => {
+                return Err(InvalidTransactionError::halt(reason, gas_used).into())
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -272,7 +266,7 @@ where
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (mut cfg, block, at) = self.evm_env_at(block_id).await?;
-        let state = self.state_at_block_id(at)?.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let state = self.state_at(at)?;
 
         // we want to disable this in eth_call, since this is common practice used by other node
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>

@@ -16,7 +16,9 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256};
+use reth_primitives::{
+    BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, SealedHeader, H256,
+};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},
@@ -116,14 +118,14 @@ where
         self.local_head.as_ref().expect("is initialized").number
     }
 
-    /// Returns the existing sync target hash.
+    /// Returns the existing sync target.
     ///
     /// # Panics
     ///
     /// If the sync target has never been set.
     #[inline]
-    fn existing_sync_target_hash(&self) -> H256 {
-        self.sync_target.as_ref().expect("is initialized").hash
+    fn existing_sync_target(&self) -> SyncTargetBlock {
+        self.sync_target.as_ref().expect("is initialized").clone()
     }
 
     /// Max requests to handle at the same time
@@ -198,7 +200,7 @@ where
         headers: Vec<Header>,
         peer_id: PeerId,
     ) -> Result<(), HeadersResponseError> {
-        let sync_target_hash = self.existing_sync_target_hash();
+        let sync_target = self.existing_sync_target();
         let mut validated = Vec::with_capacity(headers.len());
 
         let sealed_headers = headers.into_par_iter().map(|h| h.seal_slow()).collect::<Vec<_>>();
@@ -211,15 +213,45 @@ where
                     trace!(target: "downloaders::headers", ?error ,"Failed to validate header");
                     return Err(HeadersResponseError { request, peer_id: Some(peer_id), error })
                 }
-            } else if parent.hash() != sync_target_hash {
-                return Err(HeadersResponseError {
-                    request,
-                    peer_id: Some(peer_id),
-                    error: DownloadError::InvalidTip {
-                        received: parent.hash(),
-                        expected: sync_target_hash,
-                    },
-                })
+            } else {
+                match sync_target {
+                    SyncTargetBlock::Hash(hash) => {
+                        if parent.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: parent.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::Number(number) => {
+                        if parent.number != number {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTipNumber {
+                                    received: parent.number,
+                                    expected: number,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::HashAndNumber { hash, .. } => {
+                        if parent.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: parent.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
+                }
             }
 
             validated.push(parent);
@@ -246,7 +278,7 @@ where
     fn on_block_number_update(&mut self, target_block_number: u64, next_block: u64) {
         // Update the trackers
         if let Some(old_target) =
-            self.sync_target.as_mut().and_then(|t| t.number.replace(target_block_number))
+            self.sync_target.as_mut().and_then(|t| t.replace_number(target_block_number))
         {
             if target_block_number > old_target {
                 // the new target is higher than the old target we need to update the
@@ -277,7 +309,7 @@ where
         &mut self,
         response: HeadersRequestOutcome,
     ) -> Result<(), HeadersResponseError> {
-        let sync_target_hash = self.existing_sync_target_hash();
+        let sync_target = self.existing_sync_target();
         let HeadersRequestOutcome { request, outcome } = response;
         match outcome {
             Ok(res) => {
@@ -299,15 +331,43 @@ where
 
                 let target = headers.remove(0).seal_slow();
 
-                if target.hash() != sync_target_hash {
-                    return Err(HeadersResponseError {
-                        request,
-                        peer_id: Some(peer_id),
-                        error: DownloadError::InvalidTip {
-                            received: target.hash(),
-                            expected: sync_target_hash,
-                        },
-                    })
+                match sync_target {
+                    SyncTargetBlock::Hash(hash) => {
+                        if target.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: target.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::Number(number) => {
+                        if target.number != number {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTipNumber {
+                                    received: target.number,
+                                    expected: number,
+                                },
+                            })
+                        }
+                    }
+                    SyncTargetBlock::HashAndNumber { hash, .. } => {
+                        if target.hash() != hash {
+                            return Err(HeadersResponseError {
+                                request,
+                                peer_id: Some(peer_id),
+                                error: DownloadError::InvalidTip {
+                                    received: target.hash(),
+                                    expected: hash,
+                                },
+                            })
+                        }
+                    }
                 }
 
                 trace!(target: "downloaders::headers", head=?self.local_block_number(), hash=?target.hash(), number=%target.number, "Received sync target");
@@ -463,8 +523,8 @@ where
     }
 
     /// Returns the request for the `sync_target` header.
-    fn get_sync_target_request(&self, start: H256) -> HeadersRequest {
-        HeadersRequest { start: start.into(), limit: 1, direction: HeadersDirection::Falling }
+    fn get_sync_target_request(&self, start: BlockHashOrNumber) -> HeadersRequest {
+        HeadersRequest { start, limit: 1, direction: HeadersDirection::Falling }
     }
 
     /// Starts a request future
@@ -552,7 +612,7 @@ where
 
     /// If the given target is different from the current target, we need to update the sync target
     fn update_sync_target(&mut self, target: SyncTarget) {
-        let current_tip = self.sync_target.as_ref().map(|t| t.hash);
+        let current_tip = self.sync_target.as_ref().and_then(|t| t.hash());
         match target {
             SyncTarget::Tip(tip) => {
                 if Some(tip) != current_tip {
@@ -574,8 +634,9 @@ where
                     trace!(target: "downloaders::headers", new=?target, "Request new sync target");
                     self.metrics.out_of_order_requests.increment(1);
                     self.sync_target = Some(new_sync_target);
-                    self.sync_target_request =
-                        Some(self.request_fut(self.get_sync_target_request(tip), Priority::High));
+                    self.sync_target_request = Some(
+                        self.request_fut(self.get_sync_target_request(tip.into()), Priority::High),
+                    );
                 }
             }
             SyncTarget::Gap(existing) => {
@@ -591,13 +652,21 @@ where
 
                     // Update the sync target hash
                     self.sync_target = match self.sync_target.take() {
-                        Some(mut sync_target) => {
-                            sync_target.hash = target;
-                            Some(sync_target)
-                        }
+                        Some(sync_target) => Some(sync_target.with_hash(target)),
                         None => Some(SyncTargetBlock::from_hash(target)),
                     };
                     self.on_block_number_update(parent_block_number, parent_block_number);
+                }
+            }
+            SyncTarget::TipNum(num) => {
+                let current_tip_num = self.sync_target.as_ref().and_then(|t| t.number());
+                if Some(num) != current_tip_num {
+                    trace!(target: "downloaders::headers", %num, "Updating sync target based on num");
+                    // just update the sync target
+                    self.sync_target = Some(SyncTargetBlock::from_number(num));
+                    self.sync_target_request = Some(
+                        self.request_fut(self.get_sync_target_request(num.into()), Priority::High),
+                    );
                 }
             }
         }
@@ -823,24 +892,90 @@ impl HeadersResponseError {
 }
 
 /// The block to which we want to close the gap: (local head...sync target]
-#[derive(Debug, Default)]
-struct SyncTargetBlock {
+/// This tracks the sync target block, so this could be either a block number or hash.
+#[derive(Clone, Debug)]
+pub enum SyncTargetBlock {
     /// Block hash of the targeted block
-    hash: H256,
-    /// This is an `Option` because we don't know the block number at first
-    number: Option<u64>,
+    Hash(H256),
+    /// Block number of the targeted block
+    Number(u64),
+    /// Both the block hash and number of the targeted block
+    HashAndNumber {
+        /// Block hash of the targeted block
+        hash: H256,
+        /// Block number of the targeted block
+        number: u64,
+    },
 }
 
 impl SyncTargetBlock {
     /// Create new instance from hash.
     fn from_hash(hash: H256) -> Self {
-        Self { hash, number: None }
+        Self::Hash(hash)
+    }
+
+    /// Create new instance from number.
+    fn from_number(num: u64) -> Self {
+        Self::Number(num)
+    }
+
+    /// Set the hash for the sync target.
+    fn with_hash(self, hash: H256) -> Self {
+        match self {
+            Self::Hash(_) => Self::Hash(hash),
+            Self::Number(number) => Self::HashAndNumber { hash, number },
+            Self::HashAndNumber { number, .. } => Self::HashAndNumber { hash, number },
+        }
     }
 
     /// Set a number on the instance.
-    fn with_number(mut self, number: u64) -> Self {
-        self.number = Some(number);
-        self
+    fn with_number(self, number: u64) -> Self {
+        match self {
+            Self::Hash(hash) => Self::HashAndNumber { hash, number },
+            Self::Number(_) => Self::Number(number),
+            Self::HashAndNumber { hash, .. } => Self::HashAndNumber { hash, number },
+        }
+    }
+
+    /// Replace the target block number, and return the old block number, if it was set.
+    ///
+    /// If the target block is a hash, this be converted into a `HashAndNumber`, but return `None`.
+    /// The semantics should be equivalent to that of `Option::replace`.
+    fn replace_number(&mut self, number: u64) -> Option<u64> {
+        match self {
+            Self::Hash(hash) => {
+                *self = Self::HashAndNumber { hash: *hash, number };
+                None
+            }
+            Self::Number(old_number) => {
+                let res = Some(*old_number);
+                *self = Self::Number(number);
+                res
+            }
+            Self::HashAndNumber { number: old_number, hash } => {
+                let res = Some(*old_number);
+                *self = Self::HashAndNumber { hash: *hash, number };
+                res
+            }
+        }
+    }
+
+    /// Return the hash of the target block, if it is set.
+    fn hash(&self) -> Option<H256> {
+        match self {
+            Self::Hash(hash) => Some(*hash),
+            Self::Number(_) => None,
+            Self::HashAndNumber { hash, .. } => Some(*hash),
+        }
+    }
+
+    /// Return the block number of the sync target, if it is set.
+    fn number(&self) -> Option<u64> {
+        match self {
+            Self::Hash(_) => None,
+            Self::Number(number) => Some(*number),
+            Self::HashAndNumber { number, .. } => Some(*number),
+        }
     }
 }
 
@@ -989,6 +1124,65 @@ mod tests {
     use reth_interfaces::test_utils::{TestConsensus, TestHeadersClient};
     use reth_primitives::SealedHeader;
 
+    /// Tests that `replace_number` works the same way as Option::replace
+    #[test]
+    fn test_replace_number_semantics() {
+        struct Fixture {
+            // input fields (both SyncTargetBlock and Option<u64>)
+            sync_target_block: SyncTargetBlock,
+            sync_target_option: Option<u64>,
+
+            // option to replace
+            replace_number: u64,
+
+            // expected method result
+            expected_result: Option<u64>,
+
+            // output state
+            new_number: u64,
+        }
+
+        let fixtures = vec![
+            Fixture {
+                sync_target_block: SyncTargetBlock::Hash(H256::random()),
+                // Hash maps to None here, all other variants map to Some
+                sync_target_option: None,
+                replace_number: 1,
+                expected_result: None,
+                new_number: 1,
+            },
+            Fixture {
+                sync_target_block: SyncTargetBlock::Number(1),
+                sync_target_option: Some(1),
+                replace_number: 2,
+                expected_result: Some(1),
+                new_number: 2,
+            },
+            Fixture {
+                sync_target_block: SyncTargetBlock::HashAndNumber {
+                    hash: H256::random(),
+                    number: 1,
+                },
+                sync_target_option: Some(1),
+                replace_number: 2,
+                expected_result: Some(1),
+                new_number: 2,
+            },
+        ];
+
+        for fixture in fixtures {
+            let mut sync_target_block = fixture.sync_target_block;
+            let result = sync_target_block.replace_number(fixture.replace_number);
+            assert_eq!(result, fixture.expected_result);
+            assert_eq!(sync_target_block.number(), Some(fixture.new_number));
+
+            let mut sync_target_option = fixture.sync_target_option;
+            let option_result = sync_target_option.replace(fixture.replace_number);
+            assert_eq!(option_result, fixture.expected_result);
+            assert_eq!(sync_target_option, Some(fixture.new_number));
+        }
+    }
+
     /// Tests that request calc works
     #[test]
     fn test_sync_target_update() {
@@ -1013,7 +1207,7 @@ mod tests {
         assert!(downloader.sync_target_request.is_none());
         assert_matches!(
             downloader.sync_target,
-            Some(target) => target.number.is_some()
+            Some(target) => target.number().is_some()
         );
     }
 

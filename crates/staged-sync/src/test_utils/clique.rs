@@ -20,7 +20,7 @@ use std::{
 /// ```no_run
 /// # use ethers_core::utils::Geth;
 /// # use reth_staged_sync::test_utils::CliqueGethInstance;
-/// # tokio_test::block_on(async {
+/// # let clique = async {
 ///
 /// // this creates a funded geth
 /// let clique_geth = Geth::new()
@@ -32,7 +32,7 @@ use std::{
 ///
 /// // don't print logs, but drain the stderr
 /// clique.prevent_blocking().await;
-/// # });
+/// # };
 /// ```
 pub struct CliqueGethInstance {
     /// The spawned [`GethInstance`](ethers_core::utils::GethInstance).

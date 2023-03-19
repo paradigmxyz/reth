@@ -152,7 +152,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
 
         pre_state.into_iter().try_for_each(|(address, account)| -> eyre::Result<()> {
             let has_code = !account.code.is_empty();
-            let code_hash = if has_code { Some(keccak256(&account.code)) } else { None };
+            let code_hash = has_code.then(|| keccak256(&account.code));
             tx.put::<tables::PlainAccountState>(
                 address,
                 RethAccount {

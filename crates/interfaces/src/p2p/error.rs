@@ -148,6 +148,14 @@ pub enum DownloadError {
         /// The hash of the expected tip
         expected: H256,
     },
+    /// Received a tip with an invalid tip number
+    #[error("Received invalid tip number: {received:?}. Expected {expected:?}.")]
+    InvalidTipNumber {
+        /// The block number of the received tip
+        received: u64,
+        /// The block number of the expected tip
+        expected: u64,
+    },
     /// Received a response to a request with unexpected start block
     #[error("Headers response starts at unexpected block: {received:?}. Expected {expected:?}.")]
     HeadersResponseStartBlockMismatch {

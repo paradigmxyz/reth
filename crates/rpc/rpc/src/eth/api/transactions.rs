@@ -12,14 +12,16 @@ use reth_primitives::{
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rlp::Decodable;
-use reth_rpc_types::{Index, Transaction, TransactionRequest, TypedTransactionRequest};
-// use reth_rpc_types::
+use reth_rpc_types::{Index, Transaction, TransactionInfo, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::primitives::{BlockEnv, CfgEnv};
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
+    /// Returns the state at the given [BlockId]
+    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>>;
+
     /// Executes the closure with the state that corresponds to the given [BlockId].
     fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
     where
@@ -52,11 +54,16 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
-    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>> {
+        self.state_at_block_id(at)
+    }
+
+    fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         F: FnOnce(ChainState<'_>) -> EthResult<T>,
     {
-        unimplemented!()
+        let state = self.state_at(at)?;
+        f(state)
     }
 
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)> {
@@ -222,6 +229,45 @@ pub enum TransactionSource {
         /// Number of the block.
         block_number: u64,
     },
+}
+
+// === impl TransactionSource ===
+
+impl TransactionSource {
+    /// Consumes the type and returns the wrapped transaction.
+    pub fn into_recovered(self) -> TransactionSignedEcRecovered {
+        self.into()
+    }
+
+    /// Returns the transaction and block related info, if not pending
+    pub fn split(self) -> (TransactionSignedEcRecovered, TransactionInfo) {
+        match self {
+            TransactionSource::Pool(tx) => {
+                let hash = tx.hash();
+                (
+                    tx,
+                    TransactionInfo {
+                        hash: Some(hash),
+                        index: None,
+                        block_hash: None,
+                        block_number: None,
+                    },
+                )
+            }
+            TransactionSource::Database { transaction, index, block_hash, block_number } => {
+                let hash = transaction.hash();
+                (
+                    transaction,
+                    TransactionInfo {
+                        hash: Some(hash),
+                        index: Some(index),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                    },
+                )
+            }
+        }
+    }
 }
 
 impl From<TransactionSource> for TransactionSignedEcRecovered {

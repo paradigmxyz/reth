@@ -42,6 +42,7 @@ pub static MAINNET: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
                 total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
             },
         ),
+        (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
     ]),
 });
 
@@ -139,20 +140,14 @@ impl ChainSpec {
     /// Get the header for the genesis block.
     pub fn genesis_header(&self) -> Header {
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        let base_fee_per_gas = if self.fork(Hardfork::London).active_at_block(0) {
-            Some(EIP1559_INITIAL_BASE_FEE)
-        } else {
-            None
-        };
+        let base_fee_per_gas =
+            (self.fork(Hardfork::London).active_at_block(0)).then_some(EIP1559_INITIAL_BASE_FEE);
 
         // If shanghai is activated, initialize the header with an empty withdrawals hash, and
         // empty withdrawals list.
         let withdrawals_root =
-            if self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp) {
-                Some(EMPTY_WITHDRAWALS)
-            } else {
-                None
-            };
+            (self.fork(Hardfork::Shanghai).active_at_timestamp(self.genesis.timestamp))
+                .then_some(EMPTY_WITHDRAWALS);
 
         Header {
             gas_limit: self.genesis.gas_limit,
@@ -722,7 +717,17 @@ mod tests {
                 ),
                 (
                     Head { number: 15050000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 0 },
+                    ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
+                ),
+                // First Shanghai block
+                (
+                    Head { number: 20000000, timestamp: 1681338455, ..Default::default() },
+                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
+                ),
+                // Future Shanghai block
+                (
+                    Head { number: 20000000, timestamp: 2000000000, ..Default::default() },
+                    ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 0 },
                 ),
             ],
         );

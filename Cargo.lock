@@ -144,11 +144,11 @@ checksum = "224afbd727c3d6e4b90103ece64b8d1b67fbb1973b1046c2281eed3f3803f800"
 
 [[package]]
 name = "aquamarine"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bf310f0dd77f453bc43ec61506ead8283ab49423686244e474d0cc16226400c"
+checksum = "759d98a5db12e9c9d98ef2b92f794ae5c7ded6ec18d21c3fa485c9c65bec237d"
 dependencies = [
- "itertools 0.9.0",
+ "itertools",
  "proc-macro-error",
  "proc-macro2 1.0.52",
  "quote 1.0.23",
@@ -197,28 +197,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa24f727524730b077666307f2734b4a1a1c57acb79193127dcc8914d5242dd7"
 dependencies = [
  "event-listener",
-]
-
-[[package]]
-name = "async-stream"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad445822218ce64be7a341abfb0b1ea43b5c23aa83902542a4542e78309d8e5e"
-dependencies = [
- "async-stream-impl",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-stream-impl"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4655ae1a7b0cdf149156f780c5bf3f1352bc53cbd9e0a361a7ef7b22947e965"
-dependencies = [
- "proc-macro2 1.0.52",
- "quote 1.0.23",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -1009,7 +987,7 @@ dependencies = [
  "clap 3.2.23",
  "criterion-plot",
  "futures",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "num-traits",
  "oorandom",
@@ -1030,7 +1008,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools 0.10.5",
+ "itertools",
 ]
 
 [[package]]
@@ -2975,15 +2953,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "284f18f85651fe11e8a991b2adb42cb078325c996ed026d994719efcfca1d54b"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
@@ -4126,7 +4095,7 @@ checksum = "59230a63c37f3e18569bdb90e4a89cbf5bf8b06fea0b84e65ea10cc4df47addd"
 dependencies = [
  "difflib",
  "float-cmp",
- "itertools 0.10.5",
+ "itertools",
  "normalize-line-endings",
  "predicates-core",
  "regex",
@@ -4578,7 +4547,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "proptest",
- "reth-consensus",
+ "reth-beacon-consensus",
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
@@ -4608,6 +4577,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-beacon-consensus"
+version = "0.1.0"
+dependencies = [
+ "reth-consensus-common",
+ "reth-interfaces",
+ "reth-primitives",
+]
+
+[[package]]
 name = "reth-codecs"
 version = "0.1.0"
 dependencies = [
@@ -4623,7 +4601,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-consensus"
+name = "reth-consensus-common"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
@@ -4631,7 +4609,6 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "tokio",
 ]
 
 [[package]]
@@ -4724,7 +4701,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-util",
- "itertools 0.10.5",
+ "itertools",
  "metrics",
  "pin-project",
  "rayon",
@@ -5064,7 +5041,7 @@ dependencies = [
  "auto_impl",
  "cita_trie",
  "hasher",
- "itertools 0.10.5",
+ "itertools",
  "parking_lot 0.12.1",
  "proptest",
  "reth-codecs",
@@ -5076,6 +5053,7 @@ dependencies = [
  "reth-tracing",
  "revm-primitives",
  "thiserror",
+ "tracing",
  "triehash",
 ]
 
@@ -5118,17 +5096,13 @@ dependencies = [
  "auto_impl",
  "bytes",
  "criterion",
- "enr 0.8.0",
  "ethereum-types",
  "ethnum",
  "hex-literal",
  "pprof",
- "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
  "revm-primitives",
- "rlp",
- "secp256k1",
  "smol_str",
 ]
 
@@ -5239,7 +5213,6 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
- "ethers-core",
  "jsonrpsee-types",
  "lru 0.9.0",
  "rand 0.8.5",
@@ -5271,15 +5244,11 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
- "reth-interfaces",
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
- "reth-staged-sync",
- "reth-stages",
- "reth-tasks",
  "reth-tracing",
  "secp256k1",
  "serde",
@@ -5288,8 +5257,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "tokio-stream",
- "tokio-test",
  "tracing",
  "walkdir",
 ]
@@ -5299,19 +5266,16 @@ name = "reth-stages"
 version = "0.1.0"
 dependencies = [
  "aquamarine",
- "arbitrary",
  "assert_matches",
  "async-trait",
  "criterion",
- "eyre",
  "futures-util",
- "itertools 0.10.5",
+ "itertools",
  "metrics",
  "num-traits",
  "paste",
  "pin-project",
  "pprof",
- "proptest",
  "rand 0.8.5",
  "rayon",
  "reth-codecs",
@@ -5324,8 +5288,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-rlp",
- "serde",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -5382,7 +5344,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -5392,7 +5354,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "derive_more",
  "enumn",
@@ -5403,7 +5365,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "k256 0.11.6",
  "num",
@@ -5419,7 +5381,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -6597,19 +6559,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util 0.7.7",
-]
-
-[[package]]
-name = "tokio-test"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53474327ae5e166530d17f2d956afcb4f8a004de581b3cae10f12006bc8163e3"
-dependencies = [
- "async-stream",
- "bytes",
- "futures-core",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]

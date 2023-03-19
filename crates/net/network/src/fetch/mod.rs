@@ -135,11 +135,7 @@ impl StateFetcher {
             return PollAction::NoRequests
         }
 
-        let peer_id = if let Some(peer_id) = self.next_peer() {
-            peer_id
-        } else {
-            return PollAction::NoPeersAvailable
-        };
+        let Some(peer_id) = self.next_peer() else { return PollAction::NoPeersAvailable };
 
         let request = self.queued_requests.pop_front().expect("not empty; qed");
         let request = self.prepare_block_request(peer_id, request);

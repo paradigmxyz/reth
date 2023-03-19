@@ -3,7 +3,7 @@ use crate::{
     p2p::error::{DownloadError, DownloadResult},
 };
 use futures::Stream;
-use reth_primitives::{SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, SealedHeader, H256};
 
 /// A downloader capable of fetching and yielding block headers.
 ///
@@ -48,6 +48,8 @@ pub enum SyncTarget {
     /// The benefit of this variant is, that this already provides the block number of the highest
     /// missing block.
     Gap(SealedHeader),
+    /// This represents a tip by block number
+    TipNum(u64),
 }
 
 // === impl SyncTarget ===
@@ -57,10 +59,11 @@ impl SyncTarget {
     ///
     /// This returns the hash if the target is [SyncTarget::Tip] or the `parent_hash` of the given
     /// header in [SyncTarget::Gap]
-    pub fn tip(&self) -> H256 {
+    pub fn tip(&self) -> BlockHashOrNumber {
         match self {
-            SyncTarget::Tip(tip) => *tip,
-            SyncTarget::Gap(gap) => gap.parent_hash,
+            SyncTarget::Tip(tip) => (*tip).into(),
+            SyncTarget::Gap(gap) => gap.parent_hash.into(),
+            SyncTarget::TipNum(num) => (*num).into(),
         }
     }
 }

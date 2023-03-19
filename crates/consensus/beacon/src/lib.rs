@@ -4,10 +4,7 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-//! Consensus algorithms for Ethereum.
+//! Beacon consensus implementation.
 
-/// Beacon consensus implementation.
-pub mod beacon;
-
-/// Collection of consensus validation methods.
-pub mod validation;
+mod beacon_consensus;
+pub use beacon_consensus::BeaconConsensus;

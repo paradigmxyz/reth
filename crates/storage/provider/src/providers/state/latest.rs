@@ -9,8 +9,8 @@ use reth_db::{
 };
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
-    keccak256, Account, Address, Bytecode, Bytes, StorageKey, StorageValue, H256, KECCAK_EMPTY,
-    U256,
+    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
+    KECCAK_EMPTY,
 };
 use std::marker::PhantomData;
 
@@ -38,8 +38,21 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for LatestStateProviderRef<'a, 'b, TX
 
 impl<'a, 'b, TX: DbTx<'a>> BlockHashProvider for LatestStateProviderRef<'a, 'b, TX> {
     /// Get block hash by number.
-    fn block_hash(&self, number: U256) -> Result<Option<H256>> {
-        self.db.get::<tables::CanonicalHeaders>(number.to::<u64>()).map_err(Into::into)
+    fn block_hash(&self, number: u64) -> Result<Option<H256>> {
+        self.db.get::<tables::CanonicalHeaders>(number).map_err(Into::into)
+    }
+
+    fn canonical_hashes_range(&self, start: BlockNumber, end: BlockNumber) -> Result<Vec<H256>> {
+        let range = start..end;
+        self.db
+            .cursor_read::<tables::CanonicalHeaders>()
+            .map(|mut cursor| {
+                cursor
+                    .walk_range(range)?
+                    .map(|result| result.map(|(_, hash)| hash).map_err(Into::into))
+                    .collect::<Result<Vec<_>>>()
+            })?
+            .map_err(Into::into)
     }
 }
 

@@ -29,6 +29,6 @@ pub fn to_reth_acc(revm_acc: &AccountInfo) -> Account {
     Account {
         balance: revm_acc.balance,
         nonce: revm_acc.nonce,
-        bytecode_hash: if code_hash == KECCAK_EMPTY { None } else { Some(code_hash) },
+        bytecode_hash: (code_hash != KECCAK_EMPTY).then_some(code_hash),
     }
 }

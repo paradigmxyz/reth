@@ -7,17 +7,27 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{
-    consensus::{Consensus, ForkchoiceState},
     p2p::headers::downloader::{HeaderDownloader, SyncTarget},
     provider::ProviderError,
 };
-use reth_primitives::{BlockNumber, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, SealedHeader, H256};
 use reth_provider::Transaction;
-use std::sync::Arc;
+use tokio::sync::watch;
 use tracing::*;
 
 /// The [`StageId`] of the headers downloader stage.
 pub const HEADERS: StageId = StageId("Headers");
+
+/// The header sync mode.
+#[derive(Debug)]
+pub enum HeaderSyncMode {
+    /// A sync mode in which the stage continuously requests the downloader for
+    /// next blocks.
+    Continuous,
+    /// A sync mode in which the stage polls the receiver for the next tip
+    /// to download from.
+    Tip(watch::Receiver<H256>),
+}
 
 /// The headers stage.
 ///
@@ -36,8 +46,8 @@ pub const HEADERS: StageId = StageId("Headers");
 pub struct HeaderStage<D: HeaderDownloader> {
     /// Strategy for downloading the headers
     downloader: D,
-    /// Consensus client implementation
-    consensus: Arc<dyn Consensus>,
+    /// The sync mode for the stage.
+    mode: HeaderSyncMode,
 }
 
 // === impl HeaderStage ===
@@ -47,8 +57,8 @@ where
     D: HeaderDownloader,
 {
     /// Create a new header stage
-    pub fn new(downloader: D, consensus: Arc<dyn Consensus>) -> Self {
-        Self { downloader, consensus }
+    pub fn new(downloader: D, mode: HeaderSyncMode) -> Self {
+        Self { downloader, mode }
     }
 
     fn is_stage_done<DB: Database>(
@@ -68,7 +78,7 @@ where
     ///
     /// See also [SyncTarget]
     async fn get_sync_gap<DB: Database>(
-        &self,
+        &mut self,
         tx: &Transaction<'_, DB>,
         stage_progress: u64,
     ) -> Result<SyncGap, StageError> {
@@ -104,21 +114,27 @@ where
         // reverse from there. Else, it should use whatever the forkchoice state reports.
         let target = match next_header {
             Some(header) if stage_progress + 1 != header.number => SyncTarget::Gap(header),
-            None => SyncTarget::Tip(self.next_fork_choice_state().await.head_block_hash),
+            None => self.next_sync_target(head_num).await,
             _ => return Err(StageError::StageProgress(stage_progress)),
         };
 
         Ok(SyncGap { local_head, target })
     }
 
-    /// Awaits the next [ForkchoiceState] message from [Consensus] with a non-zero block hash
-    async fn next_fork_choice_state(&self) -> ForkchoiceState {
-        let mut state_rcv = self.consensus.fork_choice_state();
-        loop {
-            let _ = state_rcv.changed().await;
-            let forkchoice = state_rcv.borrow();
-            if !forkchoice.head_block_hash.is_zero() {
-                return forkchoice.clone()
+    async fn next_sync_target(&mut self, head: BlockNumber) -> SyncTarget {
+        match self.mode {
+            HeaderSyncMode::Tip(ref mut rx) => {
+                loop {
+                    let _ = rx.changed().await; // TODO: remove this await?
+                    let tip = rx.borrow();
+                    if !tip.is_zero() {
+                        return SyncTarget::Tip(*tip)
+                    }
+                }
+            }
+            HeaderSyncMode::Continuous => {
+                tracing::trace!(target: "sync::stages::headers", head, "No next header found, using continuous sync strategy");
+                SyncTarget::TipNum(head + 1)
             }
         }
     }
@@ -250,7 +266,10 @@ impl SyncGap {
     /// Returns `true` if the gap from the head to the target was closed
     #[inline]
     pub fn is_closed(&self) -> bool {
-        self.local_head.hash() == self.target.tip()
+        match self.target.tip() {
+            BlockHashOrNumber::Hash(hash) => self.local_head.hash() == hash,
+            BlockHashOrNumber::Number(num) => self.local_head.number == num,
+        }
     }
 }
 
@@ -267,35 +286,20 @@ mod tests {
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
-        use crate::{
-            stages::headers::HeaderStage,
-            test_utils::{
-                ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestTransaction,
-                UnwindStageTestRunner,
-            },
-            ExecInput, ExecOutput, UnwindInput,
-        };
-        use reth_db::{
-            tables,
-            transaction::{DbTx, DbTxMut},
-        };
+        use super::*;
+        use crate::test_utils::{TestRunnerError, TestTransaction};
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
-        use reth_interfaces::{
-            consensus::ForkchoiceState,
-            p2p::headers::downloader::HeaderDownloader,
-            test_utils::{
-                generators::{random_header, random_header_range},
-                TestConsensus, TestHeaderDownloader, TestHeadersClient,
-            },
+        use reth_interfaces::test_utils::{
+            generators::random_header_range, TestConsensus, TestHeaderDownloader, TestHeadersClient,
         };
-        use reth_primitives::{BlockNumber, SealedHeader, U256};
+        use reth_primitives::U256;
         use std::sync::Arc;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
-            pub(crate) consensus: Arc<TestConsensus>,
             pub(crate) client: Arc<TestHeadersClient>,
+            channel: (watch::Sender<H256>, watch::Receiver<H256>),
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
             tx: TestTransaction,
         }
@@ -303,12 +307,16 @@ mod tests {
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
             fn default() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
-                let consensus = Arc::new(TestConsensus::default());
                 Self {
                     client: client.clone(),
-                    consensus: consensus.clone(),
+                    channel: watch::channel(H256::zero()),
                     downloader_factory: Box::new(move || {
-                        TestHeaderDownloader::new(client.clone(), consensus.clone(), 1000, 1000)
+                        TestHeaderDownloader::new(
+                            client.clone(),
+                            Arc::new(TestConsensus::default()),
+                            1000,
+                            1000,
+                        )
                     }),
                     tx: TestTransaction::default(),
                 }
@@ -324,7 +332,7 @@ mod tests {
 
             fn stage(&self) -> Self::S {
                 HeaderStage {
-                    consensus: self.consensus.clone(),
+                    mode: HeaderSyncMode::Tip(self.channel.1.clone()),
                     downloader: (*self.downloader_factory)(),
                 }
             }
@@ -395,12 +403,7 @@ mod tests {
                     self.tx.insert_headers(std::iter::once(&tip))?;
                     tip.hash()
                 };
-                self.consensus
-                    .notify_fork_choice_state(ForkchoiceState {
-                        head_block_hash: tip,
-                        ..Default::default()
-                    })
-                    .expect("Setting tip failed");
+                self.send_tip(tip);
                 Ok(())
             }
         }
@@ -414,14 +417,13 @@ mod tests {
         impl HeadersTestRunner<ReverseHeadersDownloader<TestHeadersClient>> {
             pub(crate) fn with_linear_downloader() -> Self {
                 let client = Arc::new(TestHeadersClient::default());
-                let consensus = Arc::new(TestConsensus::default());
                 Self {
                     client: client.clone(),
-                    consensus: consensus.clone(),
+                    channel: watch::channel(H256::zero()),
                     downloader_factory: Box::new(move || {
                         ReverseHeadersDownloaderBuilder::default()
                             .stream_batch_size(500)
-                            .build(client.clone(), consensus.clone())
+                            .build(client.clone(), Arc::new(TestConsensus::default()))
                     }),
                     tx: TestTransaction::default(),
                 }
@@ -438,6 +440,10 @@ mod tests {
                 self.tx.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.tx.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
                 Ok(())
+            }
+
+            pub(crate) fn send_tip(&self, tip: H256) {
+                self.channel.0.send(tip).expect("failed to send tip");
             }
         }
     }
@@ -460,13 +466,7 @@ mod tests {
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
-        runner
-            .consensus
-            .notify_fork_choice_state(ForkchoiceState {
-                head_block_hash: tip.hash(),
-                ..Default::default()
-            })
-            .expect("Setting tip failed");
+        runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { done: true, stage_progress }) if stage_progress == tip.number);
@@ -478,16 +478,10 @@ mod tests {
     async fn head_and_tip_lookup() {
         let runner = HeadersTestRunner::default();
         let tx = runner.tx().inner();
-        let stage = runner.stage();
+        let mut stage = runner.stage();
 
         let consensus_tip = H256::random();
-        runner
-            .consensus
-            .notify_fork_choice_state(ForkchoiceState {
-                head_block_hash: consensus_tip,
-                ..Default::default()
-            })
-            .expect("Setting tip failed");
+        runner.send_tip(consensus_tip);
 
         // Genesis
         let stage_progress = 0;
@@ -510,7 +504,7 @@ mod tests {
 
         let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
         assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), consensus_tip);
+        assert_eq!(gap.target.tip(), consensus_tip.into());
 
         // Checkpoint and gap
         tx.put::<tables::CanonicalHeaders>(gap_tip.number, gap_tip.hash())
@@ -520,7 +514,7 @@ mod tests {
 
         let gap = stage.get_sync_gap(&tx, stage_progress).await.unwrap();
         assert_eq!(gap.local_head, head);
-        assert_eq!(gap.target.tip(), gap_tip.parent_hash);
+        assert_eq!(gap.target.tip(), gap_tip.parent_hash.into());
 
         // Checkpoint and gap closed
         tx.put::<tables::CanonicalHeaders>(gap_fill.number, gap_fill.hash())
@@ -551,13 +545,7 @@ mod tests {
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
-        runner
-            .consensus
-            .notify_fork_choice_state(ForkchoiceState {
-                head_block_hash: tip.hash(),
-                ..Default::default()
-            })
-            .expect("Setting tip failed");
+        runner.send_tip(tip.hash());
 
         let result = rx.await.unwrap();
         assert_matches!(result, Ok(ExecOutput { done: false, stage_progress: progress }) if progress == stage_progress);
