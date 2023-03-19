@@ -34,6 +34,7 @@ tokio = { version = "1.21.2", features = ["sync"] }
 
 # mics
 aquamarine = "0.3.0"
+parking_lot = { version = "0.12", optional = true }
 
 triehash = "0.8"
 # See to replace hashers to simplify libraries
@@ -51,3 +52,6 @@ reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-primitives = { path = "../primitives", features = ["test-utils"] }
 reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
 parking_lot = "0.12"
+
+[features]
+test-utils = ["parking_lot"]
