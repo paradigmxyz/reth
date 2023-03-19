@@ -375,12 +375,11 @@ pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StageId, UnwindOutput};
+    use crate::{test_utils::TestStage, StageId, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
     use reth_interfaces::{consensus, provider::ProviderError, sync::NoopSyncStateUpdate};
     use tokio_stream::StreamExt;
-    use utils::TestStage;
 
     #[test]
     fn record_progress_calculates_outliers() {
@@ -651,60 +650,5 @@ mod tests {
                 number: 5
             })))
         );
-    }
-
-    mod utils {
-        use super::*;
-        use async_trait::async_trait;
-        use std::collections::VecDeque;
-
-        pub(crate) struct TestStage {
-            id: StageId,
-            exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-            unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
-        }
-
-        impl TestStage {
-            pub(crate) fn new(id: StageId) -> Self {
-                Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
-            }
-
-            pub(crate) fn add_exec(mut self, output: Result<ExecOutput, StageError>) -> Self {
-                self.exec_outputs.push_back(output);
-                self
-            }
-
-            pub(crate) fn add_unwind(mut self, output: Result<UnwindOutput, StageError>) -> Self {
-                self.unwind_outputs.push_back(output);
-                self
-            }
-        }
-
-        #[async_trait]
-        impl<DB: Database> Stage<DB> for TestStage {
-            fn id(&self) -> StageId {
-                self.id
-            }
-
-            async fn execute(
-                &mut self,
-                _: &mut Transaction<'_, DB>,
-                _input: ExecInput,
-            ) -> Result<ExecOutput, StageError> {
-                self.exec_outputs
-                    .pop_front()
-                    .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
-            }
-
-            async fn unwind(
-                &mut self,
-                _: &mut Transaction<'_, DB>,
-                _input: UnwindInput,
-            ) -> Result<UnwindOutput, StageError> {
-                self.unwind_outputs
-                    .pop_front()
-                    .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))
-            }
-        }
     }
 }
