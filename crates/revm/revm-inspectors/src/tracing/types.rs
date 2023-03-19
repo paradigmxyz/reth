@@ -99,6 +99,8 @@ pub(crate) struct CallTrace {
     /// The return data of the call if this was not a contract creation, otherwise it is the
     /// runtime bytecode of the created contract
     pub(crate) output: Bytes,
+    /// The return data of the last call, if any
+    pub(crate) last_call_return_value: Option<Bytes>,
     /// The gas cost of the call
     pub(crate) gas_used: u64,
     /// The status of the trace's call
@@ -121,6 +123,7 @@ impl Default for CallTrace {
             value: Default::default(),
             data: Default::default(),
             output: Default::default(),
+            last_call_return_value: None,
             gas_used: Default::default(),
             status: InstructionResult::Continue,
             call_context: Default::default(),
@@ -239,6 +242,8 @@ pub struct CallTraceStep {
     pub stack: Stack,
     /// Memory before step execution
     pub memory: Memory,
+    /// Size of memory
+    pub memory_size: usize,
     /// Remaining gas before step execution
     pub gas: u64,
     /// Gas refund counter before step execution
@@ -279,7 +284,9 @@ impl From<&CallTraceStep> for StructLog {
             refund_counter: (step.gas_refund_counter > 0).then_some(step.gas_refund_counter),
             stack: Some(step.stack.data().clone()),
             // Filled in `CallTraceArena::geth_trace` as a result of compounding all slot changes
+            return_data: None,
             storage: None,
+            memory_size: step.memory_size as u64,
         }
     }
 }

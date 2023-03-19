@@ -47,8 +47,13 @@ impl GethTraceBuilder {
             if opts.disable_stack.unwrap_or_default() {
                 log.stack = None;
             }
+
             if !opts.enable_memory.unwrap_or_default() {
                 log.memory = None;
+            }
+
+            if opts.enable_return_data.unwrap_or_default() {
+                log.return_data = trace_node.trace.last_call_return_value.clone().map(Into::into);
             }
 
             // Add step to geth trace
