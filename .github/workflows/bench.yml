@@ -15,9 +15,7 @@ concurrency:
 name: bench
 jobs:
   iai:
-    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
-    # See also <https://github.com/foundry-rs/foundry/issues/3827>
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Install Valgrind
         run: |
