@@ -141,10 +141,15 @@ impl Command {
         raise_fd_limit();
 
         let mut config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = %self.db, "Configuration loaded");
 
-        info!(target: "reth::cli", path = %self.db, "Opening database");
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.as_ref().join(self.chain.chain.to_string());
+
+        info!(target: "reth::cli", path = ?db_path, "Configuration loaded");
+
+        info!(target: "reth::cli", path = ?db_path, "Opening database");
+
+        let db = Arc::new(init_db(db_path)?);
         let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
         info!(target: "reth::cli", "Database opened");
 

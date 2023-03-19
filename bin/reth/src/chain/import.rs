@@ -79,10 +79,14 @@ impl ImportCommand {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
         let config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = %self.db, "Configuration loaded");
 
-        info!(target: "reth::cli", path = %self.db, "Opening database");
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.as_ref().join(self.chain.chain.to_string());
+
+        info!(target: "reth::cli", path = ?db_path, "Configuration loaded");
+
+        info!(target: "reth::cli", path = ?db_path, "Opening database");
+        let db = Arc::new(init_db(db_path)?);
         info!(target: "reth::cli", "Database opened");
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
