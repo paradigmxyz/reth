@@ -341,9 +341,9 @@ where
             tracing::error!(target: "rpc::engine_api", ?error, "Failed to update forkchoice state");
         }
 
-        if let Some(attr) = payload_attributes {
+        if let Some(_attr) = payload_attributes {
             #[cfg(feature = "optimism")]
-            if self.chain_spec.optimism.is_some() && attr.gas_limit.is_none() {
+            if self.chain_spec.optimism.is_some() && _attr.gas_limit.is_none() {
                 return Err(EngineApiError::MissingGasLimitInPayloadAttributes)
             }
 

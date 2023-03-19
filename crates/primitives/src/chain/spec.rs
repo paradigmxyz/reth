@@ -163,6 +163,7 @@ pub static OP_GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
         (Hardfork::ArrowGlacier, ForkCondition::Block(4061224)),
         (Hardfork::GrayGlacier, ForkCondition::Block(4061224)),
         (Hardfork::Bedrock, ForkCondition::Block(4061224)),
+        (Hardfork::Regolith, ForkCondition::Timestamp(1679079600)),
     ]),
     optimism: Some(OptimismConfig { eip_1559_elasticity: 10, eip_1559_denominator: 50 }),
 });
@@ -636,14 +637,16 @@ impl ChainSpecBuilder {
     /// Enable Bedrock at genesis
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
+        self = self.london_activated();
         self.hardforks.insert(Hardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
-    /// Enable Bedrock at genesis
+    /// Enable Regolith at genesis
     #[cfg(feature = "optimism")]
     pub fn regolith_activated(mut self) -> Self {
-        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(0));
+        self = self.bedrock_activated();
+        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Block(0));
         self
     }
 
@@ -963,6 +966,9 @@ mod tests {
         ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head, DEV, GOERLI, H256, MAINNET,
         SEPOLIA, U256,
     };
+    use bytes::BytesMut;
+    use ethers_core::types as EtherType;
+    use reth_rlp::Encodable;
 
     #[cfg(feature = "optimism")]
     use crate::OP_GOERLI;

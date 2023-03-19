@@ -582,11 +582,11 @@ impl PoolTransaction for PooledTransaction {
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
         match &self.transaction.transaction {
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_fee_per_gas),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => None,
         }
     }
 
@@ -595,11 +595,11 @@ impl PoolTransaction for PooledTransaction {
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match &self.transaction.transaction {
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => None,
             Transaction::Legacy(_) => None,
             Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(_) => None,
         }
     }
 
@@ -633,14 +633,6 @@ impl PoolTransaction for PooledTransaction {
 impl FromRecoveredTransaction for PooledTransaction {
     fn from_recovered_transaction(tx: TransactionSignedEcRecovered) -> Self {
         let (cost, effective_gas_price) = match &tx.transaction {
-            #[cfg(feature = "optimism")]
-            Transaction::Deposit(t) => {
-                // TODO: fix this gas price estimate
-                let gas_price = U256::from(0);
-                let cost = U256::from(gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
-                let effective_gas_price = 0u128;
-                (cost, effective_gas_price)
-            }
             Transaction::Legacy(t) => {
                 let cost = U256::from(t.gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
                 let effective_gas_price = t.gas_price;
@@ -655,6 +647,14 @@ impl FromRecoveredTransaction for PooledTransaction {
                 let cost =
                     U256::from(t.max_fee_per_gas) * U256::from(t.gas_limit) + U256::from(t.value);
                 let effective_gas_price = t.max_priority_fee_per_gas;
+                (cost, effective_gas_price)
+            }
+            #[cfg(feature = "optimism")]
+            Transaction::Deposit(t) => {
+                // TODO: fix this gas price estimate
+                let gas_price = U256::from(0);
+                let cost = U256::from(gas_price) * U256::from(t.gas_limit) + U256::from(t.value);
+                let effective_gas_price = 0u128;
                 (cost, effective_gas_price)
             }
         };

@@ -12,6 +12,10 @@ pub const EIP2930_TX_TYPE_ID: u8 = 1;
 /// Identifier for [TxEip1559](crate::TxEip1559) transaction.
 pub const EIP1559_TX_TYPE_ID: u8 = 2;
 
+/// Identifier for [TxDeposit](crate::TxDeposit) transaction.
+#[cfg(feature = "optimism")]
+pub(crate) const DEPOSIT_TX_TYPE_ID: u8 = 126;
+
 /// Transaction Type
 #[derive_arbitrary(compact)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
@@ -31,11 +35,11 @@ pub enum TxType {
 impl From<TxType> for u8 {
     fn from(value: TxType) -> Self {
         match value {
-            TxType::Legacy => 0,
-            TxType::EIP2930 => 1,
-            TxType::EIP1559 => 2,
+            TxType::Legacy => LEGACY_TX_TYPE_ID,
+            TxType::EIP2930 => EIP2930_TX_TYPE_ID,
+            TxType::EIP1559 => EIP1559_TX_TYPE_ID,
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => 126,
+            TxType::DEPOSIT => DEPOSIT_TX_TYPE_ID,
         }
     }
 }
@@ -52,11 +56,11 @@ impl Compact for TxType {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         match self {
-            TxType::Legacy => 0,
-            TxType::EIP2930 => 1,
-            TxType::EIP1559 => 2,
+            TxType::Legacy => LEGACY_TX_TYPE_ID as usize,
+            TxType::EIP2930 => EIP2930_TX_TYPE_ID as usize,
+            TxType::EIP1559 => EIP1559_TX_TYPE_ID as usize,
             #[cfg(feature = "optimism")]
-            TxType::DEPOSIT => 126,
+            TxType::DEPOSIT => DEPOSIT_TX_TYPE_ID as usize,
         }
     }
 
