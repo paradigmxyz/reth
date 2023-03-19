@@ -134,12 +134,28 @@ impl From<serde_json::Value> for GethTrace {
 /// See <https://geth.ethereum.org/docs/developers/evm-tracing/built-in-tracers>
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 pub enum GethDebugBuiltInTracerType {
+    /// The 4byteTracer collects the function selectors of every function executed in the lifetime
+    /// of a transaction, along with the size of the supplied call data. The result is a
+    /// [FourByteFrame] where the keys are SELECTOR-CALLDATASIZE and the values are number of
+    /// occurrences of this key.
     #[serde(rename = "4byteTracer")]
     FourByteTracer,
+    /// The callTracer tracks all the call frames executed during a transaction, including depth 0.
+    /// The result will be a nested list of call frames, resembling how EVM works. They form a tree
+    /// with the top-level call at root and sub-calls as children of the higher levels.
     #[serde(rename = "callTracer")]
     CallTracer,
+    /// The prestate tracer has two modes: prestate and diff. The prestate mode returns the
+    /// accounts necessary to execute a given transaction. diff mode returns the differences
+    /// between the transaction's pre and post-state (i.e. what changed because the transaction
+    /// happened). The prestateTracer defaults to prestate mode. It reexecutes the given
+    /// transaction and tracks every part of state that is touched. This is similar to the concept
+    /// of a stateless witness, the difference being this tracer doesn't return any cryptographic
+    /// proof, rather only the trie leaves. The result is an object. The keys are addresses of
+    /// accounts.
     #[serde(rename = "prestateTracer")]
     PreStateTracer,
+    /// This tracer is noop. It returns an empty object and is only meant for testing the setup.
     #[serde(rename = "noopTracer")]
     NoopTracer,
 }
@@ -150,6 +166,22 @@ pub enum GethDebugBuiltInTracerType {
 pub enum GethDebugBuiltInTracerConfig {
     CallTracer(CallConfig),
     PreStateTracer(PreStateConfig),
+}
+
+// === impl GethDebugBuiltInTracerConfig ===
+
+impl GethDebugBuiltInTracerConfig {
+    /// Returns true if the config matches the given tracer
+    pub fn matches_tracer(&self, tracer: &GethDebugBuiltInTracerType) -> bool {
+        matches!(
+            (self, tracer),
+            (GethDebugBuiltInTracerConfig::CallTracer(_), GethDebugBuiltInTracerType::CallTracer,) |
+                (
+                    GethDebugBuiltInTracerConfig::PreStateTracer(_),
+                    GethDebugBuiltInTracerType::PreStateTracer,
+                )
+        )
+    }
 }
 
 /// Available tracers
@@ -174,28 +206,95 @@ pub enum GethDebugTracerConfig {
     JsTracer(serde_json::Value),
 }
 
+// === impl GethDebugTracerConfig ===
+
+impl GethDebugTracerConfig {
+    /// Returns the [CallConfig] if it is a call config.
+    pub fn into_call_config(self) -> Option<CallConfig> {
+        match self {
+            GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::CallTracer(cfg)) => {
+                Some(cfg)
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns the [PreStateConfig] if it is a call config.
+    pub fn into_pre_state_config(self) -> Option<PreStateConfig> {
+        match self {
+            GethDebugTracerConfig::BuiltInTracer(GethDebugBuiltInTracerConfig::PreStateTracer(
+                cfg,
+            )) => Some(cfg),
+            _ => None,
+        }
+    }
+
+    /// Returns true if the config matches the given tracer
+    pub fn matches_tracer(&self, tracer: &GethDebugTracerType) -> bool {
+        match (self, tracer) {
+            (_, GethDebugTracerType::BuiltInTracer(tracer)) => self.matches_builtin_tracer(tracer),
+            (GethDebugTracerConfig::JsTracer(_), GethDebugTracerType::JsTracer(_)) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the config matches the given tracer
+    pub fn matches_builtin_tracer(&self, tracer: &GethDebugBuiltInTracerType) -> bool {
+        match (self, tracer) {
+            (GethDebugTracerConfig::BuiltInTracer(config), tracer) => config.matches_tracer(tracer),
+            (GethDebugTracerConfig::JsTracer(_), _) => false,
+        }
+    }
+}
+
 /// Bindings for additional `debug_traceTransaction` options
 ///
 /// See <https://geth.ethereum.org/docs/rpc/ns-debug#debug_tracetransaction>
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GethDebugTracingOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disable_storage: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disable_stack: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enable_memory: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enable_return_data: Option<bool>,
+    #[serde(default, flatten)]
+    pub config: GethDefaultTracingOptions,
+    /// The custom tracer to use.
+    ///
+    /// If `None` then the default structlog tracer is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracer: Option<GethDebugTracerType>,
     /// tracerConfig is slated for Geth v1.11.0
     /// See <https://github.com/ethereum/go-ethereum/issues/26513>
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracer_config: Option<GethDebugTracerConfig>,
+    /// A string of decimal integers that overrides the JavaScript-based tracing calls default
+    /// timeout of 5 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<String>,
+}
+
+/// Default tracing options for the struct looger
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GethDefaultTracingOptions {
+    /// enable memory capture
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_memory: Option<bool>,
+    /// disable stack capture
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_stack: Option<bool>,
+    /// disable storage capture
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_storage: Option<bool>,
+    /// enable return data capture
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_return_data: Option<bool>,
+    /// print output during capture end
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<bool>,
+    /// maximum length of output, but zero means unlimited
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    /// Chain overrides, can be used to execute a trace using future fork rules
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overrides: Option<serde_json::Value>,
 }
 
 /// Bindings for additional `debug_traceCall` options

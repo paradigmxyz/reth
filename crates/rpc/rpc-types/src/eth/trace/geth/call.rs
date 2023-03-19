@@ -39,6 +39,8 @@ pub struct CallLogFrame {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallConfig {
+    /// When set to true, this will only trace the primary (top-level) call and not any sub-calls.
+    /// It eliminates the additional processing for each call frame
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub only_top_call: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,7 +62,7 @@ mod tests {
     #[test]
     fn test_serialize_call_trace() {
         let mut opts = GethDebugTracingCallOptions::default();
-        opts.tracing_options.disable_storage = Some(false);
+        opts.tracing_options.config.disable_storage = Some(false);
         opts.tracing_options.tracer =
             Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::CallTracer));
         opts.tracing_options.tracer_config =
