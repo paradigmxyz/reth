@@ -125,6 +125,11 @@ impl ToRpcResultExt for RethResult<Option<Block>> {
     }
 }
 
+/// Constructs an invalid params JSON-RPC error.
+pub(crate) fn invalid_params_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error {
+    rpc_err(jsonrpsee::types::error::INVALID_PARAMS_CODE, msg, None)
+}
+
 /// Constructs an internal JSON-RPC error.
 pub(crate) fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::core::Error {
     rpc_err(jsonrpsee::types::error::INTERNAL_ERROR_CODE, msg, None)

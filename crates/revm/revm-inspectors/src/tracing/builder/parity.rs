@@ -1,4 +1,4 @@
-use crate::tracing::{types::CallTraceNode, TraceInspectorConfig};
+use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
 
 /// A type for creating parity style traces
@@ -7,12 +7,12 @@ pub struct ParityTraceBuilder {
     /// Recorded trace nodes
     nodes: Vec<CallTraceNode>,
     /// How the traces were recorded
-    _config: TraceInspectorConfig,
+    _config: TracingInspectorConfig,
 }
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TraceInspectorConfig) -> Self {
+    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
         Self { nodes, _config }
     }
 

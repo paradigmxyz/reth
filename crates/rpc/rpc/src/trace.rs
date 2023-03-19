@@ -9,7 +9,7 @@ use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
-    tracing::{TraceInspectorConfig, TracingInspector},
+    tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
@@ -82,7 +82,7 @@ where
             let tx = tx_env_with_recovered(&tx);
             let env = Env { cfg, block, tx };
             let db = SubState::new(State::new(state));
-            let mut inspector = TracingInspector::new(TraceInspectorConfig::default_parity());
+            let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
 
             inspect(db, env, &mut inspector)?;
 
