@@ -631,73 +631,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
+    use crate::test_utils::TestExecutorFactory;
     use reth_db::{
         mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
         transaction::DbTxMut,
     };
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpec, ChainSpecBuilder, H256, MAINNET};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData, BlockExecutor,
-        StateProvider,
+        insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData,
     };
     use std::{collections::HashSet, sync::Arc};
 
-    #[derive(Clone, Debug)]
-    struct TestFactory {
-        exec_result: Arc<Mutex<Vec<PostState>>>,
-        chain_spec: Arc<ChainSpec>,
-    }
-
-    impl TestFactory {
-        fn new(chain_spec: Arc<ChainSpec>) -> Self {
-            Self { exec_result: Arc::new(Mutex::new(Vec::new())), chain_spec }
-        }
-
-        fn extend(&self, exec_res: Vec<PostState>) {
-            self.exec_result.lock().extend(exec_res.into_iter());
-        }
-    }
-
-    struct TestExecutor(Option<PostState>);
-
-    impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
-        fn execute(
-            &mut self,
-            _block: &reth_primitives::Block,
-            _total_difficulty: reth_primitives::U256,
-            _senders: Option<Vec<reth_primitives::Address>>,
-        ) -> Result<PostState, ExecError> {
-            self.0.clone().ok_or(ExecError::VerificationFailed)
-        }
-
-        fn execute_and_verify_receipt(
-            &mut self,
-            _block: &reth_primitives::Block,
-            _total_difficulty: reth_primitives::U256,
-            _senders: Option<Vec<reth_primitives::Address>>,
-        ) -> Result<PostState, ExecError> {
-            self.0.clone().ok_or(ExecError::VerificationFailed)
-        }
-    }
-
-    impl ExecutorFactory for TestFactory {
-        type Executor<T: StateProvider> = TestExecutor;
-
-        fn with_sp<SP: StateProvider>(&self, _sp: SP) -> Self::Executor<SP> {
-            let exec_res = self.exec_result.lock().pop();
-            TestExecutor(exec_res)
-        }
-
-        fn chain_spec(&self) -> &ChainSpec {
-            self.chain_spec.as_ref()
-        }
-    }
-
     fn setup_externals(
         exec_res: Vec<PostState>,
-    ) -> TreeExternals<Arc<Env<WriteMap>>, Arc<TestConsensus>, TestFactory> {
+    ) -> TreeExternals<Arc<Env<WriteMap>>, Arc<TestConsensus>, TestExecutorFactory> {
         let db = create_test_rw_db();
         let consensus = Arc::new(TestConsensus::default());
         let chain_spec = Arc::new(
@@ -707,7 +655,7 @@ mod tests {
                 .shanghai_activated()
                 .build(),
         );
-        let executor_factory = TestFactory::new(chain_spec.clone());
+        let executor_factory = TestExecutorFactory::new(chain_spec.clone());
         executor_factory.extend(exec_res);
 
         TreeExternals::new(db, consensus, executor_factory, chain_spec)
