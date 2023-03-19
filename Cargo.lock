@@ -5101,11 +5101,9 @@ dependencies = [
  "ethnum",
  "hex-literal",
  "pprof",
- "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
  "revm-primitives",
- "secp256k1",
  "smol_str",
 ]
 

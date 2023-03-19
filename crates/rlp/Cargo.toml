@@ -26,10 +26,6 @@ reth-rlp = { path = ".", package = "reth-rlp", features = [
 ] }
 criterion = "0.4.0"
 hex-literal = "0.3"
-rand = "0.8"
-secp256k1 = { version = "0.26.0", features = [
-    "rand-std",
-] }
 pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
