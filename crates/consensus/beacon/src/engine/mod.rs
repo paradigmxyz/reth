@@ -8,7 +8,7 @@ use reth_interfaces::{
 use reth_primitives::{BlockHash, SealedBlock, H256};
 use reth_provider::ExecutorFactory;
 use reth_rpc_types::engine::PayloadStatusEnum;
-use reth_stages::{Pipeline, PipelineError};
+use reth_stages::Pipeline;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -241,7 +241,7 @@ mod tests {
     };
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_primitives::{ChainSpecBuilder, H256, MAINNET};
-    use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
     use std::{collections::VecDeque, time::Duration};
     use tokio::sync::{
         mpsc::{unbounded_channel, UnboundedSender},

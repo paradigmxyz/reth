@@ -12,7 +12,9 @@ use reth_stages::{Pipeline, PipelineFut};
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 pub enum PipelineState<DB: Database, U: SyncStateUpdater> {
+    /// Pipeline is idle.
     Idle(Pipeline<DB, U>),
+    /// Pipeline is running.
     Running(PipelineFut<DB, U>),
 }
 
