@@ -1,11 +1,11 @@
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     mdbx::{Env, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, ChainSpec, H256};
+use reth_primitives::{keccak256, Account, Bytecode, ChainSpec, StorageEntry, H256};
 use std::{path::Path, sync::Arc};
 use tracing::debug;
 
@@ -60,17 +60,39 @@ pub fn init_genesis<DB: Database>(
     debug!("Writing genesis block.");
     let tx = db.tx_mut()?;
 
+    let mut account_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
+    let mut storage_cursor = tx.cursor_write::<tables::PlainStorageState>()?;
+    let mut bytecode_cursor = tx.cursor_write::<tables::Bytecodes>()?;
+
     // Insert account state
     for (address, account) in &genesis.alloc {
-        tx.put::<tables::PlainAccountState>(
+        let mut bytecode_hash = None;
+        // insert bytecode hash
+        if let Some(code) = &account.code {
+            let hash = keccak256(code.as_ref());
+            bytecode_cursor.upsert(hash, Bytecode::new_raw_with_hash(code.0.clone(), hash))?;
+            bytecode_hash = Some(hash);
+        }
+        // insert plain account.
+        account_cursor.upsert(
             *address,
             Account {
                 nonce: account.nonce.unwrap_or_default(),
                 balance: account.balance,
-                bytecode_hash: None,
+                bytecode_hash,
             },
         )?;
+        // insert plain storages
+        if let Some(storage) = &account.storage {
+            for (&key, &value) in storage {
+                storage_cursor.upsert(*address, StorageEntry { key, value: value.into() })?
+            }
+        }
     }
+    // Drop all cursor so we can commit the changes at the end of the fn.
+    drop(account_cursor);
+    drop(storage_cursor);
+    drop(bytecode_cursor);
 
     // Insert header
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
