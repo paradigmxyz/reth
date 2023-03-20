@@ -62,7 +62,7 @@ jobs:
     strategy:
       matrix:
         experimental: [true]
-        sim: [issues/go-ethereum-14359, ethereum/rpc-compat, ethereum/rpc, smoke/genesis, smoke/network]
+        sim: [issues/go-ethereum-14359, ethereum/rpc-compat, ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
         include:
           - sim: devp2p
             limit: discv4
@@ -135,56 +135,3 @@ jobs:
         if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/reth/client-*.log
-
-  ethereum-sync:
-    continue-on-error: ${{ matrix.experimental }}
-    strategy:
-      matrix:
-        experimental: [true]
-      fail-fast: false
-    needs: prepare
-    name: ethereum/sync
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: artifacts
-          path: /tmp
-
-      - name: Load Docker image
-        run: |
-          docker load --input /tmp/reth_image.tar
-          docker image ls -a
-      - name: Move hive binary
-        run: |
-          mv /tmp/hive /usr/local/bin
-          chmod +x /usr/local/bin/hive
-
-      # TODO: replace when we are not using a fork
-      # might not be applicable here due to the ethereum-sync-tip patch
-      - name: Checkout hive tests
-        uses: actions/checkout@v3
-        with:
-          repository: paradigmxyz/hive
-          ref: ethereum-sync-tip
-          path: hivetests
-
-      - name: Run ethereum/sync simulator
-        env:
-          CONTINUOUS: true
-        run: |
-          cd hivetests
-          hive --sim ethereum/sync --client reth
-
-      - name: Print simulator output
-        if: ${{ failure() }}
-        run: |
-          cat hivetests/workspace/logs/*simulator*.log
-
-      - name: Print reth client logs
-        if: ${{ failure() }}
-        run: |
-          cat hivetests/workspace/logs/reth/client-*.log
-
