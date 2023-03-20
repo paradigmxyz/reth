@@ -4,7 +4,7 @@ use crate::{
         revm_utils::inspect,
         EthTransactions,
     },
-    result::internal_rpc_err,
+    result::{internal_rpc_err, ToRpcResult},
     EthApiSpec,
 };
 use async_trait::async_trait;
@@ -132,11 +132,12 @@ where
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let header = match block_id {
-            // TODO: Return proper error
-            BlockId::Hash(hash) => self.client.header(&hash.into()).unwrap(),
+            BlockId::Hash(hash) => self.client.header(&hash.into()).to_rpc_result()?,
             BlockId::Number(number_or_tag) => {
-                // TODO: Return proper error
-                let number = self.client.convert_block_number(number_or_tag).unwrap().unwrap();
+                let number =
+                    self.client.convert_block_number(number_or_tag).to_rpc_result()?.ok_or(
+                        jsonrpsee::core::Error::Custom("Pending block not supported".to_string()),
+                    )?;
                 self.client.header_by_number(number).unwrap()
             }
         };
