@@ -46,9 +46,12 @@ pub enum TrieError {
     UnexpectedCheckpoint,
 }
 
+type AccountsTrieCursor<'tx, TX> =
+    Arc<Mutex<<TX as DbTxMutGAT<'tx>>::CursorMut<tables::AccountsTrie>>>;
+
 /// Database wrapper implementing HashDB trait, with a read-write transaction.
-pub struct HashDatabaseMut<'tx, TX> {
-    tx: &'tx TX,
+pub struct HashDatabaseMut<'tx, TX: DbTxMutGAT<'tx>> {
+    accounts_trie_cursor: AccountsTrieCursor<'tx, TX>,
 }
 
 impl<'tx, 'db, TX> cita_trie::DB for HashDatabaseMut<'tx, TX>
@@ -58,7 +61,7 @@ where
     type Error = TrieError;
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-        Ok(self.tx.get::<tables::AccountsTrie>(H256::from_slice(key))?)
+        Ok(self.accounts_trie_cursor.lock().seek_exact(H256::from_slice(key))?.map(|(_, v)| v))
     }
 
     fn contains(&self, key: &[u8]) -> Result<bool, Self::Error> {
@@ -71,7 +74,7 @@ where
 
     // Insert a batch of data into the cache.
     fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
-        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        let mut cursor = self.accounts_trie_cursor.lock();
         for (key, value) in keys.into_iter().zip(values.into_iter()) {
             cursor.upsert(H256::from_slice(key.as_slice()), value)?;
         }
@@ -79,7 +82,7 @@ where
     }
 
     fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
-        let mut cursor = self.tx.cursor_write::<tables::AccountsTrie>()?;
+        let mut cursor = self.accounts_trie_cursor.lock();
         for key in keys {
             if cursor.seek_exact(H256::from_slice(key.as_slice()))?.is_some() {
                 cursor.delete_current()?;
@@ -103,20 +106,26 @@ where
 {
     /// Instantiates a new Database for the accounts trie, with an empty root
     pub fn new(tx: &'tx TX) -> Result<Self, TrieError> {
+        let mut accounts_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+
         let root = EMPTY_ROOT;
-        if tx.get::<tables::AccountsTrie>(root)?.is_none() {
-            tx.put::<tables::AccountsTrie>(root, [EMPTY_STRING_CODE].to_vec())?;
+        if accounts_trie_cursor.seek_exact(root)?.is_none() {
+            accounts_trie_cursor.upsert(root, [EMPTY_STRING_CODE].to_vec())?;
         }
-        Ok(Self { tx })
+
+        Ok(Self { accounts_trie_cursor: Arc::new(Mutex::new(accounts_trie_cursor)) })
     }
 
     /// Instantiates a new Database for the accounts trie, with an existing root
     pub fn from_root(tx: &'tx TX, root: H256) -> Result<Self, TrieError> {
+        let mut accounts_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+
         if root == EMPTY_ROOT {
             return Self::new(tx)
         }
-        tx.get::<tables::AccountsTrie>(root)?.ok_or(TrieError::MissingAccountRoot(root))?;
-        Ok(Self { tx })
+        accounts_trie_cursor.seek_exact(root)?.ok_or(TrieError::MissingAccountRoot(root))?;
+
+        Ok(Self { accounts_trie_cursor: Arc::new(Mutex::new(accounts_trie_cursor)) })
     }
 }
 
