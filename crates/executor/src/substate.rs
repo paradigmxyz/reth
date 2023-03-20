@@ -69,14 +69,12 @@ impl<'a, SP: StateProvider> StateProvider for PostStateProvider<'a, SP> {
         storage_key: reth_primitives::StorageKey,
     ) -> Result<Option<reth_primitives::StorageValue>> {
         if let Some(storage) = self.state.account_storage(&account) {
-            if storage.wiped {
-                return Ok(Some(U256::ZERO))
-            }
-
             if let Some(value) =
                 storage.storage.get(&U256::from_be_bytes(storage_key.to_fixed_bytes()))
             {
                 return Ok(Some(*value))
+            } else if storage.wiped {
+                return Ok(Some(U256::ZERO))
             }
         }
 

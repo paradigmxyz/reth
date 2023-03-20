@@ -527,7 +527,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The amount of gas processed by the EVM per second.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
+      "description": "The amount of gas processed by the execution stage in millions per second.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -570,14 +570,10 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
           },
-          "unit": "si: Gas/s"
+          "unit": "Mgas/s"
         },
         "overrides": []
       },
@@ -607,13 +603,13 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_evm_gas_total[$__rate_interval])",
+          "expr": "rate(reth_sync_execution_mgas_executed_total[$__rate_interval])",
           "legendFormat": "Gas/s",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Execution stage",
+      "title": "Gas processed",
       "type": "timeseries"
     },
     {
@@ -1733,6 +1729,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24k",
-  "version": 43,
+  "version": 2,
   "weekStart": ""
 }

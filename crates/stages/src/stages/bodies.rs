@@ -44,6 +44,7 @@ pub const BODIES: StageId = StageId("Bodies");
 /// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
 /// - [`BlockBodies`][reth_db::tables::BlockBodies]
 /// - [`Transactions`][reth_db::tables::Transactions]
+/// - [`TransactionBlock`][reth_db::tables::TransactionBlock]
 /// - [`BlockTransitionIndex`][reth_db::tables::BlockTransitionIndex]
 /// - [`TxTransitionIndex`][reth_db::tables::TxTransitionIndex]
 ///
@@ -90,6 +91,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Cursors used to write bodies, ommers and transactions
         let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
@@ -117,13 +119,16 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             let mut has_withdrawals = false;
             match response {
                 BlockResponse::Full(block) => {
-                    body_cursor.append(
-                        block_number,
-                        StoredBlockBody {
-                            start_tx_id: current_tx_id,
-                            tx_count: block.body.len() as u64,
-                        },
-                    )?;
+                    let body = StoredBlockBody {
+                        start_tx_id: current_tx_id,
+                        tx_count: block.body.len() as u64,
+                    };
+                    body_cursor.append(block_number, body.clone())?;
+
+                    // write transaction block index
+                    if !body.is_empty() {
+                        tx_block_cursor.append(body.last_tx_index(), block.number)?;
+                    }
 
                     // Write transactions
                     for transaction in block.body {
@@ -208,6 +213,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Cursors to unwind transitions
         let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
         let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
+        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
 
         let mut rev_walker = body_cursor.walk_back(None)?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
@@ -228,6 +234,11 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // Delete the block transition if any
             if block_transition_cursor.seek_exact(number)?.is_some() {
                 block_transition_cursor.delete_current()?;
+            }
+
+            // Delete all transaction to block values.
+            if !body.is_empty() && tx_block_cursor.seek_exact(body.last_tx_index())?.is_some() {
+                tx_block_cursor.delete_current()?;
             }
 
             // Delete all transactions that belong to this block
@@ -555,6 +566,12 @@ mod tests {
                             progress.number,
                             block_transition_id,
                         )?;
+                        if body.tx_count != 0 {
+                            tx.put::<tables::TransactionBlock>(
+                                body.first_tx_index(),
+                                progress.number,
+                            )?;
+                        }
                         tx.put::<tables::BlockBodies>(progress.number, body)?;
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
@@ -605,6 +622,10 @@ mod tests {
                         last_tx_id,
                         |key| key,
                     )?;
+                    self.tx.ensure_no_entry_above::<tables::TransactionBlock, _>(
+                        last_tx_id,
+                        |key| key,
+                    )?;
                 }
                 Ok(())
             }
@@ -640,6 +661,7 @@ mod tests {
                     let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let mut tx_transition_cursor = tx.cursor_read::<tables::TxTransitionIndex>()?;
+                    let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
                         Some((key, _)) => key,
@@ -673,6 +695,13 @@ mod tests {
                             assert!(stored_ommers.is_none(), "Unexpected ommers entry");
                         } else {
                             assert!(stored_ommers.is_some(), "Missing ommers entry");
+                        }
+
+                        let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_index())?.map(|(_,b)| b);
+                        if body.tx_count == 0 {
+                            assert_ne!(tx_block_id,Some(number));
+                        } else {
+                            assert_eq!(tx_block_id, Some(number));
                         }
 
                         for tx_id in body.tx_id_range() {

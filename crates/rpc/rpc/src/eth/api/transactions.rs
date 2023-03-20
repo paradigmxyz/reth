@@ -1,6 +1,9 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::{
+        error::{EthApiError, EthResult},
+        utils::recover_raw_transaction,
+    },
     EthApi,
 };
 use async_trait::async_trait;
@@ -224,16 +227,7 @@ where
     ///
     /// Returns the hash of the transaction.
     pub(crate) async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
-        let mut data = tx.as_ref();
-        if data.is_empty() {
-            return Err(EthApiError::EmptyRawTransactionData)
-        }
-
-        let transaction = TransactionSigned::decode(&mut data)
-            .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
-
-        let recovered =
-            transaction.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+        let recovered = recover_raw_transaction(tx)?;
 
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
 

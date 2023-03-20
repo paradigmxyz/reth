@@ -1,7 +1,7 @@
 use crate::{
-    db::DbTool,
     dirs::{DbPath, PlatformPath},
     dump_stage::setup,
+    utils::DbTool,
 };
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
@@ -72,11 +72,9 @@ async fn unwind_and_copy<DB: Database>(
     MerkleStage::default_unwind().unwind(&mut unwind_tx, unwind).await?;
 
     // Bring Plainstate to TO (hashing stage execution requires it)
-    let mut exec_stage = ExecutionStage::new_default_threshold(reth_executor::Factory::new(
-        Arc::new(MAINNET.clone()),
-    ));
+    let mut exec_stage =
+        ExecutionStage::new(reth_executor::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
 
-    exec_stage.commit_threshold = u64::MAX;
     exec_stage
         .unwind(
             &mut unwind_tx,

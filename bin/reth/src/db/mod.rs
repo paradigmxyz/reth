@@ -1,20 +1,14 @@
 //! Database debugging tool
-use crate::dirs::{DbPath, PlatformPath};
+use crate::{
+    dirs::{DbPath, PlatformPath},
+    utils::DbTool,
+};
 use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
-use eyre::{Result, WrapErr};
+use eyre::WrapErr;
 use human_bytes::human_bytes;
-use reth_db::{
-    cursor::{DbCursorRO, Walker},
-    database::Database,
-    table::Table,
-    tables,
-    transaction::DbTx,
-};
-use reth_interfaces::test_utils::generators::random_block_range;
-use reth_provider::insert_canonical_block;
-use std::collections::BTreeMap;
-use tracing::{error, info};
+use reth_db::{database::Database, tables};
+use tracing::error;
 
 /// DB List TUI
 mod tui;
@@ -186,58 +180,6 @@ impl Command {
             }
         }
 
-        Ok(())
-    }
-}
-
-/// Wrapper over DB that implements many useful DB queries.
-pub(crate) struct DbTool<'a, DB: Database> {
-    pub(crate) db: &'a DB,
-}
-
-impl<'a, DB: Database> DbTool<'a, DB> {
-    /// Takes a DB where the tables have already been created.
-    pub(crate) fn new(db: &'a DB) -> eyre::Result<Self> {
-        Ok(Self { db })
-    }
-
-    /// Seeds the database with some random data, only used for testing
-    fn seed(&mut self, len: u64) -> Result<()> {
-        info!(target: "reth::cli", "Generating random block range from 0 to {len}");
-        let chain = random_block_range(0..len, Default::default(), 0..64);
-
-        self.db.update(|tx| {
-            chain.into_iter().try_for_each(|block| {
-                insert_canonical_block(tx, block, None, true)?;
-                Ok::<_, eyre::Error>(())
-            })
-        })??;
-
-        info!(target: "reth::cli", "Database seeded with {len} blocks");
-        Ok(())
-    }
-
-    /// Grabs the contents of the table within a certain index range and places the
-    /// entries into a [`HashMap`][std::collections::HashMap].
-    fn list<T: Table>(&mut self, start: usize, len: usize) -> Result<BTreeMap<T::Key, T::Value>> {
-        let data = self.db.view(|tx| {
-            let mut cursor = tx.cursor_read::<T>().expect("Was not able to obtain a cursor.");
-
-            // TODO: Upstream this in the DB trait.
-            let start_walker = cursor.current().transpose();
-            let walker = Walker::new(&mut cursor, start_walker);
-
-            walker.skip(start).take(len).collect::<Vec<_>>()
-        })?;
-
-        data.into_iter()
-            .collect::<Result<BTreeMap<T::Key, T::Value>, _>>()
-            .map_err(|e| eyre::eyre!(e))
-    }
-
-    fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
-        info!(target: "reth::cli", "Dropping db at {}", path);
-        std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }
 }

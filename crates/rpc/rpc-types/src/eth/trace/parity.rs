@@ -24,20 +24,31 @@ impl TraceResult {
     }
 }
 
+/// Different Trace diagnostic targets.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TraceType {
+    /// Default trace
     Trace,
+    /// Provides a full trace of the VM’s state throughout the execution of the transaction,
+    /// including for any subcalls.
     VmTrace,
+    /// Provides information detailing all altered portions of the Ethereum state made due to the
+    /// execution of the transaction.
     StateDiff,
 }
 
+/// The Outcome of a traced transaction with optional settings
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceResults {
+    /// Output of the trace
     pub output: Bytes,
+    /// Enabled if [TraceType::Trace] is provided
     pub trace: Option<Vec<TransactionTrace>>,
+    /// Enabled if [TraceType::VmTrace] is provided
     pub vm_trace: Option<VmTrace>,
+    /// Enabled if [TraceType::StateDiff] is provided
     pub state_diff: Option<StateDiff>,
 }
 
