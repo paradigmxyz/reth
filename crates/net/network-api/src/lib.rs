@@ -40,6 +40,9 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Returns the chain id
     fn chain_id(&self) -> u64;
+
+    /// Returns `true` if the network is undergoing sync.
+    fn is_syncing(&self) -> bool;
 }
 
 /// Provides general purpose information about Peers in the network.

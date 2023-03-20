@@ -39,7 +39,7 @@ where
 
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
-        Err(internal_rpc_err("unimplemented"))
+        EthApiSpec::sync_status(self).to_rpc_result()
     }
 
     /// Handler for: `eth_coinbase`

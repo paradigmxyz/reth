@@ -35,6 +35,10 @@ impl NetworkInfo for NoopNetwork {
     fn chain_id(&self) -> u64 {
         Mainnet.into()
     }
+
+    fn is_syncing(&self) -> bool {
+        false
+    }
 }
 
 impl PeersInfo for NoopNetwork {
