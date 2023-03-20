@@ -15,12 +15,15 @@ use std::collections::BTreeMap;
 ///
 /// # Wiped Storage
 ///
-/// The field `wiped` denotes whether any of the values contained in storage are valid or not; if
-/// `wiped` is `true`, the storage should be considered empty.
+/// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
+/// not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Storage {
     /// Whether the storage was wiped or not.
-    pub was_wiped: bool,
+    pub wiped: bool,
     /// The storage slots.
     pub storage: BTreeMap<U256, U256>,
 }
@@ -132,9 +135,11 @@ impl Change {
 ///
 /// # Wiped Storage
 ///
-/// The [Storage] type has a field, `wiped`, which denotes whether any of the values contained
-/// in storage are valid or not; if `wiped` is `true`, the storage for the account should be
-/// considered empty.
+/// The [Storage] type has a field, `wiped` which denotes whether the pre-existing storage in the
+/// database should be cleared or not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 ///
 /// # Transitions
 ///
@@ -411,7 +416,7 @@ impl PostState {
             }
             Change::StorageWiped { address, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.was_wiped = true;
+                storage.wiped = true;
                 storage.storage.clear();
             }
         }
@@ -439,7 +444,7 @@ impl PostState {
             }
             Change::StorageWiped { address, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.was_wiped = false;
+                storage.wiped = false;
             }
         }
     }
@@ -527,7 +532,7 @@ impl PostState {
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
             // If the storage was wiped, remove all previous entries from the database.
-            if storage.was_wiped {
+            if storage.wiped {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
@@ -843,10 +848,7 @@ mod tests {
 
         // All the storage of account A has to be deleted in the database (wiped)
         assert!(
-            state
-                .account_storage(&address_a)
-                .expect("Account A should have some storage")
-                .was_wiped,
+            state.account_storage(&address_a).expect("Account A should have some storage").wiped,
             "The wiped flag should be set to discard all pre-existing storage from the database"
         );
         // Then, we must ensure that *only* the storage from the last transition will be written
