@@ -168,11 +168,7 @@ where
         let tx = self.eth_api.transaction_by_hash(hash).await?;
 
         let mut res = Vec::new();
-        if let Some(tx) = tx {
-            let tx = match tx {
-                TransactionSource::Pool(tx) => tx,
-                TransactionSource::Database { transaction, .. } => transaction,
-            };
+        if let Some(tx) = tx.map(TransactionSource::into_recovered) {
             tx.encode(&mut res);
         }
 
