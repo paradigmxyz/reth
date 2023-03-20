@@ -57,7 +57,7 @@ pub async fn get_single_header(
 }
 
 /// Wrapper over DB that implements many useful DB queries.
-pub(crate) struct DbTool<'a, DB: Database> {
+pub struct DbTool<'a, DB: Database> {
     pub(crate) db: &'a DB,
 }
 
