@@ -2,7 +2,7 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         revm_utils::inspect,
-        EthTransactions,
+        EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
     EthApiSpec,
@@ -151,14 +151,32 @@ where
     }
 
     /// Handler for `debug_getRawBlock`
-    async fn raw_block(&self, _block_id: BlockId) -> RpcResult<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        let block = self.client.block(block_id).to_rpc_result()?;
+
+        let mut res = Vec::new();
+        if let Some(block) = block {
+            block.encode(&mut res);
+        }
+
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawTransaction`
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, _hash: H256) -> RpcResult<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn raw_transaction(&self, hash: H256) -> RpcResult<Bytes> {
+        let tx = self.eth_api.transaction_by_hash(hash).await?;
+
+        let mut res = Vec::new();
+        if let Some(tx) = tx {
+            let tx = match tx {
+                TransactionSource::Pool(tx) => tx,
+                TransactionSource::Database { transaction, .. } => transaction,
+            };
+            tx.encode(&mut res);
+        }
+
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawReceipts`
