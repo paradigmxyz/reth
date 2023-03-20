@@ -93,11 +93,6 @@ impl Command {
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
 
-        if let Some(listen_addr) = self.metrics {
-            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::initialize(listen_addr)?;
-        }
-
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
@@ -110,6 +105,11 @@ impl Command {
 
         let db = Arc::new(init_db(&self.db)?);
         let mut tx = Transaction::new(db.as_ref())?;
+
+        if let Some(listen_addr) = self.metrics {
+            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
+            prometheus_exporter::initialize_with_db_metrics(listen_addr, Arc::clone(&db)).await?;
+        }
 
         let num_blocks = self.to - self.from + 1;
 
