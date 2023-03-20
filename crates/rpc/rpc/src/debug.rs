@@ -138,7 +138,7 @@ where
                     self.client.convert_block_number(number_or_tag).to_rpc_result()?.ok_or(
                         jsonrpsee::core::Error::Custom("Pending block not supported".to_string()),
                     )?;
-                self.client.header_by_number(number).unwrap()
+                self.client.header_by_number(number).to_rpc_result()?
             }
         };
 
