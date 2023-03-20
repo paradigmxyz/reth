@@ -7,9 +7,9 @@ use crate::eth::{cache::EthStateCache, signer::EthSigner};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U64};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rpc_types::FeeHistoryCache;
+use reth_rpc_types::{FeeHistoryCache, SyncInfo, SyncStatus};
 use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc};
 
@@ -41,6 +41,12 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 
     /// Returns a list of addresses owned by client.
     fn accounts(&self) -> Vec<Address>;
+
+    /// Returns `true` if the network is undergoing sync.
+    fn is_syncing(&self) -> bool;
+
+    /// Returns the [SyncStatus] of the network
+    fn sync_status(&self) -> Result<SyncStatus>;
 }
 
 /// `Eth` API implementation.
@@ -192,6 +198,29 @@ where
 
     fn accounts(&self) -> Vec<Address> {
         self.inner.signers.iter().flat_map(|s| s.accounts()).collect()
+    }
+
+    fn is_syncing(&self) -> bool {
+        self.network().is_syncing()
+    }
+
+    /// Returns the [SyncStatus] of the network
+    fn sync_status(&self) -> Result<SyncStatus> {
+        let status = if self.is_syncing() {
+            let current_block = U256::from(
+                self.client().chain_info().map(|info| info.best_number).unwrap_or_default(),
+            );
+            SyncStatus::Info(SyncInfo {
+                starting_block: U256::from(0),
+                current_block,
+                highest_block: current_block,
+                warp_chunks_amount: None,
+                warp_chunks_processed: None,
+            })
+        } else {
+            SyncStatus::None
+        };
+        Ok(status)
     }
 }
 
