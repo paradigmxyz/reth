@@ -491,7 +491,10 @@ where
     /// Register Debug Namespace
     pub fn register_debug(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
-        self.modules.insert(RethRpcModule::Debug, DebugApi::new(eth_api).into_rpc().into());
+        self.modules.insert(
+            RethRpcModule::Debug,
+            DebugApi::new(self.client.clone(), eth_api).into_rpc().into(),
+        );
         self
     }
 
@@ -541,7 +544,9 @@ where
                         RethRpcModule::Admin => {
                             AdminApi::new(self.network.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Debug => DebugApi::new(eth_api.clone()).into_rpc().into(),
+                        RethRpcModule::Debug => {
+                            DebugApi::new(self.client.clone(), eth_api.clone()).into_rpc().into()
+                        }
                         RethRpcModule::Eth => eth_api.clone().into_rpc().into(),
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
