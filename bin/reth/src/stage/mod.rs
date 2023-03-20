@@ -164,8 +164,7 @@ impl Command {
             }
             StageEnum::Execution => {
                 let factory = reth_executor::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, 10_000);
-                stage.commit_threshold = num_blocks;
+                let mut stage = ExecutionStage::new(factory, num_blocks);
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }
