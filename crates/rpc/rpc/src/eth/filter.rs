@@ -101,32 +101,16 @@ where
                 Ok(FilterChanges::Hashes(block_hashes))
             }
             FilterKind::Log(filter) => {
-                let mut from_block_number = start_block;
-                let mut to_block_number = best_number;
-                match filter.block_option {
+                let (from_block_number, to_block_number) = match filter.block_option {
                     FilterBlockOption::Range { from_block, to_block } => {
-                        // from block is maximum of block from last poll or `from_block` of filter
-                        if let Some(filter_from_block) =
-                            from_block.and_then(|num| info.convert_block_number(num))
-                        {
-                            from_block_number = start_block.max(filter_from_block)
-                        }
-
-                        // to block is max the best number
-                        if let Some(filter_to_block) =
-                            to_block.and_then(|num| info.convert_block_number(num))
-                        {
-                            to_block_number = filter_to_block;
-                            if to_block_number > best_number {
-                                to_block_number = best_number;
-                            }
-                        }
+                        logs_utils::get_filter_block_range(from_block, to_block, start_block, info)
                     }
                     FilterBlockOption::AtBlockHash(_) => {
                         // blockHash is equivalent to fromBlock = toBlock = the block number with
                         // hash blockHash
+                        (start_block, best_number)
                     }
-                }
+                };
 
                 self.inner
                     .filter_logs(&filter, from_block_number, to_block_number)
@@ -135,6 +119,8 @@ where
         }
     }
 
+    /// Returns all logs matching given filter (in a range 'from' - 'to').
+    ///
     /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, _id: FilterId) -> RpcResult<Vec<Log>> {
         todo!()
@@ -151,9 +137,42 @@ where
         }
     }
 
+    /// Returns logs matching given filter object.
+    ///
     /// Handler for `eth_getLogs`
-    async fn logs(&self, _filter: Filter) -> RpcResult<Vec<Log>> {
-        todo!()
+    async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
+        match filter.block_option {
+            FilterBlockOption::AtBlockHash(block_hash) => {
+                let mut all_logs = Vec::new();
+                // all matching logs in the block, if it exists
+                if let Some(block) = self.inner.client.block(block_hash.into()).to_rpc_result()? {
+                    // get receipts for the block
+                    if let Some(receipts) =
+                        self.inner.client.receipts_by_block(block.number.into()).to_rpc_result()?
+                    {
+                        let filter = FilteredParams::new(Some(filter));
+                        logs_utils::append_matching_block_logs(
+                            &mut all_logs,
+                            &filter,
+                            block_hash,
+                            block.number,
+                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                        );
+                    }
+                }
+                Ok(all_logs)
+            }
+            FilterBlockOption::Range { from_block, to_block } => {
+                // compute the range
+                let info = self.inner.client.chain_info().to_rpc_result()?;
+
+                // we start at the most recent block if unset in filter
+                let start_block = info.best_number;
+                let (from_block_number, to_block_number) =
+                    logs_utils::get_filter_block_range(from_block, to_block, start_block, info);
+                self.inner.filter_logs(&filter, from_block_number, to_block_number)
+            }
+        }
     }
 }
 
@@ -193,7 +212,7 @@ where
         Ok(id)
     }
 
-    /// Returns all logs in the given range that match the filter
+    /// Returns all logs in the given _inclusive_ range that match the filter
     ///
     /// Returns an error if:
     ///  - underlying database error
