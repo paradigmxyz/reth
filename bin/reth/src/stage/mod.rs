@@ -4,7 +4,7 @@
 use crate::{
     args::NetworkArgs,
     dirs::{ConfigPath, DbPath, PlatformPath},
-    prometheus_exporter,
+    prometheus_exporter, StageEnum,
 };
 use clap::{Parser, ValueEnum};
 use reth_beacon_consensus::BeaconConsensus;
@@ -84,14 +84,6 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
-enum StageEnum {
-    Headers,
-    Bodies,
-    Senders,
-    Execution,
 }
 
 impl Command {
