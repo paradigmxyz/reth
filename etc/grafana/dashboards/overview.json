@@ -603,7 +603,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_sync_execution_mgas_executed_total[$__rate_interval])",
+          "expr": "rate(reth_sync_execution_mgas_processed_total[$__rate_interval])",
           "legendFormat": "Gas/s",
           "range": true,
           "refId": "A"
