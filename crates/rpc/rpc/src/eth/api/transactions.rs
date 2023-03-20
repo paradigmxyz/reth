@@ -70,7 +70,7 @@ where
             BlockId::Number(BlockNumberOrTag::Pending) => {
                 // This should perhaps use the latest env settings and update block specific
                 // settings like basefee/number
-                unimplemented!("support pending state env")
+                Err(EthApiError::Unsupported("pending state not implemented yet"))
             }
             hash_or_num => {
                 let block_hash = self
