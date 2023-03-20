@@ -579,7 +579,7 @@ impl PostState {
         let mut tx_num = receipts_cursor.last()?.map(|(tx_num, _)| tx_num).unwrap_or_default();
         for receipt in self.receipts.into_iter() {
             tx_num += 1;
-            receipts_cursor.append(tx_num, receipt.into())?
+            receipts_cursor.append(tx_num, receipt)?
         }
 
         Ok(())

@@ -1,5 +1,4 @@
 use crate::{
-    models::receipt::StoredReceipt,
     table::{Compress, Decompress},
     tables::models::*,
     Error,
@@ -46,8 +45,7 @@ impl_compression_for_compact!(
     StoredBlockOmmers,
     StoredBlockWithdrawals,
     Bytecode,
-    ProofCheckpoint,
-    StoredReceipt
+    ProofCheckpoint
 );
 impl_compression_for_compact!(AccountBeforeTx, TransactionSigned);
 impl_compression_for_compact!(CompactU256);

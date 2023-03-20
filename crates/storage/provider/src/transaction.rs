@@ -866,6 +866,14 @@ where
         // it is connection point for bodies getter and execution result getter.
         let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
 
+        // get transaction receipts
+        let from_transaction_num =
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_index();
+        let to_transaction_num =
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_index();
+        let receipts =
+            self.get_or_take::<tables::Receipts, TAKE>(from_transaction_num..=to_transaction_num)?;
+
         // get saved previous values
         let from_storage: TransitionIdAddress = (from, Address::zero()).into();
         let to_storage: TransitionIdAddress = (to, Address::zero()).into();
@@ -1007,18 +1015,25 @@ where
         let mut block_transition_iter = block_transition.into_iter();
         let mut next_transition_id = from;
 
+        let mut receipt_iter = receipts.into_iter();
+
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies.into_iter() {
-            let mut block_exec_res = PostState::new();
-            for _ in 0..block_body.tx_count {
+            let mut block_post_state = PostState::new();
+            for tx_num in block_body.tx_id_range() {
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
                         change
-                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
-                        block_exec_res.add_and_apply(change);
+                            .set_transition_id(block_post_state.transitions_count() as TransitionId);
+                        block_post_state.add_and_apply(change);
                     }
                 }
-                block_exec_res.finish_transition();
+                if let Some((receipt_tx_num, receipt)) = receipt_iter.next() {
+                    if tx_num != receipt_tx_num {
+                        block_post_state.add_receipt(receipt)
+                    }
+                }
+                block_post_state.finish_transition();
                 next_transition_id += 1;
             }
 
@@ -1029,14 +1044,14 @@ where
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
                         change
-                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
-                        block_exec_res.add_and_apply(change);
+                            .set_transition_id(block_post_state.transitions_count() as TransitionId);
+                        block_post_state.add_and_apply(change);
                     }
-                    block_exec_res.finish_transition();
+                    block_post_state.finish_transition();
                     next_transition_id += 1;
                 }
             }
-            block_exec_results.push(block_exec_res)
+            block_exec_results.push(block_post_state)
         }
         Ok(block_exec_results)
     }

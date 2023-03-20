@@ -18,11 +18,9 @@ use crate::{
     },
 };
 use reth_primitives::{
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, StorageEntry,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
     StorageTrieEntry, TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
-
-use self::models::receipt::StoredReceipt;
 
 /// Enum for the types of tables present in libmdbx.
 #[derive(Debug)]
@@ -159,7 +157,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores transaction receipts.
-    ( Receipts ) TxNumber | StoredReceipt
+    ( Receipts ) TxNumber | Receipt
 );
 
 table!(

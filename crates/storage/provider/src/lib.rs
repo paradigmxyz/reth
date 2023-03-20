@@ -22,8 +22,6 @@ pub use providers::{
     HistoricalStateProvider, HistoricalStateProviderRef, LatestStateProvider,
     LatestStateProviderRef, ShareableDatabase,
 };
-// provider Types
-pub use providers::StoredReceipt;
 
 /// Helper type for loading Merkle Patricia Trees from the database
 pub mod trie;

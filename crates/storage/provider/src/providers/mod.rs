@@ -2,7 +2,6 @@ use crate::{
     BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
     ProviderError, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
-pub use reth_db::models::receipt::StoredReceipt;
 use reth_db::{
     cursor::DbCursorRO,
     database::{Database, DatabaseGAT},
@@ -11,7 +10,7 @@ use reth_db::{
 };
 use reth_interfaces::Result;
 use reth_primitives::{
-    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header,
+    Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
     TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
@@ -229,11 +228,11 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
-    fn receipt(&self, id: TxNumber) -> Result<Option<StoredReceipt>> {
+    fn receipt(&self, id: TxNumber) -> Result<Option<Receipt>> {
         self.db.view(|tx| tx.get::<tables::Receipts>(id))?.map_err(Into::into)
     }
 
-    fn receipt_by_hash(&self, hash: TxHash) -> Result<Option<StoredReceipt>> {
+    fn receipt_by_hash(&self, hash: TxHash) -> Result<Option<Receipt>> {
         self.db
             .view(|tx| {
                 if let Some(id) = tx.get::<tables::TxHashNumber>(hash)? {
@@ -245,7 +244,7 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
             .map_err(Into::into)
     }
 
-    fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<StoredReceipt>>> {
+    fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
         if let Some(number) = self.block_number_for_id(block)? {
             let tx = self.db.tx()?;
             if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
