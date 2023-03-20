@@ -46,14 +46,6 @@ impl ExecutorFactory for Factory {
             executor = executor.with_stack(stack.clone());
         }
         executor
-
-        ///// Useful for setting inspector for testing ////
-        // use reth_revm::stack::{InspectorStack, InspectorStackConfig, Hook}
-        // Executor::new(self.chain_spec.clone(),
-        // substate).with_stack(InspectorStack::new(InspectorStackConfig{
-        //     use_printer_tracer: true,
-        //     hook: Hook::All,
-        // }))
     }
 
     /// Return internal chainspec
