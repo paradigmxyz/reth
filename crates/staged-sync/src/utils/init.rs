@@ -59,7 +59,7 @@ pub fn init_genesis<DB: Database>(
     drop(tx);
     debug!("Writing genesis block.");
     let tx = db.tx_mut()?;
-    insert_genesis_state::<DB>(&tx, &genesis)?;
+    insert_genesis_state::<DB>(&tx, genesis)?;
 
     // Insert header
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
