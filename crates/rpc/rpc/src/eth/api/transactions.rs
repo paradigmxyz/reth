@@ -164,7 +164,7 @@ where
         };
         let transaction = match request.into_typed_request() {
             Some(tx) => tx,
-            None => return Err(EthApiError::Unsupported("sender not specified")),
+            None => return Err(EthApiError::Unsupported("tx type not specified")),
         };
 
         let signed_tx = self.sign_request(&from, transaction)?;

@@ -5,10 +5,7 @@ use ethers_core::{
     types::transaction::eip712::{Eip712, TypedData},
     utils::hash_message,
 };
-use reth_primitives::{
-    sign_message, Address, Signature, Transaction as PrimitiveTransaction, TransactionSigned,
-    TxEip1559, TxEip2930, TxLegacy, H256,
-};
+use reth_primitives::{sign_message, Address, Signature, TransactionSigned, H256};
 use reth_rpc_types::TypedTransactionRequest;
 
 use secp256k1::SecretKey;
@@ -80,41 +77,7 @@ impl EthSigner for DevSigner {
         address: &Address,
     ) -> Result<TransactionSigned> {
         // convert to primitive transaction
-        let transaction = match request {
-            TypedTransactionRequest::Legacy(tx) => PrimitiveTransaction::Legacy(TxLegacy {
-                chain_id: tx.chain_id,
-                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
-                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
-                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
-                to: tx.kind.into(),
-                value: u128::from_be_bytes(tx.value.to_be_bytes()),
-                input: tx.input,
-            }),
-            TypedTransactionRequest::EIP2930(tx) => PrimitiveTransaction::Eip2930(TxEip2930 {
-                chain_id: tx.chain_id,
-                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
-                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
-                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
-                to: tx.kind.into(),
-                value: u128::from_be_bytes(tx.value.to_be_bytes()),
-                input: tx.input,
-                access_list: tx.access_list,
-            }),
-            TypedTransactionRequest::EIP1559(tx) => PrimitiveTransaction::Eip1559(TxEip1559 {
-                chain_id: tx.chain_id,
-                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
-                max_fee_per_gas: u128::from_be_bytes(tx.max_fee_per_gas.to_be_bytes()),
-                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
-                to: tx.kind.into(),
-                value: u128::from_be_bytes(tx.value.to_be_bytes()),
-                input: tx.input,
-                access_list: tx.access_list,
-                max_priority_fee_per_gas: u128::from_be_bytes(
-                    tx.max_priority_fee_per_gas.to_be_bytes(),
-                ),
-            }),
-        };
-
+        let transaction = request.into_transaction();
         let tx_signature_hash = transaction.signature_hash();
         let signature = self.sign_hash(tx_signature_hash, *address)?;
 
