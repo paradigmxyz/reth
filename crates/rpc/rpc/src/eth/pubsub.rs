@@ -172,9 +172,9 @@ where
 {
     /// Returns the current sync status for the `syncing` subscription
     async fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
-        let current_block =
-            self.client.chain_info().map(|info| info.best_number).unwrap_or_default();
         if is_syncing {
+            let current_block =
+                self.client.chain_info().map(|info| info.best_number).unwrap_or_default();
             EthSubscriptionResult::SyncState(PubSubSyncStatus::Detailed(SyncStatusMetadata {
                 syncing: true,
                 starting_block: 0,

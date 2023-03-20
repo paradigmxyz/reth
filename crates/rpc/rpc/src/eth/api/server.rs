@@ -39,7 +39,7 @@ where
 
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
-        Err(internal_rpc_err("unimplemented"))
+        EthApiSpec::sync_status(self).to_rpc_result()
     }
 
     /// Handler for: `eth_coinbase`
@@ -446,7 +446,7 @@ mod tests {
             let hash = H256::random();
             let gas_limit: u64 = random();
             let gas_used: u64 = random();
-            let base_fee_per_gas: Option<u64> = random::<bool>().then(|| random());
+            let base_fee_per_gas: Option<u64> = random::<bool>().then(random);
 
             let header = Header {
                 number: newest_block - i,

@@ -3,6 +3,7 @@ use crate::{
     StageError, StageId, UnwindInput, UnwindOutput,
 };
 use futures_util::StreamExt;
+use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -55,6 +56,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<ExecOutput, StageError> {
         let ((start_block, end_block), capped) =
             exec_or_return!(input, self.commit_threshold, "sync::stages::sender_recovery");
+        let done = !capped;
 
         // Look up the start index for the transaction range
         let start_tx_index = tx.get_block_body(start_block)?.start_tx_id;
@@ -65,7 +67,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // No transactions to walk over
         if start_tx_index > end_tx_index {
             info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Target transaction already reached");
-            return Ok(ExecOutput { stage_progress: end_block, done: true })
+            return Ok(ExecOutput { stage_progress: end_block, done })
         }
 
         // Acquire the cursor for inserting elements
@@ -74,31 +76,49 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor over the transactions
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         // Walk the transactions from start to end index (inclusive)
-        let entries = tx_cursor.walk_range(start_tx_index..=end_tx_index)?;
+        let tx_walker = tx_cursor.walk_range(start_tx_index..=end_tx_index)?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
 
-        // a channel to receive results from a rayon job
+        // An _unordered_ channel to receive results from a rayon job
         let (tx, rx) = mpsc::unbounded_channel();
 
-        // spawn recovery jobs onto the default rayon threadpool and send the result through the
-        // channel
-        for entry in entries {
-            let (tx_id, transaction) = entry?;
+        // Spawn recovery jobs onto the default rayon threadpool and send the result through the
+        // channel.
+        //
+        // We try to evenly divide the transactions to recover across all threads in the threadpool.
+        // Chunks are submitted instead of individual transactions to reduce the overhead of work
+        // stealing in the threadpool workers.
+        for chunk in
+            &tx_walker.chunks(self.commit_threshold as usize / rayon::current_num_threads())
+        {
             let tx = tx.clone();
-            rayon::spawn_fifo(move || {
-                let res = if let Some(signer) = transaction.recover_signer() {
-                    Ok((tx_id, signer))
-                } else {
-                    Err(StageError::from(SenderRecoveryStageError::SenderRecovery { tx: tx_id }))
-                };
-                // send the result back
-                let _ = tx.send(res);
+            // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
+            let mut chunk: Vec<_> = chunk.collect();
+
+            // Spawn the sender recovery task onto the global rayon pool
+            // This task will send the results through the channel after it recovered the senders.
+            rayon::spawn(move || {
+                chunk
+                    .drain(..)
+                    .map(|entry| {
+                        let (tx_id, transaction) = entry?;
+                        let sender = transaction.recover_signer().ok_or(StageError::from(
+                            SenderRecoveryStageError::SenderRecovery { tx: tx_id },
+                        ))?;
+
+                        Ok((tx_id, sender))
+                    })
+                    .for_each(|result: Result<_, StageError>| {
+                        let _ = tx.send(result);
+                    });
             });
         }
         drop(tx);
 
+        // We need sorted results, so we wrap the _unordered_ receiver stream into a sequential
+        // stream, which yields the results by ascending transaction ID.
         let mut recovered_senders =
             SequentialPairStream::new(start_tx_index, UnboundedReceiverStream::new(rx));
 
@@ -107,7 +127,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             senders_cursor.append(id, sender)?;
         }
 
-        let done = !capped;
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done })
     }

@@ -760,15 +760,13 @@ where
                     let err_code =
                         unsafe { ffi::mdbx_cursor_get(cursor.cursor(), &mut key, &mut data, op) };
 
-                    if err_code == ffi::MDBX_SUCCESS {
-                        Some(IntoIter::new(
+                    (err_code == ffi::MDBX_SUCCESS).then(|| {
+                        IntoIter::new(
                             Cursor::new_at_position(&**cursor).unwrap(),
                             ffi::MDBX_GET_CURRENT,
                             ffi::MDBX_NEXT_DUP,
-                        ))
-                    } else {
-                        None
-                    }
+                        )
+                    })
                 })
             }
             IterDup::Err(err) => err.take().map(|e| IntoIter::Err(Some(e))),

@@ -1,7 +1,8 @@
 use crate::{Pipeline, Stage, StageSet};
 use reth_db::database::Database;
 use reth_interfaces::sync::{NoopSyncStateUpdate, SyncStateUpdater};
-use reth_primitives::BlockNumber;
+use reth_primitives::{BlockNumber, H256};
+use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
 #[derive(Debug)]
@@ -53,6 +54,12 @@ where
     /// Once this block is reached, the pipeline will stop.
     pub fn with_max_block(mut self, block: BlockNumber) -> Self {
         self.pipeline.max_block = Some(block);
+        self
+    }
+
+    /// Set the tip sender.
+    pub fn with_tip_sender(mut self, tip_tx: watch::Sender<H256>) -> Self {
+        self.pipeline.tip_tx = Some(tip_tx);
         self
     }
 

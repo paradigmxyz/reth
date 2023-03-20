@@ -15,9 +15,7 @@ concurrency:
 name: bench
 jobs:
   iai:
-    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
-    # See also <https://github.com/foundry-rs/foundry/issues/3827>
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Install Valgrind
         run: |
@@ -53,3 +51,15 @@ jobs:
         shell: 'script -q -e -c "bash {0}"' # required to workaround /dev/tty not being available
         run: |
           ./.github/scripts/compare_iai.sh
+
+  # Checks that benchmarks not run in CI compile
+  bench-check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check if benchmarks build
+        run: cargo bench --all --all-features --all-targets --no-run

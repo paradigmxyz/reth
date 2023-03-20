@@ -56,7 +56,6 @@ use tokio::{
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{debug, info, trace, warn};
 
-pub mod bootnodes;
 pub mod error;
 mod proto;
 
@@ -486,11 +485,7 @@ impl Discv4Service {
 
     /// Returns the current enr sequence
     fn enr_seq(&self) -> Option<u64> {
-        if self.config.enable_eip868 {
-            Some(self.local_eip_868_enr.seq())
-        } else {
-            None
-        }
+        (self.config.enable_eip868).then(|| self.local_eip_868_enr.seq())
     }
 
     /// Sets the [Interval] used for periodically looking up targets over the network
@@ -1942,12 +1937,9 @@ pub enum DiscoveryUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        bootnodes::mainnet_nodes,
-        test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record},
-    };
+    use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use rand::{thread_rng, Rng};
-    use reth_primitives::{hex_literal::hex, ForkHash};
+    use reth_primitives::{hex_literal::hex, mainnet_nodes, ForkHash};
     use std::{future::poll_fn, net::Ipv4Addr};
 
     #[test]

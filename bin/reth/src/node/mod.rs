@@ -37,8 +37,9 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, TxHash, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
+use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
     utils::{
@@ -50,7 +51,7 @@ use reth_staged_sync::{
 };
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, HeaderStage, SenderRecoveryStage, TotalDifficultyStage, FINISH},
+    stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
 use std::{
@@ -128,6 +129,33 @@ pub struct Command {
 
     #[clap(flatten)]
     rpc: RpcServerArgs,
+
+    #[arg(long = "debug.print-inspector", help_heading = "Debug")]
+    print_inspector: bool,
+
+    #[arg(
+        long = "debug.hook-block",
+        help_heading = "Debug",
+        conflicts_with = "hook_transaction",
+        conflicts_with = "hook_all"
+    )]
+    hook_block: Option<u64>,
+
+    #[arg(
+        long = "debug.hook-transaction",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_all"
+    )]
+    hook_transaction: Option<TxHash>,
+
+    #[arg(
+        long = "debug.hook-all",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_transaction"
+    )]
+    hook_all: bool,
 }
 
 impl Command {
@@ -154,7 +182,7 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let (consensus, forkchoice_state_tx) = self.init_consensus()?;
+        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone())) as Arc<dyn Consensus>;
         info!(target: "reth::cli", "Consensus engine initialized");
 
         self.init_trusted_nodes(&mut config);
@@ -183,8 +211,9 @@ impl Command {
             info!(target: "reth::cli", "Continuous sync mode enabled");
         }
 
-        let engine_api_handle =
-            self.init_engine_api(Arc::clone(&db), forkchoice_state_tx, &ctx.task_executor);
+        // TODO: This will be fixed with the sync controller (https://github.com/paradigmxyz/reth/pull/1662)
+        let (tx, _rx) = watch::channel(ForkchoiceState::default());
+        let engine_api_handle = self.init_engine_api(Arc::clone(&db), tx, &ctx.task_executor);
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let _auth_server = self
@@ -208,6 +237,16 @@ impl Command {
                 &ctx.task_executor,
             )
             .await?;
+
+        if let Some(tip) = self.tip {
+            pipeline.set_tip(tip);
+            debug!(target: "reth::cli", %tip, "Tip manually set");
+        } else {
+            let warn_msg = "No tip specified. \
+                    reth cannot communicate with consensus clients, \
+                    so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
+            warn!(target: "reth::cli", warn_msg);
+        }
 
         ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
 
@@ -302,26 +341,6 @@ impl Command {
         } else {
             Ok(())
         }
-    }
-
-    fn init_consensus(&self) -> eyre::Result<(Arc<dyn Consensus>, watch::Sender<ForkchoiceState>)> {
-        let (consensus, notifier) = BeaconConsensus::builder().build(self.chain.clone());
-
-        if let Some(tip) = self.tip {
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            notifier.send(ForkchoiceState {
-                head_block_hash: tip,
-                safe_block_hash: tip,
-                finalized_block_hash: tip,
-            })?;
-        } else {
-            let warn_msg = "No tip specified. \
-            reth cannot communicate with consensus clients, \
-            so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
-            warn!(target: "reth::cli", warn_msg);
-        }
-
-        Ok((consensus, notifier))
     }
 
     fn init_engine_api(
@@ -486,44 +505,47 @@ impl Command {
             builder = builder.with_max_block(max_block)
         }
 
+        let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        use reth_revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_executor::Factory::new(self.chain.clone());
 
-        let default_stages = if continuous {
-            let continuous_headers =
-                HeaderStage::new(header_downloader, consensus.clone()).continuous();
-            let online_builder = OnlineStages::builder_with_headers(
-                continuous_headers,
-                consensus.clone(),
-                body_downloader,
-            );
-            DefaultStages::<H, B, U, reth_executor::Factory>::add_offline_stages(
-                online_builder,
-                updater.clone(),
-                factory.clone(),
-            )
-        } else {
-            DefaultStages::new(
-                consensus.clone(),
-                header_downloader,
-                body_downloader,
-                updater.clone(),
-                factory.clone(),
-            )
-            .builder()
+        let stack_config = InspectorStackConfig {
+            use_printer_tracer: self.print_inspector,
+            hook: if let Some(hook_block) = self.hook_block {
+                Hook::Block(hook_block)
+            } else if let Some(tx) = self.hook_transaction {
+                Hook::Transaction(tx)
+            } else if self.hook_all {
+                Hook::All
+            } else {
+                Hook::None
+            },
         };
 
+        let factory = factory.with_stack_config(stack_config);
+
+        let header_mode =
+            if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };
         let pipeline = builder
-            .with_sync_state_updater(updater)
+            .with_sync_state_updater(updater.clone())
+            .with_tip_sender(tip_tx)
             .add_stages(
-                default_stages
-                    .set(
-                        TotalDifficultyStage::new(consensus.clone())
-                            .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
-                    )
-                    .set(SenderRecoveryStage {
-                        commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                    })
-                    .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold)),
+                DefaultStages::new(
+                    header_mode,
+                    consensus.clone(),
+                    header_downloader,
+                    body_downloader,
+                    updater,
+                    factory.clone(),
+                )
+                .set(
+                    TotalDifficultyStage::new(consensus.clone())
+                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
+                )
+                .set(SenderRecoveryStage {
+                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
+                })
+                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold)),
             )
             .build();
 

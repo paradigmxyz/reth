@@ -23,7 +23,7 @@ mod config;
 mod types;
 mod utils;
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
-pub use config::TraceInspectorConfig;
+pub use config::TracingInspectorConfig;
 
 /// An inspector that collects call traces.
 ///
@@ -36,11 +36,15 @@ pub use config::TraceInspectorConfig;
 #[derive(Debug, Clone)]
 pub struct TracingInspector {
     /// Configures what and how the inspector records traces.
-    config: TraceInspectorConfig,
+    config: TracingInspectorConfig,
     /// Records all call traces
     traces: CallTraceArena,
+    /// Tracks active calls
     trace_stack: Vec<usize>,
+    /// Tracks active steps
     step_stack: Vec<StackStep>,
+    /// Tracks the return value of the last call
+    last_call_return_data: Option<Bytes>,
     /// The gas inspector used to track remaining gas.
     ///
     /// This is either owned by this inspector directly or part of a stack of inspectors, in which
@@ -52,12 +56,13 @@ pub struct TracingInspector {
 
 impl TracingInspector {
     /// Returns a new instance for the given config
-    pub fn new(config: TraceInspectorConfig) -> Self {
+    pub fn new(config: TracingInspectorConfig) -> Self {
         Self {
             config,
             traces: Default::default(),
             trace_stack: vec![],
             step_stack: vec![],
+            last_call_return_data: None,
             gas_inspector: Default::default(),
         }
     }
@@ -130,6 +135,7 @@ impl TracingInspector {
                 value,
                 status: InstructionResult::Continue,
                 caller,
+                last_call_return_value: self.last_call_return_data.clone(),
                 ..Default::default()
             },
         ));
@@ -156,7 +162,8 @@ impl TracingInspector {
         trace.status = status;
         trace.success = success;
         trace.gas_used = gas_used;
-        trace.output = output;
+        trace.output = output.clone();
+        self.last_call_return_data = Some(output);
 
         if let Some(address) = created_address {
             // A new contract was created via CREATE
@@ -193,6 +200,7 @@ impl TracingInspector {
             contract: interp.contract.address,
             stack,
             memory,
+            memory_size: interp.memory.len(),
             gas: self.gas_inspector.as_ref().gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
