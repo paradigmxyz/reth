@@ -120,9 +120,11 @@ where
     }
 }
 
+type StoragesTrieCursor = Arc<Mutex<<TX as DbTxMutGAT<'tx>>::DupCursorMut<tables::StoragesTrie>>>;
+
 /// Database wrapper implementing HashDB trait, with a read-write transaction.
 pub struct DupHashDatabaseMut<'tx, TX: DbTxMutGAT<'tx>> {
-    storages_trie_cursor: Arc<Mutex<<TX as DbTxMutGAT<'tx>>::DupCursorMut<tables::StoragesTrie>>>,
+    storages_trie_cursor: StoragesTrieCursor,
     key: H256,
 }
 
@@ -188,12 +190,7 @@ where
     TX: DbTxMut<'db> + DbTx<'db> + Send + Sync,
 {
     /// Instantiates a new Database for the storage trie, with an empty root
-    pub fn new(
-        storages_trie_cursor: Arc<
-            Mutex<<TX as DbTxMutGAT<'tx>>::DupCursorMut<tables::StoragesTrie>>,
-        >,
-        key: H256,
-    ) -> Result<Self, TrieError> {
+    pub fn new(storages_trie_cursor: StoragesTrieCursor, key: H256) -> Result<Self, TrieError> {
         let root = EMPTY_ROOT;
         {
             let mut cursor = storages_trie_cursor.lock();
@@ -209,9 +206,7 @@ where
 
     /// Instantiates a new Database for the storage trie, with an existing root
     pub fn from_root(
-        storages_trie_cursor: Arc<
-            Mutex<<TX as DbTxMutGAT<'tx>>::DupCursorMut<tables::StoragesTrie>>,
-        >,
+        storages_trie_cursor: StoragesTrieCursor,
         key: H256,
         root: H256,
     ) -> Result<Self, TrieError> {
