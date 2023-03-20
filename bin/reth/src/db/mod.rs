@@ -7,8 +7,8 @@ use clap::{Parser, Subcommand};
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
-use reth_db::{database::Database, tables, transaction::DbTx};
-use tracing::{error, info};
+use reth_db::{database::Database, tables};
+use tracing::error;
 
 /// DB List TUI
 mod tui;

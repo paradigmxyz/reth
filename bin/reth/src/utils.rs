@@ -105,12 +105,14 @@ impl<'a, DB: Database> DbTool<'a, DB> {
             .map_err(|e| eyre::eyre!(e))
     }
 
+    /// Drops the database at the given path.
     pub fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
         info!(target: "reth::cli", "Dropping db at {}", path);
         std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }
 
+    /// Drops the provided table from the database.
     pub fn drop_table<T: Table>(&mut self) -> Result<()> {
         self.db.update(|tx| tx.clear::<T>())??;
         Ok(())

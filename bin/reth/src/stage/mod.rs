@@ -6,7 +6,7 @@ use crate::{
     dirs::{ConfigPath, DbPath, PlatformPath},
     prometheus_exporter, StageEnum,
 };
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;

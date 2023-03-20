@@ -40,6 +40,7 @@ impl Command {
         match &self.stage {
             StageEnum::Execution => {
                 tool.db.update(|tx| {
+                    tx.clear::<tables::PlainAccountState>()?;
                     tx.clear::<tables::PlainStorageState>()?;
                     tx.clear::<tables::AccountChangeSet>()?;
                     tx.clear::<tables::StorageChangeSet>()?;
