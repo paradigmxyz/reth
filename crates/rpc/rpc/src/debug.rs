@@ -10,6 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256, U256};
+use reth_provider::{BlockProvider, HeaderProvider};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -29,24 +30,27 @@ use revm::primitives::Env;
 ///
 /// This type provides the functionality for handling `debug` related requests.
 #[non_exhaustive]
-pub struct DebugApi<Eth> {
+pub struct DebugApi<Client, Eth> {
+    /// The client that can interact with the chain.
+    client: Client,
     /// The implementation of `eth` API
     eth_api: Eth,
 }
 
 // === impl DebugApi ===
 
-impl<Eth> DebugApi<Eth> {
+impl<Client, Eth> DebugApi<Client, Eth> {
     /// Create a new instance of the [DebugApi]
-    pub fn new(eth: Eth) -> Self {
-        Self { eth_api: eth }
+    pub fn new(client: Client, eth: Eth) -> Self {
+        Self { client, eth_api: eth }
     }
 }
 
 // === impl DebugApi ===
 
-impl<Eth> DebugApi<Eth>
+impl<Client, Eth> DebugApi<Client, Eth>
 where
+    Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Trace the transaction according to the provided options.
@@ -117,14 +121,32 @@ where
     }
 }
 
+use reth_rlp::Encodable;
+
 #[async_trait]
-impl<Eth> DebugApiServer for DebugApi<Eth>
+impl<Client, Eth> DebugApiServer for DebugApi<Client, Eth>
 where
+    Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthApiSpec + 'static,
 {
     /// Handler for `debug_getRawHeader`
-    async fn raw_header(&self, _block_id: BlockId) -> RpcResult<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        let header = match block_id {
+            // TODO: Return proper error
+            BlockId::Hash(hash) => self.client.header(&hash.into()).unwrap(),
+            BlockId::Number(number_or_tag) => {
+                // TODO: Return proper error
+                let number = self.client.convert_block_number(number_or_tag).unwrap().unwrap();
+                self.client.header_by_number(number).unwrap()
+            }
+        };
+
+        let mut res = Vec::new();
+        if let Some(header) = header {
+            header.encode(&mut res);
+        }
+
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawBlock`
@@ -204,7 +226,7 @@ where
     }
 }
 
-impl<Eth> std::fmt::Debug for DebugApi<Eth> {
+impl<Client, Eth> std::fmt::Debug for DebugApi<Client, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
