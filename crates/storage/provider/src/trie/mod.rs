@@ -491,9 +491,7 @@ where
     fn calculate_storage_root(
         &mut self,
         address: H256,
-        storage_trie_cursor: Arc<
-            Mutex<<TX as DbTxMutGAT<'tx>>::DupCursorMut<tables::StoragesTrie>>,
-        >,
+        storage_trie_cursor: StoragesTrieCursor<'tx, TX>,
         next_storage: Option<H256>,
         previous_root: Option<H256>,
     ) -> Result<TrieProgress, TrieError> {
@@ -639,9 +637,7 @@ where
         &mut self,
         previous_root: H256,
         address: H256,
-        storage_trie_cursor: Arc<
-            Mutex<<TX as DbTxMutGAT<'tx>>::DupCursorMut<tables::StoragesTrie>>,
-        >,
+        storage_trie_cursor: StoragesTrieCursor<'tx, TX>,
         changed_storages: BTreeSet<H256>,
         next_storage: Option<H256>,
     ) -> Result<TrieProgress, TrieError> {
