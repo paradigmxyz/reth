@@ -2,24 +2,15 @@
 
 use crate::eth::error::SignError;
 use ethers_core::{
-    types::{
-        transaction::{
-            eip2718::TypedTransaction,
-            eip2930::Eip2930TransactionRequest,
-            eip712::{Eip712, TypedData},
-            request::TransactionRequest,
-            rlp_opt,
-        },
-        Bytes, NameOrAddress,
-    },
-    utils::{hash_message, keccak256},
+    types::transaction::eip712::{Eip712, TypedData},
+    utils::hash_message,
 };
 use reth_primitives::{
-    sign_message, Address, Signature, Transaction as PrimitiveTransaction, TransactionKind,
-    TransactionSigned, TxEip1559, TxEip2930, TxLegacy, H160, H256, U256, U64,
+    sign_message, Address, Signature, Transaction as PrimitiveTransaction, TransactionSigned,
+    TxEip1559, TxEip2930, TxLegacy, H256,
 };
 use reth_rpc_types::TypedTransactionRequest;
-use rlp::RlpStream;
+
 use secp256k1::SecretKey;
 use std::collections::HashMap;
 
@@ -54,7 +45,6 @@ pub(crate) trait EthSigner: Send + Sync {
 pub(crate) struct DevSigner {
     addresses: Vec<Address>,
     accounts: HashMap<Address, SecretKey>,
-    chain_ids: HashMap<Address, u64>,
 }
 
 impl DevSigner {
@@ -65,9 +55,6 @@ impl DevSigner {
         let secret = self.get_key(account)?;
         let signature = sign_message(H256::from_slice(secret.as_ref()), hash);
         signature.map_err(|_| SignError::CouldNotSign)
-    }
-    fn get_chain_id(&self, account: Address) -> Result<u64> {
-        self.chain_ids.get(&account).cloned().ok_or(SignError::NoChainId)
     }
 }
 #[async_trait::async_trait]
@@ -128,22 +115,10 @@ impl EthSigner for DevSigner {
             }),
         };
 
-        // set chain id if not set
-        if _transaction.chain_id().is_none() {
-            _transaction.set_chain_id(self.get_chain_id(*_address)?);
-        }
+        let tx_signature_hash = _transaction.signature_hash();
+        let signature = self.sign_hash(tx_signature_hash, *_address)?;
 
-        // // Hashes the transaction's data with the provided chain id
-        // let sighash = match _transaction.chain_id() {
-        //     Some(_) => keccak256(self.rlp().as_ref()).into(),
-        //     None => keccak256(self.rlp_unsigned().as_ref()).into(),
-        // };
-        // let sig = self.sign_hash(sighash, *_address)?;
-
-        //  let tx_hash = keccak256(sig);
-
-        // Ok(TransactionSigned { hash: tx_hash, signature: sig, transaction: _transaction })
-        unimplemented!()
+        Ok(TransactionSigned::from_transaction_and_signature(_transaction, signature))
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
@@ -162,8 +137,7 @@ mod test {
             SecretKey::from_str("4646464646464646464646464646464646464646464646464646464646464646")
                 .unwrap();
         let accounts = HashMap::from([(Address::default(), secret)]);
-        let chain_ids = HashMap::from([(Address::default(), 1)]);
-        DevSigner { addresses, accounts, chain_ids }
+        DevSigner { addresses, accounts }
     }
 
     #[tokio::test]
