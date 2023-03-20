@@ -94,9 +94,9 @@ where
     EthApiClient::call(client, call_request.clone(), Some(block_number.into()), None)
         .await
         .unwrap();
+    EthApiClient::syncing(client).await.unwrap();
 
     // Unimplemented
-    assert!(is_unimplemented(EthApiClient::syncing(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::gas_price(client).await.err().unwrap()));
