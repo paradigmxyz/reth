@@ -987,7 +987,7 @@ mod tests {
         });
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
         let storage_trie_cursor =
-            Arc::new(Mutex::new(self.tx.cursor_dup_write::<tables::StoragesTrie>()?));
+            Arc::new(Mutex::new(trie.tx.cursor_dup_write::<tables::StoragesTrie>().unwrap()));
         assert_matches!(
             trie.calculate_storage_root(hashed_address, storage_trie_cursor, None, None),
             Ok(got) if got.root().unwrap() == expected
