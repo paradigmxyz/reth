@@ -714,9 +714,12 @@
       "id": 50,
       "options": {
         "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
         },
         "pieType": "pie",
         "reduceOptions": {
@@ -1973,6 +1976,6 @@
   "timezone": "",
   "title": "reth",
   "uid": "2k8BXz24k",
-  "version": 4,
+  "version": 5,
   "weekStart": ""
 }
