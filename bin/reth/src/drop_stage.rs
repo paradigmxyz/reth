@@ -5,8 +5,16 @@ use crate::{
     StageEnum,
 };
 use clap::Parser;
-use reth_db::{database::Database, tables, transaction::DbTxMut};
+use reth_db::{
+    database::Database,
+    mdbx::{Env, WriteMap},
+    tables,
+    transaction::DbTxMut,
+};
+use reth_primitives::ChainSpec;
+use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
 use reth_stages::stages::EXECUTION;
+use std::sync::Arc;
 use tracing::info;
 
 /// `reth db` command
@@ -22,6 +30,23 @@ pub struct Command {
     #[arg(global = true, long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: PlatformPath<DbPath>,
 
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser
+    )]
+    chain: Arc<ChainSpec>,
+
     stage: StageEnum,
 }
 
@@ -30,10 +55,7 @@ impl Command {
     pub async fn execute(&self) -> eyre::Result<()> {
         std::fs::create_dir_all(&self.db)?;
 
-        let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            self.db.as_ref(),
-            reth_db::mdbx::EnvKind::RW,
-        )?;
+        let db = Env::<WriteMap>::open(self.db.as_ref(), reth_db::mdbx::EnvKind::RW)?;
 
         let tool = DbTool::new(&db)?;
 
@@ -46,6 +68,7 @@ impl Command {
                     tx.clear::<tables::StorageChangeSet>()?;
                     tx.clear::<tables::Bytecodes>()?;
                     tx.put::<tables::SyncStage>(EXECUTION.0.to_string(), 0)?;
+                    insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
                     Ok::<_, eyre::Error>(())
                 })??;
             }
