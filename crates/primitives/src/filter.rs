@@ -163,7 +163,7 @@ impl Filter {
     /// ```rust
     /// # use reth_primitives::{filter::Filter, H256};
     /// # fn main() {
-    /// let filter = Filter::new().select(H256::ZERO);
+    /// let filter = Filter::new().select(H256::zero());
     /// # }
     /// ```
     /// This is the same as `at_block_hash`
