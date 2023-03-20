@@ -650,6 +650,12 @@ where
             self.get_or_take::<tables::TxTransitionIndex, TAKE>(
                 first_transaction..=last_transaction,
             )?;
+
+            // rm Transaction block index if there are transaction present
+            if !transactions.is_empty() {
+                let tx_id_range = transactions.first().unwrap().0..=transactions.last().unwrap().0;
+                self.get_or_take::<tables::TransactionBlock, TAKE>(tx_id_range)?;
+            }
         }
 
         // Merge transaction into blocks
@@ -721,7 +727,7 @@ where
         let block_header_hashes_iter = block_header_hashes.into_iter();
         let block_tx_iter = block_tx.into_iter();
 
-        // can be not found in tables
+        // Ommers can be empty for some blocks
         let mut block_ommers_iter = block_ommers.into_iter();
         let mut block_withdrawals_iter = block_withdrawals.into_iter();
         let mut block_ommers = block_ommers_iter.next();
@@ -1479,10 +1485,13 @@ pub enum TransactionError {
 
 #[cfg(test)]
 mod test {
-    use crate::{insert_canonical_block, test_utils::blocks::*, Transaction};
+    use crate::{
+        insert_canonical_block, test_utils::blocks::*, ShareableDatabase, Transaction,
+        TransactionsProvider,
+    };
     use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
     use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, TransitionId, MAINNET};
-    use std::ops::DerefMut;
+    use std::{ops::DerefMut, sync::Arc};
 
     #[test]
     fn insert_get_take() {
@@ -1553,6 +1562,28 @@ mod test {
             block2.state_root,
         )
         .unwrap();
+
+        tx.commit().unwrap();
+
+        // Check that transactions map onto blocks correctly.
+        {
+            let provider = ShareableDatabase::new(tx.db, Arc::new(MAINNET.clone()));
+            assert_eq!(
+                provider.transaction_block(0).unwrap(),
+                Some(1),
+                "Transaction 0 should be in block 1"
+            );
+            assert_eq!(
+                provider.transaction_block(1).unwrap(),
+                Some(2),
+                "Transaction 1 should be in block 2"
+            );
+            assert_eq!(
+                provider.transaction_block(2).unwrap(),
+                None,
+                "Transaction 0 should not exist"
+            );
+        }
 
         // get second block
         let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
