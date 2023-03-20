@@ -1,5 +1,4 @@
-use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256};
-use ethers_core::types::BlockNumber;
+use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64};
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -455,15 +454,21 @@ impl From<u64> for BlockNumberOrTag {
     }
 }
 
+impl From<U64> for BlockNumberOrTag {
+    fn from(num: U64) -> Self {
+        num.as_u64().into()
+    }
+}
+
 impl From<ethers_core::types::BlockNumber> for BlockNumberOrTag {
-    fn from(value: BlockNumber) -> Self {
+    fn from(value: ethers_core::types::BlockNumber) -> Self {
         match value {
-            BlockNumber::Latest => BlockNumberOrTag::Latest,
-            BlockNumber::Finalized => BlockNumberOrTag::Finalized,
-            BlockNumber::Safe => BlockNumberOrTag::Safe,
-            BlockNumber::Earliest => BlockNumberOrTag::Earliest,
-            BlockNumber::Pending => BlockNumberOrTag::Pending,
-            BlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
+            ethers_core::types::BlockNumber::Latest => BlockNumberOrTag::Latest,
+            ethers_core::types::BlockNumber::Finalized => BlockNumberOrTag::Finalized,
+            ethers_core::types::BlockNumber::Safe => BlockNumberOrTag::Safe,
+            ethers_core::types::BlockNumber::Earliest => BlockNumberOrTag::Earliest,
+            ethers_core::types::BlockNumber::Pending => BlockNumberOrTag::Pending,
+            ethers_core::types::BlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
         }
     }
 }
