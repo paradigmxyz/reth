@@ -32,7 +32,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 27] = [
+pub const TABLES: [(TableType, &str); 28] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -40,6 +40,7 @@ pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
     (TableType::Table, BlockWithdrawals::const_name()),
+    (TableType::Table, TransactionBlock::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
     (TableType::Table, Receipts::const_name()),
@@ -148,12 +149,19 @@ table!(
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    ( Transactions ) TxNumber | TransactionSigned
+    (  Transactions ) TxNumber | TransactionSigned
 );
 
 table!(
     /// Stores the mapping of the transaction hash to the transaction number.
     ( TxHashNumber ) TxHash | TxNumber
+);
+
+table!(
+    /// Stores the mapping of transaction number to the blocks number.
+    ///
+    /// The key is the highest transaction ID in the block.
+    ( TransactionBlock ) TxNumber | BlockNumber
 );
 
 table!(

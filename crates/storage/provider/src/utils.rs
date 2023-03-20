@@ -70,6 +70,14 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         StoredBlockBody { start_tx_id: current_tx_id, tx_count: block.body.len() as u64 },
     )?;
 
+    if !block.body.is_empty() {
+        // -1 is here as current_tx_id points to the next transaction.
+        tx.put::<tables::TransactionBlock>(
+            current_tx_id + block.body.len() as u64 - 1,
+            block.number,
+        )?;
+    }
+
     let senders_len = senders.as_ref().map(|s| s.len());
     let tx_iter = if Some(block.body.len()) == senders_len {
         block.body.into_iter().zip(senders.unwrap().into_iter()).collect::<Vec<(_, _)>>()
