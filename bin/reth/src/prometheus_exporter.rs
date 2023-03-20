@@ -14,11 +14,6 @@ use reth_db::{
 };
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
 
-/// Installs Prometheus as the metrics recorder and serves it over HTTP.
-pub(crate) async fn initialize(listen_addr: SocketAddr) -> eyre::Result<()> {
-    initialize_with_hook(listen_addr, || {}).await
-}
-
 /// Installs Prometheus as the metrics recorder and serves it over HTTP with a hook.
 ///
 /// The hook is called every time the metrics are requested at the given endpoint, and can be used
