@@ -161,7 +161,6 @@ pub struct Command {
 
 impl Command {
     /// Execute `node` command
-    // TODO: RPC
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
@@ -177,7 +176,7 @@ impl Command {
         let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
         info!(target: "reth::cli", "Database opened");
 
-        self.start_metrics_endpoint()?;
+        self.start_metrics_endpoint(Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -338,13 +337,14 @@ impl Command {
         }
     }
 
-    fn start_metrics_endpoint(&self) -> eyre::Result<()> {
+    async fn start_metrics_endpoint(&self, db: Arc<Env<WriteMap>>) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(listen_addr)
-        } else {
-            Ok(())
+
+            prometheus_exporter::initialize_with_db_metrics(listen_addr, db).await?;
         }
+
+        Ok(())
     }
 
     fn init_engine_api(
