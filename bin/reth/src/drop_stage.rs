@@ -17,7 +17,7 @@ use reth_stages::stages::EXECUTION;
 use std::sync::Arc;
 use tracing::info;
 
-/// `reth db` command
+/// `reth drop-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
     /// The path to the database folder.

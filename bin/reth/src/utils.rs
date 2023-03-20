@@ -1,6 +1,5 @@
 //! Common CLI utility functions.
 use crate::dirs::{DbPath, PlatformPath};
-
 use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
