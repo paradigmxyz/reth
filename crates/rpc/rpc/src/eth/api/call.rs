@@ -68,12 +68,32 @@ where
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
 
-        let env = build_call_evm_env(cfg, block, request)?;
+        let request_gas = request.gas;
+
+        let mut env = build_call_evm_env(cfg, block, request)?;
+
         let mut db = SubState::new(State::new(state));
 
         // apply state overrides
         if let Some(state_overrides) = state_overrides {
             apply_state_overrides(state_overrides, &mut db)?;
+        }
+
+        if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
+            // no gas limit was provided in the request, so we need to cap the request's gas limit
+            let mut allowance = db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
+
+            // subtract transferred value
+            allowance = allowance
+                .checked_sub(env.tx.value)
+                .ok_or_else(|| InvalidTransactionError::InsufficientFunds)?;
+
+            // cap the gas limit
+            if let Ok(gas_limit) =
+                allowance.checked_div(env.tx.gas_price).unwrap_or_default().try_into()
+            {
+                env.tx.gas_limit = gas_limit;
+            }
         }
 
         transact(&mut db, env)
