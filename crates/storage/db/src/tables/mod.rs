@@ -158,7 +158,9 @@ table!(
 );
 
 table!(
-    /// Stored the range of transaction numbers that belong to the block.
+    /// Stores the mapping of transaction number to the blocks number.
+    ///
+    /// The key is the highest transaction ID in the block.
     ( TransactionBlock ) TxNumber | BlockNumber
 );
 

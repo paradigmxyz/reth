@@ -1565,12 +1565,24 @@ mod test {
 
         tx.commit().unwrap();
 
-        // check transition id.
+        // Check that transactions map onto blocks correctly.
         {
             let provider = ShareableDatabase::new(tx.db, Arc::new(MAINNET.clone()));
-            assert_eq!(provider.transaction_block(0).unwrap(), Some(1));
-            assert_eq!(provider.transaction_block(1).unwrap(), Some(2));
-            assert_eq!(provider.transaction_block(2).unwrap(), None);
+            assert_eq!(
+                provider.transaction_block(0).unwrap(),
+                Some(1),
+                "Transaction 0 should be in block 1"
+            );
+            assert_eq!(
+                provider.transaction_block(1).unwrap(),
+                Some(2),
+                "Transaction 1 should be in block 2"
+            );
+            assert_eq!(
+                provider.transaction_block(2).unwrap(),
+                None,
+                "Transaction 0 should not exist"
+            );
         }
 
         // get second block
