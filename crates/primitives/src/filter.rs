@@ -2,11 +2,8 @@
 
 use crate::{
     bloom::{Bloom, Input},
-    keccak256,
-    rpc::BlockNumber,
-    Address, Log, H160, H256, U64,
+    keccak256, Address, BlockNumberOrTag, Log, H160, H256, U256, U64,
 };
-use ethers_core::types::U256;
 use serde::{
     de::{DeserializeOwned, MapAccess, Visitor},
     ser::SerializeStruct,
@@ -22,19 +19,19 @@ pub type Topic = ValueOrArray<Option<H256>>;
 /// Represents the target range of blocks for the filter
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FilterBlockOption {
-    Range { from_block: Option<BlockNumber>, to_block: Option<BlockNumber> },
+    Range { from_block: Option<BlockNumberOrTag>, to_block: Option<BlockNumberOrTag> },
     AtBlockHash(H256),
 }
 
 impl FilterBlockOption {
-    pub fn get_to_block(&self) -> Option<&BlockNumber> {
+    pub fn get_to_block(&self) -> Option<&BlockNumberOrTag> {
         match self {
             FilterBlockOption::Range { to_block, .. } => to_block.as_ref(),
             FilterBlockOption::AtBlockHash(_) => None,
         }
     }
 
-    pub fn get_from_block(&self) -> Option<&BlockNumber> {
+    pub fn get_from_block(&self) -> Option<&BlockNumberOrTag> {
         match self {
             FilterBlockOption::Range { from_block, .. } => from_block.as_ref(),
             FilterBlockOption::AtBlockHash(_) => None,
@@ -42,8 +39,8 @@ impl FilterBlockOption {
     }
 }
 
-impl From<BlockNumber> for FilterBlockOption {
-    fn from(block: BlockNumber) -> Self {
+impl From<BlockNumberOrTag> for FilterBlockOption {
+    fn from(block: BlockNumberOrTag) -> Self {
         let block = Some(block);
         FilterBlockOption::Range { from_block: block, to_block: block }
     }
@@ -51,17 +48,17 @@ impl From<BlockNumber> for FilterBlockOption {
 
 impl From<U64> for FilterBlockOption {
     fn from(block: U64) -> Self {
-        BlockNumber::from(block).into()
+        BlockNumberOrTag::from(block).into()
     }
 }
 
 impl From<u64> for FilterBlockOption {
     fn from(block: u64) -> Self {
-        BlockNumber::from(block).into()
+        BlockNumberOrTag::from(block).into()
     }
 }
 
-impl<T: Into<BlockNumber>> From<Range<T>> for FilterBlockOption {
+impl<T: Into<BlockNumberOrTag>> From<Range<T>> for FilterBlockOption {
     fn from(r: Range<T>) -> Self {
         let from_block = Some(r.start.into());
         let to_block = Some(r.end.into());
@@ -69,17 +66,17 @@ impl<T: Into<BlockNumber>> From<Range<T>> for FilterBlockOption {
     }
 }
 
-impl<T: Into<BlockNumber>> From<RangeTo<T>> for FilterBlockOption {
+impl<T: Into<BlockNumberOrTag>> From<RangeTo<T>> for FilterBlockOption {
     fn from(r: RangeTo<T>) -> Self {
         let to_block = Some(r.end.into());
-        FilterBlockOption::Range { from_block: Some(BlockNumber::Earliest), to_block }
+        FilterBlockOption::Range { from_block: Some(BlockNumberOrTag::Earliest), to_block }
     }
 }
 
-impl<T: Into<BlockNumber>> From<RangeFrom<T>> for FilterBlockOption {
+impl<T: Into<BlockNumberOrTag>> From<RangeFrom<T>> for FilterBlockOption {
     fn from(r: RangeFrom<T>) -> Self {
         let from_block = Some(r.start.into());
-        FilterBlockOption::Range { from_block, to_block: Some(BlockNumber::Latest) }
+        FilterBlockOption::Range { from_block, to_block: Some(BlockNumberOrTag::Latest) }
     }
 }
 
@@ -97,7 +94,7 @@ impl Default for FilterBlockOption {
 
 impl FilterBlockOption {
     #[must_use]
-    pub fn set_from_block(&self, block: BlockNumber) -> Self {
+    pub fn set_from_block(&self, block: BlockNumberOrTag) -> Self {
         let to_block =
             if let FilterBlockOption::Range { to_block, .. } = self { *to_block } else { None };
 
@@ -105,7 +102,7 @@ impl FilterBlockOption {
     }
 
     #[must_use]
-    pub fn set_to_block(&self, block: BlockNumber) -> Self {
+    pub fn set_to_block(&self, block: BlockNumberOrTag) -> Self {
         let from_block =
             if let FilterBlockOption::Range { from_block, .. } = self { *from_block } else { None };
 
@@ -155,9 +152,9 @@ impl Filter {
     /// Match the latest block only
     ///
     /// ```rust
-    /// # use reth_primitives::{filter::Filter, rpc::BlockNumber};
+    /// # use reth_primitives::{filter::Filter, BlockNumberOrTag};
     /// # fn main() {
-    /// let filter = Filter::new().select(BlockNumber::Latest);
+    /// let filter = Filter::new().select(BlockNumberOrTag::Latest);
     /// # }
     /// ```
     ///
@@ -180,7 +177,7 @@ impl Filter {
     /// # }
     /// ```
     ///
-    /// Match all blocks in range `(1337..BlockNumber::Latest)`
+    /// Match all blocks in range `(1337..BlockNumberOrTag::Latest)`
     ///
     /// ```rust
     /// # use reth_primitives::filter::Filter;
@@ -189,7 +186,7 @@ impl Filter {
     /// # }
     /// ```
     ///
-    /// Match all blocks in range `(BlockNumber::Earliest..1337)`
+    /// Match all blocks in range `(BlockNumberOrTag::Earliest..1337)`
     ///
     /// ```rust
     /// # use reth_primitives::filter::Filter;
@@ -205,14 +202,14 @@ impl Filter {
 
     #[allow(clippy::wrong_self_convention)]
     #[must_use]
-    pub fn from_block<T: Into<BlockNumber>>(mut self, block: T) -> Self {
+    pub fn from_block<T: Into<BlockNumberOrTag>>(mut self, block: T) -> Self {
         self.block_option = self.block_option.set_from_block(block.into());
         self
     }
 
     #[allow(clippy::wrong_self_convention)]
     #[must_use]
-    pub fn to_block<T: Into<BlockNumber>>(mut self, block: T) -> Self {
+    pub fn to_block<T: Into<BlockNumberOrTag>>(mut self, block: T) -> Self {
         self.block_option = self.block_option.set_to_block(block.into());
         self
     }
@@ -301,12 +298,12 @@ impl Filter {
     }
 
     /// Returns the numeric value of the `toBlock` field
-    pub fn get_to_block(&self) -> Option<U64> {
+    pub fn get_to_block(&self) -> Option<u64> {
         self.block_option.get_to_block().and_then(|b| b.as_number())
     }
 
     /// Returns the numeric value of the `fromBlock` field
-    pub fn get_from_block(&self) -> Option<U64> {
+    pub fn get_from_block(&self) -> Option<u64> {
         self.block_option.get_from_block().and_then(|b| b.as_number())
     }
 
@@ -432,8 +429,8 @@ impl<'de> Deserialize<'de> for Filter {
             where
                 A: MapAccess<'de>,
             {
-                let mut from_block: Option<Option<BlockNumber>> = None;
-                let mut to_block: Option<Option<BlockNumber>> = None;
+                let mut from_block: Option<Option<BlockNumberOrTag>> = None;
+                let mut to_block: Option<Option<BlockNumberOrTag>> = None;
                 let mut block_hash: Option<Option<H256>> = None;
                 let mut address: Option<Option<ValueOrArray<Address>>> = None;
                 let mut topics: Option<Option<Vec<Option<Topic>>>> = None;
@@ -582,9 +579,7 @@ impl From<Address> for Topic {
 
 impl From<U256> for Topic {
     fn from(src: U256) -> Self {
-        let mut bytes = [0; 32];
-        src.to_big_endian(&mut bytes);
-        ValueOrArray::Value(Some(H256::from(bytes)))
+        ValueOrArray::Value(Some(src.into()))
     }
 }
 
@@ -732,20 +727,20 @@ impl FilteredParams {
         let filter = self.filter.as_ref().unwrap();
         let mut res = true;
 
-        if let Some(BlockNumber::Number(num)) = filter.block_option.get_from_block() {
-            if num.as_u64() > block_number {
+        if let Some(BlockNumberOrTag::Number(num)) = filter.block_option.get_from_block() {
+            if *num > block_number {
                 res = false;
             }
         }
 
         if let Some(to) = filter.block_option.get_to_block() {
             match to {
-                BlockNumber::Number(num) => {
-                    if num.as_u64() < block_number {
+                BlockNumberOrTag::Number(num) => {
+                    if *num < block_number {
                         res = false;
                     }
                 }
-                BlockNumber::Earliest => {
+                BlockNumberOrTag::Earliest => {
                     res = false;
                 }
                 _ => {}
@@ -889,12 +884,12 @@ mod tests {
             value: ValueOrArray<U256>,
         }
 
-        let item = Item { value: ValueOrArray::Value(U256::one()) };
+        let item = Item { value: ValueOrArray::Value(U256::from(1u64)) };
         let json = serde_json::to_value(item.clone()).unwrap();
         let deserialized: Item = serde_json::from_value(json).unwrap();
         assert_eq!(item, deserialized);
 
-        let item = Item { value: ValueOrArray::Array(vec![U256::one(), U256::zero()]) };
+        let item = Item { value: ValueOrArray::Array(vec![U256::from(1u64), U256::ZERO]) };
         let json = serde_json::to_value(item.clone()).unwrap();
         let deserialized: Item = serde_json::from_value(json).unwrap();
         assert_eq!(item, deserialized);

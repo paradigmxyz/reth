@@ -107,14 +107,14 @@ where
                     FilterBlockOption::Range { from_block, to_block } => {
                         // from block is maximum of block from last poll or `from_block` of filter
                         if let Some(filter_from_block) =
-                            from_block.and_then(|num| info.convert_block_number(num.into()))
+                            from_block.and_then(|num| info.convert_block_number(num))
                         {
                             from_block_number = start_block.max(filter_from_block)
                         }
 
                         // to block is max the best number
                         if let Some(filter_to_block) =
-                            to_block.and_then(|num| info.convert_block_number(num.into()))
+                            to_block.and_then(|num| info.convert_block_number(num))
                         {
                             to_block_number = filter_to_block;
                             if to_block_number > best_number {
