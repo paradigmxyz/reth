@@ -1,15 +1,18 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::{
+        error::{EthApiError, EthResult},
+        utils::recover_raw_transaction,
+    },
     EthApi,
 };
 use async_trait::async_trait;
 use reth_primitives::{
     BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
-    TransactionSigned, TransactionSignedEcRecovered, H256, U256,
+    TransactionSignedEcRecovered, H256, U256,
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rlp::Decodable;
+
 use reth_rpc_types::{Index, Transaction, TransactionInfo, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -186,16 +189,7 @@ where
     ///
     /// Returns the hash of the transaction.
     pub(crate) async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
-        let mut data = tx.as_ref();
-        if data.is_empty() {
-            return Err(EthApiError::EmptyRawTransactionData)
-        }
-
-        let transaction = TransactionSigned::decode(&mut data)
-            .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
-
-        let recovered =
-            transaction.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+        let recovered = recover_raw_transaction(tx)?;
 
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
 
