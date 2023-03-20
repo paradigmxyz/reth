@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use reth_primitives::{bytes::Bytes, Address, TxHash, H256};
 use revm::{
     inspectors::CustomPrintTracer,
@@ -14,7 +16,7 @@ pub use maybe_owned::MaybeOwnedInspector;
 /// - Block: Hook on block execution
 /// - BlockWithIndex: Hook on block execution transaction index
 /// - Transaction: Hook on a specific transaction hash
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub enum Hook {
     #[default]
     /// No hook.
@@ -37,6 +39,15 @@ pub struct InspectorStack {
     pub custom_print_tracer: Option<CustomPrintTracer>,
     /// The provided hook
     pub hook: Hook,
+}
+
+impl Debug for InspectorStack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InspectorStack")
+            .field("custom_print_tracer", &self.custom_print_tracer.is_some())
+            .field("hook", &self.hook)
+            .finish()
+    }
 }
 
 impl InspectorStack {

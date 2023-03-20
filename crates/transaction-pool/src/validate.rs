@@ -11,8 +11,8 @@ use reth_primitives::{
     TransactionSignedEcRecovered, TxHash, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID, U256,
 };
-use reth_provider::AccountProvider;
-use std::{fmt, sync::Arc, time::Instant};
+use reth_provider::{AccountProvider, StateProviderFactory};
+use std::{fmt, marker::PhantomData, sync::Arc, time::Instant};
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -67,7 +67,7 @@ pub trait TransactionValidator: Send + Sync {
     /// `max_init_code_size` should be configurable so this will take it as an argument.
     fn ensure_max_init_code_size(
         &self,
-        transaction: Self::Transaction,
+        transaction: &Self::Transaction,
         max_init_code_size: usize,
     ) -> Result<(), InvalidPoolTransactionError> {
         if *transaction.kind() == TransactionKind::Create && transaction.size() > max_init_code_size
@@ -84,7 +84,7 @@ pub trait TransactionValidator: Send + Sync {
 
 /// A [TransactionValidator] implementation that validates ethereum transaction.
 #[derive(Debug, Clone)]
-pub struct EthTransactionValidator<Client> {
+pub struct EthTransactionValidator<Client, T> {
     /// Spec of the chain
     chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
@@ -99,11 +99,13 @@ pub struct EthTransactionValidator<Client> {
     current_max_gas_limit: u64,
     /// Current base fee.
     base_fee: Option<u128>,
+    /// Marker for the transaction type
+    _marker: PhantomData<T>,
 }
 
 // === impl EthTransactionValidator ===
 
-impl<Client> EthTransactionValidator<Client> {
+impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Creates a new instance for the given [ChainSpec]
     pub fn new(client: Client, chain_spec: Arc<ChainSpec>) -> Self {
         // TODO(mattsse): improve these settings by checking against hardfork
@@ -116,6 +118,7 @@ impl<Client> EthTransactionValidator<Client> {
             eip1559: true,
             current_max_gas_limit: 30_000_000,
             base_fee: None,
+            _marker: Default::default(),
         }
     }
 
@@ -126,10 +129,12 @@ impl<Client> EthTransactionValidator<Client> {
 }
 
 #[async_trait::async_trait]
-impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
-    for EthTransactionValidator<T>
+impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
+where
+    Client: StateProviderFactory,
+    Tx: PoolTransaction,
 {
-    type Transaction = T;
+    type Transaction = Tx;
 
     async fn validate_transaction(
         &self,
@@ -172,29 +177,26 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
 
         // Reject transactions over defined size to prevent DOS attacks
         if transaction.size() > TX_MAX_SIZE {
+            let size = transaction.size();
             return TransactionValidationOutcome::Invalid(
-                transaction.clone(),
-                InvalidPoolTransactionError::OversizedData(transaction.size(), TX_MAX_SIZE),
+                transaction,
+                InvalidPoolTransactionError::OversizedData(size, TX_MAX_SIZE),
             )
         }
 
         // Check whether the init code size has been exceeded.
         if self.shanghai {
-            if let Err(err) =
-                self.ensure_max_init_code_size(transaction.clone(), MAX_INIT_CODE_SIZE)
-            {
+            if let Err(err) = self.ensure_max_init_code_size(&transaction, MAX_INIT_CODE_SIZE) {
                 return TransactionValidationOutcome::Invalid(transaction, err)
             }
         }
 
         // Checks for gas limit
         if transaction.gas_limit() > self.current_max_gas_limit {
+            let gas_limit = transaction.gas_limit();
             return TransactionValidationOutcome::Invalid(
-                transaction.clone(),
-                InvalidPoolTransactionError::ExceedsGasLimit(
-                    transaction.gas_limit(),
-                    self.current_max_gas_limit,
-                ),
+                transaction,
+                InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.current_max_gas_limit),
             )
         }
 
@@ -222,7 +224,11 @@ impl<T: PoolTransaction + AccountProvider + Clone> TransactionValidator
             )
         }
 
-        let account = match self.client.basic_account(transaction.sender()) {
+        let account = match self
+            .client
+            .latest()
+            .and_then(|state| state.basic_account(transaction.sender()))
+        {
             Ok(account) => account,
             Err(err) => return TransactionValidationOutcome::Error(transaction, Box::new(err)),
         };

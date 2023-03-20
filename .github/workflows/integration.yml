@@ -16,10 +16,8 @@ concurrency:
 name: integration
 jobs:
   test:
-    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
-    # See also <https://github.com/foundry-rs/foundry/issues/3827>
     name: test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         partition: [1, 2]

@@ -24,7 +24,7 @@ pub trait TransactionOrdering: Send + Sync + 'static {
 ///
 /// The transactions are ordered by their cost. The higher the cost,
 /// the higher the priority of this transaction is.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct CostOrdering<T>(PhantomData<T>);
 
@@ -37,5 +37,11 @@ where
 
     fn priority(&self, transaction: &Self::Transaction) -> Self::Priority {
         transaction.cost()
+    }
+}
+
+impl<T> Default for CostOrdering<T> {
+    fn default() -> Self {
+        Self(Default::default())
     }
 }
