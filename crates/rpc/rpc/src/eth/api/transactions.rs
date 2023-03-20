@@ -158,10 +158,13 @@ where
     ///
     /// This will sign the transaction and submit it to the pool
     pub(crate) async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
-        let from = request.from.unwrap_or_default();
+        let from = match request.from {
+            Some(from) => from,
+            None => return Err(EthApiError::Unsupported("sender not specified")),
+        };
         let transaction = match request.into_typed_request() {
             Some(tx) => tx,
-            None => return Err(EthApiError::Unsupported("invalid transaction type")),
+            None => return Err(EthApiError::Unsupported("sender not specified")),
         };
 
         let signed_tx = self.sign_request(&from, transaction)?;
