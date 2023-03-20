@@ -91,7 +91,7 @@ where
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
         if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
         {
-            return Ok(Some(TransactionSource::Pool(tx)))
+            return Ok(Some(TransactionSource::Pool(tx)));
         }
 
         match self.client().transaction_by_hash(hash)? {
@@ -157,14 +157,14 @@ where
     /// Send a transaction to the pool
     ///
     /// This will sign the transaction and submit it to the pool
-    pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
-        let from = _request.from.unwrap_or_default();
-        let _transaction = match _request.into_typed_request() {
+    pub(crate) async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
+        let from = request.from.unwrap_or_default();
+        let transaction = match request.into_typed_request() {
             Some(tx) => tx,
             None => return Err(EthApiError::Unsupported("invalid transaction type")),
         };
 
-        let signed_tx = self.sign_request(&from, _transaction)?;
+        let signed_tx = self.sign_request(&from, transaction)?;
 
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -183,7 +183,7 @@ where
         request: TypedTransactionRequest,
     ) -> EthResult<TransactionSigned> {
         for signer in self.inner.signers.iter() {
-            if signer.accounts().contains(from) {
+            if signer.is_signer_for(from) {
                 match signer.sign_transaction(request, from) {
                     Ok(tx) => return Ok(tx),
                     Err(e) => return Err(e.into()),
@@ -215,7 +215,7 @@ where
                     block_hash,
                     block.header.number,
                     index.into(),
-                )))
+                )));
             }
         }
 

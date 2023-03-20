@@ -76,11 +76,11 @@ impl EthSigner for DevSigner {
 
     fn sign_transaction(
         &self,
-        _request: TypedTransactionRequest,
-        _address: &Address,
+        request: TypedTransactionRequest,
+        address: &Address,
     ) -> Result<TransactionSigned> {
         // convert to primitive transaction
-        let mut _transaction = match _request {
+        let transaction = match request {
             TypedTransactionRequest::Legacy(tx) => PrimitiveTransaction::Legacy(TxLegacy {
                 chain_id: tx.chain_id,
                 nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
@@ -115,10 +115,10 @@ impl EthSigner for DevSigner {
             }),
         };
 
-        let tx_signature_hash = _transaction.signature_hash();
-        let signature = self.sign_hash(tx_signature_hash, *_address)?;
+        let tx_signature_hash = transaction.signature_hash();
+        let signature = self.sign_hash(tx_signature_hash, *address)?;
 
-        Ok(TransactionSigned::from_transaction_and_signature(_transaction, signature))
+        Ok(TransactionSigned::from_transaction_and_signature(transaction, signature))
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
