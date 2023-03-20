@@ -13,7 +13,6 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedEcRecovered, H256, U256,
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rlp::Decodable;
 use reth_rpc_types::{
     Index, Transaction, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
