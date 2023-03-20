@@ -54,6 +54,7 @@ use reth_stages::{
     stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
+use reth_transaction_pool::EthTransactionValidator;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
@@ -173,7 +174,7 @@ impl Command {
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
-        let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
         info!(target: "reth::cli", "Database opened");
 
         self.start_metrics_endpoint()?;
@@ -193,14 +194,17 @@ impl Command {
         let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
-        let test_transaction_pool = reth_transaction_pool::test_utils::testing_pool();
+        let transaction_pool = reth_transaction_pool::Pool::eth_pool(
+            EthTransactionValidator::new(shareable_db.clone(), Arc::clone(&self.chain)),
+            Default::default(),
+        );
         info!(target: "reth::cli", "Test transaction pool initialized");
 
         let _rpc_server = self
             .rpc
             .start_rpc_server(
                 shareable_db.clone(),
-                test_transaction_pool.clone(),
+                transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
             )
@@ -220,7 +224,7 @@ impl Command {
             .rpc
             .start_auth_server(
                 shareable_db,
-                test_transaction_pool,
+                transaction_pool,
                 network.clone(),
                 ctx.task_executor.clone(),
                 engine_api_handle,
