@@ -15,8 +15,11 @@ use std::collections::BTreeMap;
 ///
 /// # Wiped Storage
 ///
-/// The field `wiped` denotes whether any of the values contained in storage are valid or not; if
-/// `wiped` is `true`, the storage should be considered empty.
+/// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
+/// not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Storage {
     /// Whether the storage was wiped or not.
@@ -132,9 +135,11 @@ impl Change {
 ///
 /// # Wiped Storage
 ///
-/// The [Storage] type has a field, `wiped`, which denotes whether any of the values contained
-/// in storage are valid or not; if `wiped` is `true`, the storage for the account should be
-/// considered empty.
+/// The [Storage] type has a field, `wiped` which denotes whether the pre-existing storage in the
+/// database should be cleared or not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 ///
 /// # Transitions
 ///
@@ -405,7 +410,6 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (_, current_value)) in changeset {
                     storage.storage.insert(*slot, *current_value);
                 }
@@ -413,6 +417,7 @@ impl PostState {
             Change::StorageWiped { address, .. } => {
                 let storage = self.storage.entry(*address).or_default();
                 storage.wiped = true;
+                storage.storage.clear();
             }
         }
 
@@ -433,7 +438,6 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (old_value, _)) in changeset {
                     storage.storage.insert(*slot, *old_value);
                 }
@@ -527,16 +531,12 @@ impl PostState {
 
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
+            // If the storage was wiped, remove all previous entries from the database.
             if storage.wiped {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
                 }
-
-                // If the storage is marked as wiped, it might still contain values. This is to
-                // avoid deallocating where possible, but these values should not be written to the
-                // database.
-                continue
             }
 
             for (key, value) in storage.storage {
@@ -812,6 +812,50 @@ mod tests {
             changeset_cursor.next_dup().unwrap(),
             None,
             "Account A should only be in the changeset 2 times on deletion"
+        );
+    }
+
+    #[test]
+    fn reuse_selfdestructed_account() {
+        let address_a = Address::zero();
+
+        // 0x00 => 0 => 1
+        // 0x01 => 0 => 2
+        // 0x03 => 0 => 3
+        let storage_changeset_one = BTreeMap::from([
+            (U256::from(0), (U256::from(0), U256::from(1))),
+            (U256::from(1), (U256::from(0), U256::from(2))),
+            (U256::from(3), (U256::from(0), U256::from(3))),
+        ]);
+        // 0x00 => 0 => 3
+        // 0x01 => 0 => 4
+        let storage_changeset_two = BTreeMap::from([
+            (U256::from(0), (U256::from(0), U256::from(3))),
+            (U256::from(2), (U256::from(0), U256::from(4))),
+        ]);
+
+        let mut state = PostState::new();
+
+        // Create some storage for account A (simulates a contract deployment)
+        state.change_storage(address_a, storage_changeset_one);
+        state.finish_transition();
+        // Next transition destroys the account (selfdestruct)
+        state.destroy_account(address_a, Account::default());
+        state.finish_transition();
+        // Next transition recreates account A with some storage (simulates a contract deployment)
+        state.change_storage(address_a, storage_changeset_two);
+        state.finish_transition();
+
+        // All the storage of account A has to be deleted in the database (wiped)
+        assert!(
+            state.account_storage(&address_a).expect("Account A should have some storage").wiped,
+            "The wiped flag should be set to discard all pre-existing storage from the database"
+        );
+        // Then, we must ensure that *only* the storage from the last transition will be written
+        assert_eq!(
+            state.account_storage(&address_a).expect("Account A should have some storage").storage,
+            BTreeMap::from([(U256::from(0), U256::from(3)), (U256::from(2), U256::from(4))]),
+            "Account A's storage should only have slots 0 and 2, and they should have values 3 and 4, respectively."
         );
     }
 
