@@ -57,7 +57,9 @@ where
     Ok((res, evm.env))
 }
 
-/// Creates a new [Env] to be used for executing the [CallRequest] in `eth_call`
+/// Creates a new [Env] to be used for executing the [CallRequest] in `eth_call`.
+///
+/// Note: this does _not_ access the Database to check the sender.
 pub(crate) fn build_call_evm_env(
     cfg: CfgEnv,
     block: BlockEnv,
@@ -68,6 +70,9 @@ pub(crate) fn build_call_evm_env(
 }
 
 /// Configures a new [TxEnv]  for the [CallRequest]
+///
+/// All [TxEnv] fields are derived from the given [CallRequest], if fields are `None`, they fall
+/// back to the [BlockEnv]'s settings.
 pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv> {
     let CallRequest {
         from,
