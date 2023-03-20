@@ -92,13 +92,12 @@ pub use crate::{
     },
 };
 use crate::{
-    error::PoolResult,
+    error::{PoolError, PoolResult},
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
-
-use crate::error::PoolError;
 use reth_primitives::{TxHash, U256};
+use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 
@@ -202,6 +201,21 @@ where
     /// Whether the pool is empty
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
+    }
+}
+
+impl<Client>
+    Pool<EthTransactionValidator<Client, PooledTransaction>, CostOrdering<PooledTransaction>>
+where
+    Client: StateProviderFactory,
+{
+    /// Returns a new [Pool] that uses the default [EthTransactionValidator] when validating
+    /// [PooledTransaction]s and ords via [CostOrdering]
+    pub fn eth_pool(
+        validator: EthTransactionValidator<Client, PooledTransaction>,
+        config: PoolConfig,
+    ) -> Self {
+        Self::new(validator, CostOrdering::default(), config)
     }
 }
 
