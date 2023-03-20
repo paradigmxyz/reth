@@ -130,11 +130,9 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
-    assert!(is_unimplemented(DebugApiClient::raw_header(client, block_id).await.err().unwrap()));
-    assert!(is_unimplemented(DebugApiClient::raw_block(client, block_id).await.err().unwrap()));
-    assert!(is_unimplemented(
-        DebugApiClient::raw_transaction(client, H256::default()).await.err().unwrap()
-    ));
+    DebugApiClient::raw_header(client, block_id).await.unwrap();
+    DebugApiClient::raw_block(client, block_id).await.unwrap();
+    DebugApiClient::raw_transaction(client, H256::default()).await.unwrap();
     assert!(is_unimplemented(DebugApiClient::raw_receipts(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
 }

@@ -2,14 +2,15 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         revm_utils::inspect,
-        EthTransactions,
+        EthTransactions, TransactionSource,
     },
-    result::internal_rpc_err,
+    result::{internal_rpc_err, ToRpcResult},
     EthApiSpec,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256, U256};
+use reth_provider::{BlockProvider, HeaderProvider};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
@@ -29,24 +30,27 @@ use revm::primitives::Env;
 ///
 /// This type provides the functionality for handling `debug` related requests.
 #[non_exhaustive]
-pub struct DebugApi<Eth> {
+pub struct DebugApi<Client, Eth> {
+    /// The client that can interact with the chain.
+    client: Client,
     /// The implementation of `eth` API
     eth_api: Eth,
 }
 
 // === impl DebugApi ===
 
-impl<Eth> DebugApi<Eth> {
+impl<Client, Eth> DebugApi<Client, Eth> {
     /// Create a new instance of the [DebugApi]
-    pub fn new(eth: Eth) -> Self {
-        Self { eth_api: eth }
+    pub fn new(client: Client, eth: Eth) -> Self {
+        Self { client, eth_api: eth }
     }
 }
 
 // === impl DebugApi ===
 
-impl<Eth> DebugApi<Eth>
+impl<Client, Eth> DebugApi<Client, Eth>
 where
+    Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthTransactions + 'static,
 {
     /// Trace the transaction according to the provided options.
@@ -117,25 +121,58 @@ where
     }
 }
 
+use reth_rlp::Encodable;
+
 #[async_trait]
-impl<Eth> DebugApiServer for DebugApi<Eth>
+impl<Client, Eth> DebugApiServer for DebugApi<Client, Eth>
 where
+    Client: BlockProvider + HeaderProvider + 'static,
     Eth: EthApiSpec + 'static,
 {
     /// Handler for `debug_getRawHeader`
-    async fn raw_header(&self, _block_id: BlockId) -> RpcResult<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        let header = match block_id {
+            BlockId::Hash(hash) => self.client.header(&hash.into()).to_rpc_result()?,
+            BlockId::Number(number_or_tag) => {
+                let number =
+                    self.client.convert_block_number(number_or_tag).to_rpc_result()?.ok_or(
+                        jsonrpsee::core::Error::Custom("Pending block not supported".to_string()),
+                    )?;
+                self.client.header_by_number(number).to_rpc_result()?
+            }
+        };
+
+        let mut res = Vec::new();
+        if let Some(header) = header {
+            header.encode(&mut res);
+        }
+
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawBlock`
-    async fn raw_block(&self, _block_id: BlockId) -> RpcResult<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
+        let block = self.client.block(block_id).to_rpc_result()?;
+
+        let mut res = Vec::new();
+        if let Some(block) = block {
+            block.encode(&mut res);
+        }
+
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawTransaction`
     /// Returns the bytes of the transaction for the given hash.
-    async fn raw_transaction(&self, _hash: H256) -> RpcResult<Bytes> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn raw_transaction(&self, hash: H256) -> RpcResult<Bytes> {
+        let tx = self.eth_api.transaction_by_hash(hash).await?;
+
+        let mut res = Vec::new();
+        if let Some(tx) = tx.map(TransactionSource::into_recovered) {
+            tx.encode(&mut res);
+        }
+
+        Ok(res.into())
     }
 
     /// Handler for `debug_getRawReceipts`
@@ -204,7 +241,7 @@ where
     }
 }
 
-impl<Eth> std::fmt::Debug for DebugApi<Eth> {
+impl<Client, Eth> std::fmt::Debug for DebugApi<Client, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
