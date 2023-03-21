@@ -447,7 +447,6 @@ mod tests {
             tables,
             transaction::{DbTx, DbTxMut},
         };
-        use reth_eth_wire::BlockBody;
         use reth_interfaces::{
             consensus::Consensus,
             p2p::{
@@ -465,7 +464,7 @@ mod tests {
                 TestConsensus,
             },
         };
-        use reth_primitives::{BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
+        use reth_primitives::{BlockBody, BlockNumber, SealedBlock, SealedHeader, TxNumber, H256};
         use std::{
             collections::{HashMap, VecDeque},
             ops::Range,

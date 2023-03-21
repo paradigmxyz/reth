@@ -2,8 +2,7 @@ use std::pin::Pin;
 
 use crate::p2p::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::Future;
-use reth_eth_wire::BlockBody;
-use reth_primitives::H256;
+use reth_primitives::{BlockBody, H256};
 
 /// The bodies future type
 pub type BodiesFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send + Sync>>;
