@@ -65,7 +65,7 @@ pub struct BeaconConsensusEngine<
 impl<DB, U, C, EF> BeaconConsensusEngine<DB, U, C, EF>
 where
     DB: Database + Unpin + 'static,
-    U: SyncStateUpdater + Unpin + 'static,
+    U: SyncStateUpdater + 'static,
     C: Consensus,
     EF: ExecutorFactory + 'static,
 {
