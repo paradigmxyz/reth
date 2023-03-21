@@ -6,7 +6,7 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{fmt, fmt::Formatter, ops::Deref, str::FromStr};
+use std::{fmt, fmt::Formatter, num::ParseIntError, ops::Deref, str::FromStr};
 
 /// Ethereum full block.
 ///
@@ -507,7 +507,7 @@ impl<'de> Deserialize<'de> for BlockNumberOrTag {
 }
 
 impl FromStr for BlockNumberOrTag {
-    type Err = String;
+    type Err = ParseBlockNumberError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let block = match s {
@@ -517,18 +517,18 @@ impl FromStr for BlockNumberOrTag {
             "earliest" => Self::Earliest,
             "pending" => Self::Pending,
             _number => {
-                // This expects either a block hash or a QUANTITY hex string: <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md>
-                // therefore we assume if the len is 66, we assume this is a block hash
-                // <https://github.com/ethereum/go-ethereum/blob/ee530c0d5aa70d2c00ab5691a89ab431b73f8165/rpc/types.go#L184-L184>
-
-                let hex_string = s.trim_start_matches("0x");
-                let number = u64::from_str_radix(hex_string, 16).map_err(|err| err.to_string());
-                BlockNumberOrTag::Number(number?)
+                if let Some(hex_val) = s.strip_prefix("0x") {
+                    let number = u64::from_str_radix(hex_val, 16);
+                    BlockNumberOrTag::Number(number?)
+                } else {
+                    return Err(HexStringMissingPrefixError::default().into())
+                }
             }
         };
         Ok(block)
     }
 }
+
 impl fmt::Display for BlockNumberOrTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -541,6 +541,23 @@ impl fmt::Display for BlockNumberOrTag {
         }
     }
 }
+
+/// Error variants when parsing a [BlockNumberOrTag]
+#[derive(Debug, thiserror::Error)]
+pub enum ParseBlockNumberError {
+    /// Failed to parse hex value
+    #[error(transparent)]
+    ParseIntErr(#[from] ParseIntError),
+    /// Block numbers should be 0x-prefixed
+    #[error(transparent)]
+    MissingPrefix(#[from] HexStringMissingPrefixError),
+}
+
+/// Thrown when a 0x-prefixed hex string was expected
+#[derive(Debug, Default, thiserror::Error)]
+#[non_exhaustive]
+#[error("hex string without 0x prefix")]
+pub struct HexStringMissingPrefixError;
 
 /// A block hash which may have
 /// a boolean requireCanonical field.
@@ -747,5 +764,12 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn serde_blocknumber_non_0xprefix() {
+        let s = "\"2\"";
+        let err = serde_json::from_str::<BlockNumberOrTag>(s).unwrap_err();
+        assert_eq!(err.to_string(), HexStringMissingPrefixError::default().to_string());
     }
 }
