@@ -15,7 +15,6 @@
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/ci.yml
 [gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
-[tg-url]: https://t.me/paradigm_reth
 
 ## What is Reth? What are its goals?
 
@@ -83,9 +82,9 @@ If you have any questions, first see if the answer to your question can be found
 
 If the answer is not there:
 
--   Join the [Telegram][tg-url] to get help, or
--   Open a [discussion](https://github.com/paradigmxyz/reth/discussions/new) with your question, or
--   Open an issue with [the bug](https://github.com/paradigmxyz/reth/issues/new)
+- Join the [Telegram][tg-url] to get help, or
+- Open a [discussion](https://github.com/paradigmxyz/reth/discussions/new) with your question, or
+- Open an issue with [the bug](https://github.com/paradigmxyz/reth/issues/new)
 
 Guidelines on how to contribute can be found in our [`CONTRIBUTING.md`](./CONTRIBUTING.md). Get started with contributing in our [contributor docs](./docs)
 
@@ -113,3 +112,4 @@ We will be updating the documentation with the completion status of each compone
 We appreciate your patience until we get there. Until then, we are happy to answer all questions in the Telegram link above.
 
 [book]: https://paradigmxyz.github.io/reth/
+[tg-url]: https://t.me/paradigm_reth
