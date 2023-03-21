@@ -14,7 +14,7 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 /// Error returned by [`EngineApi`][crate::EngineApi]
 #[derive(Error, Debug)]
 pub enum EngineApiError {
-    /// Invalid payload block hash.
+    /// Invalid payload block timestamp.
     #[error("Invalid payload timestamp: {invalid}. Latest: {latest}")]
     PayloadTimestamp {
         /// The payload timestamp.

@@ -7,6 +7,9 @@ pub type BeaconEngineResult<Ok> = Result<Ok, BeaconEngineError>;
 /// The error wrapper for the beacon consensus engine.
 #[derive(Error, Debug)]
 pub enum BeaconEngineError {
+    /// Forkchoice zero hash head received.
+    #[error("Received zero hash as forkchoice head")]
+    ForkchoiceEmptyHead,
     /// Pipeline error.
     #[error(transparent)]
     Pipeline(#[from] PipelineError),

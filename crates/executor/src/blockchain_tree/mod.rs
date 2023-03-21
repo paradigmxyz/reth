@@ -489,13 +489,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
-        let chain_id = if let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) {
-            chain_id
-        } else {
-            // If block is already canonical don't return error.
-            if self.block_indices.is_block_hash_canonical(block_hash) {
-                return Ok(())
+        // If block is already canonical don't return error.
+        if self.block_indices.is_block_hash_canonical(block_hash) {
+            let td = self
+                .externals
+                .shareable_db()
+                .header_td(block_hash)?
+                .ok_or(ExecError::MissingTotalDifficulty { hash: *block_hash })?;
+            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
+                return Err(ExecError::BlockPreMerge.into())
             }
+            return Ok(())
+        }
+
+        let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
             return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
@@ -738,7 +745,7 @@ mod tests {
         let (mut block2, exec2) = data.blocks[1].clone();
         block2.number = 12;
 
-        // test pops execution results from vector, so order is from last to first.ß
+        // test pops execution results from vector, so order is from last to first.
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
 
         // last finalized block would be number 9.

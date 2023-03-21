@@ -4590,6 +4590,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-types",
  "reth-stages",
+ "reth-tracing",
  "thiserror",
  "tokio",
  "tokio-stream",

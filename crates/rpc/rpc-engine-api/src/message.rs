@@ -22,10 +22,9 @@ pub enum EngineApiMessage {
         EngineApiSender<TransitionConfiguration>,
     ),
     /// New payload message
-    NewPayload(EngineApiMessageVersion, ExecutionPayload, BeaconEngineSender<PayloadStatus>),
+    NewPayload(ExecutionPayload, BeaconEngineSender<PayloadStatus>),
     /// Forkchoice updated message
     ForkchoiceUpdated(
-        EngineApiMessageVersion,
         ForkchoiceState,
         Option<PayloadAttributes>,
         BeaconEngineSender<ForkchoiceUpdated>,
