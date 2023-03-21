@@ -510,6 +510,49 @@ where
         Ok(())
     }
 
+    /// Append blocks and insert its post state.
+    /// This will insert block data to all related tables and will update pipeline progress.
+    pub fn append_blocks_with_post_state(
+        &mut self,
+        blocks: Vec<SealedBlockWithSenders>,
+        state: PostState,
+    ) -> Result<(), TransactionError> {
+        if blocks.is_empty() {
+            return Ok(())
+        }
+        let tip = blocks.last().unwrap();
+        let new_tip_number = tip.number;
+        let new_tip_hash = tip.hash;
+        let expected_state_root = tip.state_root;
+
+        let fork_block_number = blocks.first().unwrap().number.saturating_sub(1);
+
+        let first_transition_id = self.get_block_transition(fork_block_number)?;
+
+        let num_transitions = state.transitions_count();
+
+        // Write state and changesets to the database
+        state.write_to_db(self.deref_mut(), first_transition_id)?;
+
+        // Insert the blocks
+        for block in blocks {
+            self.insert_block(block)?;
+        }
+        self.insert_hashes(
+            fork_block_number,
+            first_transition_id,
+            first_transition_id + num_transitions as u64,
+            new_tip_number,
+            new_tip_hash,
+            expected_state_root,
+        )?;
+
+        // Update pipeline progress
+        self.update_pipeline_stages(new_tip_number)?;
+
+        Ok(())
+    }
+
     /// Insert full block and make it canonical.
     ///
     /// This inserts the block and builds history related indexes. Once all blocks in a chain have
@@ -806,6 +849,7 @@ where
     ///     3. Set the local state to the value in the changeset
     ///
     /// If `TAKE` is `true`, the local state will be written to the plain state tables.
+    /// 5. Get all receipts from table
     fn get_take_block_execution_result_range<const TAKE: bool>(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
@@ -827,6 +871,14 @@ where
         // NOTE: Just get block bodies dont remove them
         // it is connection point for bodies getter and execution result getter.
         let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
+
+        // get transaction receipts
+        let from_transaction_num =
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_index();
+        let to_transaction_num =
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_index();
+        let receipts =
+            self.get_or_take::<tables::Receipts, TAKE>(from_transaction_num..=to_transaction_num)?;
 
         // get saved previous values
         let from_storage: TransitionIdAddress = (from, Address::zero()).into();
@@ -969,18 +1021,25 @@ where
         let mut block_transition_iter = block_transition.into_iter();
         let mut next_transition_id = from;
 
+        let mut receipt_iter = receipts.into_iter();
+
         // loop break if we are at the end of the blocks.
         for (_, block_body) in block_bodies.into_iter() {
-            let mut block_exec_res = PostState::new();
-            for _ in 0..block_body.tx_count {
+            let mut block_post_state = PostState::new();
+            for tx_num in block_body.tx_id_range() {
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
                         change
-                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
-                        block_exec_res.add_and_apply(change);
+                            .set_transition_id(block_post_state.transitions_count() as TransitionId);
+                        block_post_state.add_and_apply(change);
                     }
                 }
-                block_exec_res.finish_transition();
+                if let Some((receipt_tx_num, receipt)) = receipt_iter.next() {
+                    if tx_num != receipt_tx_num {
+                        block_post_state.add_receipt(receipt)
+                    }
+                }
+                block_post_state.finish_transition();
                 next_transition_id += 1;
             }
 
@@ -991,14 +1050,14 @@ where
                 if let Some(changes) = all_changesets.remove(&next_transition_id) {
                     for mut change in changes.into_iter() {
                         change
-                            .set_transition_id(block_exec_res.transitions_count() as TransitionId);
-                        block_exec_res.add_and_apply(change);
+                            .set_transition_id(block_post_state.transitions_count() as TransitionId);
+                        block_post_state.add_and_apply(change);
                     }
-                    block_exec_res.finish_transition();
+                    block_post_state.finish_transition();
                     next_transition_id += 1;
                 }
             }
-            block_exec_results.push(block_exec_res)
+            block_exec_results.push(block_post_state)
         }
         Ok(block_exec_results)
     }
@@ -1064,6 +1123,7 @@ where
         }
         // get blocks
         let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;
+        let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
         // get execution res
         let execution_res = self.get_take_block_execution_result_range::<TAKE>(range.clone())?;
         // combine them
@@ -1075,6 +1135,11 @@ where
         if TAKE {
             // rm block bodies
             self.get_or_take::<tables::BlockBodies, TAKE>(range)?;
+
+            // Update pipeline progress
+            if let Some(fork_number) = unwind_to {
+                self.update_pipeline_stages(fork_number)?;
+            }
         }
 
         // return them
@@ -1494,7 +1559,7 @@ mod test {
     use std::{ops::DerefMut, sync::Arc};
 
     #[test]
-    fn insert_get_take() {
+    fn insert_block_and_hashes_get_take() {
         let db = create_test_rw_db();
 
         // setup
@@ -1584,6 +1649,67 @@ mod test {
                 "Transaction 0 should not exist"
             );
         }
+
+        // get second block
+        let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
+        assert_eq!(get, vec![(block2.clone(), exec_res2.clone())]);
+
+        // get two blocks
+        let get = tx.get_block_and_execution_range(&chain_spec, 1..=2).unwrap();
+        assert_eq!(
+            get,
+            vec![(block1.clone(), exec_res1.clone()), (block2.clone(), exec_res2.clone())]
+        );
+
+        // take two blocks
+        let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();
+        assert_eq!(get, vec![(block1, exec_res1), (block2, exec_res2)]);
+
+        // assert genesis state
+        assert_genesis_block(&tx, genesis);
+    }
+
+    #[test]
+    fn insert_get_take_multiblocks() {
+        let db = create_test_rw_db();
+
+        // setup
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(MAINNET.genesis.clone())
+            .shanghai_activated()
+            .build();
+
+        let data = BlockChainTestData::default();
+        let genesis = data.genesis.clone();
+        let (block1, exec_res1) = data.blocks[0].clone();
+        let (block2, exec_res2) = data.blocks[1].clone();
+
+        insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
+
+        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
+        assert_genesis_block(&tx, data.genesis);
+
+        tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
+
+        // get one block
+        let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
+        assert_eq!(get, vec![(block1.clone(), exec_res1.clone())]);
+
+        // take one block
+        let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();
+        assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
+        assert_genesis_block(&tx, genesis.clone());
+
+        // insert two blocks
+        let mut merged_state = exec_res1.clone();
+        merged_state.extend(exec_res2.clone());
+        tx.append_blocks_with_post_state(
+            vec![block1.clone(), block2.clone()],
+            merged_state.clone(),
+        )
+        .unwrap();
 
         // get second block
         let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
