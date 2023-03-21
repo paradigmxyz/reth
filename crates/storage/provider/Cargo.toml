@@ -31,8 +31,7 @@ thiserror = "1.0.37"
 auto_impl = "1.0"
 itertools = "0.10"
 
-# feature test-utils
-parking_lot = { version = "0.12", optional = true }
+parking_lot = "0.12"
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
@@ -46,4 +45,4 @@ triehash = "0.8"
 
 [features]
 bench = []
-test-utils = ["parking_lot"]
+test-utils = []
