@@ -18,7 +18,7 @@ use reth_rlp::{
 };
 use reth_tracing::tracing::*;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     marker::PhantomData,
     ops::Range,
     sync::Arc,
@@ -72,10 +72,16 @@ where
         unreachable!("Use batch instead.");
     }
 
-    // Insert a batch of data into the cache.
-    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+    /// Insert a batch of data into the cache.
+    fn insert_batch(&self, _keys: Vec<Vec<u8>>, _values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+        unreachable!("Use map instead.");
+    }
+
+    /// Insert a map of data into the cache.
+    fn insert_map(&self, kv: &mut HashMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
         let mut cursor = self.accounts_trie_cursor.lock();
-        for (key, value) in keys.into_iter().zip(values.into_iter()) {
+
+        for (key, value) in kv.drain() {
             cursor.upsert(H256::from_slice(key.as_slice()), value)?;
         }
         Ok(())
@@ -163,9 +169,15 @@ where
     }
 
     /// Insert a batch of data into the cache.
-    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+    fn insert_batch(&self, _keys: Vec<Vec<u8>>, _values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+        unreachable!("Use map instead.");
+    }
+
+    /// Insert a map of data into the cache.
+    fn insert_map(&self, kv: &mut HashMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
         let mut cursor = self.storages_trie_cursor.lock();
-        for (key, node) in keys.into_iter().zip(values.into_iter()) {
+
+        for (key, node) in kv.drain() {
             let hash = H256::from_slice(key.as_slice());
             if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
                 cursor.delete_current()?;
@@ -467,7 +479,7 @@ where
                     if self.has_hit_threshold() {
                         return self.save_account_checkpoint(
                             ProofCheckpoint::default(),
-                            self.replace_account_root(&mut trie, previous_root)?,
+                            self.replace_account_root(trie, previous_root)?,
                             hashed_address,
                         )
                     }
@@ -475,7 +487,7 @@ where
                 TrieProgress::InProgress(checkpoint) => {
                     return self.save_account_checkpoint(
                         checkpoint,
-                        self.replace_account_root(&mut trie, previous_root)?,
+                        self.replace_account_root(trie, previous_root)?,
                         hashed_address,
                     )
                 }
@@ -485,7 +497,7 @@ where
         // Reset inner stage progress
         self.save_checkpoint(ProofCheckpoint::default())?;
 
-        Ok(TrieProgress::Complete(self.replace_account_root(&mut trie, previous_root)?))
+        Ok(TrieProgress::Complete(self.replace_account_root(trie, previous_root)?))
     }
 
     fn calculate_storage_root(
@@ -503,7 +515,7 @@ where
                 storage_cursor.seek_by_key_subkey(address, entry)?.filter(|e| e.key == entry),
                 PatriciaTrie::from(
                     Arc::new(DupHashDatabaseMut::from_root(
-                        storage_trie_cursor,
+                        storage_trie_cursor.clone(),
                         address,
                         previous_root.expect("is some"),
                     )?),
@@ -515,7 +527,7 @@ where
             (
                 storage_cursor.seek_by_key_subkey(address, H256::zero())?,
                 PatriciaTrie::new(
-                    Arc::new(DupHashDatabaseMut::new(storage_trie_cursor, address)?),
+                    Arc::new(DupHashDatabaseMut::new(storage_trie_cursor.clone(), address)?),
                     hasher,
                 ),
             )
@@ -535,6 +547,7 @@ where
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         storage_root: Some(self.replace_storage_root(
                             trie,
+                            storage_trie_cursor,
                             address,
                             previous_root,
                         )?),
@@ -545,7 +558,12 @@ where
             }
         }
 
-        Ok(TrieProgress::Complete(self.replace_storage_root(trie, address, previous_root)?))
+        Ok(TrieProgress::Complete(self.replace_storage_root(
+            trie,
+            storage_trie_cursor,
+            address,
+            previous_root,
+        )?))
     }
 
     /// Calculates the root of the state trie by updating an existing trie.
@@ -602,7 +620,7 @@ where
                 TrieProgress::InProgress(checkpoint) => {
                     return self.save_account_checkpoint(
                         checkpoint,
-                        self.replace_account_root(&mut trie, previous_root)?,
+                        self.replace_account_root(trie, previous_root)?,
                         hashed_address,
                     )
                 }
@@ -619,7 +637,7 @@ where
                 if self.has_hit_threshold() {
                     return self.save_account_checkpoint(
                         ProofCheckpoint::default(),
-                        self.replace_account_root(&mut trie, previous_root)?,
+                        self.replace_account_root(trie, previous_root)?,
                         hashed_address,
                     )
                 }
@@ -629,7 +647,7 @@ where
         // Reset inner stage progress
         self.save_checkpoint(ProofCheckpoint::default())?;
 
-        Ok(TrieProgress::Complete(self.replace_account_root(&mut trie, previous_root)?))
+        Ok(TrieProgress::Complete(self.replace_account_root(trie, previous_root)?))
     }
 
     /// Update the account's storage root
@@ -643,7 +661,11 @@ where
     ) -> Result<TrieProgress, TrieError> {
         let mut hashed_storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
         let mut trie = PatriciaTrie::new(
-            Arc::new(DupHashDatabaseMut::from_root(storage_trie_cursor, address, previous_root)?),
+            Arc::new(DupHashDatabaseMut::from_root(
+                storage_trie_cursor.clone(),
+                address,
+                previous_root,
+            )?),
             Arc::new(HasherKeccak::new()),
         );
 
@@ -661,6 +683,7 @@ where
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         storage_root: Some(self.replace_storage_root(
                             trie,
+                            storage_trie_cursor,
                             address,
                             previous_root,
                         )?),
@@ -673,7 +696,12 @@ where
             }
         }
 
-        Ok(TrieProgress::Complete(self.replace_storage_root(trie, address, previous_root)?))
+        Ok(TrieProgress::Complete(self.replace_storage_root(
+            trie,
+            storage_trie_cursor,
+            address,
+            previous_root,
+        )?))
     }
 
     fn gather_changes(
@@ -730,6 +758,7 @@ where
 
     fn has_hit_threshold(&mut self) -> bool {
         self.current += 1;
+        // dbg!(self.current);
         self.current >= self.commit_threshold
     }
 
@@ -765,7 +794,7 @@ where
     /// Finds the most recent account trie root and removes the previous one if applicable.
     fn replace_account_root(
         &self,
-        trie: &mut PatriciaTrie<HashDatabaseMut<'_, TX>, HasherKeccak>,
+        mut trie: PatriciaTrie<HashDatabaseMut<'_, TX>, HasherKeccak>,
         previous_root: H256,
     ) -> Result<H256, TrieError> {
         let new_root = H256::from_slice(trie.root()?.as_slice());
@@ -784,14 +813,14 @@ where
     fn replace_storage_root(
         &self,
         mut trie: PatriciaTrie<DupHashDatabaseMut<'_, TX>, HasherKeccak>,
+        storage_trie_cursor: StoragesTrieCursor<'tx, TX>,
         address: H256,
         previous_root: H256,
     ) -> Result<H256, TrieError> {
         let new_root = H256::from_slice(trie.root()?.as_slice());
 
         if new_root != previous_root {
-            let mut trie_cursor = self.tx.cursor_dup_write::<tables::StoragesTrie>()?;
-
+            let mut trie_cursor = storage_trie_cursor.lock();
             if trie_cursor
                 .seek_by_key_subkey(address, previous_root)?
                 .filter(|entry| entry.hash == previous_root)
@@ -799,10 +828,10 @@ where
             {
                 trie_cursor.delete_current()?;
             }
-        }
 
-        if new_root == EMPTY_ROOT {
-            self.tx.delete::<tables::StoragesTrie>(address, None)?;
+            if new_root == EMPTY_ROOT {
+                self.tx.delete::<tables::StoragesTrie>(address, None)?;
+            }
         }
 
         Ok(new_root)

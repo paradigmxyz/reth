@@ -20,7 +20,8 @@ reth-rlp = {path = "../../rlp"}
 revm-primitives = "1.0.0"
 
 # trie
-cita_trie = "4.0.0"
+# cita_trie = "4.0.0"
+cita_trie = { path = "../../../../cita-trie" }
 hasher = "0.1.4"
 
 # tracing
