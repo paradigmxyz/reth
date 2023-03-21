@@ -2,20 +2,20 @@ use crate::{keccak256, Address, Bytes, ChainId, TxHash, H256};
 pub use access_list::{AccessList, AccessListItem, AccessListWithGasUsed};
 use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
+pub use error::InvalidTransactionError;
+pub use meta::TransactionMeta;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
-pub use error::InvalidTransactionError;
-pub use meta::TransactionMeta;
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
 mod access_list;
 mod error;
+mod meta;
 mod signature;
 mod tx_type;
-mod meta;
 pub(crate) mod util;
 
 /// Legacy transaction.
