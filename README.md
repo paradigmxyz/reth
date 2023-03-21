@@ -11,7 +11,10 @@
 [![Codecov](https://img.shields.io/codecov/c/github/paradigmxyz/reth?token=c24SDcMImE)][codecov]
 [![Telegram Chat][tg-badge]][tg-url]
 
-[tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
+[codecov]: https://app.codecov.io/gh/paradigmxyz/reth
+[gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/ci.yml
+[gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
+[tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
 [tg-url]: https://t.me/paradigm_reth
 
 ## What is Reth? What are its goals?
@@ -99,11 +102,6 @@ None of this would have been possible without them, so big shoutout to the teams
 * [Erigon](https://github.com/ledgerwatch/erigon) (fka Turbo-Geth): Erigon pioneered the ["Staged Sync" architecture](https://erigon.substack.com/p/erigon-stage-sync-and-control-flows) that Reth is using, as well as [introduced MDBX](https://github.com/ledgerwatch/erigon/wiki/Choice-of-storage-engine) as the database of choice. We thank Erigon for pushing the state of the art research on the performance limits of Ethereum nodes.
 * [Akula](https://github.com/akula-bft/akula/): Reth uses forks of the Apache versions of Akula's [MDBX Bindings](https://github.com/paradigmxyz/reth/pull/132), [FastRLP](https://github.com/paradigmxyz/reth/pull/63) and [ECIES](https://github.com/paradigmxyz/reth/pull/80) . Given that these packages were already released under the Apache License, and they implement standardized solutions, we decided not to reimplement them to iterate faster. We thank the Akula team for their contributions to the Rust Ethereum ecosystem and for publishing these packages.
 
-[codecov]: https://app.codecov.io/gh/paradigmxyz/reth
-[gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/ci.yml
-[gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
-[book]: https://paradigmxyz.github.io/reth/
-
 ## 🚧 WARNING: UNDER CONSTRUCTION 🚧
 
 This project is work in progress and subject to frequent changes as we are still working on wiring up each individual node component into a full syncing pipeline.
@@ -113,3 +111,5 @@ It has not been audited for security purposes and should not be used in producti
 We will be updating the documentation with the completion status of each component, as well as include more contributing guidelines (design docs, architecture diagrams, repository layouts) and "good first issues". See the "Contributing and Getting Help" section above for more.
 
 We appreciate your patience until we get there. Until then, we are happy to answer all questions in the Telegram link above.
+
+[book]: https://paradigmxyz.github.io/reth/
