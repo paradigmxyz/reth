@@ -44,7 +44,11 @@ where
 
     /// Handler for: `eth_coinbase`
     async fn author(&self) -> Result<Address> {
-        Err(internal_rpc_err("unimplemented"))
+        let (_cfg_env, block_env, _block_id) =
+            // TODO: swap out latest block with pending block when that gets implemented
+            // self.evm_env_at(BlockId::Number(BlockNumberOrTag::Pending)).await?;
+            self.evm_env_at(BlockId::Number(BlockNumberOrTag::Latest)).await?;
+        Ok(block_env.coinbase)
     }
 
     /// Handler for: `eth_accounts`

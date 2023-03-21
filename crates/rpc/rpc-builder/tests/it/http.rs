@@ -61,6 +61,7 @@ where
     // Implemented
     EthApiClient::protocol_version(client).await.unwrap();
     EthApiClient::chain_id(client).await.unwrap();
+    EthApiClient::author(client).await.unwrap();
     EthApiClient::accounts(client).await.unwrap();
     EthApiClient::block_number(client).await.unwrap();
     EthApiClient::get_code(client, address, None).await.unwrap();
@@ -97,7 +98,6 @@ where
     EthApiClient::syncing(client).await.unwrap();
 
     // Unimplemented
-    assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::gas_price(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::max_priority_fee_per_gas(client).await.err().unwrap()));
