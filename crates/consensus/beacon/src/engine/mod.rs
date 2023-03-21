@@ -31,22 +31,18 @@ pub use message::{BeaconEngineMessage, BeaconEngineSender};
 mod pipeline_state;
 pub use pipeline_state::PipelineState;
 
-#[derive(Debug, Default)]
-enum BeaconEngineAction {
-    #[default]
-    None,
-    RunPipeline,
-}
-
-impl BeaconEngineAction {
-    fn run_pipeline(&self) -> bool {
-        matches!(self, BeaconEngineAction::RunPipeline)
-    }
-}
-
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
-/// TODO: add more docs
+/// The beacon consensus engine is itself driven by messages from the Consensus Layer, which are
+/// received by Engine API.
+///
+/// The consensus engine is idle until it receives the first
+/// [BeaconEngineMessage::ForkchoiceUpdated] message from the CL which would initiate the sync. At
+/// first, the consensus engine would run the [Pipeline] until the latest known block hash.
+/// Afterwards, it would attempt to create/restore the [BlockchainTree] from the blocks
+/// that are currently available. In case the restoration is successful, the consensus engine would
+/// run in a live sync mode, which mean it would solemnly rely on the messages from Engine API to
+/// construct the chain forward.
 #[must_use = "Future does nothing unless polled"]
 pub struct BeaconConsensusEngine<
     DB: Database,
@@ -87,7 +83,7 @@ where
     }
 
     /// Returns `true` if the pipeline is currently idle.
-    fn pipeline_is_idle(&self) -> bool {
+    fn is_pipeline_idle(&self) -> bool {
         self.pipeline_state.as_ref().expect("pipeline state is set").is_idle()
     }
 
@@ -115,7 +111,7 @@ where
         }
 
         self.forkchoice_state = Some(state.clone());
-        let status = if self.pipeline_is_idle() {
+        let status = if self.is_pipeline_idle() {
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => PayloadStatus::from_status(PayloadStatusEnum::Valid),
                 Err(error) => {
@@ -157,7 +153,7 @@ where
             }
         };
 
-        if self.pipeline_is_idle() {
+        if self.is_pipeline_idle() {
             let block_hash = block.hash;
             match self.blockchain_tree.insert_block(block) {
                 Ok(status) => {
@@ -193,7 +189,7 @@ where
         tip: H256,
     ) -> PipelineState<DB, U> {
         let next_action = std::mem::take(&mut self.next_action);
-        if next_action.run_pipeline() {
+        if next_action.should_run_pipeline() {
             trace!(target: "consensus::engine", ?tip, "Starting the pipeline");
             PipelineState::Running(pipeline.run_as_fut(self.db.clone(), tip))
         } else {
@@ -248,12 +244,12 @@ where
             }
 
             // Lookup the forkchoice state. We can't launch the pipeline without the tip.
-            let forckchoice_state = match &this.forkchoice_state {
+            let forkchoice_state = match &this.forkchoice_state {
                 Some(state) => state,
                 None => return Poll::Pending,
             };
 
-            let tip = forckchoice_state.head_block_hash;
+            let tip = forkchoice_state.head_block_hash;
             let next_state = match this.pipeline_state.take().expect("pipeline state is set") {
                 PipelineState::Running(mut fut) => {
                     match fut.poll_unpin(cx) {
@@ -264,8 +260,8 @@ where
                             }
 
                             // Update the state and hashes of the blockchain tree if possible
-                            if let Err(error) = this
-                                .restore_tree_if_possible(forckchoice_state.finalized_block_hash)
+                            if let Err(error) =
+                                this.restore_tree_if_possible(forkchoice_state.finalized_block_hash)
                             {
                                 error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
                                 return Poll::Ready(Err(error.into()))
@@ -285,10 +281,24 @@ where
             this.pipeline_state = Some(next_state);
 
             // If the pipeline is idle, break from the loop.
-            if this.pipeline_is_idle() {
+            if this.is_pipeline_idle() {
                 return Poll::Pending
             }
         }
+    }
+}
+
+/// Denotes the next action that the [BeaconConsensusEngine] should take.
+#[derive(Debug, Default)]
+enum BeaconEngineAction {
+    #[default]
+    None,
+    RunPipeline,
+}
+
+impl BeaconEngineAction {
+    fn should_run_pipeline(&self) -> bool {
+        matches!(self, BeaconEngineAction::RunPipeline)
     }
 }
 

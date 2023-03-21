@@ -8,6 +8,7 @@ readme = "README.md"
 description = """
 Reth RPC types
 """
+
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }

@@ -93,6 +93,9 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
 pub type PipelineFut<DB, U> =
     Pin<Box<dyn Future<Output = (Pipeline<DB, U>, Result<ControlFlow, PipelineError>)> + Send>>;
 
+/// The pipeline type itself with the result of [Pipeline::run_as_fut]
+pub type PipelineWithResult<DB, U> = (Pipeline<DB, U>, Result<ControlFlow, PipelineError>);
+
 impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
     fn default() -> Self {
         Self {

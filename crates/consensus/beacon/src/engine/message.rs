@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 /// Beacon engine sender.
 pub type BeaconEngineSender<Ok> = oneshot::Sender<BeaconEngineResult<Ok>>;
 
-/// The message received by beacon consensus engine.
+///  A message for the beacon engine from other components of the node.
 #[derive(Debug)]
 pub enum BeaconEngineMessage {
     /// Message with new payload.
