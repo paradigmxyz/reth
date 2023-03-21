@@ -48,6 +48,13 @@ impl ExtendedAccount {
         self.bytecode = Some(Bytecode::new_raw(bytecode.into()));
         self
     }
+
+    /// Add storage to the extended account. If the storage key is already present,
+    /// the value is updated.
+    pub fn with_storage(mut self, storage: HashMap<StorageKey, StorageValue>) -> Self {
+        self.storage.extend(storage);
+        self
+    }
 }
 
 impl MockEthProvider {
