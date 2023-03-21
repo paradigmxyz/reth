@@ -51,7 +51,10 @@ impl ExtendedAccount {
 
     /// Add storage to the extended account. If the storage key is already present,
     /// the value is updated.
-    pub fn with_storage(mut self, storage: HashMap<StorageKey, StorageValue>) -> Self {
+    pub fn extend_storage(
+        mut self,
+        storage: impl IntoIterator<Item = (StorageKey, StorageValue)>
+    ) -> Self {
         self.storage.extend(storage);
         self
     }
