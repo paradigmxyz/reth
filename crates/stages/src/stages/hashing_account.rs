@@ -1,4 +1,9 @@
-use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use crate::{
+    stages::stream::SequentialPairStream, ExecInput, ExecOutput, Stage, StageError, StageId,
+    UnwindInput, UnwindOutput,
+};
+use futures_util::StreamExt;
+use itertools::Itertools;
 use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -9,6 +14,8 @@ use reth_db::{
 use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 /// The [`StageId`] of the account hashing stage.
@@ -190,27 +197,40 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 self.save_checkpoint(tx, checkpoint)?;
             }
 
+            let (sender, rx) = mpsc::unbounded_channel();
             let start_address = checkpoint.address.take();
             let next_address = {
                 let mut accounts = tx.cursor_read::<tables::PlainAccountState>()?;
 
-                let hashed_batch = accounts
+                let accounts_walker = accounts
                     .walk(start_address)?
-                    .take(self.commit_threshold as usize)
-                    .map(|res| res.map(|(address, account)| (keccak256(address), account)))
-                    .collect::<Result<BTreeMap<_, _>, _>>()?;
+                    .take(self.commit_threshold as usize);
 
+                for chunk in &accounts_walker
+                    .chunks(self.commit_threshold as usize / rayon::current_num_threads())
+                {
+                    let sender = sender.clone();
+                    let mut chunk = chunk.collect::<Vec<_>>();
+                    rayon::spawn(move || {
+                        chunk
+                            .drain(..)
+                            .map(|entry| {
+                                let (address, account) = entry?;
+                                Ok((keccak256(address), account))
+                            })
+                            .for_each(|result: Result<_, StageError>| {
+                                let _ = sender.send(result);
+                            });
+                    });
+                }
+                // drop the sender to signal that we're done sending
+                drop(sender);
+
+                let mut hashed_accounts = UnboundedReceiverStream::new(rx);
                 let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
-
-                // iterate and put presorted hashed accounts
-                if start_address.is_none() {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.append(k, v))?;
-                } else {
-                    hashed_batch
-                        .into_iter()
-                        .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
+                while let Some(account) = hashed_accounts.next().await {
+                    let (k, v) = account?;
+                    hashed_account_cursor.insert(k, v)?;
                 }
 
                 // next key of iterator
