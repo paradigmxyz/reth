@@ -103,7 +103,7 @@ impl EngineApiServer for EngineApi {
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
         )
-        .map_err(|err| to_rpc_error(err))?;
+        .map_err(to_rpc_error)?;
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::NewPayload(payload, tx), rx).await
     }
@@ -116,7 +116,7 @@ impl EngineApiServer for EngineApi {
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
         )
-        .map_err(|err| to_rpc_error(err))?;
+        .map_err(to_rpc_error)?;
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::NewPayload(payload, tx), rx).await
     }
@@ -136,7 +136,7 @@ impl EngineApiServer for EngineApi {
                 attrs.timestamp.as_u64(),
                 attrs.withdrawals.is_some(),
             )
-            .map_err(|err| to_rpc_error(err))?;
+            .map_err(to_rpc_error)?;
         }
         let (tx, rx) = oneshot::channel();
         self.delegate_request(
@@ -159,7 +159,7 @@ impl EngineApiServer for EngineApi {
                 attrs.timestamp.as_u64(),
                 attrs.withdrawals.is_some(),
             )
-            .map_err(|err| to_rpc_error(err))?;
+            .map_err(to_rpc_error)?;
         }
         let (tx, rx) = oneshot::channel();
         self.delegate_request(
