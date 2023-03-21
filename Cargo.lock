@@ -4707,7 +4707,6 @@ dependencies = [
  "pin-project",
  "rayon",
  "reth-db",
- "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
