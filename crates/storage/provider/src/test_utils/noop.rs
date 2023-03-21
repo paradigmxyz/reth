@@ -5,8 +5,8 @@ use crate::{
 use reth_interfaces::Result;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockId, BlockNumber, Bytecode, Bytes, ChainInfo, Header,
-    Receipt, StorageKey, StorageValue, TransactionSigned, TxHash, TxNumber, H256, KECCAK_EMPTY,
-    U256,
+    Receipt, StorageKey, StorageValue, TransactionMeta, TransactionSigned, TxHash, TxNumber, H256,
+    KECCAK_EMPTY, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 use std::ops::RangeBounds;
@@ -53,6 +53,13 @@ impl TransactionsProvider for NoopProvider {
     }
 
     fn transaction_by_hash(&self, _hash: TxHash) -> Result<Option<TransactionSigned>> {
+        Ok(None)
+    }
+
+    fn transaction_by_hash_with_meta(
+        &self,
+        _hash: TxHash,
+    ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
         Ok(None)
     }
 
