@@ -151,8 +151,9 @@ where
 
     /// Consume the pipeline and run it. Return the pipeline and its result as a future.
     pub fn run_as_fut(mut self, db: Arc<DB>, tip: H256) -> PipelineFut<DB, U> {
-        // TODO: register metrics in the builder
-        // self.register_metrics(db.clone());
+        // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
+        // updating metrics.
+        self.register_metrics(db.clone());
 
         Box::pin(async move {
             self.set_tip(tip);
