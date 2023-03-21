@@ -115,6 +115,32 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
     Ok(env)
 }
 
+/// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
+///
+/// Returns an error if the caller has insufficient funds
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
+    mut db: DB,
+    env: &mut TxEnv,
+) -> EthResult<()>
+where
+    DB: Database,
+    EthApiError: From<<DB as Database>::Error>,
+{
+    let mut allowance = db.basic(env.caller)?.map(|acc| acc.balance).unwrap_or_default();
+
+    // subtract transferred value
+    allowance = allowance
+        .checked_sub(env.value)
+        .ok_or_else(|| InvalidTransactionError::InsufficientFunds)?;
+
+    // cap the gas limit
+    if let Ok(gas_limit) = allowance.checked_div(env.gas_price).unwrap_or_default().try_into() {
+        env.gas_limit = gas_limit;
+    }
+
+    Ok(())
+}
+
 /// Helper type for representing the fees of a [CallRequest]
 pub(crate) struct CallFees {
     /// EIP-1559 priority fee
