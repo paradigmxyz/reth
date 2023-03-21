@@ -89,3 +89,4 @@ test-utils = [
     "dep:ethers-middleware",
     "dep:async-trait"
 ]
+geth-tests = []

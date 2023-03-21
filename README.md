@@ -45,16 +45,32 @@ See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how 
 
 Rust minimum required version to build this project is 1.65.0 published 02.11.2022
 
-Prerequisites: libclang, `libclang-dev` on Debian
+Prerequisites: 
+- Debian
+  - `libclang`
+  - `libclang-dev`
 
-To test Reth, you will need to have [Geth  installed.](https://geth.ethereum.org/docs/getting-started/installing-geth)
+To fully test Reth, you will need to have [Geth installed](https://geth.ethereum.org/docs/getting-started/installing-geth), but it is possible to run a subset of tests without Geth.
+
+
+First, clone the repository:
 
 ```sh
 git clone https://github.com/paradigmxyz/reth
 cd reth
-cargo test --all
 ```
 
+Next, run the tests:
+
+```sh
+# Without Geth
+cargo test --all
+
+# With Geth
+cargo test --all --features geth-tests
+```
+
+We recommend using [`cargo nextest`]() to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
 
 ## Contributing and Getting Help
 

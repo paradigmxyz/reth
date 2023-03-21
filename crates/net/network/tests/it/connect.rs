@@ -309,6 +309,7 @@ async fn test_connect_to_trusted_peer() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_node_id_blacklist() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -361,6 +362,7 @@ async fn test_incoming_node_id_blacklist() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_incoming_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -404,6 +406,7 @@ async fn test_incoming_connect_with_single_geth() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_outgoing_connect_with_single_geth() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {
@@ -449,6 +452,7 @@ async fn test_outgoing_connect_with_single_geth() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial_test::serial]
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn test_geth_disconnect() {
     reth_tracing::init_test_tracing();
     tokio::time::timeout(GETH_TIMEOUT, async move {

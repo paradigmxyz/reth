@@ -52,7 +52,6 @@
 //! The [`NetworkConfig`] is used to configure the network.
 //! It requires an instance of [`BlockProvider`](reth_provider::BlockProvider).
 //!
-//!
 //! ```
 //! # async fn launch() {
 //! use reth_network::config::rng_secret_key;
@@ -110,7 +109,9 @@
 //!
 //! # Features
 //!
-//! - `serde`: Enable serde support for configuration types.
+//! - `serde`: Enable serde support for configuration types (enabled by default).
+//! - `test-utils`: Various utilities helpful for writing tests
+//! - `geth-tests`: Runs tests that require Geth to be installed locally.
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common helpers for network testing.
