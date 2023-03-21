@@ -14,7 +14,7 @@
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
 [tg-url]: https://t.me/paradigm_reth
 
-# What is Reth? What are its goals?
+## What is Reth? What are its goals?
 
 Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is a new Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient. Reth is an Execution Layer (EL) and is compatible with all Ethereum Consensus Layer (CL) implementations that support the [Engine API](https://github.com/ethereum/execution-apis/tree/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine). It is originally built and driven forward by [Paradigm](https://paradigm.xyz/), and is licensed under the Apache and MIT licenses.
 
@@ -29,19 +29,17 @@ More concretely, our goals are:
 6. **Configurability**: We want to solve for node operators that care about fast historical queries, but also for hobbyists who cannot operate on large hardware. We also want to support teams and individuals who want both sync from genesis and via "fast sync". We envision that Reth will be configurable enough and provide configurable "profiles" for the tradeoffs that each team faces.
 
 
-# Status
+## Status
 
-The project is not ready for use. We hope to have full sync implemented sometime in January/February 2023, followed by optimizations. In the meantime, we're working on making sure every crate of the repository is well documented, abstracted and tested.
+The project is not ready for use. We hope to have full sync implemented sometime in Q1 2023, followed by optimizations. In the meantime, we're working on making sure every crate of the repository is well documented, abstracted and tested.
 
----
+## For Developers
 
-# For Developers
-
-## Running Reth
+### Running Reth
 
 See the [Reth Book](https://paradigmxyz.github.io/reth) for instructions on how to run Reth.
 
-## Build & Test
+### Build & Test
 
 Rust minimum required version to build this project is 1.65.0 published 02.11.2022
 
@@ -88,11 +86,11 @@ If the answer is not there:
 
 Guidelines on how to contribute can be found in our [`CONTRIBUTING.md`](./CONTRIBUTING.md). Get started with contributing in our [contributor docs](./docs)
 
-# Security
+## Security
 
 See [`SECURITY.md`](./SECURITY.md).
 
-# Acknowledgements
+## Acknowledgements
 
 Reth is a new implementation of the Ethereum protocol. In the process of developing the node we investigated the design decisions other nodes have made to understand what is done well, what is not, and where we can improve the status quo.
 
@@ -106,7 +104,7 @@ None of this would have been possible without them, so big shoutout to the teams
 [gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
 [book]: https://paradigmxyz.github.io/reth/
 
-# 🚧 WARNING: UNDER CONSTRUCTION 🚧
+## 🚧 WARNING: UNDER CONSTRUCTION 🚧
 
 This project is work in progress and subject to frequent changes as we are still working on wiring up each individual node component into a full syncing pipeline.
 
