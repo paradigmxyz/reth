@@ -155,7 +155,11 @@ where
         let block = self.client.block(block_id).to_rpc_result()?;
 
         let mut res = Vec::new();
-        if let Some(block) = block {
+        if let Some(mut block) = block {
+            // In RPC withdrawals are always present
+            if block.withdrawals.is_none() {
+                block.withdrawals = Some(vec![]);
+            }
             block.encode(&mut res);
         }
 
