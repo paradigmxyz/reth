@@ -1,6 +1,6 @@
 //! The mode the consensus is operating in
 
-use futures_util::{stream::Fuse, SinkExt, StreamExt};
+use futures_util::{stream::Fuse, StreamExt};
 use reth_primitives::TxHash;
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
@@ -12,11 +12,10 @@ use std::{
 };
 use tokio::{sync::mpsc::Receiver, time::Interval};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::trace;
 
 /// Mode of operations for the `Miner`
 #[derive(Debug)]
-pub enum MiningMode {
+pub(crate) enum MiningMode {
     /// A miner that does nothing
     None,
     /// A miner that listens for new transactions that are ready.
@@ -31,7 +30,7 @@ pub enum MiningMode {
 // === impl MiningMode ===
 
 impl MiningMode {
-    pub fn instant(max_transactions: usize, listener: Receiver<TxHash>) -> Self {
+    pub(crate) fn instant(max_transactions: usize, listener: Receiver<TxHash>) -> Self {
         MiningMode::Auto(ReadyTransactionMiner {
             max_transactions,
             has_pending_txs: None,
@@ -39,12 +38,12 @@ impl MiningMode {
         })
     }
 
-    pub fn interval(duration: Duration) -> Self {
+    pub(crate) fn interval(duration: Duration) -> Self {
         MiningMode::FixedBlockTime(FixedBlockTimeMiner::new(duration))
     }
 
     /// polls the [Pool] and returns those transactions that should be put in a block, if any.
-    pub fn poll<Pool>(
+    pub(crate) fn poll<Pool>(
         &mut self,
         pool: &Pool,
         cx: &mut Context<'_>,
@@ -65,7 +64,7 @@ impl MiningMode {
 ///
 /// The default blocktime is set to 6 seconds
 #[derive(Debug)]
-pub struct FixedBlockTimeMiner {
+pub(crate) struct FixedBlockTimeMiner {
     /// The interval this fixed block time miner operates with
     interval: Interval,
 }
@@ -74,7 +73,7 @@ pub struct FixedBlockTimeMiner {
 
 impl FixedBlockTimeMiner {
     /// Creates a new instance with an interval of `duration`
-    pub fn new(duration: Duration) -> Self {
+    pub(crate) fn new(duration: Duration) -> Self {
         let start = tokio::time::Instant::now() + duration;
         Self { interval: tokio::time::interval_at(start, duration) }
     }
@@ -102,7 +101,7 @@ impl Default for FixedBlockTimeMiner {
 }
 
 /// A miner that Listens for new ready transactions
-pub struct ReadyTransactionMiner {
+pub(crate) struct ReadyTransactionMiner {
     /// how many transactions to mine per block
     max_transactions: usize,
     /// stores whether there are pending transactions (if known)

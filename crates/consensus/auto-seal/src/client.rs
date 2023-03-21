@@ -7,15 +7,8 @@
 //!
 //! These downloaders poll the miner, assemble the block, and return transactions that are ready to
 //! be mined.
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use crate::Storage;
 
-use crate::{mode::MiningMode, Storage};
-use futures_util::Future;
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -23,9 +16,10 @@ use reth_interfaces::p2p::{
     priority::Priority,
 };
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, H256,
+    BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId, WithPeerId, H256,
 };
 use reth_transaction_pool::TransactionPool;
+use std::fmt::Debug;
 use tracing::warn;
 
 /// A download client that polls the miner for transactions and assembles blocks to be returned in
@@ -34,7 +28,7 @@ use tracing::warn;
 /// When polled, the miner will assemble blocks when miners produce ready transactions and store the
 /// blocks in memory.
 #[derive(Debug, Clone)]
-pub struct AutoSealClient {
+pub(crate) struct AutoSealClient {
     storage: Storage,
 }
 
@@ -42,9 +36,9 @@ impl AutoSealClient {
     async fn fetch_headers(&self, request: HeadersRequest) -> Vec<Header> {
         let storage = self.storage.read().await;
         let HeadersRequest { start, limit, direction } = request;
-        let mut headers = Vec::new();
+        let headers = Vec::new();
 
-        let mut block: BlockHashOrNumber = match start_block {
+        let mut block: BlockHashOrNumber = match start {
             BlockHashOrNumber::Hash(start) => start.into(),
             BlockHashOrNumber::Number(num) => {
                 if let Some(hash) = storage.block_hash(num) {
@@ -97,7 +91,10 @@ impl HeadersClient for AutoSealClient {
         _priority: Priority,
     ) -> Self::Output {
         let this = self.clone();
-        Box::pin(this.fetch_headers(request))
+        Box::pin(async move {
+            let headers = this.fetch_headers(request).await;
+            Ok(WithPeerId::new(PeerId::random(), headers))
+        })
     }
 }
 
@@ -110,7 +107,10 @@ impl BodiesClient for AutoSealClient {
         _priority: Priority,
     ) -> Self::Output {
         let this = self.clone();
-        Box::pin(this.fetch_bodies(hashes))
+        Box::pin(async move {
+            let bodies = this.fetch_bodies(hashes).await;
+            Ok(WithPeerId::new(PeerId::random(), bodies))
+        })
     }
 }
 

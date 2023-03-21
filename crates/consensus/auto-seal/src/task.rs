@@ -1,4 +1,6 @@
 use crate::{mode::MiningMode, Storage};
+use futures_util::{future::BoxFuture, FutureExt};
+use reth_primitives::{BlockBody, Header, IntoRecoveredTransaction};
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -6,13 +8,15 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-/// A
+/// A Future that listens for new ready transactions and puts new blocks into storage
 pub(crate) struct MiningTask<Pool: TransactionPool> {
     /// The active miner
     miner: MiningMode,
-
+    /// Single active future that inserts a new block into `storage`
+    insert_task: Option<BoxFuture<'static, ()>>,
     /// Shared storage to insert new blocks
     storage: Storage,
     /// Pool where transactions are stored
@@ -26,13 +30,14 @@ pub(crate) struct MiningTask<Pool: TransactionPool> {
 impl<Pool: TransactionPool> MiningTask<Pool> {
     /// Creates a new instance of the task
     pub(crate) fn new(miner: MiningMode, storage: Storage, pool: Pool) -> Self {
-        Self { miner, storage, pool, queued: Default::default() }
+        Self { miner, insert_task: None, storage, pool, queued: Default::default() }
     }
 }
 
 impl<Pool> Future for MiningTask<Pool>
 where
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + Unpin + 'static,
+    <Pool as TransactionPool>::Transaction: IntoRecoveredTransaction,
 {
     type Output = ();
 
@@ -44,12 +49,61 @@ where
             if let Poll::Ready(transactions) = this.miner.poll(&this.pool, cx) {
                 // miner returned a set of transaction that we feed to the producer
                 this.queued.push_back(transactions);
-            } else {
-                // no progress made
-                break
+            }
+
+            if let Some(mut fut) = this.insert_task.take() {
+                match fut.poll_unpin(cx) {
+                    Poll::Ready(_) => {
+                        if this.queued.is_empty() {
+                            break
+                        }
+                        // queue new insert task
+                        let storage = this.storage.clone();
+                        let transactions = this.queued.pop_front().expect("not empty");
+                        this.insert_task = Some(Box::pin(async move {
+                            let mut storage = storage.write().await;
+                            let header = Header {
+                                parent_hash: storage.best_hash,
+                                ommers_hash: Default::default(),
+                                beneficiary: Default::default(),
+                                state_root: Default::default(),
+                                transactions_root: Default::default(),
+                                receipts_root: Default::default(),
+                                withdrawals_root: None,
+                                logs_bloom: Default::default(),
+                                difficulty: Default::default(),
+                                number: storage.best_block + 1,
+                                gas_limit: 30_0000,
+                                gas_used: 0,
+                                timestamp: SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                                mix_hash: Default::default(),
+                                nonce: 0,
+                                base_fee_per_gas: None,
+                                extra_data: Default::default(),
+                            };
+                            let body = BlockBody {
+                                transactions: transactions
+                                    .into_iter()
+                                    .map(|tx| tx.to_recovered_transaction().into_signed())
+                                    .collect(),
+                                ommers: vec![],
+                                withdrawals: None,
+                            };
+
+                            storage.insert_new_block(header, body)
+                        }));
+                    }
+                    Poll::Pending => {
+                        this.insert_task = Some(fut);
+                        break
+                    }
+                }
             }
         }
 
-        todo!()
+        Poll::Pending
     }
 }
