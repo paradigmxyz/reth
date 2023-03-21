@@ -72,11 +72,17 @@ cargo test --all --features geth-tests
 
 We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
 
-## Contributing and Getting Help
+## Contributing
 
 If you want to contribute, or follow along with contributor discussion, you can use our [main telegram](https://t.me/paradigm_reth) to chat with us about the development of Reth!
 
-See our [Project Layout](./docs/repo/layout.md) to understand more about the repository's structure, and descriptions about each package.
+See our [contributor docs](./docs) for more information on the project.
+
+A good starting point is [Project Layout](./docs/repo/layout.md) which gives an overview of the repository's structure, and descriptions for each package.
+
+Our contributor guidelines can be found in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+## Getting Help
 
 If you have any questions, first see if the answer to your question can be found in the [book][book].
 
@@ -85,8 +91,6 @@ If the answer is not there:
 - Join the [Telegram][tg-url] to get help, or
 - Open a [discussion](https://github.com/paradigmxyz/reth/discussions/new) with your question, or
 - Open an issue with [the bug](https://github.com/paradigmxyz/reth/issues/new)
-
-Guidelines on how to contribute can be found in our [`CONTRIBUTING.md`](./CONTRIBUTING.md). Get started with contributing in our [contributor docs](./docs)
 
 ## Security
 
