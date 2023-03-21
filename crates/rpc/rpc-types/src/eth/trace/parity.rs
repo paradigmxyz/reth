@@ -216,7 +216,7 @@ pub struct LocalizedTransactionTrace {
     #[serde(flatten)]
     pub trace: TransactionTrace,
     /// Transaction index within the block, None if pending.
-    pub transaction_position: Option<usize>,
+    pub transaction_position: Option<u64>,
     /// Hash of the transaction
     pub transaction_hash: Option<H256>,
     /// Block number the transaction is included in, None if pending.
