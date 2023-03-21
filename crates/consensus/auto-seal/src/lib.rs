@@ -10,6 +10,7 @@
 
 use reth_interfaces::consensus::ForkchoiceState;
 
+mod miner_client;
 mod mode;
 
 /// A consensus implementation that follows a strategy for announcing blocks via [ForkchoiceState]

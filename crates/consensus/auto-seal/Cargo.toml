@@ -8,10 +8,11 @@ readme = "README.md"
 description = "A consensus impl for local testing purposes"
 
 [dependencies]
-# reth 
+# reth
 reth-consensus-common = { path = "../common" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
+reth-transaction-pool = { path = "../../transaction-pool" }
 
 # async
 futures-util = "0.3"

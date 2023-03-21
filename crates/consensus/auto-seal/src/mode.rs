@@ -1,8 +1,7 @@
 //! The mode the consensus is operating in
 
 use futures_util::{stream::Fuse, SinkExt, StreamExt};
-use reth_interfaces::p2p::{headers::client::{HeadersClient, HeadersFut, HeadersRequest}, priority::Priority, download::DownloadClient, bodies::client::{BodiesClient, BodiesFut}};
-use reth_primitives::{TxHash, PeerId, H256};
+use reth_primitives::TxHash;
 use std::{
     fmt,
     pin::Pin,
@@ -12,7 +11,7 @@ use std::{
 };
 use tokio::{sync::mpsc::Receiver, time::Interval};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::{trace, warn};
+use tracing::trace;
 
 /// Mode of operations for the `Miner`
 #[derive(Debug)]
@@ -136,37 +135,5 @@ impl fmt::Debug for ReadyTransactionMiner {
         f.debug_struct("ReadyTransactionMiner")
             .field("max_transactions", &self.max_transactions)
             .finish_non_exhaustive()
-    }
-}
-
-impl HeadersClient for ReadyTransactionMiner {
-    type Output = HeadersFut;
-
-    fn get_headers_with_priority(
-        &self,
-        request: HeadersRequest,
-        _priority: Priority,
-    ) -> Self::Output {
-        todo!()
-    }
-}
-
-impl BodiesClient for ReadyTransactionMiner {
-    type Output = BodiesFut;
-
-    fn get_block_bodies_with_priority(&self, hashes: Vec<H256>, priority: Priority) -> Self::Output {
-        todo!()
-    }
-}
-
-impl DownloadClient for ReadyTransactionMiner {
-    fn report_bad_message(&self, _peer_id: PeerId) {
-        warn!("Reported a bad message on a miner, we should never produce bad blocks");
-        // noop
-    }
-
-    fn num_connected_peers(&self) -> usize {
-        // no such thing as connected peers when we are mining ourselves
-        1
     }
 }

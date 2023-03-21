@@ -4584,6 +4584,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
+ "reth-transaction-pool",
  "tokio",
  "tokio-stream",
  "tracing",
