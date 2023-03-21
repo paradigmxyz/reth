@@ -13,7 +13,7 @@ use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::{BeaconConsensus, BeaconEngineMessage};
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -26,7 +26,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::{
-    consensus::{Consensus, ForkchoiceState},
+    consensus::Consensus,
     p2p::{
         bodies::downloader::BodyDownloader,
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
@@ -58,7 +58,10 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::sync::{mpsc::unbounded_channel, watch};
+use tokio::sync::{
+    mpsc::{self, unbounded_channel, UnboundedSender},
+    watch,
+};
 use tracing::*;
 
 pub mod events;
@@ -184,7 +187,7 @@ impl Command {
         }
 
         // TODO: This will be fixed with the sync controller (https://github.com/paradigmxyz/reth/pull/1662)
-        let (tx, _rx) = watch::channel(ForkchoiceState::default());
+        let (tx, _rx) = mpsc::unbounded_channel();
         let engine_api_handle = self.init_engine_api(Arc::clone(&db), tx, &ctx.task_executor);
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -318,7 +321,7 @@ impl Command {
     fn init_engine_api(
         &self,
         db: Arc<Env<WriteMap>>,
-        forkchoice_state_tx: watch::Sender<ForkchoiceState>,
+        engine_tx: UnboundedSender<BeaconEngineMessage>,
         task_executor: &TaskExecutor,
     ) -> EngineApiHandle {
         let (message_tx, message_rx) = unbounded_channel();
@@ -326,7 +329,7 @@ impl Command {
             ShareableDatabase::new(db, self.chain.clone()),
             self.chain.clone(),
             message_rx,
-            forkchoice_state_tx,
+            engine_tx,
         );
         task_executor.spawn_critical("engine API task", engine_api);
         message_tx

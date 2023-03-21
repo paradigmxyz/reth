@@ -2,7 +2,9 @@
 use chain::{BlockChainId, Chain, ForkBlock};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{
+    BlockHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders, U256,
+};
 use reth_provider::{
     providers::ChainState, ExecutorFactory, HeaderProvider, StateProviderFactory, Transaction,
 };
@@ -87,7 +89,7 @@ pub enum BlockStatus {
     /// If block validation is valid and block extends canonical chain.
     /// In BlockchainTree sense it forks on canonical tip.
     Valid,
-    /// If block validation is valid but block does not extend canonical chain
+    /// If the block is valid, but it does not extend canonical chain
     /// (It is side chain) or hasn't been fully validated but ancestors of a payload are known.
     Accepted,
     /// If blocks is not connected to canonical chain.
@@ -165,11 +167,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let canonical_block_hashes = self.block_indices.canonical_chain();
 
         // get canonical tip
-        let (_, canonical_tip_hash) =
-            canonical_block_hashes.last_key_value().map(|(i, j)| (*i, *j)).unwrap_or_default();
+        let canonical_tip =
+            canonical_block_hashes.last_key_value().map(|(_, hash)| *hash).unwrap_or_default();
 
         let db = self.externals.shareable_db();
-        let provider = if canonical_fork.hash == canonical_tip_hash {
+        let provider = if canonical_fork.hash == canonical_tip {
             ChainState::boxed(db.latest()?)
         } else {
             ChainState::boxed(db.history_by_block_number(canonical_fork.number)?)
@@ -212,26 +214,33 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<BlockStatus, Error> {
-        let canonical_block_hashes = self.block_indices.canonical_chain();
-        let (_, canonical_tip) =
-            canonical_block_hashes.last_key_value().map(|(i, j)| (*i, *j)).unwrap_or_default();
-
-        // create state provider
         let db = self.externals.shareable_db();
-        let parent_header = db
-            .header(&block.parent_hash)?
-            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
 
-        let block_status;
-        let provider = if block.parent_hash == canonical_tip {
-            block_status = BlockStatus::Valid;
-            ChainState::boxed(db.latest()?)
+        // Validate that the block is post merge
+        let parent_td = db
+            .header_td(&block.parent_hash)?
+            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
+        if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
+            return Err(ExecError::BlockPreMerge.into())
+        }
+
+        // Create state provider
+        let canonical_block_hashes = self.block_indices.canonical_chain();
+        let canonical_tip =
+            canonical_block_hashes.last_key_value().map(|(_, hash)| *hash).unwrap_or_default();
+        let (block_status, provider) = if block.parent_hash == canonical_tip {
+            (BlockStatus::Valid, ChainState::boxed(db.latest()?))
         } else {
-            block_status = BlockStatus::Accepted;
-            ChainState::boxed(db.history_by_block_number(block.number - 1)?)
+            (
+                BlockStatus::Accepted,
+                ChainState::boxed(db.history_by_block_number(block.number - 1)?),
+            )
         };
 
-        let parent_header = parent_header.seal(block.parent_hash);
+        let parent_header = db
+            .header(&block.parent_hash)?
+            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?
+            .seal(block.parent_hash);
         let chain = Chain::new_canonical_fork(
             &block,
             &parent_header,

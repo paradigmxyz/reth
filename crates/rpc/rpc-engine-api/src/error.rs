@@ -1,4 +1,6 @@
-use reth_primitives::{Bytes, H256, U256};
+use reth_beacon_consensus::BeaconEngineError;
+use reth_primitives::{H256, U256};
+use reth_rpc_types::engine::PayloadError;
 use thiserror::Error;
 
 /// The Engine API result type
@@ -10,22 +12,8 @@ pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
 pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
-#[derive(Error, PartialEq, Debug)]
+#[derive(Error, Debug)]
 pub enum EngineApiError {
-    /// Invalid payload extra data.
-    #[error("Invalid payload extra data: {0}")]
-    PayloadExtraData(Bytes),
-    /// Invalid payload base fee.
-    #[error("Invalid payload base fee: {0}")]
-    PayloadBaseFee(U256),
-    /// Invalid payload block hash.
-    #[error("Invalid payload block hash. Execution: {execution}. Consensus: {consensus}")]
-    PayloadBlockHash {
-        /// The block hash computed from the payload.
-        execution: H256,
-        /// The block hash provided with the payload.
-        consensus: H256,
-    },
     /// Invalid payload block hash.
     #[error("Invalid payload timestamp: {invalid}. Latest: {latest}")]
     PayloadTimestamp {
@@ -33,12 +21,6 @@ pub enum EngineApiError {
         invalid: u64,
         /// Latest available timestamp.
         latest: u64,
-    },
-    /// Failed to recover transaction signer.
-    #[error("Failed to recover signer for payload transaction: {hash:?}")]
-    PayloadSignerRecovery {
-        /// The hash of the failed transaction
-        hash: H256,
     },
     /// Received pre-merge payload.
     #[error("Received pre-merge payload.")]
@@ -81,9 +63,12 @@ pub enum EngineApiError {
     /// Chain spec merge terminal total difficulty is not set
     #[error("The merge terminal total difficulty is not known")]
     UnknownMergeTerminalTotalDifficulty,
-    /// Encountered decoding error.
+    /// Beacon consensus engine error.
     #[error(transparent)]
-    Decode(#[from] reth_rlp::DecodeError),
+    ConsensusEngine(#[from] BeaconEngineError),
+    /// Encountere a payload error.
+    #[error(transparent)]
+    Payload(#[from] PayloadError),
     /// API encountered an internal error.
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),

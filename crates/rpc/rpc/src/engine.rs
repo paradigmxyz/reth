@@ -8,7 +8,7 @@ use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{BlockHash, BlockNumber, H64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{
-    EngineApiError, EngineApiHandle, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
+    EngineApiError, EngineApiHandle, EngineApiMessage, EngineApiMessageVersion,
     REQUEST_TOO_LARGE_CODE, UNKNOWN_PAYLOAD_CODE,
 };
 use reth_rpc_types::engine::{
@@ -19,7 +19,7 @@ use tokio::sync::oneshot::{self, Receiver};
 
 /// The server implementation of Engine API
 pub struct EngineApi {
-    /// Handle to the consensus engine
+    /// Handle to the engine API implementation.
     engine_tx: EngineApiHandle,
 }
 
@@ -37,13 +37,14 @@ impl std::fmt::Debug for EngineApi {
 }
 
 impl EngineApi {
-    async fn delegate_request<T>(
+    async fn delegate_request<T, E: Into<EngineApiError>>(
         &self,
         msg: EngineApiMessage,
-        rx: Receiver<EngineApiResult<T>>,
+        rx: Receiver<std::result::Result<T, E>>,
     ) -> Result<T> {
         let _ = self.engine_tx.send(msg);
         rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(|err| {
+            let err = err.into();
             let code = match err {
                 EngineApiError::InvalidParams => INVALID_PARAMS_CODE,
                 EngineApiError::PayloadUnknown => UNKNOWN_PAYLOAD_CODE,
