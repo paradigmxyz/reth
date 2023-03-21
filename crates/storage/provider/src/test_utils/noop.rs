@@ -56,6 +56,10 @@ impl TransactionsProvider for NoopProvider {
         Ok(None)
     }
 
+    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>> {
+        todo!()
+    }
+
     fn transactions_by_block(&self, _block_id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
         Ok(None)
     }

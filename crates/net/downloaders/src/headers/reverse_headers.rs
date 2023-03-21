@@ -1010,8 +1010,8 @@ impl Default for ReverseHeadersDownloaderBuilder {
 impl ReverseHeadersDownloaderBuilder {
     /// Set the request batch size.
     ///
-    /// This determines the `limit` for a [GetHeaders](reth_eth_wire::GetBlockHeaders) requests, the
-    /// number of headers we ask for.
+    /// This determines the `limit` for a `GetBlockHeaders` requests, the number of headers we ask
+    /// for.
     pub fn request_limit(mut self, limit: u64) -> Self {
         self.request_limit = limit;
         self

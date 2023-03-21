@@ -6,9 +6,8 @@ use reth_db::{
     tables,
     transaction::DbTxMut,
 };
-use reth_eth_wire::BlockBody;
 use reth_interfaces::{db, p2p::bodies::response::BlockResponse};
-use reth_primitives::{Block, SealedBlock, SealedHeader, H256};
+use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, H256};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a>(

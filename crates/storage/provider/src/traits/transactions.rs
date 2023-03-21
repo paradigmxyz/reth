@@ -12,6 +12,9 @@ pub trait TransactionsProvider: BlockIdProvider + Send + Sync {
     /// Get transaction by transaction hash.
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>>;
 
+    /// Get transaction block number
+    fn transaction_block(&self, id: TxNumber) -> Result<Option<BlockNumber>>;
+
     /// Get transactions by block id.
     fn transactions_by_block(&self, block: BlockId) -> Result<Option<Vec<TransactionSigned>>>;
 

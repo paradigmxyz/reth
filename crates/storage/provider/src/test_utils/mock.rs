@@ -149,6 +149,10 @@ impl TransactionsProvider for MockEthProvider {
             .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash == hash).cloned()))
     }
 
+    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>> {
+        unimplemented!()
+    }
+
     fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
         Ok(self.block(id)?.map(|b| b.body))
     }
