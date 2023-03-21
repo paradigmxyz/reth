@@ -32,7 +32,7 @@ pub enum TableType {
 }
 
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 28] = [
+pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -44,7 +44,6 @@ pub const TABLES: [(TableType, &str); 28] = [
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
     (TableType::Table, Receipts::const_name()),
-    (TableType::Table, Logs::const_name()),
     (TableType::Table, PlainAccountState::const_name()),
     (TableType::DupSort, PlainStorageState::const_name()),
     (TableType::Table, Bytecodes::const_name()),
@@ -167,11 +166,6 @@ table!(
 table!(
     /// (Canonical only) Stores transaction receipts.
     ( Receipts ) TxNumber | Receipt
-);
-
-table!(
-    /// (Canonical only) Stores transaction logs.
-    ( Logs ) TxNumber | Receipt
 );
 
 table!(

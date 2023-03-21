@@ -6,10 +6,7 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSender
 use reth_provider::{
     providers::ChainState, ExecutorFactory, HeaderProvider, StateProviderFactory, Transaction,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::DerefMut,
-};
+use std::collections::{BTreeMap, HashMap};
 
 pub mod block_indices;
 use block_indices::BlockIndices;
@@ -543,39 +540,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
         let mut tx = Transaction::new(&self.externals.db)?;
-        let new_tip_number = chain.tip().number;
-        let new_tip_hash = chain.tip().hash;
-        let first_transition_id =
-            tx.get_block_transition(chain.first().number.saturating_sub(1))
-                .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-        let expected_state_root = chain.tip().state_root;
-        let fork_block = chain.fork_block_number();
+
         let (blocks, state) = chain.into_inner();
-        let num_transitions = state.transitions_count();
 
-        // Write state and changesets to the database
-        state
-            .write_to_db(tx.deref_mut(), first_transition_id)
+        tx.append_blocks_with_post_state(blocks.into_values().collect(), state)
             .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-
-        // Insert the blocks
-        for block in blocks.into_values() {
-            tx.insert_block(block)
-                .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-        }
-        tx.insert_hashes(
-            fork_block,
-            first_transition_id,
-            first_transition_id + num_transitions as u64,
-            new_tip_number,
-            new_tip_hash,
-            expected_state_root,
-        )
-        .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-
-        // Update pipeline progress
-        tx.update_pipeline_stages(new_tip_number)
-            .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
         tx.commit()?;
 
@@ -617,10 +586,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 (revert_until + 1)..,
             )
             .map_err(|e| ExecError::CanonicalRevert { inner: e.to_string() })?;
-
-        // update pipeline progress.
-        tx.update_pipeline_stages(revert_until)
-            .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
         tx.commit()?;
 

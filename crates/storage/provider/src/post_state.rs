@@ -574,6 +574,14 @@ impl PostState {
             bytecodes_cursor.upsert(hash, bytecode)?;
         }
 
+        // write receipts
+        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+        let mut tx_num = receipts_cursor.last()?.map(|(tx_num, _)| tx_num).unwrap_or_default();
+        for receipt in self.receipts.into_iter() {
+            tx_num += 1;
+            receipts_cursor.append(tx_num, receipt)?
+        }
+
         Ok(())
     }
 }
