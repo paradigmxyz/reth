@@ -536,9 +536,8 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_eth_wire::BlockBody;
     use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
-    use reth_primitives::H256;
+    use reth_primitives::{BlockBody, H256};
     use std::{collections::HashMap, sync::Arc};
 
     // Check that the blocks are emitted in order of block number, not in order of

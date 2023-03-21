@@ -1,6 +1,5 @@
 use crate::metrics::DownloaderMetrics;
 use futures::{Future, FutureExt};
-use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
@@ -9,7 +8,7 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
+use reth_primitives::{BlockBody, PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
 use std::{
     collections::VecDeque,
     pin::Pin,

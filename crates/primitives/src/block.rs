@@ -570,6 +570,35 @@ impl AsRef<H256> for BlockHash {
     }
 }
 
+/// A response to `GetBlockBodies`, containing bodies if any bodies were found.
+///
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
+#[derive_arbitrary(rlp, 10)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+)]
+#[rlp(trailing)]
+pub struct BlockBody {
+    /// Transactions in the block
+    pub transactions: Vec<TransactionSigned>,
+    /// Uncle headers for the given block
+    pub ommers: Vec<Header>,
+    /// Withdrawals in the block.
+    pub withdrawals: Option<Vec<Withdrawal>>,
+}
+
+impl BlockBody {
+    /// Create a [`Block`](Block) from the body and its header.
+    pub fn create_block(&self, header: Header) -> Block {
+        Block {
+            header,
+            body: self.transactions.clone(),
+            ommers: self.ommers.clone(),
+            withdrawals: self.withdrawals.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{BlockId, BlockNumberOrTag::*, *};
