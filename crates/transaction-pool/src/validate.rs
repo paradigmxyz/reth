@@ -201,7 +201,7 @@ where
         }
 
         // Ensure max_fee_per_gas is greater than or equal to max_priority_fee_per_gas.
-        if transaction.max_fee_per_gas() <= transaction.max_priority_fee_per_gas() {
+        if transaction.max_priority_fee_per_gas() > transaction.max_fee_per_gas() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TipAboveFeeCap.into(),
