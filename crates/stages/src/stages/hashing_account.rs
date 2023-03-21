@@ -1,7 +1,4 @@
-use crate::{
-    stages::stream::SequentialPairStream, ExecInput, ExecOutput, Stage, StageError, StageId,
-    UnwindInput, UnwindOutput,
-};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use futures_util::StreamExt;
 use itertools::Itertools;
 use reth_codecs::Compact;
@@ -15,6 +12,7 @@ use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
 use std::{fmt::Debug, ops::Range};
 use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 /// The [`StageId`] of the account hashing stage.

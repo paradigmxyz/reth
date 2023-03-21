@@ -16,7 +16,7 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, SenderRecoveryStage, AccountHashingStage},
+    stages::{AccountHashingStage, BodyStage, ExecutionStage, SenderRecoveryStage},
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, sync::Arc};
