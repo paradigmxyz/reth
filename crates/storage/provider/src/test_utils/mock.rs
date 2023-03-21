@@ -6,8 +6,8 @@ use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionSigned,
-    TxHash, TxNumber, H256, U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionMeta,
+    TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
 use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
@@ -147,6 +147,13 @@ impl TransactionsProvider for MockEthProvider {
             .lock()
             .iter()
             .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash == hash).cloned()))
+    }
+
+    fn transaction_by_hash_with_meta(
+        &self,
+        _hash: TxHash,
+    ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
+        Ok(None)
     }
 
     fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>> {
