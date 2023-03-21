@@ -51,7 +51,7 @@ impl ReceiptWithBloom {
         Self { receipt, bloom }
     }
 
-    /// Desolve structure and return receipt
+    /// Consume the structure, returning only the receipt
     pub fn into_receipt(self) -> Receipt {
         self.receipt
     }
