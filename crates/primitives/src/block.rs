@@ -328,7 +328,14 @@ impl<'de> Deserialize<'de> for BlockId {
             where
                 E: serde::de::Error,
             {
-                Ok(BlockId::Number(v.parse().map_err(serde::de::Error::custom)?))
+                // Since there is no way to clearly distinguish between a DATA parameter and a QUANTITY parameter. A str is therefor deserialized into a Block Number: <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md>
+                // However, since the hex string should be a QUANTITY, we can safely assume that if the len is 66 bytes, it is in fact a hash, ref <https://github.com/ethereum/go-ethereum/blob/ee530c0d5aa70d2c00ab5691a89ab431b73f8165/rpc/types.go#L184-L184>
+                if v.len() == 66 {
+                    Ok(BlockId::Hash(v.parse::<H256>().map_err(serde::de::Error::custom)?.into()))
+                } else {
+                    // quantity hex string or tag
+                    Ok(BlockId::Number(v.parse().map_err(serde::de::Error::custom)?))
+                }
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -623,6 +630,7 @@ impl BlockBody {
 #[cfg(test)]
 mod test {
     use super::{BlockId, BlockNumberOrTag::*, *};
+
     /// Check parsing according to EIP-1898.
     #[test]
     fn can_parse_blockid_u64() {
@@ -684,6 +692,7 @@ mod test {
             assert_eq!(deserialized, *block_id)
         }
     }
+
     #[test]
     fn serde_blockid_number() {
         let block_id = BlockId::from(100u64);
@@ -691,6 +700,7 @@ mod test {
         let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, block_id)
     }
+
     #[test]
     fn serde_blockid_hash() {
         let block_id = BlockId::from(H256::default());
@@ -698,6 +708,15 @@ mod test {
         let deserialized: BlockId = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, block_id)
     }
+
+    #[test]
+    fn serde_blockid_hash_from_str() {
+        let val = "\"0x898753d8fdd8d92c1907ca21e68c7970abd290c647a202091181deec3f30a0b2\"";
+        let block_hash: H256 = serde_json::from_str(val).unwrap();
+        let block_id: BlockId = serde_json::from_str(val).unwrap();
+        assert_eq!(block_id, BlockId::Hash(block_hash.into()));
+    }
+
     #[test]
     fn serde_rpc_payload_block_tag() {
         let payload = r#"{"method":"eth_call","params":[{"to":"0xebe8efa441b9302a0d7eaecc277c09d20d684540","data":"0x45848dfc"},"latest"],"id":1,"jsonrpc":"2.0"}"#;
