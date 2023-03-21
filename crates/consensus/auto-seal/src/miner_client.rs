@@ -22,9 +22,7 @@ use reth_interfaces::p2p::{
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
-// need to move this to primitives!!!
-use reth_eth_wire::BlockBody;
-use reth_primitives::{BlockHash, BlockNumber, Header, PeerId, H256};
+use reth_primitives::{BlockHash, BlockNumber, Header, PeerId, H256, BlockBody};
 use reth_transaction_pool::TransactionPool;
 use tracing::warn;
 
