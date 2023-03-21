@@ -264,7 +264,7 @@ where
                                 this.restore_tree_if_possible(forkchoice_state.finalized_block_hash)
                             {
                                 error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
-                                return Poll::Ready(Err(error.into()))
+                                return Poll::Ready(Err(error))
                             }
 
                             // Get next pipeline state.
