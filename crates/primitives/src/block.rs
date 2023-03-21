@@ -570,7 +570,7 @@ impl AsRef<H256> for BlockHash {
     }
 }
 
-/// A response to [`GetBlockBodies`], containing bodies if any bodies were found.
+/// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[derive_arbitrary(rlp, 10)]
@@ -588,7 +588,7 @@ pub struct BlockBody {
 }
 
 impl BlockBody {
-    /// Create a [`Block`](reth_primitives::Block) from the body and its header.
+    /// Create a [`Block`](Block) from the body and its header.
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,
