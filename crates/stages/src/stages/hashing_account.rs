@@ -13,9 +13,8 @@ use reth_db::{
 };
 use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
-use std::{collections::BTreeMap, fmt::Debug, ops::Range};
+use std::{fmt::Debug, ops::Range};
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 /// The [`StageId`] of the account hashing stage.
@@ -202,9 +201,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             let next_address = {
                 let mut accounts = tx.cursor_read::<tables::PlainAccountState>()?;
 
-                let accounts_walker = accounts
-                    .walk(start_address)?
-                    .take(self.commit_threshold as usize);
+                let accounts_walker =
+                    accounts.walk(start_address)?.take(self.commit_threshold as usize);
 
                 for chunk in &accounts_walker
                     .chunks(self.commit_threshold as usize / rayon::current_num_threads())
