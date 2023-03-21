@@ -70,7 +70,7 @@ cargo test --all
 cargo test --all --features geth-tests
 ```
 
-We recommend using [`cargo nextest`]() to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
+We recommend using [`cargo nextest`](https://nexte.st/) to speed up testing. With nextest installed, simply substitute `cargo test` with `cargo nextest run`.
 
 ## Contributing and Getting Help
 
