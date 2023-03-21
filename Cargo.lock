@@ -5250,6 +5250,7 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-staged-sync",
  "reth-tracing",
  "secp256k1",
  "serde",

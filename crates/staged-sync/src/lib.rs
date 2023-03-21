@@ -5,7 +5,12 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! Puts together all the Reth stages in a unified abstraction
+//! Puts together all the Reth stages in a unified abstraction.
+//!
+//! # Features
+//!
+//! - `test-utils`: Various utilities helpful for writing tests
+//! - `geth-tests`: Runs tests that require Geth to be installed locally.
 
 pub mod config;
 pub use config::Config;
