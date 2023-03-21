@@ -78,9 +78,12 @@ pub struct Block {
     /// Base Fee for post-EIP1559 blocks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
-    /// Withdrawals
+    /// Withdrawals hash was added by EIP-4895 and is ignored in legacy headers.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    pub withdrawals_root: Option<U256>,
+    /// Withdrawals in the block
+    #[serde(default)]
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 impl Block {
@@ -175,7 +178,8 @@ impl Block {
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
             total_difficulty: Some(total_difficulty),
             size: Some(U256::from(block_length)),
-            withdrawals: block.withdrawals,
+            withdrawals: block.withdrawals.unwrap_or_default(),
+            withdrawals_root: None,
         }
     }
 
@@ -191,7 +195,8 @@ impl Block {
             header: rpc_header,
             transactions: BlockTransactions::Uncle,
             base_fee_per_gas: None,
-            withdrawals: None,
+            withdrawals_root: None,
+            withdrawals: vec![],
             size,
             total_difficulty: None,
         }
@@ -209,8 +214,6 @@ pub struct Header {
     /// Hash of the uncles
     #[serde(rename = "sha3Uncles")]
     pub uncles_hash: H256,
-    /// Authors address
-    pub author: Address,
     /// Alias of `author`
     pub miner: Address,
     /// State root hash
@@ -273,7 +276,6 @@ impl Header {
             hash: Some(block_hash),
             parent_hash,
             uncles_hash: ommers_hash,
-            author: beneficiary,
             miner: beneficiary,
             state_root,
             transactions_root,
@@ -370,7 +372,6 @@ mod tests {
                 hash: Some(H256::from_low_u64_be(1)),
                 parent_hash: H256::from_low_u64_be(2),
                 uncles_hash: H256::from_low_u64_be(3),
-                author: Address::from_low_u64_be(4),
                 miner: Address::from_low_u64_be(4),
                 state_root: H256::from_low_u64_be(5),
                 transactions_root: H256::from_low_u64_be(6),
@@ -391,7 +392,8 @@ mod tests {
             transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
             size: Some(U256::from(19)),
             base_fee_per_gas: Some(U256::from(20)),
-            withdrawals: None,
+            withdrawals_root: None,
+            withdrawals: vec![],
         };
         let serialized = serde_json::to_string(&block).unwrap();
         assert_eq!(
