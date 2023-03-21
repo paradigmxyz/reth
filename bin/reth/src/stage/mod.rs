@@ -16,7 +16,7 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
+    stages::{BodyStage, ExecutionStage, SenderRecoveryStage, AccountHashingStage},
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -165,6 +165,13 @@ impl Command {
             StageEnum::Execution => {
                 let factory = reth_executor::Factory::new(self.chain.clone());
                 let mut stage = ExecutionStage::new(factory, num_blocks);
+                if !self.skip_unwind {
+                    stage.unwind(&mut tx, unwind).await?;
+                }
+                stage.execute(&mut tx, input).await?;
+            }
+            StageEnum::AccountHashing => {
+                let mut stage = AccountHashingStage::default();
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }
