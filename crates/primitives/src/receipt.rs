@@ -56,7 +56,7 @@ impl ReceiptWithBloom {
         self.receipt
     }
 
-    /// Desolve structure and return its components
+    /// Consume the structure, returning the receipt and the bloom filter
     pub fn into_components(self) -> (Receipt, Bloom) {
         (self.receipt, self.bloom)
     }
