@@ -1,4 +1,4 @@
-use reth_primitives::{filter::FilteredParams, Receipt, TxHash, U256};
+use reth_primitives::{filter::FilteredParams, BlockNumberOrTag, ChainInfo, Receipt, TxHash, U256};
 use reth_rpc_types::Log;
 use revm::primitives::B256 as H256;
 
@@ -69,4 +69,29 @@ pub(crate) fn log_matches_filter(
         return false
     }
     true
+}
+
+/// Computes the block range based on the filter range and current block numbers
+pub(crate) fn get_filter_block_range(
+    from_block: Option<BlockNumberOrTag>,
+    to_block: Option<BlockNumberOrTag>,
+    start_block: u64,
+    info: ChainInfo,
+) -> (u64, u64) {
+    let mut from_block_number = start_block;
+    let mut to_block_number = info.best_number;
+
+    // from block is maximum of block from last poll or `from_block` of filter
+    if let Some(filter_from_block) = from_block.and_then(|num| info.convert_block_number(num)) {
+        from_block_number = start_block.max(filter_from_block)
+    }
+
+    // to block is max the best number
+    if let Some(filter_to_block) = to_block.and_then(|num| info.convert_block_number(num)) {
+        to_block_number = filter_to_block;
+        if to_block_number > info.best_number {
+            to_block_number = info.best_number;
+        }
+    }
+    (from_block_number, to_block_number)
 }

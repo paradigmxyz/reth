@@ -2675,9 +2675,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.24"
+version = "0.14.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e011372fa0b68db8350aa7a248930ecc7839bf46d8485577d69f117a75f164c"
+checksum = "cc5e554ff619822309ffd57d8734d77cd5ce6238bc956f037ea06c58238c9899"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -4543,7 +4543,9 @@ dependencies = [
  "fdlimit",
  "futures",
  "human_bytes",
+ "hyper",
  "jsonrpsee",
+ "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
  "proptest",
@@ -4558,6 +4560,7 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-revm-inspectors",
  "reth-rlp",
  "reth-rpc",
  "reth-rpc-builder",
@@ -4597,7 +4600,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
- "tokio",
 ]
 
 [[package]]
@@ -4721,7 +4723,6 @@ dependencies = [
  "pin-project",
  "rayon",
  "reth-db",
- "reth-eth-wire",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
@@ -5068,6 +5069,7 @@ dependencies = [
  "reth-tracing",
  "revm-primitives",
  "thiserror",
+ "tracing",
  "triehash",
 ]
 
@@ -5114,12 +5116,9 @@ dependencies = [
  "ethnum",
  "hex-literal",
  "pprof",
- "rand 0.8.5",
  "reth-rlp",
  "reth-rlp-derive",
  "revm-primitives",
- "rlp",
- "secp256k1",
  "smol_str",
 ]
 
@@ -5229,7 +5228,6 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
- "ethers-core",
  "jsonrpsee-types",
  "lru 0.9.0",
  "rand 0.8.5",
@@ -5361,7 +5359,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "3.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -5371,7 +5369,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "derive_more",
  "enumn",
@@ -5382,7 +5380,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "2.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "k256 0.11.6",
  "num",
@@ -5398,7 +5396,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=afc3066#afc30663270f77df9b4399ad9d4cfb0ad2b814ec"
+source = "git+https://github.com/bluealloy/revm#3d8ca6641d2e72448c23f4596f769c8fd1c784d1"
 dependencies = [
  "arbitrary",
  "auto_impl",

@@ -511,10 +511,10 @@ mod tests {
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
-        BlockBodies, BlockBody, EthVersion, Status,
+        BlockBodies, EthVersion, Status,
     };
     use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_primitives::{Header, PeerId, H256};
+    use reth_primitives::{BlockBody, Header, PeerId, H256};
     use reth_provider::test_utils::NoopProvider;
     use std::{
         future::poll_fn,

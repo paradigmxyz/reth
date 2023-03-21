@@ -15,8 +15,11 @@ use std::collections::BTreeMap;
 ///
 /// # Wiped Storage
 ///
-/// The field `wiped` denotes whether any of the values contained in storage are valid or not; if
-/// `wiped` is `true`, the storage should be considered empty.
+/// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
+/// not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Storage {
     /// Whether the storage was wiped or not.
@@ -132,9 +135,11 @@ impl Change {
 ///
 /// # Wiped Storage
 ///
-/// The [Storage] type has a field, `wiped`, which denotes whether any of the values contained
-/// in storage are valid or not; if `wiped` is `true`, the storage for the account should be
-/// considered empty.
+/// The [Storage] type has a field, `wiped` which denotes whether the pre-existing storage in the
+/// database should be cleared or not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 ///
 /// # Transitions
 ///
@@ -148,7 +153,7 @@ impl Change {
 /// - Withdrawals
 /// - The irregular state change for the DAO hardfork
 ///
-/// [PostState::finish_transition] should be called after every transaction, and after every block.
+/// [PostState::finish_transition] *must* be called after every transaction, and after every block.
 ///
 /// The first transaction executed and added to the [PostState] has a transition ID of 0, the next
 /// one a transition ID of 1, and so on. If the [PostState] is for a single block, and the number of
@@ -405,7 +410,6 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (_, current_value)) in changeset {
                     storage.storage.insert(*slot, *current_value);
                 }
@@ -413,6 +417,7 @@ impl PostState {
             Change::StorageWiped { address, .. } => {
                 let storage = self.storage.entry(*address).or_default();
                 storage.wiped = true;
+                storage.storage.clear();
             }
         }
 
@@ -433,7 +438,6 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (old_value, _)) in changeset {
                     storage.storage.insert(*slot, *old_value);
                 }
@@ -468,17 +472,21 @@ impl PostState {
             });
 
         // Write account changes
+        tracing::trace!(target: "provider::post_state", len = account_changes.len(), "Writing account changes");
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         for changeset in account_changes.into_iter() {
             match changeset {
                 Change::AccountDestroyed { id, address, old } |
                 Change::AccountChanged { id, address, old, .. } => {
+                    let destroyed = matches!(changeset, Change::AccountDestroyed { .. });
+                    tracing::trace!(target: "provider::post_state", id, ?address, ?old, destroyed, "Account changed");
                     account_changeset_cursor.append_dup(
                         first_transition_id + id,
                         AccountBeforeTx { address, info: Some(old) },
                     )?;
                 }
                 Change::AccountCreated { id, address, .. } => {
+                    tracing::trace!(target: "provider::post_state", id, ?address, "Account created");
                     account_changeset_cursor.append_dup(
                         first_transition_id + id,
                         AccountBeforeTx { address, info: None },
@@ -489,6 +497,7 @@ impl PostState {
         }
 
         // Write storage changes
+        tracing::trace!(target: "provider::post_state", len = storage_changes.len(), "Writing storage changes");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
         for changeset in storage_changes.into_iter() {
@@ -497,6 +506,7 @@ impl PostState {
                     let storage_id = TransitionIdAddress((first_transition_id + id, address));
 
                     for (key, (old_value, _)) in changeset {
+                        tracing::trace!(target: "provider::post_state", ?storage_id, ?key, ?old_value, "Storage changed");
                         storage_changeset_cursor.append_dup(
                             storage_id,
                             StorageEntry { key: H256(key.to_be_bytes()), value: old_value },
@@ -507,6 +517,7 @@ impl PostState {
                     let storage_id = TransitionIdAddress((first_transition_id + id, address));
 
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
+                        tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
                         storage_changeset_cursor.append_dup(storage_id, entry)?;
 
                         while let Some(entry) = storages_cursor.next_dup_val()? {
@@ -520,18 +531,16 @@ impl PostState {
 
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
+            // If the storage was wiped, remove all previous entries from the database.
             if storage.wiped {
+                tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
                 }
-
-                // If the storage is marked as wiped, it might still contain values. This is to
-                // avoid deallocating where possible, but these values should not be written to the
-                // database.
-                continue
             }
 
             for (key, value) in storage.storage {
+                tracing::trace!(target: "provider::post_state", ?address, ?key, "Updating plain state storage");
                 let key = H256(key.to_be_bytes());
                 if let Some(entry) = storages_cursor.seek_by_key_subkey(address, key)? {
                     if entry.key == key {
@@ -546,19 +555,31 @@ impl PostState {
         }
 
         // Write new account state
+        tracing::trace!(target: "provider::post_state", len = self.accounts.len(), "Writing new account state");
         let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
         for (address, account) in self.accounts.into_iter() {
             if let Some(account) = account {
+                tracing::trace!(target: "provider::post_state", ?address, "Updating plain state account");
                 accounts_cursor.upsert(address, account)?;
             } else if accounts_cursor.seek_exact(address)?.is_some() {
+                tracing::trace!(target: "provider::post_state", ?address, "Deleting plain state account");
                 accounts_cursor.delete_current()?;
             }
         }
 
         // Write bytecode
+        tracing::trace!(target: "provider::post_state", len = self.bytecode.len(), "Writing bytecods");
         let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in self.bytecode.into_iter() {
             bytecodes_cursor.upsert(hash, bytecode)?;
+        }
+
+        // write receipts
+        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+        let mut tx_num = receipts_cursor.last()?.map(|(tx_num, _)| tx_num).unwrap_or_default();
+        for receipt in self.receipts.into_iter() {
+            tx_num += 1;
+            receipts_cursor.append(tx_num, receipt)?
         }
 
         Ok(())
@@ -799,6 +820,50 @@ mod tests {
             changeset_cursor.next_dup().unwrap(),
             None,
             "Account A should only be in the changeset 2 times on deletion"
+        );
+    }
+
+    #[test]
+    fn reuse_selfdestructed_account() {
+        let address_a = Address::zero();
+
+        // 0x00 => 0 => 1
+        // 0x01 => 0 => 2
+        // 0x03 => 0 => 3
+        let storage_changeset_one = BTreeMap::from([
+            (U256::from(0), (U256::from(0), U256::from(1))),
+            (U256::from(1), (U256::from(0), U256::from(2))),
+            (U256::from(3), (U256::from(0), U256::from(3))),
+        ]);
+        // 0x00 => 0 => 3
+        // 0x01 => 0 => 4
+        let storage_changeset_two = BTreeMap::from([
+            (U256::from(0), (U256::from(0), U256::from(3))),
+            (U256::from(2), (U256::from(0), U256::from(4))),
+        ]);
+
+        let mut state = PostState::new();
+
+        // Create some storage for account A (simulates a contract deployment)
+        state.change_storage(address_a, storage_changeset_one);
+        state.finish_transition();
+        // Next transition destroys the account (selfdestruct)
+        state.destroy_account(address_a, Account::default());
+        state.finish_transition();
+        // Next transition recreates account A with some storage (simulates a contract deployment)
+        state.change_storage(address_a, storage_changeset_two);
+        state.finish_transition();
+
+        // All the storage of account A has to be deleted in the database (wiped)
+        assert!(
+            state.account_storage(&address_a).expect("Account A should have some storage").wiped,
+            "The wiped flag should be set to discard all pre-existing storage from the database"
+        );
+        // Then, we must ensure that *only* the storage from the last transition will be written
+        assert_eq!(
+            state.account_storage(&address_a).expect("Account A should have some storage").storage,
+            BTreeMap::from([(U256::from(0), U256::from(3)), (U256::from(2), U256::from(4))]),
+            "Account A's storage should only have slots 0 and 2, and they should have values 3 and 4, respectively."
         );
     }
 

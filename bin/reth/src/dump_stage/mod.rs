@@ -12,8 +12,8 @@ mod merkle;
 use merkle::dump_merkle_stage;
 
 use crate::{
-    db::DbTool,
     dirs::{DbPath, PlatformPath},
+    utils::DbTool,
 };
 use clap::Parser;
 use reth_db::{

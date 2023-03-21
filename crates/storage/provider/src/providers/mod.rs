@@ -181,6 +181,15 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
             .map_err(Into::into)
     }
 
+    fn transaction_block(&self, id: TxNumber) -> Result<Option<BlockNumber>> {
+        self.db
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::TransactionBlock>()?;
+                cursor.seek(id).map(|b| b.map(|(_, bn)| bn))
+            })?
+            .map_err(Into::into)
+    }
+
     fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
         if let Some(number) = self.block_number_for_id(id)? {
             let tx = self.db.tx()?;

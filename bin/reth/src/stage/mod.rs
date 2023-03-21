@@ -4,9 +4,9 @@
 use crate::{
     args::NetworkArgs,
     dirs::{ConfigPath, DbPath, PlatformPath},
-    prometheus_exporter,
+    prometheus_exporter, StageEnum,
 };
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
@@ -86,25 +86,12 @@ pub struct Command {
     network: NetworkArgs,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
-enum StageEnum {
-    Headers,
-    Bodies,
-    Senders,
-    Execution,
-}
-
 impl Command {
     /// Execute `stage` command
     pub async fn execute(&self) -> eyre::Result<()> {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
-
-        if let Some(listen_addr) = self.metrics {
-            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
-            prometheus_exporter::initialize(listen_addr)?;
-        }
 
         let config: Config = confy::load_path(&self.config).unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
@@ -119,11 +106,16 @@ impl Command {
         let db = Arc::new(init_db(&self.db)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
+        if let Some(listen_addr) = self.metrics {
+            info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
+            prometheus_exporter::initialize_with_db_metrics(listen_addr, Arc::clone(&db)).await?;
+        }
+
         let num_blocks = self.to - self.from + 1;
 
         match self.stage {
             StageEnum::Bodies => {
-                let (consensus, _) = BeaconConsensus::builder().build(self.chain.clone());
+                let consensus = Arc::new(BeaconConsensus::new(self.chain.clone()));
 
                 let mut config = config;
                 config.peers.connect_trusted_nodes_only = self.network.trusted_only;
@@ -172,8 +164,7 @@ impl Command {
             }
             StageEnum::Execution => {
                 let factory = reth_executor::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, 10_000);
-                stage.commit_threshold = num_blocks;
+                let mut stage = ExecutionStage::new(factory, num_blocks);
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

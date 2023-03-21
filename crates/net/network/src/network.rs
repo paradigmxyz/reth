@@ -229,6 +229,10 @@ impl NetworkInfo for NetworkHandle {
     fn chain_id(&self) -> u64 {
         self.inner.chain_id.load(Ordering::Relaxed)
     }
+
+    fn is_syncing(&self) -> bool {
+        SyncStateProvider::is_syncing(self)
+    }
 }
 
 impl StatusUpdater for NetworkHandle {

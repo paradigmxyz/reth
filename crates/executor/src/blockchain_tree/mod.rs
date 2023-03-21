@@ -6,10 +6,7 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSender
 use reth_provider::{
     providers::ChainState, ExecutorFactory, HeaderProvider, StateProviderFactory, Transaction,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::DerefMut,
-};
+use std::collections::{BTreeMap, HashMap};
 
 pub mod block_indices;
 use block_indices::BlockIndices;
@@ -291,11 +288,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             }
             break
         }
-        if self.block_indices.canonical_hash(&fork.number) == Some(fork.hash) {
-            Some(fork)
-        } else {
-            None
-        }
+        (self.block_indices.canonical_hash(&fork.number) == Some(fork.hash)).then_some(fork)
     }
 
     /// Insert a chain into the tree.
@@ -547,39 +540,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Canonicalize the given chain and commit it to the database.
     fn commit_canonical(&mut self, chain: Chain) -> Result<(), Error> {
         let mut tx = Transaction::new(&self.externals.db)?;
-        let new_tip_number = chain.tip().number;
-        let new_tip_hash = chain.tip().hash;
-        let first_transition_id =
-            tx.get_block_transition(chain.first().number.saturating_sub(1))
-                .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-        let expected_state_root = chain.tip().state_root;
-        let fork_block = chain.fork_block_number();
+
         let (blocks, state) = chain.into_inner();
-        let num_transitions = state.transitions_count();
 
-        // Write state and changesets to the database
-        state
-            .write_to_db(tx.deref_mut(), first_transition_id)
+        tx.append_blocks_with_post_state(blocks.into_values().collect(), state)
             .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-
-        // Insert the blocks
-        for block in blocks.into_values() {
-            tx.insert_block(block)
-                .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-        }
-        tx.insert_hashes(
-            fork_block,
-            first_transition_id,
-            first_transition_id + num_transitions as u64,
-            new_tip_number,
-            new_tip_hash,
-            expected_state_root,
-        )
-        .map_err(|e| ExecError::CanonicalCommit { inner: e.to_string() })?;
-
-        // Update pipeline progress
-        tx.update_pipeline_stages(new_tip_number)
-            .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
 
         tx.commit()?;
 
@@ -622,10 +587,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             )
             .map_err(|e| ExecError::CanonicalRevert { inner: e.to_string() })?;
 
-        // update pipeline progress.
-        tx.update_pipeline_stages(revert_until)
-            .map_err(|e| ExecError::PipelineStatusUpdate { inner: e.to_string() })?;
-
         tx.commit()?;
 
         Ok(Chain::new(blocks_and_execution))
@@ -635,73 +596,21 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
+    use crate::test_utils::TestExecutorFactory;
     use reth_db::{
         mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
         transaction::DbTxMut,
     };
     use reth_interfaces::test_utils::TestConsensus;
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpec, ChainSpecBuilder, H256, MAINNET};
+    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, H256, MAINNET};
     use reth_provider::{
-        insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData, BlockExecutor,
-        StateProvider,
+        insert_block, post_state::PostState, test_utils::blocks::BlockChainTestData,
     };
     use std::{collections::HashSet, sync::Arc};
 
-    #[derive(Clone, Debug)]
-    struct TestFactory {
-        exec_result: Arc<Mutex<Vec<PostState>>>,
-        chain_spec: Arc<ChainSpec>,
-    }
-
-    impl TestFactory {
-        fn new(chain_spec: Arc<ChainSpec>) -> Self {
-            Self { exec_result: Arc::new(Mutex::new(Vec::new())), chain_spec }
-        }
-
-        fn extend(&self, exec_res: Vec<PostState>) {
-            self.exec_result.lock().extend(exec_res.into_iter());
-        }
-    }
-
-    struct TestExecutor(Option<PostState>);
-
-    impl<SP: StateProvider> BlockExecutor<SP> for TestExecutor {
-        fn execute(
-            &mut self,
-            _block: &reth_primitives::Block,
-            _total_difficulty: reth_primitives::U256,
-            _senders: Option<Vec<reth_primitives::Address>>,
-        ) -> Result<PostState, ExecError> {
-            self.0.clone().ok_or(ExecError::VerificationFailed)
-        }
-
-        fn execute_and_verify_receipt(
-            &mut self,
-            _block: &reth_primitives::Block,
-            _total_difficulty: reth_primitives::U256,
-            _senders: Option<Vec<reth_primitives::Address>>,
-        ) -> Result<PostState, ExecError> {
-            self.0.clone().ok_or(ExecError::VerificationFailed)
-        }
-    }
-
-    impl ExecutorFactory for TestFactory {
-        type Executor<T: StateProvider> = TestExecutor;
-
-        fn with_sp<SP: StateProvider>(&self, _sp: SP) -> Self::Executor<SP> {
-            let exec_res = self.exec_result.lock().pop();
-            TestExecutor(exec_res)
-        }
-
-        fn chain_spec(&self) -> &ChainSpec {
-            self.chain_spec.as_ref()
-        }
-    }
-
     fn setup_externals(
         exec_res: Vec<PostState>,
-    ) -> TreeExternals<Arc<Env<WriteMap>>, Arc<TestConsensus>, TestFactory> {
+    ) -> TreeExternals<Env<WriteMap>, Arc<TestConsensus>, TestExecutorFactory> {
         let db = create_test_rw_db();
         let consensus = Arc::new(TestConsensus::default());
         let chain_spec = Arc::new(
@@ -711,7 +620,7 @@ mod tests {
                 .shanghai_activated()
                 .build(),
         );
-        let executor_factory = TestFactory::new(chain_spec.clone());
+        let executor_factory = TestExecutorFactory::new(chain_spec.clone());
         executor_factory.extend(exec_res);
 
         TreeExternals::new(db, consensus, executor_factory, chain_spec)

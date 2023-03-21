@@ -1,5 +1,4 @@
-use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256};
-use ethers_core::types::BlockNumber;
+use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64};
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -125,11 +124,7 @@ pub struct SealedBlockWithSenders {
 impl SealedBlockWithSenders {
     /// New sealed block with sender. Return none if len of tx and senders does not match
     pub fn new(block: SealedBlock, senders: Vec<Address>) -> Option<Self> {
-        if block.body.len() != senders.len() {
-            None
-        } else {
-            Some(Self { block, senders })
-        }
+        (!block.body.len() != senders.len()).then_some(Self { block, senders })
     }
 
     /// Split Structure to its components
@@ -459,15 +454,21 @@ impl From<u64> for BlockNumberOrTag {
     }
 }
 
+impl From<U64> for BlockNumberOrTag {
+    fn from(num: U64) -> Self {
+        num.as_u64().into()
+    }
+}
+
 impl From<ethers_core::types::BlockNumber> for BlockNumberOrTag {
-    fn from(value: BlockNumber) -> Self {
+    fn from(value: ethers_core::types::BlockNumber) -> Self {
         match value {
-            BlockNumber::Latest => BlockNumberOrTag::Latest,
-            BlockNumber::Finalized => BlockNumberOrTag::Finalized,
-            BlockNumber::Safe => BlockNumberOrTag::Safe,
-            BlockNumber::Earliest => BlockNumberOrTag::Earliest,
-            BlockNumber::Pending => BlockNumberOrTag::Pending,
-            BlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
+            ethers_core::types::BlockNumber::Latest => BlockNumberOrTag::Latest,
+            ethers_core::types::BlockNumber::Finalized => BlockNumberOrTag::Finalized,
+            ethers_core::types::BlockNumber::Safe => BlockNumberOrTag::Safe,
+            ethers_core::types::BlockNumber::Earliest => BlockNumberOrTag::Earliest,
+            ethers_core::types::BlockNumber::Pending => BlockNumberOrTag::Pending,
+            ethers_core::types::BlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
         }
     }
 }
@@ -566,6 +567,35 @@ impl From<BlockHash> for H256 {
 impl AsRef<H256> for BlockHash {
     fn as_ref(&self) -> &H256 {
         &self.block_hash
+    }
+}
+
+/// A response to `GetBlockBodies`, containing bodies if any bodies were found.
+///
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
+#[derive_arbitrary(rlp, 10)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+)]
+#[rlp(trailing)]
+pub struct BlockBody {
+    /// Transactions in the block
+    pub transactions: Vec<TransactionSigned>,
+    /// Uncle headers for the given block
+    pub ommers: Vec<Header>,
+    /// Withdrawals in the block.
+    pub withdrawals: Option<Vec<Withdrawal>>,
+}
+
+impl BlockBody {
+    /// Create a [`Block`](Block) from the body and its header.
+    pub fn create_block(&self, header: Header) -> Block {
+        Block {
+            header,
+            body: self.transactions.clone(),
+            ommers: self.ommers.clone(),
+            withdrawals: self.withdrawals.clone(),
+        }
     }
 }
 

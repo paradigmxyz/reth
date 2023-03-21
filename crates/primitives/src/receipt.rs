@@ -1,4 +1,4 @@
-use crate::{Bloom, Log, TxType};
+use crate::{bloom::logs_bloom, Bloom, Log, TxType};
 use bytes::{Buf, BufMut, BytesMut};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{length_of_length, Decodable, Encodable};
@@ -16,21 +16,61 @@ pub struct Receipt {
     pub success: bool,
     /// Gas used
     pub cumulative_gas_used: u64,
-    /// Bloom filter.
-    pub bloom: Bloom,
     /// Log send from contracts.
     pub logs: Vec<Log>,
 }
 
 impl Receipt {
+    /// Cacluates [`Log`]'s bloom filter. this is slow operatio and [ReceiptWithBloom] can
+    /// be used to cache this value.
+    pub fn bloom_slow(&self) -> Bloom {
+        logs_bloom(self.logs.iter())
+    }
+}
+
+impl From<Receipt> for ReceiptWithBloom {
+    fn from(receipt: Receipt) -> Self {
+        let bloom = receipt.bloom_slow();
+        ReceiptWithBloom { receipt, bloom }
+    }
+}
+
+/// [`Receipt`] with calculated bloom filter.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[main_codec]
+pub struct ReceiptWithBloom {
+    /// Bloom filter build from logs.
+    pub bloom: Bloom,
+    /// Main receipt body
+    pub receipt: Receipt,
+}
+
+impl ReceiptWithBloom {
+    /// Create new [ReceiptWithBloom]
+    pub fn new(receipt: Receipt, bloom: Bloom) -> Self {
+        Self { receipt, bloom }
+    }
+
+    /// Consume the structure, returning only the receipt
+    pub fn into_receipt(self) -> Receipt {
+        self.receipt
+    }
+
+    /// Consume the structure, returning the receipt and the bloom filter
+    pub fn into_components(self) -> (Receipt, Bloom) {
+        (self.receipt, self.bloom)
+    }
+}
+
+impl ReceiptWithBloom {
     /// Returns the rlp header for the receipt payload.
     fn receipt_rlp_header(&self) -> reth_rlp::Header {
         let mut rlp_head = reth_rlp::Header { list: true, payload_length: 0 };
 
-        rlp_head.payload_length += self.success.length();
-        rlp_head.payload_length += self.cumulative_gas_used.length();
+        rlp_head.payload_length += self.receipt.success.length();
+        rlp_head.payload_length += self.receipt.cumulative_gas_used.length();
         rlp_head.payload_length += self.bloom.length();
-        rlp_head.payload_length += self.logs.length();
+        rlp_head.payload_length += self.receipt.logs.length();
 
         rlp_head
     }
@@ -38,15 +78,15 @@ impl Receipt {
     /// Encodes the receipt data.
     fn encode_fields(&self, out: &mut dyn BufMut) {
         self.receipt_rlp_header().encode(out);
-        self.success.encode(out);
-        self.cumulative_gas_used.encode(out);
+        self.receipt.success.encode(out);
+        self.receipt.cumulative_gas_used.encode(out);
         self.bloom.encode(out);
-        self.logs.encode(out);
+        self.receipt.logs.encode(out);
     }
 
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
-        if matches!(self.tx_type, TxType::Legacy) {
+        if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
             return
         }
@@ -60,7 +100,7 @@ impl Receipt {
             header.encode(out);
         }
 
-        match self.tx_type {
+        match self.receipt.tx_type {
             TxType::EIP2930 => {
                 out.put_u8(0x01);
             }
@@ -86,13 +126,13 @@ impl Receipt {
             return Err(reth_rlp::DecodeError::UnexpectedString)
         }
         let started_len = b.len();
-        let this = Self {
-            tx_type,
-            success: reth_rlp::Decodable::decode(b)?,
-            cumulative_gas_used: reth_rlp::Decodable::decode(b)?,
-            bloom: reth_rlp::Decodable::decode(b)?,
-            logs: reth_rlp::Decodable::decode(b)?,
-        };
+
+        let success = reth_rlp::Decodable::decode(b)?;
+        let cumulative_gas_used = reth_rlp::Decodable::decode(b)?;
+        let bloom = reth_rlp::Decodable::decode(b)?;
+        let logs = reth_rlp::Decodable::decode(b)?;
+
+        let this = Self { receipt: Receipt { tx_type, success, cumulative_gas_used, logs }, bloom };
         let consumed = started_len - b.len();
         if consumed != rlp_head.payload_length {
             return Err(reth_rlp::DecodeError::ListLengthMismatch {
@@ -105,14 +145,14 @@ impl Receipt {
     }
 }
 
-impl Encodable for Receipt {
+impl Encodable for ReceiptWithBloom {
     fn encode(&self, out: &mut dyn BufMut) {
         self.encode_inner(out, true)
     }
     fn length(&self) -> usize {
         let mut payload_len = self.receipt_length();
         // account for eip-2718 type prefix and set the list
-        if matches!(self.tx_type, TxType::EIP1559 | TxType::EIP2930) {
+        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930) {
             payload_len += 1;
             // we include a string header for typed receipts, so include the length here
             payload_len += length_of_length(payload_len);
@@ -122,7 +162,7 @@ impl Encodable for Receipt {
     }
 }
 
-impl Decodable for Receipt {
+impl Decodable for ReceiptWithBloom {
     fn decode(buf: &mut &[u8]) -> Result<Self, reth_rlp::DecodeError> {
         // a receipt is either encoded as a string (non legacy) or a list (legacy).
         // We should not consume the buffer if we are decoding a legacy receipt, so let's
@@ -170,25 +210,27 @@ mod tests {
         let expected = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
         let mut data = vec![];
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 0x1u64,
+                logs: vec![Log {
+                    address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
+                    topics: vec![
+                        H256::from_str(
+                            "000000000000000000000000000000000000000000000000000000000000dead",
+                        )
+                        .unwrap(),
+                        H256::from_str(
+                            "000000000000000000000000000000000000000000000000000000000000beef",
+                        )
+                        .unwrap(),
+                    ],
+                    data: Bytes::from_str("0100ff").unwrap().0.into(),
+                }],
+                success: false,
+            },
             bloom: [0; 256].into(),
-            cumulative_gas_used: 0x1u64,
-            logs: vec![Log {
-                address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
-                topics: vec![
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000dead",
-                    )
-                    .unwrap(),
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000beef",
-                    )
-                    .unwrap(),
-                ],
-                data: Bytes::from_str("0100ff").unwrap().0.into(),
-            }],
-            success: false,
         };
 
         receipt.encode(&mut data);
@@ -204,28 +246,30 @@ mod tests {
         let data = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
 
         // EIP658Receipt
-        let expected = Receipt {
-            tx_type: TxType::Legacy,
+        let expected = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 0x1u64,
+                logs: vec![Log {
+                    address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
+                    topics: vec![
+                        H256::from_str(
+                            "000000000000000000000000000000000000000000000000000000000000dead",
+                        )
+                        .unwrap(),
+                        H256::from_str(
+                            "000000000000000000000000000000000000000000000000000000000000beef",
+                        )
+                        .unwrap(),
+                    ],
+                    data: Bytes::from_str("0100ff").unwrap().0.into(),
+                }],
+                success: false,
+            },
             bloom: [0; 256].into(),
-            cumulative_gas_used: 0x1u64,
-            logs: vec![Log {
-                address: Address::from_str("0000000000000000000000000000000000000011").unwrap(),
-                topics: vec![
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000dead",
-                    )
-                    .unwrap(),
-                    H256::from_str(
-                        "000000000000000000000000000000000000000000000000000000000000beef",
-                    )
-                    .unwrap(),
-                ],
-                data: Bytes::from_str("0100ff").unwrap().0.into(),
-            }],
-            success: false,
         };
 
-        let receipt = Receipt::decode(&mut &data[..]).unwrap();
+        let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
         assert_eq!(receipt, expected);
     }
 }

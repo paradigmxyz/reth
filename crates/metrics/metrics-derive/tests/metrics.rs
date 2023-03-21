@@ -303,21 +303,21 @@ impl Recorder for TestRecorder {
 
     fn register_counter(&self, key: &Key) -> Counter {
         let labels_vec: Vec<Label> = key.labels().cloned().collect();
-        let labels = if labels_vec.is_empty() { None } else { Some(labels_vec) };
+        let labels = (!labels_vec.is_empty()).then_some(labels_vec);
         self.record_metric(key.name(), TestMetricTy::Counter, None, labels);
         Counter::noop()
     }
 
     fn register_gauge(&self, key: &Key) -> Gauge {
         let labels_vec: Vec<Label> = key.labels().cloned().collect();
-        let labels = if labels_vec.is_empty() { None } else { Some(labels_vec) };
+        let labels = (!labels_vec.is_empty()).then_some(labels_vec);
         self.record_metric(key.name(), TestMetricTy::Gauge, None, labels);
         Gauge::noop()
     }
 
     fn register_histogram(&self, key: &Key) -> Histogram {
         let labels_vec: Vec<Label> = key.labels().cloned().collect();
-        let labels = if labels_vec.is_empty() { None } else { Some(labels_vec) };
+        let labels = (!labels_vec.is_empty()).then_some(labels_vec);
         self.record_metric(key.name(), TestMetricTy::Histogram, None, labels);
         Histogram::noop()
     }

@@ -2,14 +2,14 @@
 
 use crate::{message::BlockRequest, peers::PeersHandle};
 use futures::StreamExt;
-use reth_eth_wire::{BlockBody, GetBlockBodies, GetBlockHeaders};
+use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
 use reth_interfaces::p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
 };
 use reth_network_api::ReputationChangeKind;
-use reth_primitives::{Header, PeerId, H256};
+use reth_primitives::{BlockBody, Header, PeerId, H256};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -135,11 +135,7 @@ impl StateFetcher {
             return PollAction::NoRequests
         }
 
-        let peer_id = if let Some(peer_id) = self.next_peer() {
-            peer_id
-        } else {
-            return PollAction::NoPeersAvailable
-        };
+        let Some(peer_id) = self.next_peer() else { return PollAction::NoPeersAvailable };
 
         let request = self.queued_requests.pop_front().expect("not empty; qed");
         let request = self.prepare_block_request(peer_id, request);

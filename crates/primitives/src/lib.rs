@@ -39,7 +39,8 @@ pub mod proofs;
 pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{
-    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock,
+    SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
 pub use chain::{
@@ -57,9 +58,12 @@ pub use header::{Head, Header, HeadersDirection, SealedHeader};
 pub use hex_bytes::Bytes;
 pub use integer_list::IntegerList;
 pub use log::Log;
-pub use net::NodeRecord;
+pub use net::{
+    goerli_nodes, mainnet_nodes, sepolia_nodes, NodeRecord, GOERLI_BOOTNODES, MAINNET_BOOTNODES,
+    SEPOLIA_BOOTNODES,
+};
 pub use peer::{PeerId, WithPeerId};
-pub use receipt::Receipt;
+pub use receipt::{Receipt, ReceiptWithBloom};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::{StorageEntry, StorageTrieEntry};

@@ -5,13 +5,15 @@
 
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockBody, BlockHeaders,
-    EthMessage, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
+    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
+    GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock,
+    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
     SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
-use reth_primitives::{Bytes, Header, PeerId, Receipt, TransactionSigned, H256};
+use reth_primitives::{
+    BlockBody, Bytes, Header, PeerId, ReceiptWithBloom, TransactionSigned, H256,
+};
 use std::{
     fmt,
     sync::Arc,
@@ -199,7 +201,7 @@ pub enum PeerResponseResult {
     BlockBodies(RequestResult<Vec<BlockBody>>),
     PooledTransactions(RequestResult<Vec<TransactionSigned>>),
     NodeData(RequestResult<Vec<Bytes>>),
-    Receipts(RequestResult<Vec<Vec<Receipt>>>),
+    Receipts(RequestResult<Vec<Vec<ReceiptWithBloom>>>),
 }
 
 // === impl PeerResponseResult ===

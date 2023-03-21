@@ -3,7 +3,6 @@ use reth_primitives::{
     BlockHash, BlockNumber, InvalidTransactionError, SealedBlock, SealedHeader, H256, U256,
 };
 use std::fmt::Debug;
-use tokio::sync::watch::Receiver;
 
 /// Re-export fork choice state
 pub use reth_rpc_types::engine::ForkchoiceState;
@@ -12,9 +11,6 @@ pub use reth_rpc_types::engine::ForkchoiceState;
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus: Debug + Send + Sync {
-    /// Get a receiver for the fork choice state
-    fn fork_choice_state(&self) -> Receiver<ForkchoiceState>;
-
     /// Validate if the header is correct and follows consensus specification.
     ///
     /// This is called before properties that are not in the header itself (like total difficulty)

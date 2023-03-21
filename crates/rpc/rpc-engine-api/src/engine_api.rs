@@ -282,13 +282,9 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
              return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
         };
 
-        let parent_td = if let Some(parent_td) = self.client.header_td(&block.parent_hash)? {
-            parent_td
-        } else {
-            return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+        let Some(parent_td) = self.client.header_td(&block.parent_hash)? else { return Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::PayloadPreMerge.to_string(),
-            }))
-        };
+            })) };
 
         // Short circuit the check by passing parent total difficulty.
         if !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
@@ -352,10 +348,8 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
             }))
         }
 
-        let head = if let Some(head) = self.client.header(&head_block_hash)? {
-            head
-        } else {
-            // Block is not known, nothing to do.
+        let Some(head) = self.client.header(&head_block_hash)? else {
+            // Block is not known, nothing to do
             return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
         };
 
@@ -364,9 +358,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
             return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing))
         }
 
-        let head_td = if let Some(head_td) = self.client.header_td(&head_block_hash)? {
-            head_td
-        } else {
+        let Some(head_td) = self.client.header_td(&head_block_hash)? else {
             // internal error - we have the head block but not the total difficulty
             return Ok(ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
                 validation_error: EngineApiError::Internal(

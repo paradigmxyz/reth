@@ -1,28 +1,30 @@
-use crate::{error::*, util::opt, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
-use metrics::Gauge;
+use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
-use reth_metrics_derive::Metrics;
-use reth_primitives::BlockNumber;
+use reth_primitives::{BlockNumber, H256};
 use reth_provider::Transaction;
 use std::{
-    collections::HashMap,
     fmt::{Debug, Formatter},
     ops::Deref,
     sync::Arc,
 };
+use tokio::sync::watch;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 mod builder;
 mod ctrl;
 mod event;
+mod progress;
 mod set;
+mod sync_metrics;
 
 pub use builder::*;
 use ctrl::*;
 pub use event::*;
+use progress::*;
 pub use set::*;
+use sync_metrics::*;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -80,6 +82,7 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     listeners: PipelineEventListeners,
     sync_state_updater: Option<U>,
     progress: PipelineProgress,
+    tip_tx: Option<watch::Sender<H256>>,
     metrics: Metrics,
 }
 
@@ -91,6 +94,7 @@ impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
             listeners: PipelineEventListeners::default(),
             sync_state_updater: None,
             progress: PipelineProgress::default(),
+            tip_tx: None,
             metrics: Metrics::default(),
         }
     }
@@ -109,6 +113,11 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     /// Construct a pipeline using a [`PipelineBuilder`].
     pub fn builder() -> PipelineBuilder<DB, U> {
         PipelineBuilder::default()
+    }
+
+    /// Set tip for reverse sync.
+    pub fn set_tip(&self, tip: H256) {
+        self.tip_tx.as_ref().expect("tip sender is set").send(tip).expect("tip channel closed");
     }
 
     /// Listen for events on the pipeline.
@@ -360,75 +369,17 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     }
 }
 
-#[derive(Metrics)]
-#[metrics(scope = "sync")]
-struct StageMetrics {
-    /// The block number of the last commit for a stage.
-    checkpoint: Gauge,
-}
-
-#[derive(Default)]
-struct Metrics {
-    checkpoints: HashMap<StageId, StageMetrics>,
-}
-
-impl Metrics {
-    fn stage_checkpoint(&mut self, stage_id: StageId, progress: u64) {
-        self.checkpoints
-            .entry(stage_id)
-            .or_insert_with(|| StageMetrics::new_with_labels(&[("stage", stage_id.to_string())]))
-            .checkpoint
-            .set(progress as f64);
-    }
-}
-
-#[derive(Debug, Default)]
-struct PipelineProgress {
-    /// The progress of the current stage
-    pub(crate) progress: Option<BlockNumber>,
-    /// The maximum progress achieved by any stage during the execution of the pipeline.
-    pub(crate) maximum_progress: Option<BlockNumber>,
-    /// The minimum progress achieved by any stage during the execution of the pipeline.
-    pub(crate) minimum_progress: Option<BlockNumber>,
-}
-
-impl PipelineProgress {
-    fn update(&mut self, progress: BlockNumber) {
-        self.progress = Some(progress);
-        self.minimum_progress = opt::min(self.minimum_progress, progress);
-        self.maximum_progress = opt::max(self.maximum_progress, progress);
-    }
-
-    /// Create a sync state from pipeline progress.
-    fn current_sync_state(&self, downloading: bool) -> SyncState {
-        match self.progress {
-            Some(progress) if downloading => SyncState::Downloading { target_block: progress },
-            Some(progress) => SyncState::Executing { target_block: progress },
-            None => SyncState::Idle,
-        }
-    }
-
-    /// Get next control flow step
-    fn next_ctrl(&self) -> ControlFlow {
-        match self.progress {
-            Some(progress) => ControlFlow::Continue { progress },
-            None => ControlFlow::NoProgress { stage_progress: None },
-        }
-    }
-}
-
 /// A container for a queued stage.
 pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StageId, UnwindOutput};
+    use crate::{test_utils::TestStage, StageId, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_db::mdbx::{self, test_utils, EnvKind};
     use reth_interfaces::{consensus, provider::ProviderError, sync::NoopSyncStateUpdate};
     use tokio_stream::StreamExt;
-    use utils::TestStage;
 
     #[test]
     fn record_progress_calculates_outliers() {
@@ -699,60 +650,5 @@ mod tests {
                 number: 5
             })))
         );
-    }
-
-    mod utils {
-        use super::*;
-        use async_trait::async_trait;
-        use std::collections::VecDeque;
-
-        pub(crate) struct TestStage {
-            id: StageId,
-            exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-            unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
-        }
-
-        impl TestStage {
-            pub(crate) fn new(id: StageId) -> Self {
-                Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
-            }
-
-            pub(crate) fn add_exec(mut self, output: Result<ExecOutput, StageError>) -> Self {
-                self.exec_outputs.push_back(output);
-                self
-            }
-
-            pub(crate) fn add_unwind(mut self, output: Result<UnwindOutput, StageError>) -> Self {
-                self.unwind_outputs.push_back(output);
-                self
-            }
-        }
-
-        #[async_trait]
-        impl<DB: Database> Stage<DB> for TestStage {
-            fn id(&self) -> StageId {
-                self.id
-            }
-
-            async fn execute(
-                &mut self,
-                _: &mut Transaction<'_, DB>,
-                _input: ExecInput,
-            ) -> Result<ExecOutput, StageError> {
-                self.exec_outputs
-                    .pop_front()
-                    .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
-            }
-
-            async fn unwind(
-                &mut self,
-                _: &mut Transaction<'_, DB>,
-                _input: UnwindInput,
-            ) -> Result<UnwindOutput, StageError> {
-                self.unwind_outputs
-                    .pop_front()
-                    .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))
-            }
-        }
     }
 }

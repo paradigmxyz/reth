@@ -1,8 +1,8 @@
 use crate::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log,
-    Receipt, TransactionSigned, H256, U256,
+    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
+    ReceiptWithBloom, TransactionSigned, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
 use reth_revm::{
@@ -373,6 +373,8 @@ where
     /// The changes in [PostState] have a transition ID associated with them: there is one
     /// transition ID for each transaction (with the first executed tx having transition ID 0, and
     /// so on).
+    ///
+    /// The second returned value represents the total gas used by this block of transactions.
     pub fn execute_transactions(
         &mut self,
         block: &Block,
@@ -418,7 +420,6 @@ where
                 // receipts`.
                 success: result.is_success(),
                 cumulative_gas_used,
-                bloom: logs_bloom(logs.iter()),
                 logs,
             });
             post_state.finish_transition();
@@ -496,13 +497,14 @@ pub fn verify_receipt<'a>(
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
 ) -> Result<(), Error> {
     // Check receipts root.
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts.clone());
+    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts_with_bloom.iter());
     if receipts_root != expected_receipts_root {
         return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
     }
 
     // Create header log bloom.
-    let logs_bloom = receipts.fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
         return Err(Error::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
@@ -573,7 +575,7 @@ mod tests {
             Ok(self
                 .block_hash
                 .iter()
-                .filter_map(|(block, hash)| if range.contains(block) { Some(*hash) } else { None })
+                .filter_map(|(block, hash)| range.contains(block).then_some(*hash))
                 .collect())
         }
     }
@@ -657,7 +659,11 @@ mod tests {
         let mut executor = Executor::new(chain_spec, db);
         let post_state = executor.execute_and_verify_receipt(&block, U256::ZERO, None).unwrap();
 
-        assert_eq!(post_state.transitions_count(), 2, "Should executed one transaction");
+        assert_eq!(
+            post_state.transitions_count(),
+            2,
+            "Should executed two transitions (1 tx and 1 block reward)"
+        );
 
         let block_reward = U256::from(WEI_2ETH + (WEI_2ETH >> 5));
 

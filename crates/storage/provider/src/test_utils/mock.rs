@@ -149,6 +149,10 @@ impl TransactionsProvider for MockEthProvider {
             .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash == hash).cloned()))
     }
 
+    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>> {
+        unimplemented!()
+    }
+
     fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
         Ok(self.block(id)?.map(|b| b.body))
     }
@@ -179,8 +183,7 @@ impl BlockHashProvider for MockEthProvider {
     fn block_hash(&self, number: u64) -> Result<Option<H256>> {
         let lock = self.blocks.lock();
 
-        let hash =
-            lock.iter().find_map(|(hash, b)| if b.number == number { Some(*hash) } else { None });
+        let hash = lock.iter().find_map(|(hash, b)| (b.number == number).then_some(*hash));
         Ok(hash)
     }
 
@@ -213,7 +216,7 @@ impl BlockIdProvider for MockEthProvider {
 
     fn block_number(&self, hash: H256) -> Result<Option<reth_primitives::BlockNumber>> {
         let lock = self.blocks.lock();
-        let num = lock.iter().find_map(|(h, b)| if *h == hash { Some(b.number) } else { None });
+        let num = lock.iter().find_map(|(h, b)| (*h == hash).then_some(b.number));
         Ok(num)
     }
 }
