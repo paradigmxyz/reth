@@ -1550,7 +1550,7 @@ mod test {
     use std::ops::DerefMut;
 
     #[test]
-    fn insert_get_take() {
+    fn insert_block_and_hashes_get_take() {
         let db = create_test_rw_db();
 
         // setup
@@ -1616,6 +1616,67 @@ mod test {
             2,
             block2.hash,
             block2.state_root,
+        )
+        .unwrap();
+
+        // get second block
+        let get = tx.get_block_and_execution_range(&chain_spec, 2..=2).unwrap();
+        assert_eq!(get, vec![(block2.clone(), exec_res2.clone())]);
+
+        // get two blocks
+        let get = tx.get_block_and_execution_range(&chain_spec, 1..=2).unwrap();
+        assert_eq!(
+            get,
+            vec![(block1.clone(), exec_res1.clone()), (block2.clone(), exec_res2.clone())]
+        );
+
+        // take two blocks
+        let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();
+        assert_eq!(get, vec![(block1, exec_res1), (block2, exec_res2)]);
+
+        // assert genesis state
+        assert_genesis_block(&tx, genesis);
+    }
+
+    #[test]
+    fn insert_get_take_multiblocks() {
+        let db = create_test_rw_db();
+
+        // setup
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
+        let chain_spec = ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(MAINNET.genesis.clone())
+            .shanghai_activated()
+            .build();
+
+        let data = BlockChainTestData::default();
+        let genesis = data.genesis.clone();
+        let (block1, exec_res1) = data.blocks[0].clone();
+        let (block2, exec_res2) = data.blocks[1].clone();
+
+        insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
+
+        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
+        assert_genesis_block(&tx, data.genesis);
+
+        tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
+
+        // get one block
+        let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
+        assert_eq!(get, vec![(block1.clone(), exec_res1.clone())]);
+
+        // take one block
+        let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();
+        assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
+        assert_genesis_block(&tx, genesis.clone());
+
+        // insert two blocks
+        let mut merged_state = exec_res1.clone();
+        merged_state.extend(exec_res2.clone());
+        tx.append_blocks_with_post_state(
+            vec![block1.clone(), block2.clone()],
+            merged_state.clone(),
         )
         .unwrap();
 
