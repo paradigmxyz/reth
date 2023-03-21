@@ -1,6 +1,5 @@
 use super::file_codec::BlockFileCodec;
 use itertools::Either;
-use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     p2p::{
         bodies::client::{BodiesClient, BodiesFut},
@@ -12,7 +11,8 @@ use reth_interfaces::{
     sync::{SyncState, SyncStateProvider, SyncStateUpdater},
 };
 use reth_primitives::{
-    Block, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId, H256,
+    Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, PeerId,
+    H256,
 };
 use reth_rlp::{Decodable, Header as RlpHeader};
 use std::{

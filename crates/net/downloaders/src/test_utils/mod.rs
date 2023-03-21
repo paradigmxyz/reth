@@ -2,9 +2,8 @@
 //! Test helper impls
 use crate::bodies::test_utils::create_raw_bodies;
 use futures::SinkExt;
-use reth_eth_wire::BlockBody;
 use reth_interfaces::test_utils::generators::random_block_range;
-use reth_primitives::{SealedHeader, H256};
+use reth_primitives::{BlockBody, SealedHeader, H256};
 use std::{collections::HashMap, io::SeekFrom};
 use tokio::{
     fs::File,
