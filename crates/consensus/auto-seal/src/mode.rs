@@ -2,6 +2,7 @@
 
 use futures_util::{stream::Fuse, SinkExt, StreamExt};
 use reth_primitives::TxHash;
+use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     fmt,
     pin::Pin,
@@ -47,7 +48,10 @@ impl MiningMode {
         &mut self,
         pool: &Pool,
         cx: &mut Context<'_>,
-    ) -> Poll<Vec<Arc<PoolTransaction>>> {
+    ) -> Poll<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>
+    where
+        Pool: TransactionPool,
+    {
         match self {
             MiningMode::None => Poll::Pending,
             MiningMode::Auto(miner) => miner.poll(pool, cx),
@@ -75,13 +79,17 @@ impl FixedBlockTimeMiner {
         Self { interval: tokio::time::interval_at(start, duration) }
     }
 
-    fn poll<P>(&mut self, pool: &P, cx: &mut Context<'_>) -> Poll<Vec<Arc<PoolTransaction>>>
+    fn poll<Pool>(
+        &mut self,
+        pool: &Pool,
+        cx: &mut Context<'_>,
+    ) -> Poll<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>
     where
-        P: 'static,
+        Pool: TransactionPool,
     {
         if self.interval.poll_tick(cx).is_ready() {
             // drain the pool
-            return Poll::Ready(pool.ready_transactions().collect())
+            return Poll::Ready(pool.best_transactions().collect())
         }
         Poll::Pending
     }
@@ -106,7 +114,14 @@ pub struct ReadyTransactionMiner {
 // === impl ReadyTransactionMiner ===
 
 impl ReadyTransactionMiner {
-    fn poll<Pool>(&mut self, pool: &Pool, cx: &mut Context<'_>) -> Poll<Vec<Arc<PoolTransaction>>> {
+    fn poll<Pool>(
+        &mut self,
+        pool: &Pool,
+        cx: &mut Context<'_>,
+    ) -> Poll<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>
+    where
+        Pool: TransactionPool,
+    {
         // drain the notification stream
         while let Poll::Ready(Some(_hash)) = Pin::new(&mut self.rx).poll_next(cx) {
             self.has_pending_txs = Some(true);
@@ -116,8 +131,7 @@ impl ReadyTransactionMiner {
             return Poll::Pending
         }
 
-        let transactions =
-            pool.ready_transactions().take(self.max_transactions).collect::<Vec<_>>();
+        let transactions = pool.best_transactions().take(self.max_transactions).collect::<Vec<_>>();
 
         // there are pending transactions if we didn't drain the pool
         self.has_pending_txs = Some(transactions.len() >= self.max_transactions);
