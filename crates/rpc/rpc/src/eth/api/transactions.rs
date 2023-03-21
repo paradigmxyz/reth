@@ -92,19 +92,17 @@ where
             return Ok(Some(TransactionSource::Pool(tx)))
         }
 
-        match self.client().transaction_by_hash(hash)? {
+        match self.client().transaction_by_hash_with_meta(hash)? {
             None => Ok(None),
-            Some(tx) => {
+            Some((tx, meta)) => {
                 let transaction =
                     tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
                 let tx = TransactionSource::Database {
                     transaction,
-                    // TODO: this is just stubbed out for now still need to fully implement tx =>
-                    // block
-                    index: 0,
-                    block_hash: Default::default(),
-                    block_number: 0,
+                    index: meta.index,
+                    block_hash: meta.block_hash,
+                    block_number: meta.block_number,
                 };
                 Ok(Some(tx))
             }
@@ -210,7 +208,7 @@ pub enum TransactionSource {
         /// Transaction fetched via provider
         transaction: TransactionSignedEcRecovered,
         /// Index of the transaction in the block
-        index: usize,
+        index: u64,
         /// Hash of the block.
         block_hash: H256,
         /// Number of the block.
