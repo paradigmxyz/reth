@@ -98,12 +98,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use reth_primitives::{StorageValue, StorageKey};
-    use reth_provider::test_utils::{MockEthProvider, NoopProvider, ExtendedAccount};
-    use reth_transaction_pool::test_utils::testing_pool;
-    use crate::eth::cache::EthStateCache;
     use super::*;
+    use crate::eth::cache::EthStateCache;
+    use reth_primitives::{StorageKey, StorageValue};
+    use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
+    use reth_transaction_pool::test_utils::testing_pool;
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_storage() {

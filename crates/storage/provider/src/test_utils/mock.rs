@@ -53,7 +53,7 @@ impl ExtendedAccount {
     /// the value is updated.
     pub fn extend_storage(
         mut self,
-        storage: impl IntoIterator<Item = (StorageKey, StorageValue)>
+        storage: impl IntoIterator<Item = (StorageKey, StorageValue)>,
     ) -> Self {
         self.storage.extend(storage);
         self
