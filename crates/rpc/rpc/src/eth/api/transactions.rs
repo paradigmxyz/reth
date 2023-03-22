@@ -1,6 +1,9 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::{
+        error::{EthApiError, EthResult},
+        utils::recover_raw_transaction,
+    },
     EthApi,
 };
 use async_trait::async_trait;
@@ -10,7 +13,6 @@ use reth_primitives::{
     TransactionSigned, TransactionSignedEcRecovered, H256, U256,
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
-use reth_rlp::Decodable;
 use reth_rpc_types::{
     Index, Transaction, TransactionInfo, TransactionRequest, TypedTransactionRequest,
 };
@@ -155,14 +157,17 @@ where
     /// Send a transaction to the pool
     ///
     /// This will sign the transaction and submit it to the pool
-    pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
-        let from = _request.from.unwrap_or_default();
-        let _transaction = match _request.into_typed_request() {
+    pub(crate) async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
+        let from = match request.from {
+            Some(from) => from,
+            None => return Err(EthApiError::Unsupported("sender not specified")),
+        };
+        let transaction = match request.into_typed_request() {
             Some(tx) => tx,
-            None => return Err(EthApiError::Unsupported("invalid transaction type")),
+            None => return Err(EthApiError::Unsupported("tx type not specified")),
         };
 
-        let signed_tx = self.sign_request(&from, _transaction)?;
+        let signed_tx = self.sign_request(&from, transaction)?;
 
         let recovered =
             signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
@@ -181,7 +186,7 @@ where
         request: TypedTransactionRequest,
     ) -> EthResult<TransactionSigned> {
         for signer in self.inner.signers.iter() {
-            if signer.accounts().contains(from) {
+            if signer.is_signer_for(from) {
                 match signer.sign_transaction(request, from) {
                     Ok(tx) => return Ok(tx),
                     Err(e) => return Err(e.into()),
@@ -224,16 +229,7 @@ where
     ///
     /// Returns the hash of the transaction.
     pub(crate) async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
-        let mut data = tx.as_ref();
-        if data.is_empty() {
-            return Err(EthApiError::EmptyRawTransactionData)
-        }
-
-        let transaction = TransactionSigned::decode(&mut data)
-            .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
-
-        let recovered =
-            transaction.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+        let recovered = recover_raw_transaction(tx)?;
 
         let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
 

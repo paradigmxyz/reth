@@ -4,9 +4,9 @@
 use crate::{
     args::NetworkArgs,
     dirs::{ConfigPath, DbPath, PlatformPath},
-    prometheus_exporter,
+    prometheus_exporter, StageEnum,
 };
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_primitives::ChainSpec;
@@ -84,14 +84,6 @@ pub struct Command {
 
     #[clap(flatten)]
     network: NetworkArgs,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, ValueEnum)]
-enum StageEnum {
-    Headers,
-    Bodies,
-    Senders,
-    Execution,
 }
 
 impl Command {
@@ -172,8 +164,7 @@ impl Command {
             }
             StageEnum::Execution => {
                 let factory = reth_executor::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, 10_000);
-                stage.commit_threshold = num_blocks;
+                let mut stage = ExecutionStage::new(factory, num_blocks);
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

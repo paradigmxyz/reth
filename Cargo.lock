@@ -5144,7 +5144,6 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
- "rlp",
  "schnellru",
  "secp256k1",
  "serde",

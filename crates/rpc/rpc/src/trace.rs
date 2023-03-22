@@ -1,22 +1,26 @@
 use crate::{
-    eth::{cache::EthStateCache, error::EthResult, revm_utils::inspect, EthTransactions},
+    eth::{
+        cache::EthStateCache, error::EthResult, revm_utils::inspect,
+        utils::recover_raw_transaction, EthTransactions,
+    },
     result::internal_rpc_err,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_primitives::{BlockId, Bytes, H256};
+use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
+
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     CallRequest, Index,
 };
-use revm::primitives::Env;
+use revm::primitives::{Env, ExecutionResult, ResultAndState};
 use std::collections::HashSet;
 
 /// `trace` API implementation.
@@ -48,6 +52,71 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Eth: EthTransactions + 'static,
 {
+    /// Executes the transaction at the given [BlockId] with a tracer configured by the config.
+    fn trace_at<F, R>(
+        &self,
+        env: Env,
+        config: TracingInspectorConfig,
+        at: BlockId,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
+    {
+        self.eth_api.with_state_at(at, |state| {
+            let db = SubState::new(State::new(state));
+
+            let mut inspector = TracingInspector::new(config);
+            let (res, _) = inspect(db, env, &mut inspector)?;
+
+            f(inspector, res)
+        })
+    }
+
+    /// Executes the given call and returns a number of possible traces for it.
+    pub async fn trace_call(
+        &self,
+        _call: CallRequest,
+        _trace_types: HashSet<TraceType>,
+        _block_id: Option<BlockId>,
+    ) -> EthResult<TraceResults> {
+        todo!()
+    }
+
+    /// Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
+    pub async fn trace_raw_transaction(
+        &self,
+        tx: Bytes,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
+    ) -> EthResult<TraceResults> {
+        let tx = recover_raw_transaction(tx)?;
+
+        let (cfg, block, at) = self
+            .eth_api
+            .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)))
+            .await?;
+        let tx = tx_env_with_recovered(&tx);
+        let env = Env { cfg, block, tx };
+
+        let config = tracing_config(&trace_types);
+
+        self.trace_at(env, config, at, |inspector, res| {
+            let output = match res.result {
+                ExecutionResult::Success { output, .. } => output.into_data(),
+                ExecutionResult::Revert { output, .. } => output,
+                ExecutionResult::Halt { .. } => Default::default(),
+            };
+
+            let (trace, vm_trace, state_diff) =
+                inspector.into_parity_builder().into_trace_type_traces(&trace_types);
+
+            let res = TraceResults { output: output.into(), trace, vm_trace, state_diff };
+
+            Ok(res)
+        })
+    }
+
     /// Returns transaction trace with the given address.
     pub async fn trace_get(
         &self,
@@ -77,15 +146,11 @@ where
         let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
 
         let (tx, tx_info) = transaction.split();
+        let tx = tx_env_with_recovered(&tx);
+        let env = Env { cfg, block, tx };
 
-        self.eth_api.with_state_at(at, |state| {
-            let tx = tx_env_with_recovered(&tx);
-            let env = Env { cfg, block, tx };
-            let db = SubState::new(State::new(state));
-            let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
-
-            inspect(db, env, &mut inspector)?;
-
+        // execute the trace
+        self.trace_at(env, TracingInspectorConfig::default_parity(), at, |inspector, _| {
             let traces = inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
 
             Ok(Some(traces))
@@ -99,14 +164,16 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Eth: EthTransactions + 'static,
 {
+    /// Executes the given call and returns a number of possible traces for it.
+    ///
     /// Handler for `trace_call`
     async fn trace_call(
         &self,
-        _call: CallRequest,
-        _trace_types: HashSet<TraceType>,
-        _block_id: Option<BlockId>,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
     ) -> Result<TraceResults> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(TraceApi::trace_call(self, call, trace_types, block_id).await?)
     }
 
     /// Handler for `trace_callMany`
@@ -121,11 +188,11 @@ where
     /// Handler for `trace_rawTransaction`
     async fn trace_raw_transaction(
         &self,
-        _data: Bytes,
-        _trace_types: HashSet<TraceType>,
-        _block_id: Option<BlockId>,
+        data: Bytes,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
     ) -> Result<TraceResults> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(TraceApi::trace_raw_transaction(self, data, trace_types, block_id).await?)
     }
 
     /// Handler for `trace_replayBlockTransactions`
@@ -182,4 +249,11 @@ impl<Client, Eth> std::fmt::Debug for TraceApi<Client, Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceApi").finish_non_exhaustive()
     }
+}
+
+/// Returns the [TracingInspectorConfig] depending on the enabled [TraceType]s
+fn tracing_config(trace_types: &HashSet<TraceType>) -> TracingInspectorConfig {
+    TracingInspectorConfig::default_parity()
+        .set_state_diffs(trace_types.contains(&TraceType::StateDiff))
+        .set_steps(trace_types.contains(&TraceType::VmTrace))
 }

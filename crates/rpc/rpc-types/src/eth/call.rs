@@ -28,3 +28,12 @@ pub struct CallRequest {
     /// AccessList
     pub access_list: Option<AccessList>,
 }
+
+impl CallRequest {
+    /// Returns the configured fee cap, if any.
+    ///
+    /// The returns `gas_price` (legacy) if set or `max_fee_per_gas` (EIP1559)
+    pub fn fee_cap(&self) -> Option<U256> {
+        self.gas_price.or(self.max_fee_per_gas)
+    }
+}

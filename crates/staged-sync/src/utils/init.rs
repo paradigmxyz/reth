@@ -1,6 +1,6 @@
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
+    database::{Database, DatabaseGAT},
     mdbx::{Env, WriteMap},
     tables,
     transaction::{DbTx, DbTxMut},
@@ -59,7 +59,25 @@ pub fn init_genesis<DB: Database>(
     drop(tx);
     debug!("Writing genesis block.");
     let tx = db.tx_mut()?;
+    insert_genesis_state::<DB>(&tx, genesis)?;
 
+    // Insert header
+    tx.put::<tables::CanonicalHeaders>(0, hash)?;
+    tx.put::<tables::HeaderNumbers>(hash, 0)?;
+    tx.put::<tables::BlockBodies>(0, Default::default())?;
+    tx.put::<tables::BlockTransitionIndex>(0, 0)?;
+    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
+    tx.put::<tables::Headers>(0, header)?;
+
+    tx.commit()?;
+    Ok(hash)
+}
+
+/// Inserts the genesis state into the database.
+pub fn insert_genesis_state<DB: Database>(
+    tx: &<DB as DatabaseGAT<'_>>::TXMut,
+    genesis: &reth_primitives::Genesis,
+) -> Result<(), InitDatabaseError> {
     let mut account_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
     let mut storage_cursor = tx.cursor_write::<tables::PlainStorageState>()?;
     let mut bytecode_cursor = tx.cursor_write::<tables::Bytecodes>()?;
@@ -89,21 +107,8 @@ pub fn init_genesis<DB: Database>(
             }
         }
     }
-    // Drop all cursor so we can commit the changes at the end of the fn.
-    drop(account_cursor);
-    drop(storage_cursor);
-    drop(bytecode_cursor);
 
-    // Insert header
-    tx.put::<tables::CanonicalHeaders>(0, hash)?;
-    tx.put::<tables::HeaderNumbers>(hash, 0)?;
-    tx.put::<tables::BlockBodies>(0, Default::default())?;
-    tx.put::<tables::BlockTransitionIndex>(0, 0)?;
-    tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
-    tx.put::<tables::Headers>(0, header)?;
-
-    tx.commit()?;
-    Ok(hash)
+    Ok(())
 }
 
 #[cfg(test)]
