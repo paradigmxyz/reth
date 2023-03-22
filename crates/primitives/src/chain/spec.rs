@@ -511,7 +511,6 @@ impl ForkCondition {
     pub fn active_at_block(&self, current_block: BlockNumber) -> bool {
         match self {
             ForkCondition::Block(block) => current_block >= *block,
-            ForkCondition::TTD { fork_block: Some(block), .. } => current_block >= *block,
             _ => false,
         }
     }
