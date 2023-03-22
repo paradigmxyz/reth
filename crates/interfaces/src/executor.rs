@@ -7,7 +7,7 @@ use thiserror::Error;
 pub enum Error {
     #[error("EVM reported invalid transaction ({hash:?}): {message}")]
     EVM { hash: H256, message: String },
-    #[error("Example of error.")]
+    #[error("Verification failed.")]
     VerificationFailed,
     #[error("Fatal internal error")]
     ExecutionFatalError,
@@ -64,4 +64,8 @@ pub enum Error {
     CanonicalCommit { inner: String },
     #[error("Transaction error on pipeline status update: {inner:?}")]
     PipelineStatusUpdate { inner: String },
+    #[error("Block {hash:?} is pre merge")]
+    BlockPreMerge { hash: H256 },
+    #[error("Missing total difficulty")]
+    MissingTotalDifficulty { hash: H256 },
 }

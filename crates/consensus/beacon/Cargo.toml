@@ -11,6 +11,28 @@ readme = "README.md"
 reth-consensus-common = { path = "../common" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
+reth-stages = { path = "../../stages" }
+reth-db = { path = "../../storage/db" }
+reth-provider = { path = "../../storage/provider" }
+reth-executor = { path = "../../executor" }
+reth-rpc-types = { path = "../../rpc/rpc-types" }
+
+# async
+tokio = { version = "1.21.2", features = ["sync"] }
+tokio-stream = "0.1.10"
+futures = "0.3"
+
+# misc
+tracing = "0.1"
+thiserror = "1.0"
 
 [dev-dependencies]
+# reth
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-stages = { path = "../../stages", features = ["test-utils"] }
+reth-executor = { path = "../../executor", features = ["test-utils"] }
+reth-db = { path = "../../storage/db", features = ["test-utils"] }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
+reth-tracing = { path = "../../tracing" }
+
+assert_matches = "1.5"

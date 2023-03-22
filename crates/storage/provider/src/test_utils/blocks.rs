@@ -45,7 +45,7 @@ pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlo
 }
 
 /// Test chain with genesis, blocks, execution results
-/// that have correcte changesets.
+/// that have valid changesets.
 pub struct BlockChainTestData {
     /// Genesis
     pub genesis: SealedBlock,

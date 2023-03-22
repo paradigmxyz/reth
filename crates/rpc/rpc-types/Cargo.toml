@@ -8,6 +8,7 @@ readme = "README.md"
 description = """
 Reth RPC types
 """
+
 [dependencies]
 # reth
 reth-primitives = { path = "../../primitives" }
@@ -27,5 +28,9 @@ jsonrpsee-types = { version = "0.16" }
 lru = "0.9"
 
 [dev-dependencies]
-rand = "0.8"
+# reth
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+
+# misc
+rand = "0.8"
+assert_matches = "1.5"

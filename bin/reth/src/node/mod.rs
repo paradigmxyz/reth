@@ -13,7 +13,7 @@ use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
-use reth_beacon_consensus::BeaconConsensus;
+use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
 use reth_db::{
     database::Database,
     mdbx::{Env, WriteMap},
@@ -24,6 +24,10 @@ use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+};
+use reth_executor::{
+    blockchain_tree::{config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree},
+    Factory,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
@@ -60,7 +64,10 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::sync::{mpsc::unbounded_channel, watch};
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot, watch,
+};
 use tracing::*;
 
 pub mod events;
@@ -216,9 +223,32 @@ impl Command {
             info!(target: "reth::cli", "Continuous sync mode enabled");
         }
 
-        // TODO: This will be fixed with the sync controller (https://github.com/paradigmxyz/reth/pull/1662)
-        let (tx, _rx) = watch::channel(ForkchoiceState::default());
-        let engine_api_handle = self.init_engine_api(Arc::clone(&db), tx, &ctx.task_executor);
+        let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
+
+        let _tip_rx = match self.tip {
+            Some(tip) => {
+                let (tx, rx) = oneshot::channel();
+                let state = ForkchoiceState {
+                    head_block_hash: tip,
+                    finalized_block_hash: tip,
+                    safe_block_hash: tip,
+                };
+                consensus_engine_tx
+                    .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tx))?;
+                debug!(target: "reth::cli", %tip, "Tip manually set");
+                Some(rx)
+            }
+            None => {
+                let warn_msg = "No tip specified. \
+                reth cannot communicate with consensus clients, \
+                so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
+                warn!(target: "reth::cli", warn_msg);
+                None
+            }
+        };
+
+        let engine_api_handle =
+            self.init_engine_api(Arc::clone(&db), consensus_engine_tx, &ctx.task_executor);
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let _auth_server = self
@@ -228,12 +258,13 @@ impl Command {
                 transaction_pool,
                 network.clone(),
                 ctx.task_executor.clone(),
+                self.chain.clone(),
                 engine_api_handle,
             )
             .await?;
         info!(target: "reth::cli", "Started Auth server");
 
-        let (mut pipeline, events) = self
+        let (pipeline, events) = self
             .build_networked_pipeline(
                 &mut config,
                 network.clone(),
@@ -243,29 +274,22 @@ impl Command {
             )
             .await?;
 
-        if let Some(tip) = self.tip {
-            pipeline.set_tip(tip);
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-        } else {
-            let warn_msg = "No tip specified. \
-                    reth cannot communicate with consensus clients, \
-                    so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
-            warn!(target: "reth::cli", warn_msg);
-        }
-
         ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
 
-        // Run pipeline
+        let beacon_consensus_engine =
+            self.build_consensus_engine(db.clone(), consensus, pipeline, consensus_engine_rx)?;
+
+        // Run consensus engine
         let (rx, tx) = tokio::sync::oneshot::channel();
-        info!(target: "reth::cli", "Starting sync pipeline");
-        ctx.task_executor.spawn_critical_blocking("pipeline task", async move {
-            let res = pipeline.run(db.clone()).await;
+        info!(target: "reth::cli", "Starting consensus engine");
+        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
+            let res = beacon_consensus_engine.await;
             let _ = rx.send(res);
         });
 
         tx.await??;
 
-        info!(target: "reth::cli", "Pipeline has finished.");
+        info!(target: "reth::cli", "Consensus engine has exited.");
 
         if self.terminate {
             Ok(())
@@ -324,6 +348,23 @@ impl Command {
         Ok((pipeline, events))
     }
 
+    fn build_consensus_engine(
+        &self,
+        db: Arc<Env<WriteMap>>,
+        consensus: Arc<dyn Consensus>,
+        pipeline: Pipeline<Env<WriteMap>, impl SyncStateUpdater + 'static>,
+        message_rx: UnboundedReceiver<BeaconEngineMessage>,
+    ) -> eyre::Result<
+        BeaconConsensusEngine<Env<WriteMap>, impl SyncStateUpdater, Arc<dyn Consensus>, Factory>,
+    > {
+        let executor_factory = Factory::new(self.chain.clone());
+        let tree_externals =
+            TreeExternals::new(db.clone(), consensus, executor_factory, self.chain.clone());
+        let blockchain_tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
+
+        Ok(BeaconConsensusEngine::new(db, pipeline, blockchain_tree, message_rx))
+    }
+
     fn load_config(&self) -> eyre::Result<Config> {
         confy::load_path::<Config>(&self.config).wrap_err("Could not load config")
     }
@@ -352,7 +393,7 @@ impl Command {
     fn init_engine_api(
         &self,
         db: Arc<Env<WriteMap>>,
-        forkchoice_state_tx: watch::Sender<ForkchoiceState>,
+        engine_tx: UnboundedSender<BeaconEngineMessage>,
         task_executor: &TaskExecutor,
     ) -> EngineApiHandle {
         let (message_tx, message_rx) = unbounded_channel();
@@ -360,7 +401,7 @@ impl Command {
             ShareableDatabase::new(db, self.chain.clone()),
             self.chain.clone(),
             message_rx,
-            forkchoice_state_tx,
+            engine_tx,
         );
         task_executor.spawn_critical("engine API task", engine_api);
         message_tx
