@@ -9,7 +9,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::TxNumber;
+use reth_primitives::{TransactionSigned, TxNumber, H160};
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
@@ -95,24 +95,24 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             let (tx, rx) = mpsc::unbounded_channel();
             channels.push(rx);
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
-            let mut chunk: Vec<_> = chunk.collect();
+            let chunk: Vec<_> = chunk.collect();
+
+            // closure that would recover signer. Used as utility to wrap result
+            let recover = |entry: Result<(TxNumber, TransactionSigned), reth_db::Error>| -> Result<(u64, H160), Box<StageError>> {
+                let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
+                let sender = transaction.recover_signer().ok_or(StageError::from(
+                    SenderRecoveryStageError::SenderRecovery { tx: tx_id },
+                ))?;
+
+                Ok((tx_id, sender))
+            };
 
             // Spawn the sender recovery task onto the global rayon pool
             // This task will send the results through the channel after it recovered the senders.
             rayon::spawn(move || {
-                chunk
-                    .drain(..)
-                    .map(|entry| {
-                        let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
-                        let sender = transaction.recover_signer().ok_or(StageError::from(
-                            SenderRecoveryStageError::SenderRecovery { tx: tx_id },
-                        ))?;
-
-                        Ok((tx_id, sender))
-                    })
-                    .for_each(|result: Result<_, Box<StageError>>| {
-                        let _ = tx.send(result);
-                    });
+                for entry in chunk {
+                    let _ = tx.send(recover(entry));
+                }
             });
         }
 
