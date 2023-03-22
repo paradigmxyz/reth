@@ -724,6 +724,36 @@ mod tests {
         use reth_provider::test_utils::blocks::BlockChainTestData;
 
         #[tokio::test]
+        async fn new_payload_before_forkchoice() {
+            let chain_spec = Arc::new(
+                ChainSpecBuilder::default()
+                    .chain(MAINNET.chain)
+                    .genesis(MAINNET.genesis.clone())
+                    .paris_activated()
+                    .build(),
+            );
+            let (consensus_engine, env) = setup_consensus_engine(
+                chain_spec,
+                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                Vec::default(),
+            );
+
+            let mut engine_rx = spawn_consensus_engine(consensus_engine);
+
+            // Send new payload
+            let rx = env.send_new_payload(random_block(0, None, None, Some(0)).into());
+            // Invalid, because this is a genesis block
+            assert_matches!(rx.await, Ok(Ok(result)) => assert_matches!(result.status, PayloadStatusEnum::Invalid { .. }));
+
+            // Send new payload
+            let rx = env.send_new_payload(random_block(1, None, None, Some(0)).into());
+            let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
+            assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+
+            assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
+        }
+
+        #[tokio::test]
         async fn payload_known() {
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
