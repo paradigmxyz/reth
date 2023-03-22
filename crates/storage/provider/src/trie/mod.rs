@@ -465,7 +465,12 @@ where
         let mut accounts_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
         let storage_trie_cursor =
             Arc::new(Mutex::new(self.tx.cursor_dup_write::<tables::StoragesTrie>()?));
-        let mut walker = accounts_cursor.walk(checkpoint.hashed_address.take())?;
+
+        let mut first_hashed_address = checkpoint.hashed_address.take();
+        let mut walker = accounts_cursor.walk(first_hashed_address)?;
+        if first_hashed_address.is_some() && checkpoint.storage_root.is_none() {
+            walker.next();
+        }
 
         while let Some((hashed_address, account)) = walker.next().transpose()? {
             match self.calculate_storage_root(
