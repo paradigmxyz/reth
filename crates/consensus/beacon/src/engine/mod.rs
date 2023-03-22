@@ -7,7 +7,7 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
     Error,
 };
-use reth_primitives::{BlockHash, SealedBlock, H256};
+use reth_primitives::{BlockHash, BlockNumber, SealedBlock, H256};
 use reth_provider::ExecutorFactory;
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
@@ -56,6 +56,7 @@ pub struct BeaconConsensusEngine<
     message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
     forkchoice_state: Option<ForkchoiceState>,
     next_action: BeaconEngineAction,
+    max_block: Option<BlockNumber>,
 }
 
 impl<DB, U, C, EF> BeaconConsensusEngine<DB, U, C, EF>
@@ -74,6 +75,7 @@ where
         pipeline: Pipeline<DB, U>,
         blockchain_tree: BlockchainTree<DB, C, EF>,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
+        max_block: Option<BlockNumber>,
     ) -> Self {
         Self {
             db,
@@ -82,6 +84,7 @@ where
             message_rx: UnboundedReceiverStream::new(message_rx),
             forkchoice_state: None,
             next_action: BeaconEngineAction::RunPipeline,
+            max_block,
         }
     }
 
@@ -212,6 +215,21 @@ where
         };
         Ok(())
     }
+
+    /// Check if the engine reached max block as specified by `max_block` parameter.
+    fn has_reached_max_block(&self, progress: Option<BlockNumber>) -> bool {
+        if progress.zip(self.max_block).map_or(false, |(progress, target)| progress >= target) {
+            trace!(
+                target: "consensus::engine",
+                ?progress,
+                max_block = ?self.max_block,
+                "Consensus engine reached max block."
+            );
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// On initialization, the consensus engine will poll the message receiver and return
@@ -240,7 +258,18 @@ where
                 match msg {
                     BeaconEngineMessage::ForkchoiceUpdated(state, attrs, tx) => {
                         let response = this.on_forkchoice_updated(state, attrs);
+                        let is_valid_response =
+                            matches!(response.payload_status.status, PayloadStatusEnum::Valid);
                         let _ = tx.send(Ok(response));
+
+                        // Terminate the sync early if it's reached the maximum user
+                        // configured block.
+                        if is_valid_response {
+                            let tip_number = this.blockchain_tree.canonical_tip_number();
+                            if this.has_reached_max_block(tip_number) {
+                                return Poll::Ready(Ok(()))
+                            }
+                        }
                     }
                     BeaconEngineMessage::NewPayload(block, tx) => {
                         let response = this.on_new_payload(block);
@@ -260,10 +289,22 @@ where
                 PipelineState::Running(mut fut) => {
                     match fut.poll_unpin(cx) {
                         Poll::Ready((pipeline, result)) => {
-                            // Any pipeline error at this point is fatal.
                             if let Err(error) = result {
                                 return Poll::Ready(Err(error.into()))
                             }
+
+                            match result {
+                                Ok(_) => {
+                                    // Terminate the sync early if it's reached the maximum user
+                                    // configured block.
+                                    let minimum_pipeline_progress = *pipeline.minimum_progress();
+                                    if this.has_reached_max_block(minimum_pipeline_progress) {
+                                        return Poll::Ready(Ok(()))
+                                    }
+                                }
+                                // Any pipeline error at this point is fatal.
+                                Err(error) => return Poll::Ready(Err(error.into())),
+                            };
 
                             // Update the state and hashes of the blockchain tree if possible
                             if let Err(error) =
@@ -395,14 +436,13 @@ mod tests {
             .build();
 
         // Setup blockchain tree
-        let externals =
-            TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec.clone());
+        let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
         let config = BlockchainTreeConfig::new(1, 2, 3);
         let tree = BlockchainTree::new(externals, config).expect("failed to create tree");
 
         let (sync_tx, sync_rx) = unbounded_channel();
         (
-            BeaconConsensusEngine::new(db.clone(), pipeline, tree, sync_rx),
+            BeaconConsensusEngine::new(db.clone(), pipeline, tree, sync_rx, None),
             TestEnv::new(db, tip_rx, sync_tx),
         )
     }
@@ -507,10 +547,36 @@ mod tests {
             head_block_hash: H256::random(),
             ..Default::default()
         });
+
         assert_matches!(
             rx.await,
             Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
         );
+    }
+
+    #[tokio::test]
+    async fn terminates_upon_reaching_max_block() {
+        let max_block = 1000;
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+        let (mut consensus_engine, env) = setup_consensus_engine(
+            chain_spec,
+            VecDeque::from([Ok(ExecOutput { stage_progress: max_block, done: true })]),
+            Vec::default(),
+        );
+        consensus_engine.max_block = Some(max_block);
+        let rx = spawn_consensus_engine(consensus_engine);
+
+        let _ = env.send_forkchoice_updated(ForkchoiceState {
+            head_block_hash: H256::random(),
+            ..Default::default()
+        });
+        assert_matches!(rx.await, Ok(Ok(())));
     }
 
     fn insert_blocks<'a, DB: Database>(db: &DB, mut blocks: impl Iterator<Item = &'a SealedBlock>) {

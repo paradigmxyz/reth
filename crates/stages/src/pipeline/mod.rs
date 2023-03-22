@@ -128,6 +128,11 @@ where
         PipelineBuilder::default()
     }
 
+    /// Return the minimum pipeline progress
+    pub fn minimum_progress(&self) -> &Option<u64> {
+        &self.progress.minimum_progress
+    }
+
     /// Set tip for reverse sync.
     pub fn set_tip(&self, tip: H256) {
         self.tip_tx.as_ref().expect("tip sender is set").send(tip).expect("tip channel closed");

@@ -329,7 +329,7 @@ impl Command {
             TreeExternals::new(db.clone(), consensus, executor_factory, self.chain.clone());
         let blockchain_tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
 
-        Ok(BeaconConsensusEngine::new(db, pipeline, blockchain_tree, message_rx))
+        Ok(BeaconConsensusEngine::new(db, pipeline, blockchain_tree, message_rx, self.max_block))
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
