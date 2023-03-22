@@ -54,7 +54,7 @@ use reth_stages::{
     stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::EthTransactionValidator;
+use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
@@ -187,17 +187,19 @@ impl Command {
 
         self.init_trusted_nodes(&mut config);
 
-        info!(target: "reth::cli", "Connecting to P2P network");
-        let network_config =
-            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
-        let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
-        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
-
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             EthTransactionValidator::new(shareable_db.clone(), Arc::clone(&self.chain)),
             Default::default(),
         );
         info!(target: "reth::cli", "Test transaction pool initialized");
+
+        info!(target: "reth::cli", "Connecting to P2P network");
+        let network_config =
+            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
+        let network = self
+            .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
+            .await?;
+        info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
 
         let _rpc_server = self
             .rpc
@@ -366,19 +368,22 @@ impl Command {
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
     /// to that network.
-    async fn start_network<C>(
+    async fn start_network<C, Pool>(
         &self,
         config: NetworkConfig<C>,
         task_executor: &TaskExecutor,
-        // TODO: integrate pool
-        _pool: (),
+        pool: Pool,
     ) -> Result<NetworkHandle, NetworkError>
     where
         C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+        Pool: TransactionPool + Unpin + 'static,
     {
         let client = config.client.clone();
-        let (handle, network, _txpool, eth) =
-            NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
+        let (handle, network, txpool, eth) = NetworkManager::builder(config)
+            .await?
+            .transactions(pool)
+            .request_handler(client)
+            .split_with_handle();
 
         let known_peers_file = self.network.persistent_peers_file();
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
@@ -386,8 +391,7 @@ impl Command {
         });
 
         task_executor.spawn_critical("p2p eth request handler", eth);
-
-        // TODO spawn pool
+        task_executor.spawn_critical("p2p txpool request handler", txpool);
 
         Ok(handle)
     }
