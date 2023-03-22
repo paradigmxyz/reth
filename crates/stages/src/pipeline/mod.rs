@@ -90,8 +90,7 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [Pipeline::run_as_fut].
-pub type PipelineFut<DB, U> =
-    Pin<Box<dyn Future<Output = (Pipeline<DB, U>, Result<ControlFlow, PipelineError>)> + Send>>;
+pub type PipelineFut<DB, U> = Pin<Box<dyn Future<Output = PipelineWithResult<DB, U>> + Send>>;
 
 /// The pipeline type itself with the result of [Pipeline::run_as_fut]
 pub type PipelineWithResult<DB, U> = (Pipeline<DB, U>, Result<ControlFlow, PipelineError>);

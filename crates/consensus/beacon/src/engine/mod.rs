@@ -66,6 +66,9 @@ where
     EF: ExecutorFactory + 'static,
 {
     /// Create new instance of the [BeaconConsensusEngine].
+    ///
+    /// The `message_rx` receiver is connected to the Engine API and is used to
+    /// handle the messages received from the Consensus Layer.
     pub fn new(
         db: Arc<DB>,
         pipeline: Pipeline<DB, U>,
@@ -549,7 +552,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn unknown_head_hash() {
+        async fn valid_forkchoice() {
             let chain_spec = Arc::new(
                 ChainSpecBuilder::default()
                     .chain(MAINNET.chain)
@@ -569,20 +572,68 @@ mod tests {
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let rx_invalid = env.send_forkchoice_updated(ForkchoiceState {
+            let forkchoice = ForkchoiceState {
+                head_block_hash: block1.hash,
+                finalized_block_hash: block1.hash,
+                ..Default::default()
+            };
+
+            let rx_invalid = env.send_forkchoice_updated(forkchoice);
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
+            assert_matches!(rx_invalid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+
+            let rx_valid = env.send_forkchoice_updated(forkchoice);
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid);
+            assert_matches!(rx_valid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+
+            assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
+        }
+
+        #[tokio::test]
+        async fn unknown_head_hash() {
+            let chain_spec = Arc::new(
+                ChainSpecBuilder::default()
+                    .chain(MAINNET.chain)
+                    .genesis(MAINNET.genesis.clone())
+                    .paris_activated()
+                    .build(),
+            );
+            let (consensus_engine, env) = setup_consensus_engine(
+                chain_spec,
+                VecDeque::from([
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                    Ok(ExecOutput { done: true, stage_progress: 0 }),
+                ]),
+                Vec::default(),
+            );
+
+            let genesis = random_block(0, None, None, Some(0));
+            let block1 = random_block(1, Some(genesis.hash), None, Some(0));
+            insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
+
+            let mut engine_rx = spawn_consensus_engine(consensus_engine);
+
+            let invalid_forkchoice_state = ForkchoiceState {
+                head_block_hash: H256::random(),
+                finalized_block_hash: block1.hash,
+                ..Default::default()
+            };
+
+            let rx = env.send_forkchoice_updated(invalid_forkchoice_state);
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
+            assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+
+            let rx = env.send_forkchoice_updated(invalid_forkchoice_state);
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
+            assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+
+            let rx_valid = env.send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
                 finalized_block_hash: block1.hash,
                 ..Default::default()
             });
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(rx_invalid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
-
-            let rx_valid = env.send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: block1.hash,
-                finalized_block_hash: block1.hash,
-                ..Default::default()
-            });
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid);
             assert_matches!(rx_valid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));

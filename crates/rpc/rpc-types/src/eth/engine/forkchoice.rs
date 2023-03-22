@@ -3,7 +3,7 @@ use reth_primitives::{H256, H64};
 use serde::{Deserialize, Serialize};
 
 /// This structure encapsulates the fork choice state
-#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ForkchoiceState {
     pub head_block_hash: H256,
