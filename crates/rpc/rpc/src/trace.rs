@@ -94,7 +94,7 @@ where
 
         let (cfg, block, at) = self
             .eth_api
-            .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)))
+            .evm_env_at(block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)))
             .await?;
         let tx = tx_env_with_recovered(&tx);
         let env = Env { cfg, block, tx };
