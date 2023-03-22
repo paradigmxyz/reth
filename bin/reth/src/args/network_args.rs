@@ -46,7 +46,7 @@ pub struct NetworkArgs {
     pub nat: NatResolver,
 
     /// Network listening port. default: 30303
-    #[arg(long = "port")]
+    #[arg(long = "port", value_name = "PORT")]
     pub port: Option<u16>,
 }
 
@@ -97,7 +97,7 @@ pub struct DiscoveryArgs {
     pub disable_discv4_discovery: bool,
 
     /// The UDP port to use for P2P discovery/networking. default: 30303
-    #[arg(long = "discovery.port")]
+    #[arg(long = "discovery.port", name = "discovery.port", value_name = "DISCOVERY_PORT")]
     pub port: Option<u16>,
 }
 

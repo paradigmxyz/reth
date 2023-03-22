@@ -621,4 +621,12 @@ mod tests {
         let cmd = Command::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
     }
+
+    #[test]
+    fn parse_port() {
+        let cmd =
+            Command::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
+        assert_eq!(cmd.network.discovery.port, Some(300));
+        assert_eq!(cmd.network.port, Some(99));
+    }
 }
