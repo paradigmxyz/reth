@@ -225,18 +225,20 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
+        // Forward the `debug.tip` as forkchoice state to the consensus engine.
+        // This will initiate the sync up to the provided tip.
         let _tip_rx = match self.tip {
             Some(tip) => {
-                let (tx, rx) = oneshot::channel();
+                let (tip_tx, tip_rx) = oneshot::channel();
                 let state = ForkchoiceState {
                     head_block_hash: tip,
                     finalized_block_hash: tip,
                     safe_block_hash: tip,
                 };
                 consensus_engine_tx
-                    .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tx))?;
+                    .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tip_tx))?;
                 debug!(target: "reth::cli", %tip, "Tip manually set");
-                Some(rx)
+                Some(tip_rx)
             }
             None => {
                 let warn_msg = "No tip specified. \
@@ -348,15 +350,18 @@ impl Command {
         Ok((pipeline, events))
     }
 
-    fn build_consensus_engine(
+    fn build_consensus_engine<DB, U, C>(
         &self,
-        db: Arc<Env<WriteMap>>,
-        consensus: Arc<dyn Consensus>,
-        pipeline: Pipeline<Env<WriteMap>, impl SyncStateUpdater + 'static>,
+        db: Arc<DB>,
+        consensus: C,
+        pipeline: Pipeline<DB, U>,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> eyre::Result<
-        BeaconConsensusEngine<Env<WriteMap>, impl SyncStateUpdater, Arc<dyn Consensus>, Factory>,
-    > {
+    ) -> eyre::Result<BeaconConsensusEngine<DB, U, C, Factory>>
+    where
+        DB: Database + Unpin + 'static,
+        U: SyncStateUpdater + Unpin + 'static,
+        C: Consensus + Unpin + 'static,
+    {
         let executor_factory = Factory::new(self.chain.clone());
         let tree_externals =
             TreeExternals::new(db.clone(), consensus, executor_factory, self.chain.clone());

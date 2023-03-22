@@ -43,19 +43,35 @@ pub use pipeline_state::PipelineState;
 /// that are currently available. In case the restoration is successful, the consensus engine would
 /// run in a live sync mode, which mean it would solemnly rely on the messages from Engine API to
 /// construct the chain forward.
+///
+/// # Panics
+///
+/// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<
+pub struct BeaconConsensusEngine<DB, U, C, EF>
+where
     DB: Database,
     U: SyncStateUpdater,
     C: Consensus,
     EF: ExecutorFactory,
-> {
+{
+    /// The database handle.
     db: Arc<DB>,
+    /// The current state of the pipeline.
+    /// Must always be [Some] unless the state is being reevaluated.
+    /// The pipeline is used for historical sync by setting the current forkchoice head.
     pipeline_state: Option<PipelineState<DB, U>>,
+    /// The blockchain tree used for live sync and reorg tracking.
     blockchain_tree: BlockchainTree<DB, C, EF>,
+    /// The Engine API message receiver.
     message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
+    /// Current forkchoice state. The engine must receive the initial state in order to start
+    /// syncing.
     forkchoice_state: Option<ForkchoiceState>,
+    /// Next action that the engine should take after the pipeline finished running.
     next_action: BeaconEngineAction,
+    /// Max block after which the consensus engine would terminate the sync. Used for debugging
+    /// purposes.
     max_block: Option<BlockNumber>,
 }
 
@@ -95,7 +111,7 @@ where
 
     /// Set next action to [BeaconEngineAction::RunPipeline] to indicate that
     /// consensus engine needs to run the pipeline as soon as it becomes available.
-    fn pipeline_run_needed(&mut self) {
+    fn require_pipeline_run(&mut self) {
         self.next_action = BeaconEngineAction::RunPipeline;
     }
 
@@ -122,7 +138,7 @@ where
                 Ok(_) => PayloadStatus::from_status(PayloadStatusEnum::Valid),
                 Err(error) => {
                     error!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
-                    self.pipeline_run_needed();
+                    self.require_pipeline_run();
                     match error {
                         Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
                             PayloadStatus::from_status(PayloadStatusEnum::Invalid {
@@ -211,7 +227,7 @@ where
     ) -> Result<(), reth_interfaces::Error> {
         match self.db.view(|tx| tx.get::<tables::HeaderNumbers>(finalized_hash))?? {
             Some(number) => self.blockchain_tree.restore_canonical_hashes(number)?,
-            None => self.pipeline_run_needed(),
+            None => self.require_pipeline_run(),
         };
         Ok(())
     }
