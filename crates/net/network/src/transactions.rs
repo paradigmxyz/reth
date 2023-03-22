@@ -676,6 +676,7 @@ mod tests {
     use secp256k1::SecretKey;
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(not(feature = "geth-tests"), ignore)]
     async fn test_ignored_tx_broadcasts_while_syncing() {
         reth_tracing::init_test_tracing();
 

@@ -3,7 +3,10 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
-        revm_utils::{build_call_evm_env, get_precompiles, inspect, transact},
+        revm_utils::{
+            build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
+            transact,
+        },
         EthTransactions,
     },
     EthApi,
@@ -81,19 +84,7 @@ where
 
         if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
-            let mut allowance = db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
-
-            // subtract transferred value
-            allowance = allowance
-                .checked_sub(env.tx.value)
-                .ok_or_else(|| InvalidTransactionError::InsufficientFunds)?;
-
-            // cap the gas limit
-            if let Ok(gas_limit) =
-                allowance.checked_div(env.tx.gas_price).unwrap_or_default().try_into()
-            {
-                env.tx.gas_limit = gas_limit;
-            }
+            cap_tx_gas_limit_with_caller_allowance(&mut db, &mut env.tx)?;
         }
 
         transact(&mut db, env)
@@ -292,8 +283,14 @@ where
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
 
-        let env = build_call_evm_env(cfg, block, request.clone())?;
+        let mut env = build_call_evm_env(cfg, block, request.clone())?;
+
         let mut db = SubState::new(State::new(state));
+
+        if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
+            // no gas limit was provided in the request, so we need to cap the request's gas limit
+            cap_tx_gas_limit_with_caller_allowance(&mut db, &mut env.tx)?;
+        }
 
         let from = request.from.unwrap_or_default();
         let to = if let Some(to) = request.to {

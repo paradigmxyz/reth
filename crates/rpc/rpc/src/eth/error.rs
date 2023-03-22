@@ -1,6 +1,6 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
-use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err};
+use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
@@ -72,7 +72,6 @@ impl From<EthApiError> for RpcError {
             EthApiError::FailedToDecodeSignedTransaction |
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
-            EthApiError::UnknownBlockNumber |
             EthApiError::InvalidBlockRange |
             EthApiError::ConflictingRequestGasPrice { .. } |
             EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
@@ -86,6 +85,9 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
+            EthApiError::UnknownBlockNumber => {
+                rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
+            }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
         }
     }
@@ -372,6 +374,9 @@ pub enum SignError {
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
     TypedData,
+    /// No chainid
+    #[error("No chainid")]
+    NoChainId,
 }
 
 /// Converts the evm [ExecutionResult] into a result where `Ok` variant is the output bytes if it is

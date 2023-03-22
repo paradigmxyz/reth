@@ -7,6 +7,7 @@ use ethers_core::{
 };
 use reth_primitives::{sign_message, Address, Signature, TransactionSigned, H256};
 use reth_rpc_types::TypedTransactionRequest;
+
 use secp256k1::SecretKey;
 use std::collections::HashMap;
 
@@ -72,10 +73,15 @@ impl EthSigner for DevSigner {
 
     fn sign_transaction(
         &self,
-        _request: TypedTransactionRequest,
-        _address: &Address,
+        request: TypedTransactionRequest,
+        address: &Address,
     ) -> Result<TransactionSigned> {
-        todo!()
+        // convert to primitive transaction
+        let transaction = request.into_transaction();
+        let tx_signature_hash = transaction.signature_hash();
+        let signature = self.sign_hash(tx_signature_hash, *address)?;
+
+        Ok(TransactionSigned::from_transaction_and_signature(transaction, signature))
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {

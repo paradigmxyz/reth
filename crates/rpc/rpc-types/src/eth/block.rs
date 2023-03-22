@@ -76,11 +76,11 @@ pub struct Block {
     /// Integer the size of this block in bytes.
     pub size: Option<U256>,
     /// Base Fee for post-EIP1559 blocks.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_fee_per_gas: Option<U256>,
-    /// Withdrawals
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub withdrawals: Option<Vec<Withdrawal>>,
+    /// Withdrawals in the block
+    #[serde(default)]
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 impl Block {
@@ -175,7 +175,7 @@ impl Block {
             base_fee_per_gas: base_fee_per_gas.map(U256::from),
             total_difficulty: Some(total_difficulty),
             size: Some(U256::from(block_length)),
-            withdrawals: block.withdrawals,
+            withdrawals: block.withdrawals.unwrap_or_default(),
         }
     }
 
@@ -191,7 +191,7 @@ impl Block {
             header: rpc_header,
             transactions: BlockTransactions::Uncle,
             base_fee_per_gas: None,
-            withdrawals: None,
+            withdrawals: vec![],
             size,
             total_difficulty: None,
         }
@@ -209,8 +209,6 @@ pub struct Header {
     /// Hash of the uncles
     #[serde(rename = "sha3Uncles")]
     pub uncles_hash: H256,
-    /// Authors address
-    pub author: Address,
     /// Alias of `author`
     pub miner: Address,
     /// State root hash
@@ -273,7 +271,6 @@ impl Header {
             hash: Some(block_hash),
             parent_hash,
             uncles_hash: ommers_hash,
-            author: beneficiary,
             miner: beneficiary,
             state_root,
             transactions_root,
@@ -370,7 +367,6 @@ mod tests {
                 hash: Some(H256::from_low_u64_be(1)),
                 parent_hash: H256::from_low_u64_be(2),
                 uncles_hash: H256::from_low_u64_be(3),
-                author: Address::from_low_u64_be(4),
                 miner: Address::from_low_u64_be(4),
                 state_root: H256::from_low_u64_be(5),
                 transactions_root: H256::from_low_u64_be(6),
@@ -391,12 +387,12 @@ mod tests {
             transactions: BlockTransactions::Hashes(vec![H256::from_low_u64_be(18)]),
             size: Some(U256::from(19)),
             base_fee_per_gas: Some(U256::from(20)),
-            withdrawals: None,
+            withdrawals: vec![],
         };
         let serialized = serde_json::to_string(&block).unwrap();
         assert_eq!(
             serialized,
-            r#"{"hash":"0x0000000000000000000000000000000000000000000000000000000000000001","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000002","sha3Uncles":"0x0000000000000000000000000000000000000000000000000000000000000003","author":"0x0000000000000000000000000000000000000004","miner":"0x0000000000000000000000000000000000000004","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000005","transactionsRoot":"0x0000000000000000000000000000000000000000000000000000000000000006","receiptsRoot":"0x0000000000000000000000000000000000000000000000000000000000000007","withdrawalsRoot":"0x0000000000000000000000000000000000000000000000000000000000000008","number":"0x9","gasUsed":"0xa","gasLimit":"0xb","extraData":"0x010203","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","timestamp":"0xc","difficulty":"0xd","mixHash":"0x000000000000000000000000000000000000000000000000000000000000000e","nonce":"0x000000000000000f","totalDifficulty":"0x186a0","uncles":["0x0000000000000000000000000000000000000000000000000000000000000011"],"transactions":["0x0000000000000000000000000000000000000000000000000000000000000012"],"size":"0x13","baseFeePerGas":"0x14"}"#
+            r#"{"hash":"0x0000000000000000000000000000000000000000000000000000000000000001","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000002","sha3Uncles":"0x0000000000000000000000000000000000000000000000000000000000000003","miner":"0x0000000000000000000000000000000000000004","stateRoot":"0x0000000000000000000000000000000000000000000000000000000000000005","transactionsRoot":"0x0000000000000000000000000000000000000000000000000000000000000006","receiptsRoot":"0x0000000000000000000000000000000000000000000000000000000000000007","withdrawalsRoot":"0x0000000000000000000000000000000000000000000000000000000000000008","number":"0x9","gasUsed":"0xa","gasLimit":"0xb","extraData":"0x010203","logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","timestamp":"0xc","difficulty":"0xd","mixHash":"0x000000000000000000000000000000000000000000000000000000000000000e","nonce":"0x000000000000000f","totalDifficulty":"0x186a0","uncles":["0x0000000000000000000000000000000000000000000000000000000000000011"],"transactions":["0x0000000000000000000000000000000000000000000000000000000000000012"],"size":"0x13","baseFeePerGas":"0x14","withdrawals":[]}"#
         );
         let deserialized: Block = serde_json::from_str(&serialized).unwrap();
         assert_eq!(block, deserialized);
