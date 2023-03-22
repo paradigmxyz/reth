@@ -3,7 +3,7 @@ use hasher::HasherKeccak;
 use parking_lot::Mutex;
 use reth_codecs::Compact;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
@@ -18,7 +18,7 @@ use reth_rlp::{
 };
 use reth_tracing::tracing::*;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
     ops::Range,
     sync::Arc,
@@ -78,10 +78,10 @@ where
     }
 
     /// Insert a map of data into the cache.
-    fn insert_map(&self, kv: &mut HashMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
+    fn insert_map(&self, kv: &mut BTreeMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
         let mut cursor = self.accounts_trie_cursor.lock();
 
-        for (key, value) in kv.drain() {
+        while let Some((key, value)) = kv.pop_first() {
             cursor.upsert(H256::from_slice(key.as_slice()), value)?;
         }
         Ok(())
@@ -142,6 +142,7 @@ type StoragesTrieCursor<'tx, TX> =
 pub struct DupHashDatabaseMut<'tx, TX: DbTxMutGAT<'tx>> {
     storages_trie_cursor: StoragesTrieCursor<'tx, TX>,
     key: H256,
+    is_update: bool,
 }
 
 impl<'tx, 'db, TX> cita_trie::DB for DupHashDatabaseMut<'tx, TX>
@@ -174,15 +175,24 @@ where
     }
 
     /// Insert a map of data into the cache.
-    fn insert_map(&self, kv: &mut HashMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
+    fn insert_map(&self, kv: &mut BTreeMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
         let mut cursor = self.storages_trie_cursor.lock();
 
-        for (key, node) in kv.drain() {
+        while let Some((key, node)) = kv.pop_first() {
             let hash = H256::from_slice(key.as_slice());
-            if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
-                cursor.delete_current()?;
+
+            if hash == EMPTY_ROOT {
+                continue
             }
-            cursor.upsert(self.key, StorageTrieEntry { hash, node })?;
+
+            if self.is_update {
+                if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
+                    cursor.delete_current()?;
+                }
+                cursor.upsert(self.key, StorageTrieEntry { hash, node })?;
+            } else {
+                cursor.append_dup(self.key, StorageTrieEntry { hash, node })?;
+            }
         }
         Ok(())
     }
@@ -191,6 +201,11 @@ where
         let mut cursor = self.storages_trie_cursor.lock();
         for key in keys {
             let hash = H256::from_slice(key.as_slice());
+
+            if hash == EMPTY_ROOT {
+                continue
+            }
+
             if cursor.seek_by_key_subkey(self.key, hash)?.filter(|e| e.hash == hash).is_some() {
                 cursor.delete_current()?;
             }
@@ -216,17 +231,7 @@ where
         storages_trie_cursor: StoragesTrieCursor<'tx, TX>,
         key: H256,
     ) -> Result<Self, TrieError> {
-        let root = EMPTY_ROOT;
-        {
-            let mut cursor = storages_trie_cursor.lock();
-            if cursor.seek_by_key_subkey(key, root)?.filter(|entry| entry.hash == root).is_none() {
-                cursor.upsert(
-                    key,
-                    StorageTrieEntry { hash: root, node: [EMPTY_STRING_CODE].to_vec() },
-                )?;
-            }
-        }
-        Ok(Self { storages_trie_cursor, key })
+        Ok(Self { storages_trie_cursor, key, is_update: false })
     }
 
     /// Instantiates a new Database for the storage trie, with an existing root
@@ -243,7 +248,7 @@ where
             .seek_by_key_subkey(key, root)?
             .filter(|entry| entry.hash == root)
             .ok_or(TrieError::MissingStorageRoot(root))?;
-        Ok(Self { storages_trie_cursor, key })
+        Ok(Self { storages_trie_cursor, key, is_update: true })
     }
 }
 
@@ -758,7 +763,6 @@ where
 
     fn has_hit_threshold(&mut self) -> bool {
         self.current += 1;
-        // dbg!(self.current);
         self.current >= self.commit_threshold
     }
 
@@ -819,7 +823,7 @@ where
     ) -> Result<H256, TrieError> {
         let new_root = H256::from_slice(trie.root()?.as_slice());
 
-        if new_root != previous_root {
+        if new_root != previous_root && previous_root != EMPTY_ROOT {
             let mut trie_cursor = storage_trie_cursor.lock();
             if trie_cursor
                 .seek_by_key_subkey(address, previous_root)?
@@ -827,10 +831,6 @@ where
                 .is_some()
             {
                 trie_cursor.delete_current()?;
-            }
-
-            if new_root == EMPTY_ROOT {
-                self.tx.delete::<tables::StoragesTrie>(address, None)?;
             }
         }
 
