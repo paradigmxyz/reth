@@ -163,11 +163,7 @@ where
         };
         let transaction = match request.into_typed_request() {
             Some(tx) => tx,
-            None => {
-                return Err(EthApiError::Unsupported(
-                    "both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified",
-                ))
-            }
+            None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
 
         // TODO we need to update additional settings in the transaction: nonce, gaslimit, chainid,
