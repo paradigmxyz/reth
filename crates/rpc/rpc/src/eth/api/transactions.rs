@@ -89,7 +89,7 @@ where
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {
         if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
         {
-            return Ok(Some(TransactionSource::Pool(tx)));
+            return Ok(Some(TransactionSource::Pool(tx)))
         }
 
         match self.client().transaction_by_hash(hash)? {
@@ -213,7 +213,7 @@ where
                     block_hash,
                     block.header.number,
                     index.into(),
-                )));
+                )))
             }
         }
 
@@ -226,7 +226,7 @@ where
     pub(crate) async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
         let mut data = tx.as_ref();
         if data.is_empty() {
-            return Err(EthApiError::EmptyRawTransactionData);
+            return Err(EthApiError::EmptyRawTransactionData)
         }
 
         let transaction = TransactionSigned::decode(&mut data)
