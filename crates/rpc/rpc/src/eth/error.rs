@@ -30,16 +30,10 @@ pub enum EthApiError {
     /// An internal error where prevrandao is not set in the evm's environment
     #[error("Prevrandao not in th EVM's environment after merge")]
     PrevrandaoNotSet,
-    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} and maxFeePerGas {max_fee_per_gas} set")]
-    ConflictingRequestGasPrice { gas_price: U256, max_fee_per_gas: U256 },
-    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} maxFeePerGas {max_fee_per_gas} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
-    ConflictingRequestGasPriceAndTipSet {
-        gas_price: U256,
-        max_fee_per_gas: U256,
-        max_priority_fee_per_gas: U256,
-    },
-    #[error("Conflicting fee values in request. Legacy gasPrice {gas_price} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
-    RequestLegacyGasPriceAndTipSet { gas_price: U256, max_priority_fee_per_gas: U256 },
+    /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
+    /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
+    #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
+    ConflictingFeeFieldsInRequest,
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
     /// Thrown when constructing an RPC block from a primitive block data failed.
@@ -73,9 +67,7 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
-            EthApiError::ConflictingRequestGasPrice { .. } |
-            EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
-            EthApiError::RequestLegacyGasPriceAndTipSet { .. } |
+            EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),

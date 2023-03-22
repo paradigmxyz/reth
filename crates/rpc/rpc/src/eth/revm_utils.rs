@@ -189,22 +189,7 @@ impl CallFees {
                 }
                 Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas })
             }
-            (Some(gas_price), Some(max_fee_per_gas), Some(max_priority_fee_per_gas)) => {
-                Err(EthApiError::ConflictingRequestGasPriceAndTipSet {
-                    gas_price,
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                })
-            }
-            (Some(gas_price), Some(max_fee_per_gas), None) => {
-                Err(EthApiError::ConflictingRequestGasPrice { gas_price, max_fee_per_gas })
-            }
-            (Some(gas_price), None, Some(max_priority_fee_per_gas)) => {
-                Err(EthApiError::RequestLegacyGasPriceAndTipSet {
-                    gas_price,
-                    max_priority_fee_per_gas,
-                })
-            }
+            _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
         }
     }
 }
