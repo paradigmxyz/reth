@@ -6,8 +6,7 @@ use crate::p2p::{
 };
 use async_trait::async_trait;
 use futures::{future, Future, FutureExt};
-use reth_eth_wire::BlockBody;
-use reth_primitives::{WithPeerId, H256};
+use reth_primitives::{BlockBody, WithPeerId, H256};
 use std::{
     fmt::{Debug, Formatter},
     pin::Pin,

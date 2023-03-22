@@ -41,8 +41,9 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, TxHash, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
+use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
     utils::{
@@ -57,6 +58,7 @@ use reth_stages::{
     stages::{ExecutionStage, HeaderSyncMode, SenderRecoveryStage, TotalDifficultyStage, FINISH},
 };
 use reth_tasks::TaskExecutor;
+use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
@@ -135,11 +137,37 @@ pub struct Command {
 
     #[clap(flatten)]
     rpc: RpcServerArgs,
+
+    #[arg(long = "debug.print-inspector", help_heading = "Debug")]
+    print_inspector: bool,
+
+    #[arg(
+        long = "debug.hook-block",
+        help_heading = "Debug",
+        conflicts_with = "hook_transaction",
+        conflicts_with = "hook_all"
+    )]
+    hook_block: Option<u64>,
+
+    #[arg(
+        long = "debug.hook-transaction",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_all"
+    )]
+    hook_transaction: Option<TxHash>,
+
+    #[arg(
+        long = "debug.hook-all",
+        help_heading = "Debug",
+        conflicts_with = "hook_block",
+        conflicts_with = "hook_transaction"
+    )]
+    hook_all: bool,
 }
 
 impl Command {
     /// Execute `node` command
-    // TODO: RPC
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
@@ -152,10 +180,10 @@ impl Command {
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
-        let shareable_db = ShareableDatabase::new(Arc::clone(&db), self.chain.clone());
+        let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
         info!(target: "reth::cli", "Database opened");
 
-        self.start_metrics_endpoint()?;
+        self.start_metrics_endpoint(Arc::clone(&db)).await?;
 
         debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
 
@@ -166,20 +194,25 @@ impl Command {
 
         self.init_trusted_nodes(&mut config);
 
+        let transaction_pool = reth_transaction_pool::Pool::eth_pool(
+            EthTransactionValidator::new(shareable_db.clone(), Arc::clone(&self.chain)),
+            Default::default(),
+        );
+        info!(target: "reth::cli", "Test transaction pool initialized");
+
         info!(target: "reth::cli", "Connecting to P2P network");
         let network_config =
             self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
-        let network = self.start_network(network_config, &ctx.task_executor, ()).await?;
+        let network = self
+            .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
+            .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
-
-        let test_transaction_pool = reth_transaction_pool::test_utils::testing_pool();
-        info!(target: "reth::cli", "Test transaction pool initialized");
 
         let _rpc_server = self
             .rpc
             .start_rpc_server(
                 shareable_db.clone(),
-                test_transaction_pool.clone(),
+                transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
             )
@@ -222,7 +255,7 @@ impl Command {
             .rpc
             .start_auth_server(
                 shareable_db,
-                test_transaction_pool,
+                transaction_pool,
                 network.clone(),
                 ctx.task_executor.clone(),
                 self.chain.clone(),
@@ -347,13 +380,14 @@ impl Command {
         }
     }
 
-    fn start_metrics_endpoint(&self) -> eyre::Result<()> {
+    async fn start_metrics_endpoint(&self, db: Arc<Env<WriteMap>>) -> eyre::Result<()> {
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::initialize(listen_addr)
-        } else {
-            Ok(())
+
+            prometheus_exporter::initialize_with_db_metrics(listen_addr, db).await?;
         }
+
+        Ok(())
     }
 
     fn init_engine_api(
@@ -375,19 +409,22 @@ impl Command {
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
     /// to that network.
-    async fn start_network<C>(
+    async fn start_network<C, Pool>(
         &self,
         config: NetworkConfig<C>,
         task_executor: &TaskExecutor,
-        // TODO: integrate pool
-        _pool: (),
+        pool: Pool,
     ) -> Result<NetworkHandle, NetworkError>
     where
         C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+        Pool: TransactionPool + Unpin + 'static,
     {
         let client = config.client.clone();
-        let (handle, network, _txpool, eth) =
-            NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
+        let (handle, network, txpool, eth) = NetworkManager::builder(config)
+            .await?
+            .transactions(pool)
+            .request_handler(client)
+            .split_with_handle();
 
         let known_peers_file = self.network.persistent_peers_file();
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
@@ -395,8 +432,7 @@ impl Command {
         });
 
         task_executor.spawn_critical("p2p eth request handler", eth);
-
-        // TODO spawn pool
+        task_executor.spawn_critical("p2p txpool request handler", txpool);
 
         Ok(handle)
     }
@@ -519,7 +555,23 @@ impl Command {
         }
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
+        use reth_revm_inspectors::stack::InspectorStackConfig;
         let factory = reth_executor::Factory::new(self.chain.clone());
+
+        let stack_config = InspectorStackConfig {
+            use_printer_tracer: self.print_inspector,
+            hook: if let Some(hook_block) = self.hook_block {
+                Hook::Block(hook_block)
+            } else if let Some(tx) = self.hook_transaction {
+                Hook::Transaction(tx)
+            } else if self.hook_all {
+                Hook::All
+            } else {
+                Hook::None
+            },
+        };
+
+        let factory = factory.with_stack_config(stack_config);
 
         let header_mode =
             if continuous { HeaderSyncMode::Continuous } else { HeaderSyncMode::Tip(tip_rx) };

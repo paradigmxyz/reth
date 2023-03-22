@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Attribute, DataStruct, Error, Field, Meta, NestedMeta, Result, Type, TypePath};
+use syn::{Attribute, DataStruct, Error, Field, Meta, Result, Type, TypePath};
 
 pub(crate) const EMPTY_STRING_CODE: u8 = 0x80;
 
@@ -19,18 +19,21 @@ pub(crate) fn parse_struct<'a>(
 }
 
 pub(crate) fn attributes_include(attrs: &[Attribute], attr_name: &str) -> bool {
-    attrs.iter().any(|attr| {
-        if attr.path.is_ident("rlp") {
-            if let Ok(Meta::List(meta)) = attr.parse_meta() {
-                if let Some(NestedMeta::Meta(meta)) = meta.nested.first() {
-                    return meta.path().is_ident(attr_name)
+    for attr in attrs.iter() {
+        if attr.path().is_ident("rlp") {
+            if let Meta::List(meta) = &attr.meta {
+                let mut is_attr = false;
+                let _ = meta.parse_nested_meta(|meta| {
+                    is_attr = meta.path.is_ident(attr_name);
+                    Ok(())
+                });
+                if is_attr {
+                    return true
                 }
-                return false
-            } else {
             }
         }
-        false
-    })
+    }
+    false
 }
 
 pub(crate) fn is_optional(field: &Field) -> bool {

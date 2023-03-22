@@ -39,7 +39,8 @@ pub mod proofs;
 pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{
-    Block, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock, SealedBlockWithSenders,
+    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumberOrTag, SealedBlock,
+    SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
 pub use chain::{
@@ -62,15 +63,16 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
-pub use receipt::Receipt;
+pub use receipt::{Receipt, ReceiptWithBloom};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::{StorageEntry, StorageTrieEntry};
 pub use transaction::{
     util::secp256k1::sign_message, AccessList, AccessListItem, AccessListWithGasUsed,
     FromRecoveredTransaction, IntoRecoveredTransaction, InvalidTransactionError, Signature,
-    Transaction, TransactionKind, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
-    TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    Transaction, TransactionKind, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
+    TxEip1559, TxEip2930, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
 pub use withdrawal::Withdrawal;
 

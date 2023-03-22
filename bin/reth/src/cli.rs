@@ -4,7 +4,7 @@ use std::str::FromStr;
 use crate::{
     chain, db,
     dirs::{LogsDir, PlatformPath},
-    dump_stage, node, p2p,
+    drop_stage, dump_stage, node, p2p,
     runner::CliRunner,
     stage, test_eth_chain, test_vectors,
 };
@@ -31,6 +31,7 @@ pub fn run() -> eyre::Result<()> {
         Commands::Db(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::Stage(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::DumpStage(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::DropStage(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
@@ -63,6 +64,9 @@ pub enum Commands {
     /// Dumps a stage from a range into a new database.
     #[command(name = "dump-stage")]
     DumpStage(dump_stage::Command),
+    /// Drops a stage's tables from the database.
+    #[command(name = "drop-stage")]
+    DropStage(drop_stage::Command),
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),

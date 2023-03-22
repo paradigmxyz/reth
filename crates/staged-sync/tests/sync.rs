@@ -15,6 +15,7 @@ use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc};
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg_attr(not(feature = "geth-tests"), ignore)]
 async fn can_peer_with_geth() {
     reth_tracing::init_test_tracing();
 

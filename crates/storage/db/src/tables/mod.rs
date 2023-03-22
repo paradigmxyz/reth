@@ -40,10 +40,10 @@ pub const TABLES: [(TableType, &str); 27] = [
     (TableType::Table, BlockBodies::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
     (TableType::Table, BlockWithdrawals::const_name()),
+    (TableType::Table, TransactionBlock::const_name()),
     (TableType::Table, Transactions::const_name()),
     (TableType::Table, TxHashNumber::const_name()),
     (TableType::Table, Receipts::const_name()),
-    (TableType::Table, Logs::const_name()),
     (TableType::Table, PlainAccountState::const_name()),
     (TableType::DupSort, PlainStorageState::const_name()),
     (TableType::Table, Bytecodes::const_name()),
@@ -148,7 +148,7 @@ table!(
 
 table!(
     /// (Canonical only) Stores the transaction body for canonical transactions.
-    ( Transactions ) TxNumber | TransactionSigned
+    (  Transactions ) TxNumber | TransactionSigned
 );
 
 table!(
@@ -157,13 +157,15 @@ table!(
 );
 
 table!(
-    /// (Canonical only) Stores transaction receipts.
-    ( Receipts ) TxNumber | Receipt
+    /// Stores the mapping of transaction number to the blocks number.
+    ///
+    /// The key is the highest transaction ID in the block.
+    ( TransactionBlock ) TxNumber | BlockNumber
 );
 
 table!(
-    /// (Canonical only) Stores transaction logs.
-    ( Logs ) TxNumber | Receipt
+    /// (Canonical only) Stores transaction receipts.
+    ( Receipts ) TxNumber | Receipt
 );
 
 table!(

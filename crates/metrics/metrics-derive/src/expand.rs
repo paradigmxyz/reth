@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use quote::{quote, ToTokens};
 use regex::Regex;
 use syn::{
-    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Lit, LitBool, LitStr,
+    punctuated::Punctuated, Attribute, Data, DeriveInput, Error, Expr, Lit, LitBool, LitStr,
     MetaNameValue, Result, Token,
 };
 
@@ -168,7 +168,7 @@ pub(crate) struct MetricsAttr {
 }
 
 impl MetricsAttr {
-    const DEFAULT_SEPARATOR: &str = ".";
+    const DEFAULT_SEPARATOR: &'static str = ".";
 
     fn separator(&self) -> String {
         match &self.separator {
@@ -189,18 +189,22 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
         metrics_attr.parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
     let (mut scope, mut separator, mut dynamic) = (None, None, None);
     for kv in parsed {
+        let lit = match kv.value {
+            Expr::Lit(ref expr) => &expr.lit,
+            _ => continue,
+        };
         if kv.path.is_ident("scope") {
             if scope.is_some() {
                 return Err(Error::new_spanned(kv, "Duplicate `scope` value provided."))
             }
-            let scope_lit = parse_str_lit(&kv.lit)?;
+            let scope_lit = parse_str_lit(lit)?;
             validate_metric_name(&scope_lit)?;
             scope = Some(scope_lit);
         } else if kv.path.is_ident("separator") {
             if separator.is_some() {
                 return Err(Error::new_spanned(kv, "Duplicate `separator` value provided."))
             }
-            let separator_lit = parse_str_lit(&kv.lit)?;
+            let separator_lit = parse_str_lit(lit)?;
             if !SUPPORTED_SEPARATORS.contains(&&*separator_lit.value()) {
                 return Err(Error::new_spanned(
                     kv,
@@ -219,7 +223,7 @@ fn parse_metrics_attr(node: &DeriveInput) -> Result<MetricsAttr> {
             if dynamic.is_some() {
                 return Err(Error::new_spanned(kv, "Duplicate `dynamic` flag provided."))
             }
-            dynamic = Some(parse_bool_lit(&kv.lit)?.value);
+            dynamic = Some(parse_bool_lit(lit)?.value);
         } else {
             return Err(Error::new_spanned(kv, "Unsupported attribute entry."))
         }
@@ -254,16 +258,20 @@ fn parse_metric_fields(node: &DeriveInput) -> Result<Vec<Metric<'_>>> {
             let parsed = metric_attr
                 .parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)?;
             for kv in parsed {
+                let lit = match kv.value {
+                    Expr::Lit(ref expr) => &expr.lit,
+                    _ => continue,
+                };
                 if kv.path.is_ident("describe") {
                     if describe.is_some() {
                         return Err(Error::new_spanned(kv, "Duplicate `describe` value provided."))
                     }
-                    describe = Some(parse_str_lit(&kv.lit)?);
+                    describe = Some(parse_str_lit(lit)?);
                 } else if kv.path.is_ident("rename") {
                     if rename.is_some() {
                         return Err(Error::new_spanned(kv, "Duplicate `rename` value provided."))
                     }
-                    let rename_lit = parse_str_lit(&kv.lit)?;
+                    let rename_lit = parse_str_lit(lit)?;
                     validate_metric_name(&rename_lit)?;
                     rename = Some(rename_lit)
                 } else {
@@ -304,7 +312,7 @@ fn parse_single_attr<'a, T: WithAttrs + ToTokens>(
     token: &'a T,
     ident: &str,
 ) -> Result<Option<&'a Attribute>> {
-    let mut attr_iter = token.attrs().iter().filter(|a| a.path.is_ident(ident));
+    let mut attr_iter = token.attrs().iter().filter(|a| a.path().is_ident(ident));
     if let Some(attr) = attr_iter.next() {
         if let Some(next_attr) = attr_iter.next() {
             Err(Error::new_spanned(
@@ -333,15 +341,16 @@ fn parse_single_required_attr<'a, T: WithAttrs + ToTokens>(
 fn parse_docs_to_string<T: WithAttrs>(token: &T) -> Result<Option<String>> {
     let mut doc_str = None;
     for attr in token.attrs().iter() {
-        let meta = attr.parse_meta()?;
-        if let syn::Meta::NameValue(meta) = meta {
-            if let syn::Lit::Str(doc) = meta.lit {
-                let doc_value = doc.value().trim().to_string();
-                doc_str = Some(
-                    doc_str
-                        .map(|prev_doc_value| format!("{prev_doc_value} {doc_value}"))
-                        .unwrap_or(doc_value),
-                );
+        if let syn::Meta::NameValue(ref meta) = attr.meta {
+            if let Expr::Lit(ref lit) = meta.value {
+                if let Lit::Str(ref doc) = lit.lit {
+                    let doc_value = doc.value().trim().to_string();
+                    doc_str = Some(
+                        doc_str
+                            .map(|prev_doc_value| format!("{prev_doc_value} {doc_value}"))
+                            .unwrap_or(doc_value),
+                    );
+                }
             }
         }
     }

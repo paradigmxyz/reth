@@ -1,10 +1,9 @@
-use reth_eth_wire::BlockBody;
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     priority::Priority,
 };
-use reth_primitives::{PeerId, H256};
+use reth_primitives::{BlockBody, PeerId, H256};
 use std::{
     collections::HashMap,
     fmt::Debug,

@@ -1,7 +1,7 @@
 use crate::{
-    db::DbTool,
     dirs::{DbPath, PlatformPath},
     dump_stage::setup,
+    utils::DbTool,
 };
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
