@@ -1,6 +1,5 @@
 use reth_beacon_consensus::BeaconEngineError;
 use reth_primitives::{H256, U256};
-use reth_rpc_types::engine::PayloadError;
 use thiserror::Error;
 
 /// The Engine API result type
@@ -49,10 +48,7 @@ pub enum EngineApiError {
     /// Beacon consensus engine error.
     #[error(transparent)]
     ConsensusEngine(#[from] BeaconEngineError),
-    /// Encountered a payload error.
-    #[error(transparent)]
-    Payload(#[from] PayloadError),
     /// Encountered an internal error.
     #[error(transparent)]
-    Internal(#[from] reth_interfaces::Error),
+    Internal(Box<dyn std::error::Error + Send + Sync>),
 }

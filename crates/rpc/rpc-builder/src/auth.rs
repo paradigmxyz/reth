@@ -13,6 +13,7 @@ use reth_transaction_pool::TransactionPool;
 use std::{net::SocketAddr, sync::Arc};
 
 /// Configure and launch an auth server with `engine` and a _new_ `eth` namespace.
+#[allow(clippy::too_many_arguments)]
 pub async fn launch<Client, Pool, Network, Tasks>(
     client: Client,
     pool: Pool,

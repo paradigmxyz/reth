@@ -100,7 +100,10 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
 
         let mut result = Vec::with_capacity(count as usize);
         for num in start..start + count {
-            let block = self.client.block(BlockId::Number(num.into()))?;
+            let block = self
+                .client
+                .block(BlockId::Number(num.into()))
+                .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
         }
 
@@ -119,7 +122,10 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
 
         let mut result = Vec::with_capacity(hashes.len());
         for hash in hashes {
-            let block = self.client.block(BlockId::Hash(hash.into()))?;
+            let block = self
+                .client
+                .block(BlockId::Hash(hash.into()))
+                .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
             result.push(block.map(Into::into));
         }
 
@@ -161,7 +167,10 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         }
 
         // Attempt to look up terminal block hash
-        let local_hash = self.client.block_hash(terminal_block_number.as_u64())?;
+        let local_hash = self
+            .client
+            .block_hash(terminal_block_number.as_u64())
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
         // Transition configuration exchange is successful if block hashes match
         match local_hash {

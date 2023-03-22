@@ -1,3 +1,4 @@
+use reth_rpc_types::engine::PayloadError;
 use reth_stages::PipelineError;
 use thiserror::Error;
 
@@ -10,12 +11,12 @@ pub enum BeaconEngineError {
     /// Forkchoice zero hash head received.
     #[error("Received zero hash as forkchoice head")]
     ForkchoiceEmptyHead,
+    /// Encountered a payload error.
+    #[error(transparent)]
+    Payload(#[from] PayloadError),
     /// Pipeline error.
     #[error(transparent)]
     Pipeline(#[from] PipelineError),
-    /// Database error.
-    #[error(transparent)]
-    Database(#[from] reth_db::Error),
     /// Common error. Wrapper around [reth_interfaces::Error].
     #[error(transparent)]
     Common(#[from] reth_interfaces::Error),

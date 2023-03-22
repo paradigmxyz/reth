@@ -202,7 +202,10 @@ where
 
     /// Attempt to restore the tree with the finalized block number.
     /// If the finalized block is missing from the database, trigger the pipeline run.
-    fn restore_tree_if_possible(&mut self, finalized_hash: BlockHash) -> BeaconEngineResult<()> {
+    fn restore_tree_if_possible(
+        &mut self,
+        finalized_hash: BlockHash,
+    ) -> Result<(), reth_interfaces::Error> {
         match self.db.view(|tx| tx.get::<tables::HeaderNumbers>(finalized_hash))?? {
             Some(number) => self.blockchain_tree.restore_canonical_hashes(number)?,
             None => self.pipeline_run_needed(),
@@ -267,7 +270,7 @@ where
                                 this.restore_tree_if_possible(forkchoice_state.finalized_block_hash)
                             {
                                 error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
-                                return Poll::Ready(Err(error))
+                                return Poll::Ready(Err(error.into()))
                             }
 
                             // Get next pipeline state.
