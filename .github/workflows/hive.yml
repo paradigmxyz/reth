@@ -94,11 +94,11 @@ jobs:
             experimental: true
             # eth_ rpc methods
           - sim: ethereum/rpc-compat
-            limit: eth_
+            include: [eth_]
             experimental: true
             # debug_ rpc methods
           - sim: ethereum/rpc-compat
-            limit: debug_
+            include: [debug_]
             experimental: true
       fail-fast: false
     needs: prepare
