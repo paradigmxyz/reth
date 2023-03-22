@@ -65,7 +65,8 @@ use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
     eth::cache::EthStateCache, AdminApi, DebugApi, EthApi, EthFilter, EthPubSub,
-    EthSubscriptionIdProvider, NetApi, TraceApi, Web3Api,
+    EthSubscriptionIdProvider, NetApi, TraceApi,
+    TracingCallGuard, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_tasks::TaskSpawner;
@@ -76,8 +77,10 @@ use std::{
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
+    sync::Arc,
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
+use tokio::sync::Semaphore;
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
@@ -534,8 +537,18 @@ where
     pub fn register_debug(&mut self) -> &mut Self {
         let eth_api = self.eth_api();
         self.modules.insert(
+            
             RethRpcModule::Debug,
-            DebugApi::new(self.client.clone(), eth_api).into_rpc().into(),
+           
+            DebugApi::new(self.client.clone(), 
+                eth_api,
+                TracingCallGuard::new(Arc::new(Semaphore::new(
+                    self.config.eth.max_tracing_call_in_parallel,
+                ))),
+            )
+            .into_rpc()
+            .into(),
+        ,
         );
         self
     }
@@ -587,7 +600,14 @@ where
                             AdminApi::new(self.network.clone()).into_rpc().into()
                         }
                         RethRpcModule::Debug => {
-                            DebugApi::new(self.client.clone(), eth_api.clone()).into_rpc().into()
+                            DebugApi::new(
+                            self.client.clone(), eth_api.clone(),
+                            TracingCallGuard::new(Arc::new(Semaphore::new(
+                                self.config.eth.max_tracing_call_in_parallel,
+                            ))),
+                        )
+                        .into_rpc()
+                        .into()
                         }
                         RethRpcModule::Eth => {
                             // merge all eth handlers
@@ -600,11 +620,16 @@ where
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Trace => {
-                            TraceApi::new(self.client.clone(), eth_api.clone(), eth_cache.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Trace => TraceApi::new(
+                            self.client.clone(),
+                            eth_api.clone(),
+                            eth_cache.clone(),
+                            TracingCallGuard::new(Arc::new(Semaphore::new(
+                                self.config.eth.max_tracing_call_in_parallel,
+                            ))),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                     })
                     .clone()

@@ -22,4 +22,6 @@ pub struct EthHandlers<Client, Pool, Network, Events> {
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
+
+    pub max_tracing_call_in_parallel: usize,
 }
