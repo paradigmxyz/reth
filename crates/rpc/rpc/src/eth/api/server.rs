@@ -23,6 +23,7 @@ use reth_rpc_types::{
     Work,
 };
 use reth_transaction_pool::TransactionPool;
+use revm_primitives::utilities::create_address;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use tracing::trace;
@@ -207,8 +208,8 @@ where
         match tx.transaction.kind() {
             Create => {
                 res_receipt.to = Some(Address::zero());
-                // TODO get contract address
-                // res_receipt.contract_address = None;
+                res_receipt.contract_address =
+                    Some(create_address(transaction.signer, tx.transaction.nonce()));
             }
             Call(addr) => {
                 res_receipt.to = Some(*addr);
