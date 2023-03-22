@@ -8,6 +8,7 @@ use crate::{
 };
 use async_trait::async_trait;
 
+use crate::eth::error::SignError;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     TransactionSigned, TransactionSignedEcRecovered, H256, U256,
@@ -160,12 +161,19 @@ where
     pub(crate) async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
         let from = match request.from {
             Some(from) => from,
-            None => return Err(EthApiError::Unsupported("sender not specified")),
+            None => return Err(SignError::NoAccount.into()),
         };
         let transaction = match request.into_typed_request() {
             Some(tx) => tx,
-            None => return Err(EthApiError::Unsupported("tx type not specified")),
+            None => {
+                return Err(EthApiError::Unsupported(
+                    "both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified",
+                ))
+            }
         };
+
+        // TODO we need to update additional settings in the transaction: nonce, gaslimit, chainid,
+        // gasprice
 
         let signed_tx = self.sign_request(&from, transaction)?;
 
@@ -187,9 +195,9 @@ where
     ) -> EthResult<TransactionSigned> {
         for signer in self.inner.signers.iter() {
             if signer.is_signer_for(from) {
-                match signer.sign_transaction(request, from) {
-                    Ok(tx) => return Ok(tx),
-                    Err(e) => return Err(e.into()),
+                return match signer.sign_transaction(request, from) {
+                    Ok(tx) => Ok(tx),
+                    Err(e) => Err(e.into()),
                 }
             }
         }
