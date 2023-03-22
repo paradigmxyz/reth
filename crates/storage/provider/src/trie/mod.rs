@@ -538,9 +538,10 @@ where
         } else {
             (
                 storage_cursor.seek_by_key_subkey(address, H256::zero())?,
-                PatriciaTrie::new(
+                PatriciaTrie::new_with_hash(
                     Arc::new(DupHashDatabaseMut::new(storage_trie_cursor.clone(), address)?),
                     hasher,
+                    EMPTY_ROOT.as_slice().to_vec(),
                 ),
             )
         };
