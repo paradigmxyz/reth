@@ -231,6 +231,16 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the discovery and listener address
+    ///
+    /// This is a convenience function for both [NetworkConfigBuilder::listener_addr] and
+    /// [NetworkConfigBuilder::discovery_addr].
+    ///
+    /// By default, both are on the same port: [DEFAULT_DISCOVERY_PORT]
+    pub fn set_addrs(self, addr: SocketAddr) -> Self {
+        self.listener_addr(addr).discovery_addr(addr)
+    }
+
     /// Sets the socket address the network will listen on
     pub fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = Some(listener_addr);
