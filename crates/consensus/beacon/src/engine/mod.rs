@@ -272,8 +272,8 @@ where
             // Process all incoming messages first.
             while let Poll::Ready(Some(msg)) = this.message_rx.poll_next_unpin(cx) {
                 match msg {
-                    BeaconEngineMessage::ForkchoiceUpdated(state, attrs, tx) => {
-                        let response = this.on_forkchoice_updated(state, attrs);
+                    BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                        let response = this.on_forkchoice_updated(state, payload_attrs);
                         let is_valid_response =
                             matches!(response.payload_status.status, PayloadStatusEnum::Valid);
                         let _ = tx.send(Ok(response));
@@ -287,8 +287,8 @@ where
                             }
                         }
                     }
-                    BeaconEngineMessage::NewPayload(block, tx) => {
-                        let response = this.on_new_payload(block);
+                    BeaconEngineMessage::NewPayload { payload, tx } => {
+                        let response = this.on_new_payload(payload);
                         let _ = tx.send(Ok(response));
                     }
                 }
@@ -412,11 +412,11 @@ mod tests {
 
         fn send_new_payload(
             &self,
-            block: ExecutionPayload,
+            payload: ExecutionPayload,
         ) -> oneshot::Receiver<BeaconEngineResult<PayloadStatus>> {
             let (tx, rx) = oneshot::channel();
             self.sync_tx
-                .send(BeaconEngineMessage::NewPayload(block, tx))
+                .send(BeaconEngineMessage::NewPayload { payload, tx })
                 .expect("failed to send msg");
             rx
         }
@@ -427,7 +427,7 @@ mod tests {
         ) -> oneshot::Receiver<BeaconEngineResult<ForkchoiceUpdated>> {
             let (tx, rx) = oneshot::channel();
             self.sync_tx
-                .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tx))
+                .send(BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs: None, tx })
                 .expect("failed to send msg");
             rx
         }

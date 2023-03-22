@@ -235,8 +235,11 @@ impl Command {
                     finalized_block_hash: tip,
                     safe_block_hash: tip,
                 };
-                consensus_engine_tx
-                    .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tip_tx))?;
+                consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
+                    state,
+                    payload_attrs: None,
+                    tx: tip_tx,
+                })?;
                 debug!(target: "reth::cli", %tip, "Tip manually set");
                 Some(tip_rx)
             }
