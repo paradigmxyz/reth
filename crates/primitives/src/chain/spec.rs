@@ -63,6 +63,7 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
             Hardfork::Paris,
             ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
         ),
+        (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
     ]),
 });
 
@@ -743,7 +744,15 @@ mod tests {
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
+                    Head { number: 1561650, ..Default::default() },
+                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
+                ),
+                (
                     Head { number: 1561651, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
+                ),
+                (
+                    Head { number: 4460643, ..Default::default() },
                     ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
                 ),
                 (
@@ -751,8 +760,22 @@ mod tests {
                     ForkId { hash: ForkHash([0x75, 0x7a, 0x1c, 0x47]), next: 5062605 },
                 ),
                 (
-                    Head { number: 12965000, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 0 },
+                    Head { number: 5062605, ..Default::default() },
+                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
+                ),
+                (
+                    Head { number: 6000000, timestamp: 1678832735, ..Default::default() },
+                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
+                ),
+                // First Shanghai block
+                (
+                    Head { number: 6000001, timestamp: 1678832736, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 },
+                ),
+                // Future Shanghai block
+                (
+                    Head { number: 6500000, timestamp: 1678832736, ..Default::default() },
+                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 0 },
                 ),
             ],
         );
