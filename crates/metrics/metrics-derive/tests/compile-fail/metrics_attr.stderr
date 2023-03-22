@@ -17,11 +17,12 @@ error: Either `scope = ..` or `dynamic = true` must be set.
 16 | | struct CustomMetrics3;
    | |______________________^
 
-error: expected literal
-  --> tests/compile-fail/metrics_attr.rs:19:19
+error: Either `scope = ..` or `dynamic = true` must be set.
+  --> tests/compile-fail/metrics_attr.rs:19:1
    |
-19 | #[metrics(scope = value)]
-   |                   ^^^^^
+19 | / #[metrics(scope = value)]
+20 | | struct CustomMetrics4;
+   | |______________________^
 
 error: Value **must** be a string literal.
   --> tests/compile-fail/metrics_attr.rs:23:19
@@ -41,11 +42,12 @@ error: Duplicate `scope` value provided.
 31 | #[metrics(scope = "some_scope", scope = "another_scope")]
    |                                 ^^^^^^^^^^^^^^^^^^^^^^^
 
-error: expected literal
-  --> tests/compile-fail/metrics_attr.rs:35:23
+error: Either `scope = ..` or `dynamic = true` must be set.
+  --> tests/compile-fail/metrics_attr.rs:35:1
    |
-35 | #[metrics(separator = value)]
-   |                       ^^^^^
+35 | / #[metrics(separator = value)]
+36 | | struct CustomMetrics8;
+   | |______________________^
 
 error: Value **must** be a string literal.
   --> tests/compile-fail/metrics_attr.rs:39:23
