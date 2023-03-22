@@ -118,9 +118,9 @@ where
                     error!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
                     self.pipeline_run_needed();
                     match error {
-                        Error::Execution(ExecutorError::BlockPreMerge) => {
+                        Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
                             PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                                validation_error: ExecutorError::BlockPreMerge.to_string(),
+                                validation_error: error.to_string(),
                             })
                             .with_latest_valid_hash(H256::zero())
                         }
@@ -168,7 +168,7 @@ where
                 }
                 Err(error) => {
                     let latest_valid_hash =
-                        matches!(error, Error::Execution(ExecutorError::BlockPreMerge))
+                        matches!(error, Error::Execution(ExecutorError::BlockPreMerge { .. }))
                             .then_some(H256::zero());
                     PayloadStatus::new(
                         PayloadStatusEnum::Invalid { validation_error: error.to_string() },
@@ -657,7 +657,7 @@ mod tests {
                 ..Default::default()
             });
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Invalid {
-                validation_error: ExecutorError::BlockPreMerge.to_string(),
+                validation_error: ExecutorError::BlockPreMerge { hash: block1.hash }.to_string(),
             })
             .with_latest_valid_hash(H256::zero());
             assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
@@ -795,9 +795,9 @@ mod tests {
             assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
             // Send new payload
-            let rx = env.send_new_payload(block2.into());
+            let rx = env.send_new_payload(block2.clone().into());
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Invalid {
-                validation_error: ExecutorError::BlockPreMerge.to_string(),
+                validation_error: ExecutorError::BlockPreMerge { hash: block2.hash }.to_string(),
             })
             .with_latest_valid_hash(H256::zero());
             assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));

@@ -14,17 +14,6 @@ pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 /// Error returned by [`EngineApi`][crate::EngineApi]
 #[derive(Error, Debug)]
 pub enum EngineApiError {
-    /// Invalid payload block timestamp.
-    #[error("Invalid payload timestamp: {invalid}. Latest: {latest}")]
-    PayloadTimestamp {
-        /// The payload timestamp.
-        invalid: u64,
-        /// Latest available timestamp.
-        latest: u64,
-    },
-    /// Received pre-merge payload.
-    #[error("Received pre-merge payload.")]
-    PayloadPreMerge,
     /// Unknown payload requested.
     #[error("Unknown payload")]
     PayloadUnknown,
@@ -57,19 +46,13 @@ pub enum EngineApiError {
         /// Consensus terminal block hash.
         consensus: H256,
     },
-    /// Forkchoice zero hash head received.
-    #[error("Received zero hash as forkchoice head")]
-    ForkchoiceEmptyHead,
-    /// Chain spec merge terminal total difficulty is not set
-    #[error("The merge terminal total difficulty is not known")]
-    UnknownMergeTerminalTotalDifficulty,
     /// Beacon consensus engine error.
     #[error(transparent)]
     ConsensusEngine(#[from] BeaconEngineError),
-    /// Encountere a payload error.
+    /// Encountered a payload error.
     #[error(transparent)]
     Payload(#[from] PayloadError),
-    /// API encountered an internal error.
+    /// Encountered an internal error.
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
 }

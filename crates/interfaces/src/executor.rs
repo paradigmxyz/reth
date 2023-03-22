@@ -64,8 +64,8 @@ pub enum Error {
     CanonicalCommit { inner: String },
     #[error("Transaction error on pipeline status update: {inner:?}")]
     PipelineStatusUpdate { inner: String },
-    #[error("Block pre merge")]
-    BlockPreMerge,
+    #[error("Block {hash:?} is pre merge")]
+    BlockPreMerge { hash: H256 },
     #[error("Missing total difficulty")]
     MissingTotalDifficulty { hash: H256 },
 }

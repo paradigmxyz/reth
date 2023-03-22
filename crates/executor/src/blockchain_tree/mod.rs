@@ -221,7 +221,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             .header_td(&block.parent_hash)?
             .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
         if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
-            return Err(ExecError::BlockPreMerge.into())
+            return Err(ExecError::BlockPreMerge { hash: block.hash }.into())
         }
 
         // Create state provider
@@ -497,7 +497,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 .header_td(block_hash)?
                 .ok_or(ExecError::MissingTotalDifficulty { hash: *block_hash })?;
             if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
-                return Err(ExecError::BlockPreMerge.into())
+                return Err(ExecError::BlockPreMerge { hash: *block_hash }.into())
             }
             return Ok(())
         }
