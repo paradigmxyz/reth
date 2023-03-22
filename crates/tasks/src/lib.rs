@@ -95,7 +95,6 @@ impl TaskSpawner for TokioTaskExecutor {
     }
 
     fn spawn_blocking(&self, _name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        // take a block on the future and spawn it onto the runtime
         tokio::task::spawn_blocking(move || tokio::runtime::Handle::current().block_on(fut))
     }
 }
