@@ -62,7 +62,7 @@ jobs:
     strategy:
       matrix:
         experimental: [true]
-        sim: [issues/go-ethereum-14359, ethereum/rpc-compat, ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
+        sim: [issues/go-ethereum-14359, ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
         include:
           - sim: devp2p
             limit: discv4
@@ -91,6 +91,14 @@ jobs:
             experimental: true
           - sim: ethereum/engine
             limit: engine-sync
+            experimental: true
+            # eth_ rpc methods
+          - sim: ethereum/rpc-compat
+            limit: eth_
+            experimental: true
+            # debug_ rpc methods
+          - sim: ethereum/rpc-compat
+            limit: debug_
             experimental: true
       fail-fast: false
     needs: prepare
