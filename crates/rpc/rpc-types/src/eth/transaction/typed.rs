@@ -3,7 +3,9 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
-use reth_primitives::{AccessList, Address, Bytes, U128, U256};
+use reth_primitives::{
+    AccessList, Address, Bytes, Transaction, TxEip1559, TxEip2930, TxLegacy, U128, U256,
+};
 use reth_rlp::{BufMut, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +20,46 @@ pub enum TypedTransactionRequest {
     Legacy(LegacyTransactionRequest),
     EIP2930(EIP2930TransactionRequest),
     EIP1559(EIP1559TransactionRequest),
+}
+
+impl TypedTransactionRequest {
+    /// coverts a typed transaction request into a primitive transaction
+    pub fn into_transaction(self) -> Transaction {
+        match self {
+            TypedTransactionRequest::Legacy(tx) => Transaction::Legacy(TxLegacy {
+                chain_id: tx.chain_id,
+                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
+                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
+                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
+                to: tx.kind.into(),
+                value: u128::from_be_bytes(tx.value.to_be_bytes()),
+                input: tx.input,
+            }),
+            TypedTransactionRequest::EIP2930(tx) => Transaction::Eip2930(TxEip2930 {
+                chain_id: tx.chain_id,
+                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
+                gas_price: u128::from_be_bytes(tx.gas_price.to_be_bytes()),
+                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
+                to: tx.kind.into(),
+                value: u128::from_be_bytes(tx.value.to_be_bytes()),
+                input: tx.input,
+                access_list: tx.access_list,
+            }),
+            TypedTransactionRequest::EIP1559(tx) => Transaction::Eip1559(TxEip1559 {
+                chain_id: tx.chain_id,
+                nonce: u64::from_be_bytes(tx.nonce.to_be_bytes()),
+                max_fee_per_gas: u128::from_be_bytes(tx.max_fee_per_gas.to_be_bytes()),
+                gas_limit: u64::from_be_bytes(tx.gas_limit.to_be_bytes()),
+                to: tx.kind.into(),
+                value: u128::from_be_bytes(tx.value.to_be_bytes()),
+                input: tx.input,
+                access_list: tx.access_list,
+                max_priority_fee_per_gas: u128::from_be_bytes(
+                    tx.max_priority_fee_per_gas.to_be_bytes(),
+                ),
+            }),
+        }
+    }
 }
 
 /// Represents a legacy transaction request
@@ -109,6 +151,15 @@ impl Decodable for TransactionKind {
             }
         } else {
             Err(DecodeError::InputTooShort)
+        }
+    }
+}
+
+impl From<TransactionKind> for reth_primitives::TransactionKind {
+    fn from(kind: TransactionKind) -> Self {
+        match kind {
+            TransactionKind::Call(to) => reth_primitives::TransactionKind::Call(to),
+            TransactionKind::Create => reth_primitives::TransactionKind::Create,
         }
     }
 }

@@ -7,13 +7,16 @@ use crate::{
     EthApi,
 };
 use async_trait::async_trait;
+
+use crate::eth::error::SignError;
 use reth_primitives::{
-    BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
-    TransactionSignedEcRecovered, H256, U256,
+    Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
+    TransactionSigned, TransactionSignedEcRecovered, H256, U256,
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
-
-use reth_rpc_types::{Index, Transaction, TransactionInfo, TransactionRequest};
+use reth_rpc_types::{
+    Index, Transaction, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::primitives::{BlockEnv, CfgEnv};
 
@@ -150,8 +153,53 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: 'static,
 {
-    pub(crate) async fn send_transaction(&self, _request: TransactionRequest) -> EthResult<H256> {
-        unimplemented!()
+    /// Send a transaction to the pool
+    ///
+    /// This will sign the transaction and submit it to the pool
+    pub(crate) async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
+        let from = match request.from {
+            Some(from) => from,
+            None => return Err(SignError::NoAccount.into()),
+        };
+        let transaction = match request.into_typed_request() {
+            Some(tx) => tx,
+            None => {
+                return Err(EthApiError::Unsupported(
+                    "both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified",
+                ))
+            }
+        };
+
+        // TODO we need to update additional settings in the transaction: nonce, gaslimit, chainid,
+        // gasprice
+
+        let signed_tx = self.sign_request(&from, transaction)?;
+
+        let recovered =
+            signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+
+        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+
+        // submit the transaction to the pool with a `Local` origin
+        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+
+        Ok(hash)
+    }
+
+    pub(crate) fn sign_request(
+        &self,
+        from: &Address,
+        request: TypedTransactionRequest,
+    ) -> EthResult<TransactionSigned> {
+        for signer in self.inner.signers.iter() {
+            if signer.is_signer_for(from) {
+                return match signer.sign_transaction(request, from) {
+                    Ok(tx) => Ok(tx),
+                    Err(e) => Err(e.into()),
+                }
+            }
+        }
+        Err(EthApiError::InvalidTransactionSignature)
     }
 
     /// Get Transaction by [BlockId] and the index of the transaction within that Block.

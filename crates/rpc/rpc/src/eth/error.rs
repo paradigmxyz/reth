@@ -374,6 +374,9 @@ pub enum SignError {
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
     TypedData,
+    /// No chainid
+    #[error("No chainid")]
+    NoChainId,
 }
 
 /// Converts the evm [ExecutionResult] into a result where `Ok` variant is the output bytes if it is
