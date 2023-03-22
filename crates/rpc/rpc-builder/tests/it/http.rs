@@ -98,7 +98,6 @@ where
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
-    assert!(is_unimplemented(EthApiClient::transaction_receipt(client, hash).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::gas_price(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::max_priority_fee_per_gas(client).await.err().unwrap()));
     assert!(is_unimplemented(EthApiClient::is_mining(client).await.err().unwrap()));

@@ -11,7 +11,9 @@ use crate::{
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, Header, H256, H64, U256, U64,
+    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, Header, Transaction,
+    TransactionKind::{Call, Create},
+    TxEip1559, TxEip2930, TxLegacy, H256, H64, U128, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -160,8 +162,85 @@ where
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, _hash: H256) -> Result<Option<TransactionReceipt>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
+
+        let receipt = match self.inner.client.receipt_by_hash(hash) {
+            Ok(Some(recpt)) => recpt,
+            Ok(None) => return Err(EthApiError::Unsupported("receipt not found").into()),
+            Err(_) => return Err(EthApiError::Unsupported("call resulted in error").into()),
+        };
+
+        let (tx, meta) = match self.client().transaction_by_hash_with_meta(hash) {
+            Ok(Some((tx, meta))) => (tx, meta),
+            Ok(None) => return Err(EthApiError::Unsupported("metadata not found").into()),
+            Err(_) => return Err(EthApiError::Unsupported("call resulted in error").into()),
+        };
+
+        let transaction =
+            tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+
+        let mut res_receipt = TransactionReceipt {
+            transaction_hash: Some(meta.tx_hash),
+            transaction_index: Some(U256::from(meta.index)),
+            block_hash: Some(meta.block_hash),
+            block_number: Some(U256::from(meta.block_number)),
+            from: transaction.signer,
+            to: Some(Address::zero()),
+            cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
+            gas_used: Some(U256::from(0)),
+            contract_address: None,
+            logs: receipt.logs.clone().into_iter().map(|l| l.into()).collect(),
+            effective_gas_price: U128::from(0),
+            transaction_type: U256::from(0),
+            state_root: None,
+            logs_bloom: receipt.bloom_slow(),
+            status_code: None,
+        };
+
+        if receipt.success {
+            res_receipt.status_code = Some(U64::from(1));
+        } else {
+            res_receipt.status_code = Some(U64::from(0));
+        }
+
+        match tx.transaction.kind() {
+            Create => {
+                res_receipt.to = Some(Address::zero());
+                // TODO get contract address
+                // res_receipt.contract_address = None;
+            }
+            Call(addr) => {
+                res_receipt.to = Some(*addr);
+                res_receipt.contract_address = None;
+            }
+        }
+
+        match tx.transaction {
+            Transaction::Legacy(TxLegacy { gas_limit, gas_price, .. }) => {
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(0);
+                res_receipt.effective_gas_price = U128::from(gas_price);
+            }
+            Transaction::Eip2930(TxEip2930 { gas_limit, gas_price, .. }) => {
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(1);
+                res_receipt.effective_gas_price = U128::from(gas_price);
+            }
+            Transaction::Eip1559(TxEip1559 {
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                ..
+            }) => {
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(2);
+                res_receipt.effective_gas_price =
+                    U128::from(max_fee_per_gas) + U128::from(max_priority_fee_per_gas);
+            }
+        }
+
+        Ok(Some(res_receipt))
     }
 
     /// Handler for: `eth_getBalance`

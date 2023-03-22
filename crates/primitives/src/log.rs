@@ -1,4 +1,4 @@
-use crate::{Address, Bytes, H256};
+use crate::{rpc::Log as RpcLog, Address, Bytes, H256};
 use reth_codecs::{main_codec, Compact};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 
@@ -12,4 +12,22 @@ pub struct Log {
     pub topics: Vec<H256>,
     /// Arbitrary length data.
     pub data: Bytes,
+}
+
+impl From<Log> for RpcLog {
+    fn from(log: Log) -> Self {
+        Self {
+            address: log.address.into(),
+            topics: log.topics.into_iter().map(Into::into).collect(),
+            data: log.data.to_vec().into(),
+            block_hash: None,
+            block_number: None,
+            transaction_hash: None,
+            transaction_index: None,
+            log_index: None,
+            transaction_log_index: None,
+            log_type: None,
+            removed: None,
+        }
+    }
 }
