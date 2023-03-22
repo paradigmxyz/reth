@@ -113,7 +113,7 @@ where
             }))
         }
 
-        self.forkchoice_state = Some(state.clone());
+        self.forkchoice_state = Some(state);
         let status = if self.is_pipeline_idle() {
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => PayloadStatus::from_status(PayloadStatusEnum::Valid),
