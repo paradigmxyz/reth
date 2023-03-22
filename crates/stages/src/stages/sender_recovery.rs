@@ -1,8 +1,7 @@
 use crate::{
-    exec_or_return, stages::stream::SequentialPairStream, ExecAction, ExecInput, ExecOutput, Stage,
-    StageError, StageId, UnwindInput, UnwindOutput,
+    exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
+    UnwindOutput,
 };
-use futures_util::StreamExt;
 use itertools::Itertools;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -10,12 +9,11 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::TxNumber;
+use reth_primitives::{TransactionSigned, TxNumber, H160};
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 /// The [`StageId`] of the sender recovery stage.
@@ -81,8 +79,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
 
-        // An _unordered_ channel to receive results from a rayon job
-        let (tx, rx) = mpsc::unbounded_channel();
+        // channels used to return result of sender recovery.
+        let mut channels = Vec::new();
 
         // Spawn recovery jobs onto the default rayon threadpool and send the result through the
         // channel.
@@ -93,38 +91,37 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         for chunk in
             &tx_walker.chunks(self.commit_threshold as usize / rayon::current_num_threads())
         {
-            let tx = tx.clone();
+            // An _unordered_ channel to receive results from a rayon job
+            let (tx, rx) = mpsc::unbounded_channel();
+            channels.push(rx);
             // Note: Unfortunate side-effect of how chunk is designed in itertools (it is not Send)
-            let mut chunk: Vec<_> = chunk.collect();
+            let chunk: Vec<_> = chunk.collect();
+
+            // closure that would recover signer. Used as utility to wrap result
+            let recover = |entry: Result<(TxNumber, TransactionSigned), reth_db::Error>| -> Result<(u64, H160), Box<StageError>> {
+                let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
+                let sender = transaction.recover_signer().ok_or(StageError::from(
+                    SenderRecoveryStageError::SenderRecovery { tx: tx_id },
+                ))?;
+
+                Ok((tx_id, sender))
+            };
 
             // Spawn the sender recovery task onto the global rayon pool
             // This task will send the results through the channel after it recovered the senders.
             rayon::spawn(move || {
-                chunk
-                    .drain(..)
-                    .map(|entry| {
-                        let (tx_id, transaction) = entry?;
-                        let sender = transaction.recover_signer().ok_or(StageError::from(
-                            SenderRecoveryStageError::SenderRecovery { tx: tx_id },
-                        ))?;
-
-                        Ok((tx_id, sender))
-                    })
-                    .for_each(|result: Result<_, StageError>| {
-                        let _ = tx.send(result);
-                    });
+                for entry in chunk {
+                    let _ = tx.send(recover(entry));
+                }
             });
         }
-        drop(tx);
 
-        // We need sorted results, so we wrap the _unordered_ receiver stream into a sequential
-        // stream, which yields the results by ascending transaction ID.
-        let mut recovered_senders =
-            SequentialPairStream::new(start_tx_index, UnboundedReceiverStream::new(rx));
-
-        while let Some(recovered) = recovered_senders.next().await {
-            let (id, sender) = recovered?;
-            senders_cursor.append(id, sender)?;
+        // Iterate over channels and append the sender in the order that they are received.
+        for mut channel in channels {
+            while let Some(recovered) = channel.recv().await {
+                let (tx_id, sender) = recovered.map_err(|boxed| *boxed)?;
+                senders_cursor.append(tx_id, sender)?;
+            }
         }
 
         info!(target: "sync::stages::sender_recovery", stage_progress = end_block, done, "Sync iteration finished");
