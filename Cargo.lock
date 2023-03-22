@@ -4549,6 +4549,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "proptest",
+ "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-db",
  "reth-discv4",
@@ -4584,7 +4585,7 @@ name = "reth-auto-seal-consensus"
 version = "0.1.0"
 dependencies = [
  "futures-util",
- "reth-consensus-common",
+ "reth-beacon-consensus",
  "reth-interfaces",
  "reth-primitives",
  "reth-transaction-pool",

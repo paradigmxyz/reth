@@ -1,4 +1,4 @@
-//! The mode the consensus is operating in
+//! The mode the auto seal miner is operating in.
 
 use futures_util::{stream::Fuse, StreamExt};
 use reth_primitives::TxHash;
@@ -15,7 +15,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream};
 
 /// Mode of operations for the `Miner`
 #[derive(Debug)]
-pub(crate) enum MiningMode {
+pub enum MiningMode {
     /// A miner that does nothing
     None,
     /// A miner that listens for new transactions that are ready.
@@ -30,7 +30,9 @@ pub(crate) enum MiningMode {
 // === impl MiningMode ===
 
 impl MiningMode {
-    pub(crate) fn instant(max_transactions: usize, listener: Receiver<TxHash>) -> Self {
+    /// Creates a new instant mining mode that listens for new transactions and tries to build
+    /// non-empty blocks as soon as transactions arrive.
+    pub fn instant(max_transactions: usize, listener: Receiver<TxHash>) -> Self {
         MiningMode::Auto(ReadyTransactionMiner {
             max_transactions,
             has_pending_txs: None,
@@ -38,7 +40,8 @@ impl MiningMode {
         })
     }
 
-    pub(crate) fn interval(duration: Duration) -> Self {
+    /// Creates a new interval miner that builds a block ever `duration`.
+    pub fn interval(duration: Duration) -> Self {
         MiningMode::FixedBlockTime(FixedBlockTimeMiner::new(duration))
     }
 
@@ -64,7 +67,7 @@ impl MiningMode {
 ///
 /// The default blocktime is set to 6 seconds
 #[derive(Debug)]
-pub(crate) struct FixedBlockTimeMiner {
+pub struct FixedBlockTimeMiner {
     /// The interval this fixed block time miner operates with
     interval: Interval,
 }
@@ -101,7 +104,7 @@ impl Default for FixedBlockTimeMiner {
 }
 
 /// A miner that Listens for new ready transactions
-pub(crate) struct ReadyTransactionMiner {
+pub struct ReadyTransactionMiner {
     /// how many transactions to mine per block
     max_transactions: usize,
     /// stores whether there are pending transactions (if known)

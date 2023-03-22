@@ -1,14 +1,5 @@
 //! This includes download client implementations for auto sealing miners.
-//!
-//! Auto sealing miners can be polled, and will return a list of transactions that are ready to be
-//! mined.
-//!
-//! TODO: this polls the miners, so maybe the consensus should also be implemented here?
-//!
-//! These downloaders poll the miner, assemble the block, and return transactions that are ready to
-//! be mined.
 use crate::Storage;
-
 use reth_interfaces::p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -18,7 +9,6 @@ use reth_interfaces::p2p::{
 use reth_primitives::{
     BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId, WithPeerId, H256,
 };
-use reth_transaction_pool::TransactionPool;
 use std::fmt::Debug;
 use tracing::warn;
 
@@ -28,11 +18,15 @@ use tracing::warn;
 /// When polled, the miner will assemble blocks when miners produce ready transactions and store the
 /// blocks in memory.
 #[derive(Debug, Clone)]
-pub(crate) struct AutoSealClient {
+pub struct AutoSealClient {
     storage: Storage,
 }
 
 impl AutoSealClient {
+    pub(crate) fn new(storage: Storage) -> Self {
+        Self { storage }
+    }
+
     async fn fetch_headers(&self, request: HeadersRequest) -> Vec<Header> {
         let storage = self.storage.read().await;
         let HeadersRequest { start, limit, direction } = request;

@@ -1,5 +1,7 @@
 use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
+use reth_beacon_consensus::BeaconEngineMessage;
+use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{BlockBody, Header, IntoRecoveredTransaction};
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
@@ -10,9 +12,10 @@ use std::{
     task::{Context, Poll},
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
-pub(crate) struct MiningTask<Pool: TransactionPool> {
+pub struct MiningTask<Pool: TransactionPool> {
     /// The active miner
     miner: MiningMode,
     /// Single active future that inserts a new block into `storage`
@@ -23,14 +26,21 @@ pub(crate) struct MiningTask<Pool: TransactionPool> {
     pool: Pool,
     /// backlog of sets of transactions ready to be mined
     queued: VecDeque<Vec<Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>>,
+    /// TODO: ideally this would just be a sender of hashes
+    to_engine: UnboundedSender<BeaconEngineMessage>,
 }
 
 // === impl MiningTask ===
 
 impl<Pool: TransactionPool> MiningTask<Pool> {
     /// Creates a new instance of the task
-    pub(crate) fn new(miner: MiningMode, storage: Storage, pool: Pool) -> Self {
-        Self { miner, insert_task: None, storage, pool, queued: Default::default() }
+    pub(crate) fn new(
+        miner: MiningMode,
+        to_engine: UnboundedSender<BeaconEngineMessage>,
+        storage: Storage,
+        pool: Pool,
+    ) -> Self {
+        Self { miner, insert_task: None, storage, pool, to_engine, queued: Default::default() }
     }
 }
 
@@ -60,6 +70,7 @@ where
                         // queue new insert task
                         let storage = this.storage.clone();
                         let transactions = this.queued.pop_front().expect("not empty");
+                        let to_engine = this.to_engine.clone();
                         this.insert_task = Some(Box::pin(async move {
                             let mut storage = storage.write().await;
                             let header = Header {
@@ -92,8 +103,17 @@ where
                                 ommers: vec![],
                                 withdrawals: None,
                             };
+                            storage.insert_new_block(header, body);
 
-                            storage.insert_new_block(header, body)
+                            let new_hash = storage.best_hash;
+                            let state = ForkchoiceState {
+                                head_block_hash: new_hash,
+                                finalized_block_hash: new_hash,
+                                safe_block_hash: new_hash,
+                            };
+                            let (tx, _rx) = oneshot::channel();
+                            let _ = to_engine
+                                .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tx));
                         }));
                     }
                     Poll::Pending => {
@@ -105,5 +125,11 @@ where
         }
 
         Poll::Pending
+    }
+}
+
+impl<Pool: TransactionPool> std::fmt::Debug for MiningTask<Pool> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MiningTask").finish_non_exhaustive()
     }
 }

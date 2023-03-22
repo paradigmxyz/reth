@@ -9,7 +9,7 @@ description = "A consensus impl for local testing purposes"
 
 [dependencies]
 # reth
-reth-consensus-common = { path = "../common" }
+reth-beacon-consensus = { path = "../beacon" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-transaction-pool = { path = "../../transaction-pool" }

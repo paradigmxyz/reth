@@ -7,6 +7,12 @@
 
 //! A [Consensus](reth_interfaces::consensus::Consensus) implementation for local testing purposes
 //! that automatically seals blocks.
+//!
+//! The Mining task polls a [], and will return a list of transactions that are ready to be
+//! mined.
+//!
+//! These downloaders poll the miner, assemble the block, and return transactions that are ready to
+//! be mined.
 
 use reth_interfaces::consensus::{Consensus, ConsensusError};
 use reth_primitives::{
@@ -14,13 +20,21 @@ use reth_primitives::{
     SealedHeader, H256, U256,
 };
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
 mod client;
 mod mode;
 mod task;
 
-/// A consensus implementation that follows a strategy for announcing blocks
-#[derive(Debug)]
+pub use crate::client::AutoSealClient;
+pub use mode::{FixedBlockTimeMiner, MiningMode, ReadyTransactionMiner};
+use reth_beacon_consensus::BeaconEngineMessage;
+use reth_transaction_pool::TransactionPool;
+pub use task::MiningTask;
+
+/// A consensus implementation intended for local development and testing purposes.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AutoSealConsensus {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
@@ -56,6 +70,49 @@ impl Consensus for AutoSealConsensus {
 
     fn has_block_reward(&self, _total_difficulty: U256, _difficulty: U256) -> bool {
         false
+    }
+}
+
+/// Builder type for configuring the setup
+pub struct AutoSealBuilder<Pool> {
+    consensus: AutoSealConsensus,
+    pool: Pool,
+    mode: MiningMode,
+    storage: Storage,
+    to_engine: UnboundedSender<BeaconEngineMessage>,
+}
+
+// === impl AutoSealBuilder ===
+
+impl<Pool: TransactionPool> AutoSealBuilder<Pool> {
+    /// Creates a new builder instance to configure all parts.
+    pub fn new(
+        chain_spec: Arc<ChainSpec>,
+        pool: Pool,
+        to_engine: UnboundedSender<BeaconEngineMessage>,
+    ) -> Self {
+        let mode = MiningMode::instant(100, pool.pending_transactions_listener());
+        Self {
+            consensus: AutoSealConsensus::new(chain_spec),
+            pool,
+            mode,
+            storage: Default::default(),
+            to_engine,
+        }
+    }
+
+    /// Sets the [MiningMode] it operates in, default is [MiningMode::Auto]
+    pub fn mode(mut self, mode: MiningMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Consumes the type and returns all components
+    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Pool>) {
+        let Self { consensus, pool, mode, storage, to_engine } = self;
+        let client = AutoSealClient::new(storage.clone());
+        let task = MiningTask::new(mode, to_engine, storage, pool);
+        (consensus, client, task)
     }
 }
 
