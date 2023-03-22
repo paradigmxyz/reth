@@ -483,6 +483,10 @@ impl Command {
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
+                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+            )))
+            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::UNSPECIFIED,
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
             .build(ShareableDatabase::new(db, self.chain.clone()))
@@ -610,5 +614,19 @@ mod tests {
             let args: Command = Command::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
+    }
+
+    #[test]
+    fn parse_discovery_port() {
+        let cmd = Command::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
+        assert_eq!(cmd.network.discovery.port, Some(300));
+    }
+
+    #[test]
+    fn parse_port() {
+        let cmd =
+            Command::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
+        assert_eq!(cmd.network.discovery.port, Some(300));
+        assert_eq!(cmd.network.port, Some(99));
     }
 }

@@ -44,6 +44,10 @@ pub struct NetworkArgs {
     /// NAT resolution method.
     #[arg(long, default_value = "any")]
     pub nat: NatResolver,
+
+    /// Network listening port. default: 30303
+    #[arg(long = "port", value_name = "PORT")]
+    pub port: Option<u16>,
 }
 
 impl NetworkArgs {
@@ -82,18 +86,18 @@ impl NetworkArgs {
 pub struct DiscoveryArgs {
     /// Disable the discovery service.
     #[arg(short, long)]
-    disable_discovery: bool,
+    pub disable_discovery: bool,
 
     /// Disable the DNS discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
-    disable_dns_discovery: bool,
+    pub disable_dns_discovery: bool,
 
     /// Disable Discv4 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
-    disable_discv4_discovery: bool,
+    pub disable_discv4_discovery: bool,
 
-    /// The UDP port to use for P2P discovery/networking.
-    #[arg(long = "discovery.port")]
+    /// The UDP port to use for P2P discovery/networking. default: 30303
+    #[arg(long = "discovery.port", name = "discovery.port", value_name = "DISCOVERY_PORT")]
     pub port: Option<u16>,
 }
 
