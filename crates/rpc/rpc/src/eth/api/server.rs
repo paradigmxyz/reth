@@ -186,7 +186,7 @@ where
         let (res, _env) = self
             .execute_call_at(
                 request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)),
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
                 state_overrides,
             )
             .await?;
@@ -200,7 +200,7 @@ where
         mut request: CallRequest,
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
+        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let access_list = self.create_access_list_at(request.clone(), block_number).await?;
         request.access_list = Some(access_list.clone());
         let gas_used = self.estimate_gas_at(request, block_id).await?;
@@ -216,7 +216,7 @@ where
         Ok(EthApi::estimate_gas_at(
             self,
             request,
-            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)),
+            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
         )
         .await?)
     }
