@@ -805,7 +805,7 @@ where
 
             // withdrawal can be missing
             let shanghai_is_active =
-                chain_spec.fork(Hardfork::Paris).active_at_block(main_block_number);
+                chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(header.timestamp);
             let mut withdrawals = Some(Vec::new());
             if shanghai_is_active {
                 if let Some((block_number, _)) = block_withdrawals.as_ref() {
