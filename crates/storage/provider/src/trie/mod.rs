@@ -6,7 +6,7 @@ use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, TransitionIdAddress},
     tables,
-    transaction::{DbTx, DbTxMut, DbTxMutGAT},
+    transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
 };
 use reth_primitives::{
     keccak256, proofs::EMPTY_ROOT, Account, Address, ProofCheckpoint, StorageEntry,
@@ -463,10 +463,12 @@ where
         };
 
         let mut accounts_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
+        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
+
         let storage_trie_cursor =
             Arc::new(Mutex::new(self.tx.cursor_dup_write::<tables::StoragesTrie>()?));
 
-        let mut first_hashed_address = checkpoint.hashed_address.take();
+        let first_hashed_address = checkpoint.hashed_address.take();
         let mut walker = accounts_cursor.walk(first_hashed_address)?;
         if first_hashed_address.is_some() && checkpoint.storage_root.is_none() {
             walker.next();
@@ -475,6 +477,7 @@ where
         while let Some((hashed_address, account)) = walker.next().transpose()? {
             match self.calculate_storage_root(
                 hashed_address,
+                &mut storage_cursor,
                 storage_trie_cursor.clone(),
                 checkpoint.storage_key.take(),
                 checkpoint.storage_root.take(),
@@ -513,12 +516,11 @@ where
     fn calculate_storage_root(
         &mut self,
         address: H256,
+        storage_cursor: &mut <TX as DbTxGAT<'tx>>::DupCursor<tables::HashedStorage>,
         storage_trie_cursor: StoragesTrieCursor<'tx, TX>,
         next_storage: Option<H256>,
         previous_root: Option<H256>,
     ) -> Result<TrieProgress, TrieError> {
-        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
-
         let hasher = Arc::new(HasherKeccak::new());
         let (mut current_entry, mut trie) = if let Some(entry) = next_storage {
             (
@@ -601,6 +603,8 @@ where
         )?;
 
         let mut accounts_cursor = self.tx.cursor_read::<tables::HashedAccount>()?;
+        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
+
         let storage_trie_cursor =
             Arc::new(Mutex::new(self.tx.cursor_dup_write::<tables::StoragesTrie>()?));
 
@@ -619,6 +623,7 @@ where
             } else {
                 self.calculate_storage_root(
                     hashed_address,
+                    &mut storage_cursor,
                     storage_trie_cursor.clone(),
                     checkpoint.storage_key.take(),
                     checkpoint.storage_root.take(),
@@ -1027,8 +1032,10 @@ mod tests {
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
         let storage_trie_cursor =
             Arc::new(Mutex::new(trie.tx.cursor_dup_write::<tables::StoragesTrie>().unwrap()));
+        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
+
         assert_matches!(
-            trie.calculate_storage_root(hashed_address, storage_trie_cursor, None, None),
+            trie.calculate_storage_root(hashed_address,&mut storage_cursor, storage_trie_cursor, None, None),
             Ok(got) if got.root().unwrap() == expected
         );
     }
