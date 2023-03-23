@@ -1,5 +1,4 @@
-use cita_trie::{PatriciaTrie, Trie};
-use hasher::HasherKeccak;
+use cita_trie::{FixedHasherKeccak as HasherKeccak, PatriciaTrie, Trie};
 use parking_lot::Mutex;
 use reth_codecs::Compact;
 use reth_db::{
@@ -78,19 +77,20 @@ where
     }
 
     /// Insert a map of data into the cache.
-    fn insert_map(&self, kv: &mut BTreeMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
+    fn insert_map(&self, mut kv: Vec<([u8; 32], Vec<u8>)>) -> Result<(), Self::Error> {
+        kv.sort_by(|a, b| a.0.cmp(&b.0));
         let mut cursor = self.accounts_trie_cursor.lock();
 
-        while let Some((key, value)) = kv.pop_first() {
-            cursor.upsert(H256::from_slice(key.as_slice()), value)?;
+        for (key, value) in kv.into_iter() {
+            cursor.upsert(H256::from(key), value)?;
         }
         Ok(())
     }
 
-    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
+    fn remove_batch(&self, keys: &[[u8; 32]]) -> Result<(), Self::Error> {
         let mut cursor = self.accounts_trie_cursor.lock();
         for key in keys {
-            if cursor.seek_exact(H256::from_slice(key.as_slice()))?.is_some() {
+            if cursor.seek_exact(H256::from(key))?.is_some() {
                 cursor.delete_current()?;
             }
         }
@@ -175,11 +175,12 @@ where
     }
 
     /// Insert a map of data into the cache.
-    fn insert_map(&self, kv: &mut BTreeMap<Vec<u8>, Vec<u8>>) -> Result<(), Self::Error> {
+    fn insert_map(&self, mut kv: Vec<([u8; 32], Vec<u8>)>) -> Result<(), Self::Error> {
+        kv.sort_by(|a, b| a.0.cmp(&b.0));
         let mut cursor = self.storages_trie_cursor.lock();
 
-        while let Some((key, node)) = kv.pop_first() {
-            let hash = H256::from_slice(key.as_slice());
+        for (key, node) in kv.into_iter() {
+            let hash = H256::from(key);
 
             if hash == EMPTY_ROOT {
                 continue
@@ -197,10 +198,10 @@ where
         Ok(())
     }
 
-    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
+    fn remove_batch(&self, keys: &[[u8; 32]]) -> Result<(), Self::Error> {
         let mut cursor = self.storages_trie_cursor.lock();
         for key in keys {
-            let hash = H256::from_slice(key.as_slice());
+            let hash = H256::from(key);
 
             if hash == EMPTY_ROOT {
                 continue
