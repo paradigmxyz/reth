@@ -99,7 +99,7 @@ where
             blockchain_tree,
             message_rx: UnboundedReceiverStream::new(message_rx),
             forkchoice_state: None,
-            next_action: BeaconEngineAction::RunPipeline,
+            next_action: BeaconEngineAction::None,
             max_block,
         }
     }
@@ -111,8 +111,8 @@ where
 
     /// Set next action to [BeaconEngineAction::RunPipeline] to indicate that
     /// consensus engine needs to run the pipeline as soon as it becomes available.
-    fn require_pipeline_run(&mut self) {
-        self.next_action = BeaconEngineAction::RunPipeline;
+    fn require_pipeline_run(&mut self, target: PipelineTarget) {
+        self.next_action = BeaconEngineAction::RunPipeline(target);
     }
 
     /// Called to resolve chain forks and ensure that the Execution layer is working with the latest
@@ -132,13 +132,21 @@ where
             }))
         }
 
+        let is_first_forkchoice = self.forkchoice_state.is_none();
         self.forkchoice_state = Some(state);
         let status = if self.is_pipeline_idle() {
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => PayloadStatus::from_status(PayloadStatusEnum::Valid),
                 Err(error) => {
                     error!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
-                    self.require_pipeline_run();
+                    // If this is the first forkchoice received, start downloading from safe block
+                    // hash.
+                    let target = if is_first_forkchoice {
+                        PipelineTarget::Safe
+                    } else {
+                        PipelineTarget::Head
+                    };
+                    self.require_pipeline_run(target);
                     match error {
                         Error::Execution(error @ ExecutorError::BlockPreMerge { .. }) => {
                             PayloadStatus::from_status(PayloadStatusEnum::Invalid {
@@ -208,10 +216,14 @@ where
     fn next_pipeline_state(
         &mut self,
         pipeline: Pipeline<DB, U>,
-        tip: H256,
+        forkchoice_state: ForkchoiceState,
     ) -> PipelineState<DB, U> {
         let next_action = std::mem::take(&mut self.next_action);
-        if next_action.should_run_pipeline() {
+        if let BeaconEngineAction::RunPipeline(target) = next_action {
+            let tip = match target {
+                PipelineTarget::Head => forkchoice_state.head_block_hash,
+                PipelineTarget::Safe => forkchoice_state.safe_block_hash,
+            };
             trace!(target: "consensus::engine", ?tip, "Starting the pipeline");
             PipelineState::Running(pipeline.run_as_fut(self.db.clone(), tip))
         } else {
@@ -227,7 +239,7 @@ where
     ) -> Result<(), reth_interfaces::Error> {
         match self.db.view(|tx| tx.get::<tables::HeaderNumbers>(finalized_hash))?? {
             Some(number) => self.blockchain_tree.restore_canonical_hashes(number)?,
-            None => self.require_pipeline_run(),
+            None => self.require_pipeline_run(PipelineTarget::Head),
         };
         Ok(())
     }
@@ -296,11 +308,10 @@ where
 
             // Lookup the forkchoice state. We can't launch the pipeline without the tip.
             let forkchoice_state = match &this.forkchoice_state {
-                Some(state) => state,
+                Some(state) => *state,
                 None => return Poll::Pending,
             };
 
-            let tip = forkchoice_state.head_block_hash;
             let next_state = match this.pipeline_state.take().expect("pipeline state is set") {
                 PipelineState::Running(mut fut) => {
                     match fut.poll_unpin(cx) {
@@ -331,7 +342,7 @@ where
                             }
 
                             // Get next pipeline state.
-                            this.next_pipeline_state(pipeline, tip)
+                            this.next_pipeline_state(pipeline, forkchoice_state)
                         }
                         Poll::Pending => {
                             this.pipeline_state = Some(PipelineState::Running(fut));
@@ -339,7 +350,9 @@ where
                         }
                     }
                 }
-                PipelineState::Idle(pipeline) => this.next_pipeline_state(pipeline, tip),
+                PipelineState::Idle(pipeline) => {
+                    this.next_pipeline_state(pipeline, forkchoice_state)
+                }
             };
             this.pipeline_state = Some(next_state);
 
@@ -356,13 +369,18 @@ where
 enum BeaconEngineAction {
     #[default]
     None,
-    RunPipeline,
+    /// Contains the type of target hash to pass to the pipeline
+    RunPipeline(PipelineTarget),
 }
 
-impl BeaconEngineAction {
-    fn should_run_pipeline(&self) -> bool {
-        matches!(self, BeaconEngineAction::RunPipeline)
-    }
+/// The target hash to pass to the pipeline.
+#[derive(Debug, Default)]
+enum PipelineTarget {
+    /// Corresponds to the head block hash.
+    #[default]
+    Head,
+    /// Corresponds to the safe block hash.
+    Safe,
 }
 
 #[cfg(test)]
