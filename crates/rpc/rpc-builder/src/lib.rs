@@ -635,6 +635,20 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<Endpoint>,
 }
 
+impl fmt::Debug for RpcServerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RpcServerConfig")
+            .field("http_server_config", &self.http_server_config)
+            .field("http_cors_domains", &self.http_cors_domains)
+            .field("http_addr", &self.http_addr)
+            .field("ws_server_config", &self.ws_server_config)
+            .field("ws_addr", &self.ws_addr)
+            .field("ipc_server_config", &self.ipc_server_config)
+            .field("ipc_endpoint", &self.ipc_endpoint.as_ref().map(|endpoint| endpoint.path()))
+            .finish()
+    }
+}
+
 /// === impl RpcServerConfig ===
 
 impl RpcServerConfig {
@@ -1022,8 +1036,8 @@ impl RpcServer {
     }
 }
 
-impl std::fmt::Debug for RpcServer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for RpcServer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcServer")
             .field("http", &self.http.is_some())
             .field("ws", &self.ws.is_some())
