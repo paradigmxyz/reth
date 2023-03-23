@@ -53,19 +53,22 @@
 //! }
 //! ```
 
+use constants::*;
 use jsonrpsee::{
     core::{server::rpc_module::Methods, Error as RpcError},
     server::{IdProvider, Server, ServerHandle},
     RpcModule,
 };
+use reth_interfaces::events::ChainEventSubscriptions;
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
-    AdminApi, DebugApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider, NetApi, TraceApi,
-    Web3Api,
+    eth::cache::EthStateCache, AdminApi, DebugApi, EthApi, EthFilter, EthPubSub,
+    EthSubscriptionIdProvider, NetApi, TraceApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
+use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
@@ -77,28 +80,24 @@ use std::{
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
-
 use tracing::{instrument, trace};
-
-pub use jsonrpsee::server::ServerBuilder;
-pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 /// Auth server utilities.
 pub mod auth;
+
+/// Cors utilities.
+mod cors;
 
 /// Eth utils
 mod eth;
 
 /// Common RPC constants.
 pub mod constants;
-pub use crate::eth::{EthConfig, EthHandlers};
-use constants::*;
-use reth_interfaces::events::ChainEventSubscriptions;
-use reth_rpc::eth::cache::EthStateCache;
-use reth_tasks::TaskSpawner;
 
-/// Cors utilities.
-mod cors;
+// re-export for convenience
+pub use crate::eth::{EthConfig, EthHandlers};
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
 /// Convenience function for starting a server in one step.
 pub async fn launch<Client, Pool, Network, Tasks, Events>(
