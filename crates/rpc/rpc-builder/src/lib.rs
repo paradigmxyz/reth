@@ -75,6 +75,8 @@ use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 
+use tracing::{instrument, trace};
+
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{Builder as IpcServerBuilder, Endpoint};
 
@@ -983,14 +985,21 @@ impl RpcServer {
         self.ws_local_addr
     }
 
+    /// Returns the [`Endpoint`] of the ipc server if started.
+    pub fn ipc_endpoint(&self) -> Option<&Endpoint> {
+        self.ipc.as_ref().map(|ipc| ipc.endpoint())
+    }
+
     /// Starts the configured server by spawning the servers on the tokio runtime.
     ///
     /// This returns an [RpcServerHandle] that's connected to the server task(s) until the server is
     /// stopped or the [RpcServerHandle] is dropped.
+    #[instrument(name = "start", skip_all, fields(http = ?self.http_local_addr, ws = ?self.ws_local_addr, ipc = ?self.ipc_endpoint().map(|ipc|ipc.path())), target = "rpc", level = "TRACE")]
     pub async fn start(
         self,
         modules: TransportRpcModules<()>,
     ) -> Result<RpcServerHandle, RpcError> {
+        trace!(target: "rpc", "staring RPC server");
         let TransportRpcModules { http, ws, ipc } = modules;
         let mut handle = RpcServerHandle {
             http_local_addr: self.http_local_addr,
