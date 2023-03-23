@@ -8,6 +8,7 @@ description = "Helpers for configuring RPC"
 
 [dependencies]
 # reth
+reth-primitives = { path = "../../primitives" }
 reth-ipc = { path = "../ipc" }
 reth-interfaces = { path = "../../interfaces" }
 reth-network-api = { path = "../../net/network-api" }
@@ -33,7 +34,6 @@ tracing = "0.1"
 
 [dev-dependencies]
 reth-tracing = { path = "../../tracing" }
-reth-primitives = { path = "../../primitives" }
 reth-rpc-api = { path = "../rpc-api", features = ["client"] }
 reth-transaction-pool = { path = "../../transaction-pool", features = ["test-utils"] }
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }

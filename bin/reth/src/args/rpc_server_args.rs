@@ -5,6 +5,7 @@ use clap::Args;
 use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
 use reth_interfaces::events::ChainEventSubscriptions;
 use reth_network_api::{NetworkInfo, Peers};
+use reth_primitives::ChainSpec;
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
@@ -17,6 +18,7 @@ use reth_transaction_pool::TransactionPool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::Path,
+    sync::Arc,
 };
 
 /// Parameters for configuring the rpc more granularity via CLI
@@ -149,6 +151,7 @@ impl RpcServerArgs {
         pool: Pool,
         network: Network,
         executor: Tasks,
+        chain_spec: Arc<ChainSpec>,
         handle: EngineApiHandle,
     ) -> Result<ServerHandle, RpcError>
     where
@@ -173,6 +176,7 @@ impl RpcServerArgs {
             pool,
             network,
             executor,
+            chain_spec,
             handle,
             socket_address,
             secret,
