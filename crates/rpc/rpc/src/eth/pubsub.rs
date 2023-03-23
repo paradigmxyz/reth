@@ -3,7 +3,8 @@
 use crate::eth::logs_utils;
 use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
-use reth_interfaces::{events::ChainEventSubscriptions, sync::SyncStateProvider};
+use reth_interfaces::events::ChainEventSubscriptions;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{filter::FilteredParams, BlockId, TxHash};
 use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
@@ -60,7 +61,7 @@ where
     Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
-    Network: SyncStateProvider + Clone + 'static,
+    Network: NetworkInfo + Clone + 'static,
 {
     /// Handler for `eth_subscribe`
     fn subscribe(
@@ -91,7 +92,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
     Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
     Events: ChainEventSubscriptions + Clone + 'static,
-    Network: SyncStateProvider + Clone + 'static,
+    Network: NetworkInfo + Clone + 'static,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -201,7 +202,7 @@ impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network
 where
     Client: BlockProvider + EvmEnvProvider + 'static,
     Events: ChainEventSubscriptions + 'static,
-    Network: SyncStateProvider + 'static,
+    Network: NetworkInfo + 'static,
 {
     /// Returns a stream that yields all new RPC blocks.
     fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
