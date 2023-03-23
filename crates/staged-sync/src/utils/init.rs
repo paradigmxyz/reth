@@ -103,6 +103,9 @@ pub fn insert_genesis_state<DB: Database>(
         // insert plain storages
         if let Some(storage) = &account.storage {
             for (&key, &value) in storage {
+                if value.is_zero() {
+                    continue
+                }
                 storage_cursor.upsert(*address, StorageEntry { key, value: value.into() })?
             }
         }
