@@ -9,12 +9,14 @@ use clap::{Parser, Subcommand};
 use reth_db::mdbx::{Env, EnvKind, WriteMap};
 use reth_discv4::NatResolver;
 use reth_interfaces::p2p::bodies::client::BodiesClient;
+use reth_network::config::rng_secret_key;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, NodeRecord};
 use reth_provider::ShareableDatabase;
 use reth_staged_sync::{
     utils::{chainspec::chain_spec_value_parser, hash_or_num_value_parser},
     Config,
 };
+use secp256k1::SecretKey;
 use std::sync::Arc;
 
 /// `reth p2p` command
@@ -40,6 +42,16 @@ pub struct Command {
         value_parser = chain_spec_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    /// Secret key to use for this node.
+    /// 
+    /// This also will deterministically set the peer ID.
+    #[arg(
+        long,
+        value_name = "SECRET_KEY",
+        verbatim_doc_comment,
+    )]
+    secret_key: Option<SecretKey>,
 
     /// Disable the discovery service.
     #[command(flatten)]
@@ -98,8 +110,10 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
+        let secret_key = self.secret_key.unwrap_or(rng_secret_key());
+
         let mut network_config_builder =
-            config.network_config(self.nat, None).chain_spec(self.chain.clone());
+            config.network_config(self.nat, None, secret_key).chain_spec(self.chain.clone());
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 

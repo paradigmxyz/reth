@@ -4470,6 +4470,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
+ "secp256k1",
  "serde",
  "serde_json",
  "shellexpand",

@@ -39,7 +39,7 @@ use reth_interfaces::{
     test_utils::TestChainEventSubscriptions,
 };
 use reth_network::{
-    error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
+     config::rng_secret_key, error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, TxHash, H256};
@@ -60,6 +60,7 @@ use reth_stages::{
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
+use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
@@ -106,6 +107,16 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    /// Secret key to use for this node.
+    /// 
+    /// This also will deterministically set the peer ID.
+    #[arg(
+        long,
+        value_name = "SECRET_KEY",
+        verbatim_doc_comment,
+    )]
+    secret_key: Option<SecretKey>,
 
     /// Enable Prometheus metrics.
     ///
@@ -203,7 +214,7 @@ impl Command {
 
         info!(target: "reth::cli", "Connecting to P2P network");
         let network_config =
-            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
+            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone(), self.secret_key);
         let network = self
             .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
             .await?;
@@ -504,7 +515,7 @@ impl Command {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -512,7 +523,7 @@ impl Command {
             match get_single_header(fetch_client.clone(), tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
@@ -526,11 +537,14 @@ impl Command {
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
+        secret_key: Option<SecretKey>
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
+        let secret_key = secret_key.unwrap_or(rng_secret_key());
+
         let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
-            .network_config(config, self.chain.clone())
+            .network_config(config, self.chain.clone(), secret_key)
             .with_task_executor(Box::new(executor))
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
