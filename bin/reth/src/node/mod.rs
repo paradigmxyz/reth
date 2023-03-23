@@ -32,6 +32,7 @@ use reth_interfaces::{
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
     sync::SyncStateUpdater,
+    test_utils::TestChainEventSubscriptions,
 };
 use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
@@ -208,6 +209,8 @@ impl Command {
                 transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
+                // TODO use real implementation
+                TestChainEventSubscriptions::default(),
             )
             .await?;
         info!(target: "reth::cli", "Started RPC server");
