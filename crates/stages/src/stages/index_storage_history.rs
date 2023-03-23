@@ -54,7 +54,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: to_block, done: true })
+        Ok(ExecOutput { stage_progress: to_block, done: to_block == previous_stage_progress })
     }
 
     /// Unwind the stage.
