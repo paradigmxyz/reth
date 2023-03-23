@@ -237,7 +237,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
             if stage_progress < to {
                 debug!(target: "sync::pipeline", from = %stage_progress, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
-                return Ok(())
+                continue
             }
 
             debug!(target: "sync::pipeline", from = %stage_progress, %to, ?bad_block, "Starting unwind");
