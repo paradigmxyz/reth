@@ -314,11 +314,17 @@ where
             None => return Err(EthApiError::Unsupported("Previous receipt not found")),
         };
 
+        let len = res_receipt.logs.len() as u64;
         res_receipt.logs.iter_mut().for_each(|log| {
+            let mut _index = 0;
             log.transaction_hash = Some(meta.tx_hash);
             log.transaction_index = Some(U256::from(meta.index));
             log.block_hash = Some(meta.block_hash);
             log.block_number = Some(U256::from(meta.block_number));
+            log.log_index = Some(U256::from(meta.index * (len -1) +  _index));
+            log.transaction_log_index = Some(U256::from(_index));
+            log.removed = false;
+            _index += 1;
         });
 
         match tx.transaction.kind() {
