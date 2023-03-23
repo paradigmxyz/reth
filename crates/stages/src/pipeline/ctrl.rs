@@ -25,4 +25,8 @@ impl ControlFlow {
     pub fn should_continue(&self) -> bool {
         matches!(self, ControlFlow::Continue { .. } | ControlFlow::NoProgress { .. })
     }
+
+    pub fn is_unwind(&self) -> bool {
+        matches!(self, ControlFlow::Unwind { .. })
+    }
 }
