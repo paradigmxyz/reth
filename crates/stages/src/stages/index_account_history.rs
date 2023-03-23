@@ -53,7 +53,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: to_block, done: true })
+        Ok(ExecOutput { stage_progress: to_block, done: to_block == previous_stage_progress })
     }
 
     /// Unwind the stage.
