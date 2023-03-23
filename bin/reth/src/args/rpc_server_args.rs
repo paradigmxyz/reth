@@ -213,7 +213,7 @@ impl RpcServerArgs {
                 self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
                 self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
             );
-            config = config.with_ws_address(socket_address).with_http(ServerBuilder::new());
+            config = config.with_ws_address(socket_address).with_ws(ServerBuilder::new());
         }
 
         if !self.ipcdisable {
