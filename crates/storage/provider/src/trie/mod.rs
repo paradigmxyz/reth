@@ -523,31 +523,41 @@ where
         previous_root: Option<H256>,
     ) -> Result<TrieProgress, TrieError> {
         let hasher = Arc::new(HasherKeccak::new());
-        let (mut current_entry, mut trie) = if let Some(entry) = next_storage {
-            (
-                storage_cursor.seek_by_key_subkey(address, entry)?.filter(|e| e.key == entry),
-                PatriciaTrie::from(
-                    Arc::new(DupHashDatabaseMut::from_root(
-                        storage_trie_cursor.clone(),
-                        address,
-                        previous_root.expect("is some"),
-                    )?),
-                    hasher,
-                    previous_root.expect("is some").as_bytes(),
-                )?,
-            )
+        let previous_root = previous_root.unwrap_or(EMPTY_ROOT);
+
+        let has_checkpoint = next_storage.is_some();
+        let mut current_entry = if let Some(entry) = next_storage {
+            storage_cursor.seek_by_key_subkey(address, entry)?.filter(|e| e.key == entry)
         } else {
-            (
-                storage_cursor.seek_by_key_subkey(address, H256::zero())?,
-                PatriciaTrie::new_with_hash(
-                    Arc::new(DupHashDatabaseMut::new(storage_trie_cursor.clone(), address)?),
-                    hasher,
-                    EMPTY_ROOT.as_slice().to_vec(),
-                ),
-            )
+            storage_cursor.seek_by_key_subkey(address, H256::zero())?
         };
 
-        let previous_root = previous_root.unwrap_or(EMPTY_ROOT);
+        if current_entry.is_none() {
+            return Ok(TrieProgress::Complete(self.replace_storage_root(
+                EMPTY_ROOT,
+                storage_trie_cursor,
+                address,
+                previous_root,
+            )?))
+        }
+
+        let mut trie = if has_checkpoint {
+            PatriciaTrie::from(
+                Arc::new(DupHashDatabaseMut::<TX>::from_root(
+                    storage_trie_cursor.clone(),
+                    address,
+                    previous_root,
+                )?),
+                hasher,
+                previous_root.as_bytes(),
+            )?
+        } else {
+            PatriciaTrie::new_with_hash(
+                Arc::new(DupHashDatabaseMut::<TX>::new(storage_trie_cursor.clone(), address)?),
+                hasher,
+                EMPTY_ROOT.as_slice().to_vec(),
+            )
+        };
 
         while let Some(StorageEntry { key: storage_key, value }) = current_entry {
             let out = encode_fixed_size(&value).to_vec();
@@ -560,7 +570,7 @@ where
                 if threshold {
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         storage_root: Some(self.replace_storage_root(
-                            trie,
+                            H256::from_slice(trie.root()?.as_slice()),
                             storage_trie_cursor,
                             address,
                             previous_root,
@@ -573,7 +583,7 @@ where
         }
 
         Ok(TrieProgress::Complete(self.replace_storage_root(
-            trie,
+            H256::from_slice(trie.root()?.as_slice()),
             storage_trie_cursor,
             address,
             previous_root,
@@ -677,8 +687,17 @@ where
         next_storage: Option<H256>,
     ) -> Result<TrieProgress, TrieError> {
         let mut hashed_storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
+        if hashed_storage_cursor.seek_by_key_subkey(address, H256::zero())?.is_none() {
+            return Ok(TrieProgress::Complete(self.replace_storage_root(
+                EMPTY_ROOT,
+                storage_trie_cursor,
+                address,
+                previous_root,
+            )?))
+        }
+
         let mut trie = PatriciaTrie::new(
-            Arc::new(DupHashDatabaseMut::from_root(
+            Arc::new(DupHashDatabaseMut::<TX>::from_root(
                 storage_trie_cursor.clone(),
                 address,
                 previous_root,
@@ -699,7 +718,7 @@ where
                 if self.has_hit_threshold() {
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         storage_root: Some(self.replace_storage_root(
-                            trie,
+                            H256::from_slice(trie.root()?.as_slice()),
                             storage_trie_cursor,
                             address,
                             previous_root,
@@ -714,7 +733,7 @@ where
         }
 
         Ok(TrieProgress::Complete(self.replace_storage_root(
-            trie,
+            H256::from_slice(trie.root()?.as_slice()),
             storage_trie_cursor,
             address,
             previous_root,
@@ -828,13 +847,11 @@ where
     /// Finds the most recent storage trie root and removes the previous one if applicable.
     fn replace_storage_root(
         &self,
-        mut trie: PatriciaTrie<DupHashDatabaseMut<'_, TX>, HasherKeccak>,
+        new_root: H256,
         storage_trie_cursor: StoragesTrieCursor<'tx, TX>,
         address: H256,
         previous_root: H256,
     ) -> Result<H256, TrieError> {
-        let new_root = H256::from_slice(trie.root()?.as_slice());
-
         if new_root != previous_root && previous_root != EMPTY_ROOT {
             let mut trie_cursor = storage_trie_cursor.lock();
             if trie_cursor
