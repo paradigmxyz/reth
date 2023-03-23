@@ -368,11 +368,14 @@ where
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
 
-                    for pooled_tx in self
-                        .pool
-                        .pooled_transactions()
-                        .into_iter()
-                        .take(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT)
+                    let pooled_txs = self.pool.pooled_transactions();
+                    if pooled_txs.is_empty() {
+                        // do not send a message if there are no transactions in the pool
+                        return
+                    }
+
+                    for pooled_tx in
+                        pooled_txs.into_iter().take(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT)
                     {
                         peer.transactions.insert(*pooled_tx.hash());
                         msg_builder.push_pooled(pooled_tx);
