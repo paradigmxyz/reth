@@ -29,4 +29,5 @@ enum StageEnum {
     Bodies,
     Senders,
     Execution,
+    Merkle,
 }

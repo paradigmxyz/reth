@@ -72,6 +72,18 @@ impl Command {
                     Ok::<_, eyre::Error>(())
                 })??;
             }
+            StageEnum::Merkle => {
+                tool.db.update(|tx| {
+                    tx.clear::<tables::AccountsTrie>()?;
+                    tx.clear::<tables::StoragesTrie>()?;
+                    tx.put::<tables::SyncStageProgress>(
+                        // TODO: Extract to constant in `TrieLoader` in trie/mod.rs
+                        "TrieLoader".to_string(),
+                        Vec::new(),
+                    )?;
+                    Ok::<_, eyre::Error>(())
+                })??;
+            }
             _ => {
                 info!("Nothing to do for stage {:?}", self.stage);
             }
