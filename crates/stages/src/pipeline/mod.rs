@@ -235,12 +235,12 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
             let mut stage_progress = stage_id.get_progress(tx.deref())?.unwrap_or_default();
             if stage_progress < to {
-                debug!(from = %stage_progress, %to, "Unwind point too far for stage");
+                debug!(target: "sync::pipeline", from = %stage_progress, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
                 return Ok(())
             }
 
-            debug!(from = %stage_progress, %to, ?bad_block, "Starting unwind");
+            debug!(target: "sync::pipeline", from = %stage_progress, %to, ?bad_block, "Starting unwind");
             while stage_progress > to {
                 let input = UnwindInput { stage_progress, unwind_to: to, bad_block };
                 self.listeners.notify(PipelineEvent::Unwinding { stage_id, input });
