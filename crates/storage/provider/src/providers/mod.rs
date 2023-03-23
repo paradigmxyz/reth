@@ -322,10 +322,14 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
             if let Some(number) = self.block_number_for_id(id)? {
-                return Ok(self
-                    .db
-                    .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
-                    .map(|w| w.withdrawals))
+                // If we are past shanghai, then all blocks should have a withdrawal list, even if
+                // empty
+                return Ok(Some(
+                    self.db
+                        .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
+                        .map(|w| w.withdrawals)
+                        .unwrap_or_default(),
+                ))
             }
         }
         Ok(None)
