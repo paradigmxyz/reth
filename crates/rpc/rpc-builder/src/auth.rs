@@ -4,7 +4,7 @@ use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{
-    eth::cache::EthStateCache, AuthLayer, EngineApi, EthApi, JwtAuthValidator, JwtSecret,
+    eth::cache::EthStateCache, AuthLayer, EngineApi, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_engine_api::EngineApiHandle;
@@ -38,20 +38,16 @@ where
 {
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
-    launch_with_eth_api(
-        EthApi::new(client, pool, network, eth_cache),
-        chain_spec,
-        handle,
-        socket_addr,
-        secret,
-    )
-    .await
+    let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache);
+    let eth_filter = EthFilter::new(client, pool);
+    launch_with_eth_api(eth_api, chain_spec, eth_filter, handle, socket_addr, secret).await
 }
 
 /// Configure and launch an auth server with existing EthApi implementation.
 pub async fn launch_with_eth_api<Client, Pool, Network>(
     eth_api: EthApi<Client, Pool, Network>,
     chain_spec: Arc<ChainSpec>,
+    eth_filter: EthFilter<Client, Pool>,
     handle: EngineApiHandle,
     socket_addr: SocketAddr,
     secret: JwtSecret,
@@ -71,6 +67,7 @@ where
     let mut module = RpcModule::new(());
     module.merge(EngineApi::new(chain_spec, handle).into_rpc()).expect("No conflicting methods");
     module.merge(eth_api.into_rpc()).expect("No conflicting methods");
+    module.merge(eth_filter.into_rpc()).expect("No conflicting methods");
 
     // Create auth middleware.
     let middleware =
