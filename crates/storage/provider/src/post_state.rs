@@ -269,6 +269,10 @@ impl PostState {
 
     /// Extend this [PostState] with the changes in another [PostState].
     pub fn extend(&mut self, other: PostState) {
+        if other.changes.is_empty() {
+            return
+        }
+
         self.changes.reserve(other.changes.len());
 
         let mut next_transition_id = self.current_transition_id;
