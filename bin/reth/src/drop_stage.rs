@@ -13,7 +13,7 @@ use reth_db::{
 };
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
-use reth_stages::stages::{EXECUTION, MERKLE_EXECUTION};
+use reth_stages::stages::EXECUTION;
 use std::sync::Arc;
 use tracing::info;
 
@@ -77,7 +77,8 @@ impl Command {
                     tx.clear::<tables::AccountsTrie>()?;
                     tx.clear::<tables::StoragesTrie>()?;
                     tx.put::<tables::SyncStageProgress>(
-                        MERKLE_EXECUTION.0.to_string(),
+                        // TODO: Extract to constant in `TrieLoader` in trie/mod.rs
+                        "TrieLoader".to_string(),
                         Vec::new(),
                     )?;
                     Ok::<_, eyre::Error>(())
