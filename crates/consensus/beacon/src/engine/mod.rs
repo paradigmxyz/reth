@@ -321,12 +321,17 @@ where
                             }
 
                             match result {
-                                Ok(_) => {
-                                    // Terminate the sync early if it's reached the maximum user
-                                    // configured block.
-                                    let minimum_pipeline_progress = *pipeline.minimum_progress();
-                                    if this.has_reached_max_block(minimum_pipeline_progress) {
-                                        return Poll::Ready(Ok(()))
+                                Ok(ctrl) => {
+                                    if ctrl.is_unwind() {
+                                        this.require_pipeline_run(PipelineTarget::Head);
+                                    } else {
+                                        // Terminate the sync early if it's reached the maximum user
+                                        // configured block.
+                                        let minimum_pipeline_progress =
+                                            *pipeline.minimum_progress();
+                                        if this.has_reached_max_block(minimum_pipeline_progress) {
+                                            return Poll::Ready(Ok(()))
+                                        }
                                     }
                                 }
                                 // Any pipeline error at this point is fatal.
