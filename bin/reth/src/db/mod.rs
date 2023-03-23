@@ -172,6 +172,7 @@ impl Command {
                     BlockTransitionIndex,
                     TxTransitionIndex,
                     SyncStage,
+                    SyncStageProgress,
                     Transactions
                 ]);
             }
