@@ -321,7 +321,7 @@ where
             log.transaction_index = Some(U256::from(meta.index));
             log.block_hash = Some(meta.block_hash);
             log.block_number = Some(U256::from(meta.block_number));
-            log.log_index = Some(U256::from(meta.index * (len -1) +  _index));
+            log.log_index = Some(U256::from(meta.index * (len - 1) + _index));
             log.transaction_log_index = Some(U256::from(_index));
             log.removed = false;
             _index += 1;
