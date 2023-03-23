@@ -138,7 +138,7 @@ where
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => PayloadStatus::from_status(PayloadStatusEnum::Valid),
                 Err(error) => {
-                    error!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
+                    warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
                     // If this is the first forkchoice received, start downloading from safe block
                     // hash.
                     let target = if is_first_forkchoice {
@@ -174,6 +174,7 @@ where
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
     fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
+        trace!(target: "consensus::engine", block_hash = ?payload.block_hash, block_number = payload.block_number.as_u64(), "Received new payload");
         let block = match SealedBlock::try_from(payload) {
             Ok(block) => block,
             Err(error) => {
