@@ -21,6 +21,7 @@ use reth_rpc_types::{
     Work,
 };
 use reth_transaction_pool::TransactionPool;
+
 use serde_json::Value;
 use std::collections::BTreeMap;
 use tracing::trace;
@@ -160,8 +161,9 @@ where
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, _hash: H256) -> Result<Option<TransactionReceipt>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
+        Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
 
     /// Handler for: `eth_getBalance`

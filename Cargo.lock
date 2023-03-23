@@ -5045,6 +5045,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "revm-primitives",
  "schnellru",
  "secp256k1",
  "serde",
