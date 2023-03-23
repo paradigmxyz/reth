@@ -166,7 +166,7 @@ where
             None => return Ok(None),
         };
 
-        Self::build_transaction_receipt(tx, meta, receipt).map(Some)
+        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
     }
 }
 
@@ -269,7 +269,8 @@ where
     /// Helper function for `eth_getTransactionReceipt`
     ///
     /// Returns the receipt
-    pub(crate) fn build_transaction_receipt(
+    pub(crate) async fn build_transaction_receipt(
+        &self,
         tx: TransactionSigned,
         meta: TransactionMeta,
         mut receipt: Receipt,
@@ -285,7 +286,7 @@ where
             from: transaction.signer(),
             to: None,
             cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
-            gas_used: Some(U256::from(0)),
+            gas_used: None,
             contract_address: None,
             logs: std::mem::take(&mut receipt.logs).into_iter().map(Log::from_primitive).collect(),
             effective_gas_price: U128::from(0),
@@ -295,6 +296,30 @@ where
             logs_bloom: receipt.bloom_slow(),
             status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         };
+
+        // TODO maybe add a helper function for this
+        let prev_tx_hash = match self
+            .transaction_by_block_and_tx_index(
+                meta.block_number,
+                ((meta.index - 1) as usize).into(),
+            )
+            .await?
+        {
+            Some(tx) => tx.hash,
+            None => return Err(EthApiError::Unsupported("Invalid Block or Transaction index")),
+        };
+
+        let prev_receipt = match self.client().receipt_by_hash(prev_tx_hash)? {
+            Some(recpt) => recpt,
+            None => return Err(EthApiError::Unsupported("Previous receipt not found")),
+        };
+
+        res_receipt.logs.iter_mut().for_each(|log| {
+            log.transaction_hash = Some(meta.tx_hash);
+            log.transaction_index = Some(U256::from(meta.index));
+            log.block_hash = Some(meta.block_hash);
+            log.block_number = Some(U256::from(meta.block_number));
+        });
 
         match tx.transaction.kind() {
             Create => {
@@ -310,26 +335,38 @@ where
         }
 
         match tx.transaction {
-            PrimitiveTransaction::Legacy(TxLegacy { gas_limit, gas_price, .. }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
+            PrimitiveTransaction::Legacy(TxLegacy { gas_price, .. }) => {
+                // gas_used = CumulativeGasUsed(this_tx) - CumulativeGasUsed(tx_index - 1)
+                res_receipt.gas_used = Some(
+                    U256::from(receipt.cumulative_gas_used)
+                        .checked_sub(U256::from(prev_receipt.cumulative_gas_used))
+                        .ok_or(EthApiError::Unsupported("Overflow occured"))?,
+                );
+
                 res_receipt.transaction_type = U256::from(0);
                 res_receipt.effective_gas_price = U128::from(gas_price);
             }
-            PrimitiveTransaction::Eip2930(TxEip2930 { gas_limit, gas_price, .. }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
+            PrimitiveTransaction::Eip2930(TxEip2930 { gas_price, .. }) => {
+                // gas_used = CumulativeGasUsed(this_tx) - CumulativeGasUsed(tx_index - 1)
+                res_receipt.gas_used = Some(
+                    U256::from(receipt.cumulative_gas_used)
+                        .checked_sub(U256::from(prev_receipt.cumulative_gas_used))
+                        .ok_or(EthApiError::Unsupported("Overflow occured"))?,
+                );
                 res_receipt.transaction_type = U256::from(1);
                 res_receipt.effective_gas_price = U128::from(gas_price);
             }
             PrimitiveTransaction::Eip1559(TxEip1559 {
-                gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 ..
             }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
+                // gas_used = CumulativeGasUsed(this_tx) - CumulativeGasUsed(tx_index - 1)
+                res_receipt.gas_used = Some(
+                    U256::from(receipt.cumulative_gas_used)
+                        .checked_sub(U256::from(prev_receipt.cumulative_gas_used))
+                        .ok_or(EthApiError::Unsupported("Overflow occured"))?,
+                );
                 res_receipt.transaction_type = U256::from(2);
                 res_receipt.effective_gas_price =
                     U128::from(max_fee_per_gas + max_priority_fee_per_gas)
