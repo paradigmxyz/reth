@@ -4483,9 +4483,21 @@ dependencies = [
 name = "reth-beacon-consensus"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
+ "futures",
  "reth-consensus-common",
+ "reth-db",
+ "reth-executor",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
+ "reth-rpc-types",
+ "reth-stages",
+ "reth-tracing",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -5101,12 +5113,12 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "futures",
+ "reth-beacon-consensus",
  "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-rlp",
  "reth-rpc-types",
  "thiserror",
  "tokio",
@@ -5118,6 +5130,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "jsonrpsee-types",
  "lru 0.9.0",
  "rand 0.8.5",

@@ -1,4 +1,5 @@
 use crate::{error::*, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput};
+use futures_util::Future;
 use reth_db::database::Database;
 use reth_interfaces::sync::{SyncState, SyncStateUpdater};
 use reth_primitives::{BlockNumber, H256};
@@ -6,6 +7,7 @@ use reth_provider::Transaction;
 use std::{
     fmt::{Debug, Formatter},
     ops::Deref,
+    pin::Pin,
     sync::Arc,
 };
 use tokio::sync::watch;
@@ -86,6 +88,13 @@ pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
     metrics: Metrics,
 }
 
+/// The future that returns the owned pipeline and the result of the pipeline run. See
+/// [Pipeline::run_as_fut].
+pub type PipelineFut<DB, U> = Pin<Box<dyn Future<Output = PipelineWithResult<DB, U>> + Send>>;
+
+/// The pipeline type itself with the result of [Pipeline::run_as_fut]
+pub type PipelineWithResult<DB, U> = (Pipeline<DB, U>, Result<ControlFlow, PipelineError>);
+
 impl<DB: Database, U: SyncStateUpdater> Default for Pipeline<DB, U> {
     fn default() -> Self {
         Self {
@@ -109,10 +118,19 @@ impl<DB: Database, U: SyncStateUpdater> Debug for Pipeline<DB, U> {
     }
 }
 
-impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
+impl<DB, U> Pipeline<DB, U>
+where
+    DB: Database + 'static,
+    U: SyncStateUpdater + 'static,
+{
     /// Construct a pipeline using a [`PipelineBuilder`].
     pub fn builder() -> PipelineBuilder<DB, U> {
         PipelineBuilder::default()
+    }
+
+    /// Return the minimum pipeline progress
+    pub fn minimum_progress(&self) -> &Option<u64> {
+        &self.progress.minimum_progress
     }
 
     /// Set tip for reverse sync.
@@ -138,13 +156,27 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
         }
     }
 
+    /// Consume the pipeline and run it. Return the pipeline and its result as a future.
+    pub fn run_as_fut(mut self, db: Arc<DB>, tip: H256) -> PipelineFut<DB, U> {
+        // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
+        // updating metrics.
+        self.register_metrics(db.clone());
+
+        Box::pin(async move {
+            self.set_tip(tip);
+            let result = self.run_loop(db).await;
+            trace!(target: "sync::pipeline", ?tip, ?result, "Pipeline finished");
+            (self, result)
+        })
+    }
+
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
     pub async fn run(&mut self, db: Arc<DB>) -> Result<(), PipelineError> {
         self.register_metrics(db.clone());
 
         loop {
-            let next_action = self.run_loop(db.as_ref()).await?;
+            let next_action = self.run_loop(db.clone()).await?;
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
@@ -172,7 +204,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
     /// If any stage is unsuccessful at execution, we proceed to
     /// unwind. This will undo the progress across the entire pipeline
     /// up to the block that caused the error.
-    async fn run_loop(&mut self, db: &DB) -> Result<ControlFlow, PipelineError> {
+    async fn run_loop(&mut self, db: Arc<DB>) -> Result<ControlFlow, PipelineError> {
         let mut previous_stage = None;
         for stage_index in 0..self.stages.len() {
             let stage = &self.stages[stage_index];
@@ -186,7 +218,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
 
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
             let next = self
-                .execute_stage_to_completion(db, previous_stage, stage_index)
+                .execute_stage_to_completion(db.as_ref(), previous_stage, stage_index)
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
@@ -202,7 +234,7 @@ impl<DB: Database, U: SyncStateUpdater> Pipeline<DB, U> {
                     if let Some(ref updater) = self.sync_state_updater {
                         updater.update_sync_state(SyncState::Downloading { target_block: target });
                     }
-                    self.unwind(db, target, bad_block).await?;
+                    self.unwind(db.as_ref(), target, bad_block).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }

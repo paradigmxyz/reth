@@ -2,7 +2,9 @@
 use chain::{BlockChainId, Chain, ForkBlock};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{
+    BlockHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders, U256,
+};
 use reth_provider::{
     providers::ChainState, ExecutorFactory, HeaderProvider, StateProviderFactory, Transaction,
 };
@@ -84,7 +86,7 @@ pub enum BlockStatus {
     /// If block validation is valid and block extends canonical chain.
     /// In BlockchainTree sense it forks on canonical tip.
     Valid,
-    /// If block validation is valid but block does not extend canonical chain
+    /// If the block is valid, but it does not extend canonical chain
     /// (It is side chain) or hasn't been fully validated but ancestors of a payload are known.
     Accepted,
     /// If blocks is not connected to canonical chain.
@@ -139,6 +141,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         })
     }
 
+    /// Return the tip of the canonical chain
+    pub fn canonical_tip_number(&self) -> Option<BlockNumber> {
+        self.block_indices.canonical_chain().last_key_value().map(|(number, _)| *number)
+    }
+
     /// Create a new sidechain by forking the given chain, or append the block if the parent block
     /// is the top of the given chain.
     fn fork_side_chain(
@@ -162,11 +169,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         let canonical_block_hashes = self.block_indices.canonical_chain();
 
         // get canonical tip
-        let (_, canonical_tip_hash) =
-            canonical_block_hashes.last_key_value().map(|(i, j)| (*i, *j)).unwrap_or_default();
+        let canonical_tip =
+            canonical_block_hashes.last_key_value().map(|(_, hash)| *hash).unwrap_or_default();
 
         let db = self.externals.shareable_db();
-        let provider = if canonical_fork.hash == canonical_tip_hash {
+        let provider = if canonical_fork.hash == canonical_tip {
             ChainState::boxed(db.latest()?)
         } else {
             ChainState::boxed(db.history_by_block_number(canonical_fork.number)?)
@@ -209,26 +216,34 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<BlockStatus, Error> {
-        let canonical_block_hashes = self.block_indices.canonical_chain();
-        let (_, canonical_tip) =
-            canonical_block_hashes.last_key_value().map(|(i, j)| (*i, *j)).unwrap_or_default();
-
-        // create state provider
         let db = self.externals.shareable_db();
-        let parent_header = db
-            .header(&block.parent_hash)?
-            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
 
-        let block_status;
-        let provider = if block.parent_hash == canonical_tip {
-            block_status = BlockStatus::Valid;
-            ChainState::boxed(db.latest()?)
+        // Validate that the block is post merge
+        let parent_td = db
+            .header_td(&block.parent_hash)?
+            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?;
+        // Pass the parent total difficulty to short-circuit unnecessary calculations.
+        if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(parent_td, U256::ZERO) {
+            return Err(ExecError::BlockPreMerge { hash: block.hash }.into())
+        }
+
+        // Create state provider
+        let canonical_block_hashes = self.block_indices.canonical_chain();
+        let canonical_tip =
+            canonical_block_hashes.last_key_value().map(|(_, hash)| *hash).unwrap_or_default();
+        let (block_status, provider) = if block.parent_hash == canonical_tip {
+            (BlockStatus::Valid, ChainState::boxed(db.latest()?))
         } else {
-            block_status = BlockStatus::Accepted;
-            ChainState::boxed(db.history_by_block_number(block.number - 1)?)
+            (
+                BlockStatus::Accepted,
+                ChainState::boxed(db.history_by_block_number(block.number - 1)?),
+            )
         };
 
-        let parent_header = parent_header.seal(block.parent_hash);
+        let parent_header = db
+            .header(&block.parent_hash)?
+            .ok_or(ExecError::CanonicalChain { block_hash: block.parent_hash })?
+            .seal(block.parent_hash);
         let chain = Chain::new_canonical_fork(
             &block,
             &parent_header,
@@ -477,13 +492,20 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
     pub fn make_canonical(&mut self, block_hash: &BlockHash) -> Result<(), Error> {
-        let chain_id = if let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) {
-            chain_id
-        } else {
-            // If block is already canonical don't return error.
-            if self.block_indices.is_block_hash_canonical(block_hash) {
-                return Ok(())
+        // If block is already canonical don't return error.
+        if self.block_indices.is_block_hash_canonical(block_hash) {
+            let td = self
+                .externals
+                .shareable_db()
+                .header_td(block_hash)?
+                .ok_or(ExecError::MissingTotalDifficulty { hash: *block_hash })?;
+            if !self.externals.chain_spec.fork(Hardfork::Paris).active_at_ttd(td, U256::ZERO) {
+                return Err(ExecError::BlockPreMerge { hash: *block_hash }.into())
             }
+            return Ok(())
+        }
+
+        let Some(chain_id) = self.block_indices.get_blocks_chain_id(block_hash) else {
             return Err(ExecError::BlockHashNotFoundInChain { block_hash: *block_hash }.into())
         };
         let chain = self.chains.remove(&chain_id).expect("To be present");
@@ -694,7 +716,7 @@ mod tests {
         let (mut block2, exec2) = data.blocks[1].clone();
         block2.number = 12;
 
-        // test pops execution results from vector, so order is from last to first.ß
+        // test pops execution results from vector, so order is from last to first.
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);
 
         // last finalized block would be number 9.
