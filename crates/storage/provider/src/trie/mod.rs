@@ -488,7 +488,7 @@ where
 
                     let mut out = Vec::new();
                     Encodable::encode(&value, &mut out);
-                    trie.insert(hashed_address.as_bytes().to_vec(), out)?;
+                    trie.insert(hashed_address.as_bytes(), out)?;
 
                     if self.has_hit_threshold() {
                         return self.save_account_checkpoint(
@@ -551,7 +551,7 @@ where
 
         while let Some(StorageEntry { key: storage_key, value }) = current_entry {
             let out = encode_fixed_size(&value).to_vec();
-            trie.insert(storage_key.to_vec(), out)?;
+            trie.insert(&storage_key.to_fixed_bytes(), out)?;
             // Should be able to use walk_dup, but any call to next() causes an assert fail in
             // mdbx.c
             current_entry = storage_cursor.next_dup()?.map(|(_, v)| v);
@@ -649,7 +649,7 @@ where
                 let mut out = Vec::new();
                 Encodable::encode(&value, &mut out);
 
-                trie.insert(hashed_address.as_bytes().to_vec(), out)?;
+                trie.insert(hashed_address.as_bytes(), out)?;
 
                 if self.has_hit_threshold() {
                     return self.save_account_checkpoint(
@@ -695,7 +695,7 @@ where
                 hashed_storage_cursor.seek_by_key_subkey(address, key)?.filter(|e| e.key == key)
             {
                 let out = encode_fixed_size(&value).to_vec();
-                trie.insert(key.as_bytes().to_vec(), out)?;
+                trie.insert(key.as_bytes(), out)?;
                 if self.has_hit_threshold() {
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         storage_root: Some(self.replace_storage_root(
