@@ -54,6 +54,10 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port")]
     pub ws_port: Option<u16>,
 
+    /// Origins from which to accept WebSocket requests
+    #[arg(long = "ws.origins", name = "ws.origins")]
+    pub ws_allowed_origins: Option<String>,
+
     /// Rpc Modules to be configured for Ws server
     #[arg(long = "ws.api")]
     pub ws_api: Option<RpcModuleSelection>,
@@ -200,7 +204,8 @@ impl RpcServerArgs {
             config = config
                 .with_http_address(socket_address)
                 .with_http(ServerBuilder::new())
-                .with_cors(self.http_corsdomain.clone().unwrap_or_default());
+                .with_http_cors(self.http_corsdomain.clone())
+                .with_ws_cors(self.ws_allowed_origins.clone());
         }
 
         if self.ws {
