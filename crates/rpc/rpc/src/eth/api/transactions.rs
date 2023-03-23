@@ -11,14 +11,19 @@ use async_trait::async_trait;
 use crate::eth::error::SignError;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
-    TransactionSigned, TransactionSignedEcRecovered, H256, U256,
+    Receipt, Transaction as PrimitiveTransaction,
+    TransactionKind::{Call, Create},
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
+    TxLegacy, H256, U128, U256, U64,
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{
-    Index, Transaction, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+    Index, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::primitives::{BlockEnv, CfgEnv};
+use revm_primitives::utilities::create_address;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
@@ -244,8 +249,85 @@ where
 
         Ok(hash)
     }
-}
 
+    /// Helper function for eth_getTransactionReceipt
+    ///
+    /// Returns the receipt
+    pub(crate) async fn get_transaction_receipt(
+        tx: TransactionSigned,
+        meta: TransactionMeta,
+        receipt: Receipt,
+    ) -> EthResult<Option<TransactionReceipt>> {
+        let transaction =
+            tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+
+        let mut res_receipt = TransactionReceipt {
+            transaction_hash: Some(meta.tx_hash),
+            transaction_index: Some(U256::from(meta.index)),
+            block_hash: Some(meta.block_hash),
+            block_number: Some(U256::from(meta.block_number)),
+            from: transaction.signer,
+            to: Some(Address::zero()),
+            cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
+            gas_used: Some(U256::from(0)),
+            contract_address: None,
+            logs: receipt.logs.clone().into_iter().map(|l| l.into()).collect(),
+            effective_gas_price: U128::from(0),
+            transaction_type: U256::from(0),
+            state_root: None,
+            logs_bloom: receipt.bloom_slow(),
+            status_code: None,
+        };
+
+        if receipt.success {
+            res_receipt.status_code = Some(U64::from(1));
+        } else {
+            res_receipt.status_code = Some(U64::from(0));
+        }
+
+        match tx.transaction.kind() {
+            Create => {
+                res_receipt.to = Some(Address::zero());
+                // set contract address if creation was successful
+                if receipt.success {
+                    res_receipt.contract_address =
+                        Some(create_address(transaction.signer, tx.transaction.nonce()));
+                } else {
+                    res_receipt.contract_address = None;
+                }
+            }
+            Call(addr) => {
+                res_receipt.to = Some(*addr);
+                res_receipt.contract_address = None;
+            }
+        }
+
+        match tx.transaction {
+            PrimitiveTransaction::Legacy(TxLegacy { gas_limit, gas_price, .. }) => {
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(0);
+                res_receipt.effective_gas_price = U128::from(gas_price);
+            }
+            PrimitiveTransaction::Eip2930(TxEip2930 { gas_limit, gas_price, .. }) => {
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(1);
+                res_receipt.effective_gas_price = U128::from(gas_price);
+            }
+            PrimitiveTransaction::Eip1559(TxEip1559 {
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                ..
+            }) => {
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(2);
+                res_receipt.effective_gas_price =
+                    U128::from(max_fee_per_gas) + U128::from(max_priority_fee_per_gas);
+            }
+        }
+        Ok(Some(res_receipt))
+    }
+}
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TransactionSource {
