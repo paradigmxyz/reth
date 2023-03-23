@@ -853,11 +853,11 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
 pub struct TransactionSignedEcRecovered {
     /// Signer of the transaction
-    pub signer: Address,
+    signer: Address,
     /// Signed transaction
     #[deref]
     #[as_ref]
-    pub signed_transaction: TransactionSigned,
+    signed_transaction: TransactionSigned,
 }
 
 // === impl TransactionSignedEcRecovered ===

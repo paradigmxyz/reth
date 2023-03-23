@@ -163,23 +163,7 @@ where
     /// Handler for: `eth_getTransactionReceipt`
     async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
-
-        let receipt = match self.inner.client.receipt_by_hash(hash) {
-            Ok(Some(recpt)) => recpt,
-            Ok(None) => return Err(EthApiError::Unsupported("receipt not found").into()),
-            Err(_) => return Err(EthApiError::Unsupported("call resulted in error").into()),
-        };
-
-        let (tx, meta) = match self.client().transaction_by_hash_with_meta(hash) {
-            Ok(Some((tx, meta))) => (tx, meta),
-            Ok(None) => return Err(EthApiError::Unsupported("metadata not found").into()),
-            Err(_) => return Err(EthApiError::Unsupported("call resulted in error").into()),
-        };
-
-        match EthApi::<Client, Pool, Network>::get_transaction_receipt(tx, meta, receipt).await? {
-            Some(receipt) => Ok(Some(receipt)),
-            None => Err(EthApiError::Unsupported("call resulted in error").into()),
-        }
+        Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
 
     /// Handler for: `eth_getBalance`
