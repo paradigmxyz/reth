@@ -16,6 +16,7 @@ reth-db = { path = "../../storage/db" }
 reth-provider = { path = "../../storage/provider" }
 reth-executor = { path = "../../executor" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
+reth-tasks = { path = "../../tasks" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
