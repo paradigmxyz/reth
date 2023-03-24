@@ -90,6 +90,7 @@ where
                 // ready to queue in new insert task
                 let storage = this.storage.clone();
                 let transactions = this.queued.pop_front().expect("not empty");
+
                 let to_engine = this.to_engine.clone();
                 let client = this.client.clone();
                 let chain_spec = Arc::clone(&this.chain_spec);
@@ -119,7 +120,7 @@ where
                         extra_data: Default::default(),
                     };
 
-                    let body = Block {
+                    let block = Block {
                         header,
                         body: transactions
                             .into_iter()
@@ -128,19 +129,20 @@ where
                         ommers: vec![],
                         withdrawals: None,
                     };
+
                     // execute the new block
                     let substate = SubState::new(State::new(client.latest().unwrap()));
                     let mut executor = Executor::new(chain_spec, substate);
 
+                    trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
+
                     let (_, gas_used) =
-                        executor.execute_transactions(&body, U256::ZERO, None).unwrap();
-                    let Block { mut header, body, .. } = body;
+                        executor.execute_transactions(&block, U256::ZERO, None).unwrap();
+                    let Block { mut header, body, .. } = block;
 
                     // clear all transactions from pool
                     // TODO this should happen automatically via events
-                    pool.remove_invalid(
-                        body.iter().map(|tx|tx.hash)
-                    );
+                    pool.remove_invalid(body.iter().map(|tx| tx.hash));
 
                     let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
                     header.gas_used = gas_used;

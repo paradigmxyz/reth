@@ -132,16 +132,16 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
         };
 
-        // if block_root != trie_root {
-        //     warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?trie_root, expected = ?block_root, "Block's root state failed verification");
-        //     return Err(StageError::Validation {
-        //         block: previous_stage_progress,
-        //         error: consensus::ConsensusError::BodyStateRootDiff {
-        //             got: trie_root,
-        //             expected: block_root,
-        //         },
-        //     })
-        // }
+        if block_root != trie_root {
+            warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?trie_root, expected = ?block_root, "Block's root state failed verification");
+            return Err(StageError::Validation {
+                block: previous_stage_progress,
+                error: consensus::ConsensusError::BodyStateRootDiff {
+                    got: trie_root,
+                    expected: block_root,
+                },
+            })
+        }
 
         info!(target: "sync::stages::merkle::exec", "Stage finished");
         Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })

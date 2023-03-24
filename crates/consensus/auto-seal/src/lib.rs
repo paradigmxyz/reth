@@ -137,13 +137,12 @@ pub(crate) struct Storage {
 // == impl Storage ===
 
 impl Storage {
-
     fn new(chain_spec: &ChainSpec) -> Self {
         Self {
-            inner: Arc::new(  RwLock::new(StorageInner{
+            inner: Arc::new(RwLock::new(StorageInner {
                 best_hash: chain_spec.genesis_hash.unwrap_or_default(),
-               .. Default::default()
-            }))
+                ..Default::default()
+            })),
         }
     }
 
