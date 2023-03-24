@@ -303,7 +303,7 @@ where
             None => return Err(EthApiError::UnknownBlockNumber),
         };
 
-        // get the previous transaction receipt
+        // get the previous transaction cumulative gas used
         let prev_tx_cumulative_gas_used = match all_receipts.get((meta.index - 1) as usize) {
             Some(prev_receipt) => {
                 if meta.index > 0 {
