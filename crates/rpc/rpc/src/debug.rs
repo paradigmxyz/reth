@@ -5,8 +5,8 @@ use crate::{
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec,
-, TracingCallGuard};
+    EthApiSpec, TracingCallGuard,
+};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256, U256};

@@ -23,5 +23,12 @@ pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
 
-    pub max_tracing_call_in_parallel: usize,
+    /// The maximum number of tracing calls that can be executed in parallel.
+    pub max_tracing_requests: usize,
+}
+
+impl default for EthConfig {
+    fn default() -> Self {
+        Self { cache: EthStateCacheConfig::default(), max_tracing_requests: 4 }
+    }
 }
