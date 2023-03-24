@@ -111,7 +111,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Also removes all dependent transactions.
     ///
     /// Consumer: Block production
-    fn remove_invalid(
+    fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
