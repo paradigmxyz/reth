@@ -345,7 +345,7 @@ where
     let mut account_info = db.basic(account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce;
+        account_info.nonce = nonce.as_u64();
     }
     if let Some(code) = account_override.code {
         account_info.code = Some(Bytecode::new_raw(code.0));

@@ -10,11 +10,11 @@ pub struct EthHandlers<Client, Pool, Network, Events> {
     /// Main `eth_` request handler
     pub api: EthApi<Client, Pool, Network>,
     /// The async caching layer used by the eth handlers
-    pub eth_cache: EthStateCache,
+    pub cache: EthStateCache,
     /// Polling based filter handler available on all transports
     pub filter: EthFilter<Client, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
-    pub pubsub: Option<EthPubSub<Client, Pool, Events, Network>>,
+    pub pubsub: EthPubSub<Client, Pool, Events, Network>,
 }
 
 /// Additional config values for the eth namespace

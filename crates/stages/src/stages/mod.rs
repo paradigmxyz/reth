@@ -18,8 +18,6 @@ mod index_storage_history;
 mod merkle;
 /// The sender recovery stage.
 mod sender_recovery;
-/// Helper types for working with streams.
-mod stream;
 /// The total difficulty stage
 mod total_difficulty;
 /// The transaction lookup stage

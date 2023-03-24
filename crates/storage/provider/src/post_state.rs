@@ -269,6 +269,10 @@ impl PostState {
 
     /// Extend this [PostState] with the changes in another [PostState].
     pub fn extend(&mut self, other: PostState) {
+        if other.changes.is_empty() {
+            return
+        }
+
         self.changes.reserve(other.changes.len());
 
         let mut next_transition_id = self.current_transition_id;
@@ -479,18 +483,16 @@ impl PostState {
                 Change::AccountDestroyed { id, address, old } |
                 Change::AccountChanged { id, address, old, .. } => {
                     let destroyed = matches!(changeset, Change::AccountDestroyed { .. });
-                    tracing::trace!(target: "provider::post_state", id, ?address, ?old, destroyed, "Account changed");
-                    account_changeset_cursor.append_dup(
-                        first_transition_id + id,
-                        AccountBeforeTx { address, info: Some(old) },
-                    )?;
+                    let transition_id = first_transition_id + id;
+                    tracing::trace!(target: "provider::post_state", transition_id, ?address, ?old, destroyed, "Account changed");
+                    account_changeset_cursor
+                        .append_dup(transition_id, AccountBeforeTx { address, info: Some(old) })?;
                 }
                 Change::AccountCreated { id, address, .. } => {
-                    tracing::trace!(target: "provider::post_state", id, ?address, "Account created");
-                    account_changeset_cursor.append_dup(
-                        first_transition_id + id,
-                        AccountBeforeTx { address, info: None },
-                    )?;
+                    let transition_id = first_transition_id + id;
+                    tracing::trace!(target: "provider::post_state", transition_id, ?address, "Account created");
+                    account_changeset_cursor
+                        .append_dup(transition_id, AccountBeforeTx { address, info: None })?;
                 }
                 _ => unreachable!(),
             }

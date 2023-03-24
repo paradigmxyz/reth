@@ -119,7 +119,7 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
             } else {
                 let should_compact = is_flag_type(&ftype) ||
                     field.attrs.iter().any(|attr| {
-                        attr.path.segments.iter().any(|path| path.ident == "maybe_zero")
+                        attr.path().segments.iter().any(|path| path.ident == "maybe_zero")
                     });
 
                 fields.push(FieldTypes::StructField((

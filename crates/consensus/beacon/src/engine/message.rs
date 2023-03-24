@@ -8,15 +8,23 @@ use tokio::sync::oneshot;
 /// Beacon engine sender.
 pub type BeaconEngineSender<Ok> = oneshot::Sender<BeaconEngineResult<Ok>>;
 
-///  A message for the beacon engine from other components of the node.
+/// A message for the beacon engine from other components of the node.
 #[derive(Debug)]
 pub enum BeaconEngineMessage {
     /// Message with new payload.
-    NewPayload(ExecutionPayload, BeaconEngineSender<PayloadStatus>),
+    NewPayload {
+        /// The execution payload received by Engine API.
+        payload: ExecutionPayload,
+        /// The sender for returning payload status result.
+        tx: BeaconEngineSender<PayloadStatus>,
+    },
     /// Message with updated forkchoice state.
-    ForkchoiceUpdated(
-        ForkchoiceState,
-        Option<PayloadAttributes>,
-        BeaconEngineSender<ForkchoiceUpdated>,
-    ),
+    ForkchoiceUpdated {
+        /// The updated forkchoice state.
+        state: ForkchoiceState,
+        /// The payload attributes for block building.
+        payload_attrs: Option<PayloadAttributes>,
+        /// The sender for returning forkchoice updated result.
+        tx: BeaconEngineSender<ForkchoiceUpdated>,
+    },
 }

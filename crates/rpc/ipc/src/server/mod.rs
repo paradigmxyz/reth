@@ -47,6 +47,11 @@ pub struct IpcServer<B = Identity, L = ()> {
 }
 
 impl IpcServer {
+    /// Returns the configured [Endpoint]
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
+
     /// Start responding to connections requests.
     ///
     /// This will run on the tokio runtime until the server is stopped or the ServerHandle is

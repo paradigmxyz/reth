@@ -3,6 +3,7 @@
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
+use reth_interfaces::events::ChainEventSubscriptions;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
@@ -56,6 +57,10 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port")]
     pub ws_port: Option<u16>,
 
+    /// Origins from which to accept WebSocket requests
+    #[arg(long = "ws.origins", name = "ws.origins")]
+    pub ws_allowed_origins: Option<String>,
+
     /// Rpc Modules to be configured for Ws server
     #[arg(long = "ws.api")]
     pub ws_api: Option<RpcModuleSelection>,
@@ -106,12 +111,13 @@ impl RpcServerArgs {
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub(crate) async fn start_rpc_server<Client, Pool, Network, Tasks>(
+    pub(crate) async fn start_rpc_server<Client, Pool, Network, Tasks, Events>(
         &self,
         client: Client,
         pool: Pool,
         network: Network,
         executor: Tasks,
+        events: Events,
     ) -> Result<RpcServerHandle, RpcError>
     where
         Client: BlockProvider
@@ -124,6 +130,7 @@ impl RpcServerArgs {
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
+        Events: ChainEventSubscriptions + Clone + 'static,
     {
         reth_rpc_builder::launch(
             client,
@@ -132,6 +139,7 @@ impl RpcServerArgs {
             self.transport_rpc_module_config(),
             self.rpc_server_config(),
             executor,
+            events,
         )
         .await
     }
@@ -204,7 +212,8 @@ impl RpcServerArgs {
             config = config
                 .with_http_address(socket_address)
                 .with_http(ServerBuilder::new())
-                .with_cors(self.http_corsdomain.clone().unwrap_or_default());
+                .with_http_cors(self.http_corsdomain.clone())
+                .with_ws_cors(self.ws_allowed_origins.clone());
         }
 
         if self.ws {
@@ -212,7 +221,7 @@ impl RpcServerArgs {
                 self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
                 self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
             );
-            config = config.with_ws_address(socket_address).with_http(ServerBuilder::new());
+            config = config.with_ws_address(socket_address).with_ws(ServerBuilder::new());
         }
 
         if !self.ipcdisable {

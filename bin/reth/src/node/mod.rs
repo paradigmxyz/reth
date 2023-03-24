@@ -36,6 +36,7 @@ use reth_interfaces::{
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
     sync::SyncStateUpdater,
+    test_utils::TestChainEventSubscriptions,
 };
 use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
@@ -207,6 +208,7 @@ impl Command {
             .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
 
         let _rpc_server = self
             .rpc
@@ -215,6 +217,8 @@ impl Command {
                 transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
+                // TODO use real implementation
+                TestChainEventSubscriptions::default(),
             )
             .await?;
         info!(target: "reth::cli", "Started RPC server");
@@ -225,18 +229,23 @@ impl Command {
 
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
+        // Forward the `debug.tip` as forkchoice state to the consensus engine.
+        // This will initiate the sync up to the provided tip.
         let _tip_rx = match self.tip {
             Some(tip) => {
-                let (tx, rx) = oneshot::channel();
+                let (tip_tx, tip_rx) = oneshot::channel();
                 let state = ForkchoiceState {
                     head_block_hash: tip,
                     finalized_block_hash: tip,
                     safe_block_hash: tip,
                 };
-                consensus_engine_tx
-                    .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tx))?;
+                consensus_engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
+                    state,
+                    payload_attrs: None,
+                    tx: tip_tx,
+                })?;
                 debug!(target: "reth::cli", %tip, "Tip manually set");
-                Some(rx)
+                Some(tip_rx)
             }
             None => {
                 let warn_msg = "No tip specified. \
@@ -348,21 +357,24 @@ impl Command {
         Ok((pipeline, events))
     }
 
-    fn build_consensus_engine(
+    fn build_consensus_engine<DB, U, C>(
         &self,
-        db: Arc<Env<WriteMap>>,
-        consensus: Arc<dyn Consensus>,
-        pipeline: Pipeline<Env<WriteMap>, impl SyncStateUpdater + 'static>,
+        db: Arc<DB>,
+        consensus: C,
+        pipeline: Pipeline<DB, U>,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> eyre::Result<
-        BeaconConsensusEngine<Env<WriteMap>, impl SyncStateUpdater, Arc<dyn Consensus>, Factory>,
-    > {
+    ) -> eyre::Result<BeaconConsensusEngine<DB, U, C, Factory>>
+    where
+        DB: Database + Unpin + 'static,
+        U: SyncStateUpdater + Unpin + 'static,
+        C: Consensus + Unpin + 'static,
+    {
         let executor_factory = Factory::new(self.chain.clone());
         let tree_externals =
             TreeExternals::new(db.clone(), consensus, executor_factory, self.chain.clone());
         let blockchain_tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
 
-        Ok(BeaconConsensusEngine::new(db, pipeline, blockchain_tree, message_rx))
+        Ok(BeaconConsensusEngine::new(db, pipeline, blockchain_tree, message_rx, self.max_block))
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
@@ -524,6 +536,10 @@ impl Command {
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::UNSPECIFIED,
+                self.network.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
+            )))
+            .discovery_addr(SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::UNSPECIFIED,
                 self.network.discovery.port.unwrap_or(DEFAULT_DISCOVERY_PORT),
             )))
             .build(ShareableDatabase::new(db, self.chain.clone()))
@@ -651,5 +667,19 @@ mod tests {
             let args: Command = Command::parse_from(["reth", "--chain", chain]);
             assert_eq!(args.chain.chain, chain.parse().unwrap());
         }
+    }
+
+    #[test]
+    fn parse_discovery_port() {
+        let cmd = Command::try_parse_from(["reth", "--discovery.port", "300"]).unwrap();
+        assert_eq!(cmd.network.discovery.port, Some(300));
+    }
+
+    #[test]
+    fn parse_port() {
+        let cmd =
+            Command::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
+        assert_eq!(cmd.network.discovery.port, Some(300));
+        assert_eq!(cmd.network.port, Some(99));
     }
 }

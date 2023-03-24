@@ -21,6 +21,7 @@ use reth_rpc_types::{
     Work,
 };
 use reth_transaction_pool::TransactionPool;
+
 use serde_json::Value;
 use std::collections::BTreeMap;
 use tracing::trace;
@@ -160,8 +161,9 @@ where
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, _hash: H256) -> Result<Option<TransactionReceipt>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
+        Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
 
     /// Handler for: `eth_getBalance`
@@ -263,9 +265,9 @@ where
         &self,
         block_count: U64,
         newest_block: BlockId,
-        _reward_percentiles: Option<Vec<f64>>,
+        reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
-        trace!(target: "rpc::eth", ?block_count, ?newest_block, ?_reward_percentiles, "Serving eth_feeHistory");
+        trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         let block_count = block_count.as_u64();
 
         if block_count == 0 {
@@ -387,14 +389,15 @@ where
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, _request: TransactionRequest) -> Result<H256> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn send_transaction(&self, request: TransactionRequest) -> Result<H256> {
+        trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
+        Ok(EthTransactions::send_transaction(self, request).await?)
     }
 
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
-        Ok(EthApi::send_raw_transaction(self, tx).await?)
+        Ok(EthTransactions::send_raw_transaction(self, tx).await?)
     }
 
     /// Handler for: `eth_sign`

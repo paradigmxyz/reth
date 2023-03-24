@@ -141,6 +141,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         })
     }
 
+    /// Return the tip of the canonical chain
+    pub fn canonical_tip_number(&self) -> Option<BlockNumber> {
+        self.block_indices.canonical_chain().last_key_value().map(|(number, _)| *number)
+    }
+
     /// Create a new sidechain by forking the given chain, or append the block if the parent block
     /// is the top of the given chain.
     fn fork_side_chain(

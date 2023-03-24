@@ -65,12 +65,15 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
             }
             EngineApiMessage::NewPayload(payload, tx) => {
                 // forward message to the consensus engine
-                let _ = self.engine_tx.send(BeaconEngineMessage::NewPayload(payload, tx));
+                let _ = self.engine_tx.send(BeaconEngineMessage::NewPayload { payload, tx });
             }
-            EngineApiMessage::ForkchoiceUpdated(state, attrs, tx) => {
+            EngineApiMessage::ForkchoiceUpdated(state, payload_attrs, tx) => {
                 // forward message to the consensus engine
-                let _ =
-                    self.engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated(state, attrs, tx));
+                let _ = self.engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
+                    state,
+                    payload_attrs,
+                    tx,
+                });
             }
         }
     }
@@ -252,7 +255,10 @@ mod tests {
 
         let (result_tx, _result_rx) = oneshot::channel();
         handle.send_message(EngineApiMessage::NewPayload(SealedBlock::default().into(), result_tx));
-        assert_matches!(handle.engine_rx.recv().await, Some(BeaconEngineMessage::NewPayload(..)));
+        assert_matches!(
+            handle.engine_rx.recv().await,
+            Some(BeaconEngineMessage::NewPayload { .. })
+        );
 
         let (result_tx, _result_rx) = oneshot::channel();
         handle.send_message(EngineApiMessage::ForkchoiceUpdated(
@@ -262,7 +268,7 @@ mod tests {
         ));
         assert_matches!(
             handle.engine_rx.recv().await,
-            Some(BeaconEngineMessage::ForkchoiceUpdated(..))
+            Some(BeaconEngineMessage::ForkchoiceUpdated { .. })
         );
     }
 

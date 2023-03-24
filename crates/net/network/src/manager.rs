@@ -23,7 +23,7 @@ use crate::{
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
-    metrics::NetworkMetrics,
+    metrics::{DisconnectMetrics, NetworkMetrics},
     network::{NetworkHandle, NetworkHandleMessage},
     peers::{PeersHandle, PeersManager},
     session::SessionManager,
@@ -53,7 +53,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
@@ -107,6 +107,8 @@ pub struct NetworkManager<C> {
     num_active_peers: Arc<AtomicUsize>,
     /// Metrics for the Network
     metrics: NetworkMetrics,
+    /// Disconnect metrics for the Network
+    disconnect_metrics: DisconnectMetrics,
 }
 
 // === impl NetworkManager ===
@@ -231,6 +233,7 @@ where
             to_eth_request_handler: None,
             num_active_peers,
             metrics: Default::default(),
+            disconnect_metrics: Default::default(),
         })
     }
 
@@ -647,6 +650,7 @@ where
                                 ?total_active,
                                 "Session established"
                             );
+                            debug!(target: "net", peer_enode=%NodeRecord::new(remote_addr, peer_id), "Established peer enode");
 
                             if direction.is_incoming() {
                                 this.swarm
@@ -714,6 +718,9 @@ where
                             this.metrics
                                 .outgoing_connections
                                 .set(this.swarm.state().peers().num_outbound_connections() as f64);
+                            if let Some(reason) = reason {
+                                this.disconnect_metrics.increment(reason);
+                            }
                             this.event_listeners
                                 .send(NetworkEvent::SessionClosed { peer_id, reason });
                         }
@@ -731,6 +738,9 @@ where
                                     .peers_mut()
                                     .on_incoming_pending_session_dropped(remote_addr, err);
                                 this.metrics.pending_session_failures.increment(1);
+                                if let Some(reason) = err.as_disconnected() {
+                                    this.disconnect_metrics.increment(reason);
+                                }
                             } else {
                                 this.swarm
                                     .state_mut()
@@ -762,6 +772,9 @@ where
                                     err,
                                 );
                                 this.metrics.pending_session_failures.increment(1);
+                                if let Some(reason) = err.as_disconnected() {
+                                    this.disconnect_metrics.increment(reason);
+                                }
                             } else {
                                 this.swarm
                                     .state_mut()

@@ -27,6 +27,7 @@ reth-tasks = { path = "../../tasks" }
 # eth
 revm = { version = "3.0.0", features = ["optional_block_gas_limit"] }
 ethers-core = { git = "https://github.com/gakonst/ethers-rs", features = ["eip712"] }
+revm-primitives = { version = "1.0", features = ["serde"] }
 
 
 # rpc

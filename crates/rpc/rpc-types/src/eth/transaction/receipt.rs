@@ -1,4 +1,5 @@
-use reth_primitives::{rpc::Log, Address, Bloom, H256, U128, U256, U64};
+use crate::Log;
+use reth_primitives::{Address, Bloom, H256, U128, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Transaction receipt
@@ -25,7 +26,7 @@ pub struct TransactionReceipt {
     pub contract_address: Option<Address>,
     /// Logs emitted by this transaction.
     pub logs: Vec<Log>,
-    /// The state root
+    /// The post-transaction stateroot (pre Byzantium)
     ///
     /// EIP98 makes this optional field, if it's missing then skip serializing it
     #[serde(skip_serializing_if = "Option::is_none", rename = "root")]

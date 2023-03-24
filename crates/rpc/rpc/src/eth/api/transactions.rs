@@ -1,24 +1,27 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
     eth::{
-        error::{EthApiError, EthResult},
+        error::{EthApiError, EthResult, SignError},
         utils::recover_raw_transaction,
     },
     EthApi,
 };
 use async_trait::async_trait;
-
-use crate::eth::error::SignError;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
-    TransactionSigned, TransactionSignedEcRecovered, H256, U256,
+    Receipt, Transaction as PrimitiveTransaction,
+    TransactionKind::{Call, Create},
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
+    TxLegacy, H256, U128, U256, U64,
 };
 use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{
-    Index, Transaction, TransactionInfo, TransactionRequest, TypedTransactionRequest,
+    Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
+    TypedTransactionRequest,
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::primitives::{BlockEnv, CfgEnv};
+use revm_primitives::utilities::create_address;
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
@@ -49,6 +52,21 @@ pub trait EthTransactions: Send + Sync {
         &self,
         hash: H256,
     ) -> EthResult<Option<(TransactionSource, BlockId)>>;
+
+    /// Returns the transaction receipt for the given hash.
+    ///
+    /// Returns None if the transaction does not exist or is pending
+    /// Note: The tx receipt is not available for pending transactions.
+    async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>>;
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// Returns the hash of the transaction.
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256>;
+
+    /// Signs transaction with a matching signer, if any and submits the transaction to the pool.
+    /// Returns the hash of the signed transaction.
+    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256>;
 }
 
 #[async_trait]
@@ -143,31 +161,40 @@ where
             }
         }
     }
-}
 
-// === impl EthApi ===
+    async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>> {
+        let (tx, meta) = match self.client().transaction_by_hash_with_meta(hash)? {
+            Some((tx, meta)) => (tx, meta),
+            None => return Ok(None),
+        };
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
-where
-    Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
-{
-    /// Send a transaction to the pool
-    ///
-    /// This will sign the transaction and submit it to the pool
-    pub(crate) async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
+        let receipt = match self.client().receipt_by_hash(hash)? {
+            Some(recpt) => recpt,
+            None => return Ok(None),
+        };
+
+        Self::build_transaction_receipt(tx, meta, receipt).map(Some)
+    }
+
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
+        let recovered = recover_raw_transaction(tx)?;
+
+        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+
+        // submit the transaction to the pool with a `Local` origin
+        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+
+        Ok(hash)
+    }
+
+    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
         let from = match request.from {
             Some(from) => from,
             None => return Err(SignError::NoAccount.into()),
         };
         let transaction = match request.into_typed_request() {
             Some(tx) => tx,
-            None => {
-                return Err(EthApiError::Unsupported(
-                    "both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified",
-                ))
-            }
+            None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
 
         // TODO we need to update additional settings in the transaction: nonce, gaslimit, chainid,
@@ -185,7 +212,16 @@ where
 
         Ok(hash)
     }
+}
 
+// === impl EthApi ===
+
+impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+where
+    Pool: TransactionPool + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: 'static,
+{
     pub(crate) fn sign_request(
         &self,
         from: &Address,
@@ -231,21 +267,78 @@ where
         Ok(None)
     }
 
-    /// Decodes and recovers the transaction and submits it to the pool.
+    /// Helper function for `eth_getTransactionReceipt`
     ///
-    /// Returns the hash of the transaction.
-    pub(crate) async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
-        let recovered = recover_raw_transaction(tx)?;
+    /// Returns the receipt
+    pub(crate) fn build_transaction_receipt(
+        tx: TransactionSigned,
+        meta: TransactionMeta,
+        mut receipt: Receipt,
+    ) -> EthResult<TransactionReceipt> {
+        let transaction =
+            tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+        let mut res_receipt = TransactionReceipt {
+            transaction_hash: Some(meta.tx_hash),
+            transaction_index: Some(U256::from(meta.index)),
+            block_hash: Some(meta.block_hash),
+            block_number: Some(U256::from(meta.block_number)),
+            from: transaction.signer(),
+            to: None,
+            cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
+            gas_used: Some(U256::from(0)),
+            contract_address: None,
+            logs: std::mem::take(&mut receipt.logs).into_iter().map(Log::from_primitive).collect(),
+            effective_gas_price: U128::from(0),
+            transaction_type: U256::from(0),
+            // TODO: set state root after the block
+            state_root: None,
+            logs_bloom: receipt.bloom_slow(),
+            status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
+        };
 
-        // submit the transaction to the pool with a `Local` origin
-        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+        match tx.transaction.kind() {
+            Create => {
+                // set contract address if creation was successful
+                if receipt.success {
+                    res_receipt.contract_address =
+                        Some(create_address(transaction.signer(), tx.transaction.nonce()));
+                }
+            }
+            Call(addr) => {
+                res_receipt.to = Some(*addr);
+            }
+        }
 
-        Ok(hash)
+        match tx.transaction {
+            PrimitiveTransaction::Legacy(TxLegacy { gas_limit, gas_price, .. }) => {
+                // TODO: set actual gas used
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(0);
+                res_receipt.effective_gas_price = U128::from(gas_price);
+            }
+            PrimitiveTransaction::Eip2930(TxEip2930 { gas_limit, gas_price, .. }) => {
+                // TODO: set actual gas used
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(1);
+                res_receipt.effective_gas_price = U128::from(gas_price);
+            }
+            PrimitiveTransaction::Eip1559(TxEip1559 {
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                ..
+            }) => {
+                // TODO: set actual gas used
+                res_receipt.gas_used = Some(U256::from(gas_limit));
+                res_receipt.transaction_type = U256::from(2);
+                res_receipt.effective_gas_price =
+                    U128::from(max_fee_per_gas + max_priority_fee_per_gas)
+            }
+        }
+        Ok(res_receipt)
     }
 }
-
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TransactionSource {
@@ -330,12 +423,11 @@ impl From<TransactionSource> for Transaction {
 
 #[cfg(test)]
 mod tests {
-    use crate::eth::cache::EthStateCache;
+    use super::*;
+    use crate::{eth::cache::EthStateCache, EthApi};
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
-
-    use crate::EthApi;
 
     #[tokio::test]
     async fn send_raw_transaction() {
