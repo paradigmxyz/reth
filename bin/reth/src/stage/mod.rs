@@ -59,13 +59,9 @@ pub struct Command {
     chain: Arc<ChainSpec>,
 
     /// Secret key to use for this node.
-    /// 
+    ///
     /// This also will deterministically set the peer ID.
-    #[arg(
-        long,
-        value_name = "SECRET_KEY",
-        verbatim_doc_comment,
-    )]
+    #[arg(long, value_name = "SECRET_KEY", verbatim_doc_comment)]
     secret_key: Option<SecretKey>,
 
     /// Enable Prometheus metrics.

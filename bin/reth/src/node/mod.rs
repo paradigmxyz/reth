@@ -2,8 +2,8 @@
 //!
 //! Starts the client
 use crate::{
-    args::{NetworkArgs, RpcServerArgs},
-    dirs::{ConfigPath, DbPath, PlatformPath},
+    args::{get_secret_key, NetworkArgs, RpcServerArgs},
+    dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -39,7 +39,7 @@ use reth_interfaces::{
     test_utils::TestChainEventSubscriptions,
 };
 use reth_network::{
-     config::rng_secret_key, error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager
+    error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, TxHash, H256};
@@ -109,14 +109,10 @@ pub struct Command {
     chain: Arc<ChainSpec>,
 
     /// Secret key to use for this node.
-    /// 
+    ///
     /// This also will deterministically set the peer ID.
-    #[arg(
-        long,
-        value_name = "SECRET_KEY",
-        verbatim_doc_comment,
-    )]
-    secret_key: Option<SecretKey>,
+    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
+    secret_key: PlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -213,8 +209,13 @@ impl Command {
         info!(target: "reth::cli", "Test transaction pool initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let network_config =
-            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone(), self.secret_key);
+        let secret_key = get_secret_key(&self.secret_key)?;
+        let network_config = self.load_network_config(
+            &config,
+            Arc::clone(&db),
+            ctx.task_executor.clone(),
+            secret_key,
+        );
         let network = self
             .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
             .await?;
@@ -537,10 +538,8 @@ impl Command {
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
-        secret_key: Option<SecretKey>
+        secret_key: SecretKey,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
-        let secret_key = secret_key.unwrap_or(rng_secret_key());
-
         let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network

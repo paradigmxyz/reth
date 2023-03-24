@@ -26,7 +26,7 @@ impl Config {
         &self,
         nat_resolution_method: reth_net_nat::NatResolver,
         peers_file: Option<PathBuf>,
-        secret_key: SecretKey
+        secret_key: SecretKey,
     ) -> NetworkConfigBuilder {
         let peer_config = self
             .peers

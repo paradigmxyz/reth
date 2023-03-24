@@ -58,7 +58,7 @@ impl NetworkArgs {
         &self,
         config: &Config,
         chain_spec: Arc<ChainSpec>,
-        secret_key: SecretKey
+        secret_key: SecretKey,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
 

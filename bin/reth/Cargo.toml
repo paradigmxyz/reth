@@ -76,3 +76,5 @@ eyre = "0.6.8"
 clap = { version = "4", features = ["derive", "cargo"] }
 tempfile = { version = "3.3.0" }
 backon = "0.4"
+hex = "0.4"
+thiserror = "1.0"
