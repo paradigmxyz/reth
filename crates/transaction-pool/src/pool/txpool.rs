@@ -953,11 +953,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 }
                 has_parked_ancestor = !tx.state.is_pending();
 
+                // update the pool based on the state
+                tx.subpool = tx.state.into();
+
                 if tx_id.eq(id) {
                     // if it is the new transaction, track the state
                     state = tx.state;
                 } else {
-                    tx.subpool = tx.state.into();
+                    // check if anything changed
                     if current_pool != tx.subpool {
                         updates.push(PoolUpdate {
                             id: *id,
@@ -1146,6 +1149,26 @@ mod tests {
         test_utils::{MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };
+
+    #[test]
+    fn test_insert_pending() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let valid_tx = f.validated(tx.clone());
+        let InsertOk { updates, replaced_tx, move_to, state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(updates.is_empty());
+        assert!(replaced_tx.is_none());
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(state.contains(TxState::ENOUGH_BALANCE));
+        assert_eq!(move_to, SubPool::Pending);
+
+        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        assert_eq!(inserted.subpool, SubPool::Pending);
+    }
 
     #[test]
     fn test_simple_insert() {
