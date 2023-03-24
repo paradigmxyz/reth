@@ -305,13 +305,8 @@ where
 
         // get the previous transaction cumulative gas used
         let prev_tx_cumulative_gas_used = match all_receipts.get((meta.index - 1) as usize) {
-            Some(prev_receipt) => {
-                if meta.index > 0 {
-                    prev_receipt.cumulative_gas_used
-                } else {
-                    0
-                }
-            }
+            Some(prev_receipt) => prev_receipt.cumulative_gas_used,
+            // if meta.index == 0, then there is no previous transaction
             None => 0,
         };
 
