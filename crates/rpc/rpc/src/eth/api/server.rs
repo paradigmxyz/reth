@@ -390,8 +390,7 @@ where
 
     /// Handler for: `eth_sendTransaction`
     async fn send_transaction(&self, _request: TransactionRequest) -> Result<H256> {
-        trace!(target: "rpc::eth", "Serving eth_sendTransaction");
-        Ok(EthApi::send_transaction(self, _request).await?)
+        Err(internal_rpc_err("unimplemented"))
     }
 
     /// Handler for: `eth_sendRawTransaction`

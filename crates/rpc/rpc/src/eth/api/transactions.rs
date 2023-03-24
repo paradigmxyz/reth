@@ -278,6 +278,12 @@ where
         let transaction =
             tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
 
+        // get all receipts for the block
+        let all_receipts = match self.client().receipts_by_block((meta.block_number).into())? {
+            Some(recpts) => recpts,
+            None => return Err(EthApiError::UnknownBlockNumber),
+        };
+
         let mut res_receipt = TransactionReceipt {
             transaction_hash: Some(meta.tx_hash),
             transaction_index: Some(U256::from(meta.index)),
@@ -297,45 +303,47 @@ where
             status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         };
 
-        // get all receipts for the block
-        let all_receipts = match self.client().receipts_by_block((meta.block_number).into())? {
-            Some(recpts) => recpts,
-            None => return Err(EthApiError::UnknownBlockNumber),
-        };
-
         // get the previous transaction cumulative gas used
         let prev_tx_cumulative_gas_used = match all_receipts.get((meta.index - 1) as usize) {
-            Some(prev_receipt) => prev_receipt.cumulative_gas_used,
-            // if meta.index == 0, then there is no previous transaction
+            Some(prev_receipt) => {
+                if meta.index > 0 {
+                    prev_receipt.cumulative_gas_used
+                } else {
+                    0
+                }
+            }
+
             None => 0,
         };
 
-        // gas_used = CumulativeGasUsed(tx_index) - CumulativeGasUsed(tx_index - 1)
-        res_receipt.gas_used = Some(
-            U256::from(receipt.cumulative_gas_used)
-                .checked_sub(U256::from(prev_tx_cumulative_gas_used))
-                .ok_or(EthApiError::Unsupported("Overflow occured"))?,
-        );
+        res_receipt.gas_used =
+            Some(U256::from(receipt.cumulative_gas_used - prev_tx_cumulative_gas_used));
 
-        let mut log_index: u32 = 0;
-        for (tx_idx, receipt) in all_receipts.into_iter().enumerate() {
-            for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
-                if tx_idx == meta.index as usize {
-                    let rpclog = Log {
-                        address: log.address,
-                        topics: log.topics,
-                        data: log.data,
-                        block_hash: Some(meta.block_hash),
-                        block_number: Some(U256::from(meta.block_number)),
-                        transaction_hash: Some(meta.tx_hash),
-                        transaction_index: Some(U256::from(tx_idx)),
-                        transaction_log_index: Some(U256::from(tx_log_idx)),
-                        log_index: Some(U256::from(log_index)),
-                        removed: false,
-                    };
-                    res_receipt.logs.push(rpclog);
-                }
-                log_index += 1;
+        let mut all_receipts_iter = all_receipts.into_iter();
+        let prev_tx_receipts: Vec<_> =
+            all_receipts_iter.clone().take(meta.index as usize).collect();
+
+        let mut num_logs = 0;
+        for tx_receipt in prev_tx_receipts.into_iter() {
+            num_logs += tx_receipt.logs.len();
+            all_receipts_iter.next();
+        }
+
+        if receipt == all_receipts_iter.next().unwrap() {
+            for (tx_log_idx, log) in receipt.clone().logs.into_iter().enumerate() {
+                let rpclog = Log {
+                    address: log.address,
+                    topics: log.topics,
+                    data: log.data,
+                    block_hash: Some(meta.block_hash),
+                    block_number: Some(U256::from(meta.block_number)),
+                    transaction_hash: Some(meta.tx_hash),
+                    transaction_index: Some(U256::from(meta.index)),
+                    transaction_log_index: Some(U256::from(tx_log_idx)),
+                    log_index: Some(U256::from(num_logs + tx_log_idx)),
+                    removed: false,
+                };
+                res_receipt.logs.push(rpclog);
             }
         }
 
