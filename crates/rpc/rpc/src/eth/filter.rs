@@ -121,14 +121,14 @@ where
 
     /// Returns an array of all logs matching filter with given id.
     ///
-    /// Returns an error if no matching [FilterKind::Log] filter exists.
+    /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
     async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
             if let FilterKind::Log(ref filter) =
-                filters.get(&id).ok_or_else( ||FilterError::FilterNotFound(id.clone()))?.kind
+                filters.get(&id).ok_or_else(|| FilterError::FilterNotFound(id.clone()))?.kind
             {
                 *filter.clone()
             } else {
@@ -179,7 +179,6 @@ where
     Client: BlockProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
-
     /// Returns logs matching given filter object.
     async fn logs_for_filter(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         match filter.block_option {
@@ -237,7 +236,12 @@ where
     /// Returns an error if:
     ///  - underlying database error
     ///  - amount of matches exceeds configured limit
-    fn get_logs_in_block_range(&self, filter: &Filter, from_block: u64, to_block: u64) -> RpcResult<Vec<Log>> {
+    fn get_logs_in_block_range(
+        &self,
+        filter: &Filter,
+        from_block: u64,
+        to_block: u64,
+    ) -> RpcResult<Vec<Log>> {
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 
