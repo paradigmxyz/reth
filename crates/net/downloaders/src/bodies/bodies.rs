@@ -280,8 +280,7 @@ where
     /// downloaded or are not in progress, they will be re-requested.
     fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
         // Check if the range is valid.
-        let is_valid = !range.is_empty();
-        if !is_valid {
+        if range.is_empty() {
             tracing::error!(target: "downloaders::bodies", ?range, "Range is invalid");
             return Err(DownloadError::InvalidBodyRange { range })
         }
