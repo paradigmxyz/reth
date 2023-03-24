@@ -246,11 +246,9 @@ where
             // older than head
             self.blockchain_tree.restore_canonical_hashes(number)?;
 
-            if let Some(tip) = self.blockchain_tree.canonical_tip_hash() {
-                if tip == forkchoice_state.head_block_hash {
-                    // The blockchain tree has correct tip, no pipeline sync needed
-                    return Ok(())
-                }
+            // The blockchain tree has correct tip, no pipeline sync needed
+            if self.blockchain_tree.is_block_hash_canonical(&forkchoice_state.head_block_hash) {
+                return Ok(())
             }
         }
 
@@ -413,7 +411,7 @@ mod tests {
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
-    use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
+    use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError, StageSet};
     use std::{collections::VecDeque, time::Duration};
     use tokio::sync::{
         mpsc::{unbounded_channel, UnboundedSender},
@@ -470,7 +468,7 @@ mod tests {
 
     fn setup_consensus_engine(
         chain_spec: Arc<ChainSpec>,
-        pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
+        stage_set: impl StageSet<Env<WriteMap>>,
         executor_results: Vec<PostState>,
     ) -> (TestBeaconConsensusEngine, TestEnv<Env<WriteMap>>) {
         reth_tracing::init_test_tracing();
@@ -481,10 +479,7 @@ mod tests {
 
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(H256::default());
-        let pipeline = Pipeline::builder()
-            .add_stages(TestStages::new(pipeline_exec_outputs, Default::default()))
-            .with_tip_sender(tip_tx)
-            .build();
+        let pipeline = Pipeline::builder().add_stages(stage_set).with_tip_sender(tip_tx).build();
 
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
@@ -521,7 +516,8 @@ mod tests {
         );
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec,
-            VecDeque::from([Err(StageError::ChannelClosed)]),
+            TestStages::default()
+                .with_exec_outputs(VecDeque::from([Err(StageError::ChannelClosed)])),
             Vec::default(),
         );
         let rx = spawn_consensus_engine(consensus_engine);
@@ -548,7 +544,8 @@ mod tests {
         );
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec,
-            VecDeque::from([Err(StageError::ChannelClosed)]),
+            TestStages::default()
+                .with_exec_outputs(VecDeque::from([Err(StageError::ChannelClosed)])),
             Vec::default(),
         );
         let mut rx = spawn_consensus_engine(consensus_engine);
@@ -586,10 +583,10 @@ mod tests {
         );
         let (consensus_engine, env) = setup_consensus_engine(
             chain_spec,
-            VecDeque::from([
+            TestStages::default().with_exec_outputs(VecDeque::from([
                 Ok(ExecOutput { stage_progress: 1, done: true }),
                 Err(StageError::ChannelClosed),
-            ]),
+            ])),
             Vec::default(),
         );
         let rx = spawn_consensus_engine(consensus_engine);
@@ -617,7 +614,10 @@ mod tests {
         );
         let (mut consensus_engine, env) = setup_consensus_engine(
             chain_spec,
-            VecDeque::from([Ok(ExecOutput { stage_progress: max_block, done: true })]),
+            TestStages::default().with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                stage_progress: max_block,
+                done: true,
+            })])),
             Vec::default(),
         );
         consensus_engine.max_block = Some(max_block);
@@ -656,7 +656,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                TestStages::default().with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    stage_progress: 0,
+                })])),
                 Vec::default(),
             );
 
@@ -682,7 +685,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                TestStages::default().with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    stage_progress: 0,
+                })])),
                 Vec::default(),
             );
 
@@ -720,11 +726,13 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([
-                    Ok(ExecOutput { done: true, stage_progress: 0 }),
-                    Ok(ExecOutput { done: true, stage_progress: 0 }),
-                    Ok(ExecOutput { done: true, stage_progress: 0 }),
-                ]),
+                TestStages::default()
+                    .with_exec_outputs(VecDeque::from([
+                        Ok(ExecOutput { done: true, stage_progress: 0 }),
+                        Ok(ExecOutput { done: true, stage_progress: 0 }),
+                        Ok(ExecOutput { done: true, stage_progress: 0 }),
+                    ]))
+                    .with_delay(Some(Duration::from_secs(1))),
                 Vec::default(),
             );
 
@@ -770,7 +778,12 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                TestStages::default()
+                    .with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                        done: true,
+                        stage_progress: 0,
+                    })]))
+                    .with_delay(Some(Duration::from_secs(1))),
                 Vec::default(),
             );
 
@@ -781,8 +794,8 @@ mod tests {
             let _ = spawn_consensus_engine(consensus_engine);
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
-                finalized_block_hash: block1.hash,
+                head_block_hash: block1.hash,
+                finalized_block_hash: H256::random(),
                 ..Default::default()
             });
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
@@ -800,10 +813,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([
+                TestStages::default().with_exec_outputs(VecDeque::from([
                     Ok(ExecOutput { done: true, stage_progress: 0 }),
                     Ok(ExecOutput { done: true, stage_progress: 0 }),
-                ]),
+                ])),
                 Vec::default(),
             );
 
@@ -815,8 +828,8 @@ mod tests {
             let _ = spawn_consensus_engine(consensus_engine);
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
-                finalized_block_hash: block1.hash,
+                head_block_hash: genesis.hash,
+                finalized_block_hash: genesis.hash,
                 ..Default::default()
             });
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
@@ -854,7 +867,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                TestStages::default().with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    stage_progress: 0,
+                })])),
                 Vec::default(),
             );
 
@@ -884,7 +900,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                TestStages::default().with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    stage_progress: 0,
+                })])),
                 Vec::default(),
             );
 
@@ -897,7 +916,7 @@ mod tests {
 
             // Send forkchoice
             let rx = env.send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: block1.hash,
+                head_block_hash: block2.hash,
                 finalized_block_hash: block1.hash,
                 ..Default::default()
             });
@@ -925,7 +944,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                TestStages::default().with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    stage_progress: 0,
+                })])),
                 Vec::default(),
             );
 
@@ -977,7 +999,10 @@ mod tests {
             );
             let (consensus_engine, env) = setup_consensus_engine(
                 chain_spec,
-                VecDeque::from([Ok(ExecOutput { done: true, stage_progress: 0 })]),
+                TestStages::default().with_exec_outputs(VecDeque::from([Ok(ExecOutput {
+                    done: true,
+                    stage_progress: 0,
+                })])),
                 Vec::from([exec_result2]),
             );
 

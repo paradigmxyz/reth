@@ -147,8 +147,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     }
 
     /// Return block hash the tip of the canonical chain
-    pub fn canonical_tip_hash(&self) -> Option<BlockHash> {
-        self.block_indices.canonical_chain().last_key_value().map(|(_, hash)| *hash)
+    pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
+        self.block_indices.is_block_hash_canonical(block_hash)
     }
 
     /// Create a new sidechain by forking the given chain, or append the block if the parent block

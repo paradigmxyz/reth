@@ -1,18 +1,19 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::database::Database;
 use reth_provider::Transaction;
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 
 #[derive(Debug)]
 pub struct TestStage {
     id: StageId,
     exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
     unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
+    delay: Option<Duration>,
 }
 
 impl TestStage {
     pub fn new(id: StageId) -> Self {
-        Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
+        Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new(), delay: None }
     }
 
     pub fn with_exec(mut self, exec_outputs: VecDeque<Result<ExecOutput, StageError>>) -> Self {
@@ -25,6 +26,11 @@ impl TestStage {
         unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
     ) -> Self {
         self.unwind_outputs = unwind_outputs;
+        self
+    }
+
+    pub fn with_delay(mut self, delay: Option<Duration>) -> Self {
+        self.delay = delay;
         self
     }
 
@@ -50,6 +56,9 @@ impl<DB: Database> Stage<DB> for TestStage {
         _: &mut Transaction<'_, DB>,
         _input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
+        if let Some(duration) = self.delay {
+            tokio::time::sleep(duration).await;
+        }
         self.exec_outputs
             .pop_front()
             .unwrap_or_else(|| panic!("Test stage {} executed too many times.", self.id))
@@ -60,6 +69,9 @@ impl<DB: Database> Stage<DB> for TestStage {
         _: &mut Transaction<'_, DB>,
         _input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
+        if let Some(duration) = self.delay {
+            tokio::time::sleep(duration).await;
+        }
         self.unwind_outputs
             .pop_front()
             .unwrap_or_else(|| panic!("Test stage {} unwound too many times.", self.id))
