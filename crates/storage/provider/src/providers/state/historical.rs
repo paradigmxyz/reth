@@ -53,21 +53,17 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
             });
 
         // if changeset transition id is present we are getting value from changeset
-        if let Some(changeset_transition_id) = changeset_transition_id {
-            if let Some(changeset_transition_id) = changeset_transition_id {
-                let account = self
-                    .tx
-                    .cursor_dup_read::<tables::AccountChangeSet>()?
-                    .seek_by_key_subkey(changeset_transition_id, address)?
-                    .filter(|acc| acc.address == address)
-                    .ok_or(ProviderError::AccountChangeset {
-                        transition_id: changeset_transition_id,
-                        address,
-                    })?;
-                Ok(account.info)
-            } else {
-                Ok(None)
-            }
+        if let Some(Some(changeset_transition_id)) = changeset_transition_id {
+            let account = self
+                .tx
+                .cursor_dup_read::<tables::AccountChangeSet>()?
+                .seek_by_key_subkey(changeset_transition_id, address)?
+                .filter(|acc| acc.address == address)
+                .ok_or(ProviderError::AccountChangeset {
+                    transition_id: changeset_transition_id,
+                    address,
+                })?;
+            Ok(account.info)
         } else {
             // if changeset is not present that means that there was history shard but we need to
             // use newest value from plain state
@@ -112,22 +108,18 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
             });
 
         // if changeset transition id is present we are getting value from changeset
-        if let Some(changeset_transition_id) = changeset_transition_id {
-            if let Some(changeset_transition_id) = changeset_transition_id {
-                let storage_entry = self
-                    .tx
-                    .cursor_dup_read::<tables::StorageChangeSet>()?
-                    .seek_by_key_subkey((changeset_transition_id, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or(ProviderError::StorageChangeset {
-                        transition_id: changeset_transition_id,
-                        address,
-                        storage_key,
-                    })?;
-                Ok(Some(storage_entry.value))
-            } else {
-                Ok(None)
-            }
+        if let Some(Some(changeset_transition_id)) = changeset_transition_id {
+            let storage_entry = self
+                .tx
+                .cursor_dup_read::<tables::StorageChangeSet>()?
+                .seek_by_key_subkey((changeset_transition_id, address).into(), storage_key)?
+                .filter(|entry| entry.key == storage_key)
+                .ok_or(ProviderError::StorageChangeset {
+                    transition_id: changeset_transition_id,
+                    address,
+                    storage_key,
+                })?;
+            Ok(Some(storage_entry.value))
         } else {
             // if changeset is not present that means that there was history shard but we need to
             // use newest value from plain state
