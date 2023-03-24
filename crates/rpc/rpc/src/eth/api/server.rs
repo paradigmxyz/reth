@@ -59,7 +59,9 @@ where
 
     /// Handler for: `eth_blockNumber`
     fn block_number(&self) -> Result<U256> {
-        trace!(target: "rpc::eth", "Serving eth_blockNumber");
+        let block_num = EthApiSpec::chain_info(self).with_message("failed to read chain info")?.best_number;
+        trace!(target: "rpc::eth", block_num, "Serving eth_blockNumber");
+
         Ok(U256::from(
             EthApiSpec::chain_info(self).with_message("failed to read chain info")?.best_number,
         ))

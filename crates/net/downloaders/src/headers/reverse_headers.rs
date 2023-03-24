@@ -704,6 +704,7 @@ where
             match req.poll_unpin(cx) {
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
+                        trace!(target: "downloaders::headers", ?err, "invalid sync target response");
                         if err.is_channel_closed() {
                             // download channel closed which means the network was dropped
                             return Poll::Ready(None)

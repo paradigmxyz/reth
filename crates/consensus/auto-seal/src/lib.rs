@@ -75,7 +75,8 @@ impl Consensus for AutoSealConsensus {
 }
 
 /// Builder type for configuring the setup
-pub struct AutoSealBuilder<Pool> {
+pub struct AutoSealBuilder<Client, Pool> {
+    client: Client,
     consensus: AutoSealConsensus,
     pool: Pool,
     mode: MiningMode,
@@ -85,19 +86,22 @@ pub struct AutoSealBuilder<Pool> {
 
 // === impl AutoSealBuilder ===
 
-impl<Pool: TransactionPool> AutoSealBuilder<Pool> {
+impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool> {
     /// Creates a new builder instance to configure all parts.
     pub fn new(
         chain_spec: Arc<ChainSpec>,
+        client: Client,
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage>,
     ) -> Self {
-        let mode = MiningMode::instant(100, pool.pending_transactions_listener());
+        let mode = MiningMode::interval(std::time::Duration::from_secs(4));
+        // let mode = MiningMode::instant(100, pool.pending_transactions_listener());
         Self {
+            storage: Storage::new(&chain_spec),
+            client,
             consensus: AutoSealConsensus::new(chain_spec),
             pool,
             mode,
-            storage: Default::default(),
             to_engine,
         }
     }
@@ -109,11 +113,18 @@ impl<Pool: TransactionPool> AutoSealBuilder<Pool> {
     }
 
     /// Consumes the type and returns all components
-    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Pool>) {
-        let Self { consensus, pool, mode, storage, to_engine } = self;
-        let client = AutoSealClient::new(storage.clone());
-        let task = MiningTask::new(mode, to_engine, storage, pool);
-        (consensus, client, task)
+    pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool>) {
+        let Self { client, consensus, pool, mode, storage, to_engine } = self;
+        let auto_client = AutoSealClient::new(storage.clone());
+        let task = MiningTask::new(
+            Arc::clone(&consensus.chain_spec),
+            mode,
+            to_engine,
+            storage,
+            client,
+            pool,
+        );
+        (consensus, auto_client, task)
     }
 }
 
@@ -126,6 +137,16 @@ pub(crate) struct Storage {
 // == impl Storage ===
 
 impl Storage {
+
+    fn new(chain_spec: &ChainSpec) -> Self {
+        Self {
+            inner: Arc::new(  RwLock::new(StorageInner{
+                best_hash: chain_spec.genesis_hash.unwrap_or_default(),
+               .. Default::default()
+            }))
+        }
+    }
+
     /// Returns the write lock of the storage
     pub(crate) async fn write(&self) -> RwLockWriteGuard<'_, StorageInner> {
         self.inner.write().await

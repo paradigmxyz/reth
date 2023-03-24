@@ -13,6 +13,7 @@ use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
+use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
 use reth_db::{
     database::Database,
@@ -150,8 +151,12 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone())) as Arc<dyn Consensus>;
-        info!(target: "reth::cli", "Consensus engine initialized");
+        let consensus: Arc<dyn Consensus> = if self.auto_mine {
+            debug!(target: "reth::cli", "Using auto seal");
+            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
+        };
 
         self.init_trusted_nodes(&mut config);
 
@@ -217,14 +222,14 @@ impl Command {
         };
 
         let engine_api_handle =
-            self.init_engine_api(Arc::clone(&db), consensus_engine_tx, &ctx.task_executor);
+            self.init_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let _auth_server = self
             .rpc
             .start_auth_server(
-                shareable_db,
-                transaction_pool,
+                shareable_db.clone(),
+                transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
                 self.chain.clone(),
@@ -233,19 +238,49 @@ impl Command {
             .await?;
         info!(target: "reth::cli", "Started Auth server");
 
-        let client = network.fetch_client().await?;
-        let (pipeline, events) = self
-            .build_networked_pipeline(
-                &mut config,
-                network.clone(),
-                client,
-                Arc::clone(&consensus),
-                db.clone(),
-                &ctx.task_executor,
+        let pipeline = if self.auto_mine {
+            let (_, client, task) = AutoSealBuilder::new(
+                Arc::clone(&self.chain),
+                shareable_db,
+                transaction_pool.clone(),
+                consensus_engine_tx,
             )
-            .await?;
+            .build();
 
-        ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            ctx.task_executor.spawn(Box::pin(task));
+
+            let (pipeline, events) = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client,
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
+
+            pipeline
+        } else {
+            let client = network.fetch_client().await?;
+            let (pipeline, events) = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client,
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
+
+            pipeline
+        };
 
         let beacon_consensus_engine = self.build_consensus_engine(
             db.clone(),
@@ -254,6 +289,7 @@ impl Command {
             pipeline,
             consensus_engine_rx,
         )?;
+        info!(target: "reth::cli", "Consensus engine initialized");
 
         // Run consensus engine
         let (rx, tx) = tokio::sync::oneshot::channel();
@@ -285,7 +321,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         db: Arc<Env<WriteMap>>,
         task_executor: &TaskExecutor,
-    ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
+    ) -> eyre::Result<(Pipeline<Env<WriteMap>, NetworkHandle>, impl Stream<Item = NodeEvent>)>
     where
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {

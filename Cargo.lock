@@ -4486,8 +4486,11 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
+ "reth-executor",
  "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
+ "reth-revm",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",

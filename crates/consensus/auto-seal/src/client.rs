@@ -10,7 +10,7 @@ use reth_primitives::{
     BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId, WithPeerId, H256,
 };
 use std::fmt::Debug;
-use tracing::warn;
+use tracing::{trace, warn};
 
 /// A download client that polls the miner for transactions and assembles blocks to be returned in
 /// the download process.
@@ -28,9 +28,11 @@ impl AutoSealClient {
     }
 
     async fn fetch_headers(&self, request: HeadersRequest) -> Vec<Header> {
+        trace!(target: "consensus::auto", ?request, "received headers request");
+
         let storage = self.storage.read().await;
         let HeadersRequest { start, limit, direction } = request;
-        let headers = Vec::new();
+        let mut headers = Vec::new();
 
         let mut block: BlockHashOrNumber = match start {
             BlockHashOrNumber::Hash(start) => start.into(),
@@ -38,6 +40,7 @@ impl AutoSealClient {
                 if let Some(hash) = storage.block_hash(num) {
                     hash.into()
                 } else {
+                    warn!(target: "consensus::auto", num, "no matching block found");
                     return headers
                 }
             }
@@ -53,15 +56,19 @@ impl AutoSealClient {
                         block = next.into()
                     }
                 }
+                headers.push(header);
             } else {
                 break
             }
         }
 
+        trace!(target: "consensus::auto", ?headers, "returning headers");
+
         headers
     }
 
     async fn fetch_bodies(&self, hashes: Vec<H256>) -> Vec<BlockBody> {
+        trace!(target: "consensus::auto", ?hashes, "received bodies request");
         let storage = self.storage.read().await;
         let mut bodies = Vec::new();
         for hash in hashes {
@@ -71,6 +78,8 @@ impl AutoSealClient {
                 break
             }
         }
+
+        trace!(target: "consensus::auto", ?bodies, "returning bodies");
 
         bodies
     }
