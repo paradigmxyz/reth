@@ -141,7 +141,7 @@ where
                     warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
                     // If this is the first forkchoice received, start downloading from safe block
                     // hash.
-                    let target = if is_first_forkchoice {
+                    let target = if is_first_forkchoice && !state.safe_block_hash.is_zero() {
                         PipelineTarget::Safe
                     } else {
                         PipelineTarget::Head
@@ -161,6 +161,7 @@ where
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
+        trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         ForkchoiceUpdated::new(status)
     }
 
@@ -174,17 +175,20 @@ where
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
     fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
-        trace!(target: "consensus::engine", block_hash = ?payload.block_hash, block_number = payload.block_number.as_u64(), "Received new payload");
+        let block_number = payload.block_number.as_u64();
+        let block_hash = payload.block_hash;
+        trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
         let block = match SealedBlock::try_from(payload) {
             Ok(block) => block,
             Err(error) => {
+                error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
                 return PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
                     validation_error: error.to_string(),
                 })
             }
         };
 
-        if self.is_pipeline_idle() {
+        let status = if self.is_pipeline_idle() {
             let block_hash = block.hash;
             match self.blockchain_tree.insert_block(block) {
                 Ok(status) => {
@@ -209,7 +213,9 @@ where
             }
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-        }
+        };
+        trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
+        status
     }
 
     /// Returns the next pipeline state depending on the current value of the next action.
