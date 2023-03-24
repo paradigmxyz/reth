@@ -308,7 +308,7 @@ where
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
         self.clear();
         self.download_range = range;
-        return Ok(())
+        Ok(())
     }
 }
 
