@@ -236,12 +236,25 @@ where
     /// If the finalized block is missing from the database, trigger the pipeline run.
     fn restore_tree_if_possible(
         &mut self,
-        finalized_hash: BlockHash,
+        forkchoice_state: ForkchoiceState,
     ) -> Result<(), reth_interfaces::Error> {
-        match self.db.view(|tx| tx.get::<tables::HeaderNumbers>(finalized_hash))?? {
-            Some(number) => self.blockchain_tree.restore_canonical_hashes(number)?,
-            None => self.require_pipeline_run(PipelineTarget::Head),
-        };
+        if let Some(number) = self
+            .db
+            .view(|tx| tx.get::<tables::HeaderNumbers>(forkchoice_state.finalized_block_hash))??
+        {
+            // Restore the tree from finalized block in case we receive payloads that fork at blocks
+            // older than head
+            self.blockchain_tree.restore_canonical_hashes(number)?;
+
+            if let Some(tip) = self.blockchain_tree.canonical_tip_hash() {
+                if tip == forkchoice_state.head_block_hash {
+                    // The blockchain tree has correct tip, no pipeline sync needed
+                    return Ok(())
+                }
+            }
+        }
+
+        self.require_pipeline_run(PipelineTarget::Head);
         Ok(())
     }
 
@@ -340,9 +353,7 @@ where
                             };
 
                             // Update the state and hashes of the blockchain tree if possible
-                            if let Err(error) =
-                                this.restore_tree_if_possible(forkchoice_state.finalized_block_hash)
-                            {
+                            if let Err(error) = this.restore_tree_if_possible(forkchoice_state) {
                                 error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
                                 return Poll::Ready(Err(error.into()))
                             }
