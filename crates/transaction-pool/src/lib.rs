@@ -300,11 +300,11 @@ where
         Box::new(self.pool.best_transactions())
     }
 
-    fn remove_invalid(
+    fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.remove_invalid(hashes)
+        self.pool.remove_transactions(hashes)
     }
 
     fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {

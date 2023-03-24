@@ -347,11 +347,11 @@ where
     }
 
     /// Removes and returns all matching transactions from the pool.
-    pub(crate) fn remove_invalid(
+    pub(crate) fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let removed = self.pool.write().remove_invalid(hashes);
+        let removed = self.pool.write().remove_transactions(hashes);
 
         let mut listener = self.event_listener.write();
 
