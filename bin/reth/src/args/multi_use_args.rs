@@ -28,8 +28,7 @@ pub fn get_secret_key(
     match exists {
         Ok(true) => {
             let contents = read_to_string(fpath)?;
-            (contents.as_str().parse::<SecretKey>())
-                .map_err(SecretKeyError::SecretKeyDecodeError)
+            (contents.as_str().parse::<SecretKey>()).map_err(SecretKeyError::SecretKeyDecodeError)
         }
         Ok(false) => {
             let default_path = PlatformPath::<SecretKeyPath>::default();
