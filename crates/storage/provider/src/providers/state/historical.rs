@@ -43,25 +43,31 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
         // history key to search IntegerList of transition id changesets.
         let history_key = ShardedKey::new(address, self.transition);
 
-        let Some(changeset_transition_id) = self.tx.cursor_read::<tables::AccountHistory>()?
+        let changeset_transition_id = self
+            .tx
+            .cursor_read::<tables::AccountHistory>()?
             .seek(history_key)?
-            .filter(|(key,_)| key.key == address)
-            .map(|(_,list)| list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)) else {
-                return Ok(None)
-            };
+            .filter(|(key, _)| key.key == address)
+            .map(|(_, list)| {
+                list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)
+            });
 
         // if changeset transition id is present we are getting value from changeset
         if let Some(changeset_transition_id) = changeset_transition_id {
-            let account = self
-                .tx
-                .cursor_dup_read::<tables::AccountChangeSet>()?
-                .seek_by_key_subkey(changeset_transition_id, address)?
-                .filter(|acc| acc.address == address)
-                .ok_or(ProviderError::AccountChangeset {
-                    transition_id: changeset_transition_id,
-                    address,
-                })?;
-            Ok(account.info)
+            if let Some(changeset_transition_id) = changeset_transition_id {
+                let account = self
+                    .tx
+                    .cursor_dup_read::<tables::AccountChangeSet>()?
+                    .seek_by_key_subkey(changeset_transition_id, address)?
+                    .filter(|acc| acc.address == address)
+                    .ok_or(ProviderError::AccountChangeset {
+                        transition_id: changeset_transition_id,
+                        address,
+                    })?;
+                Ok(account.info)
+            } else {
+                Ok(None)
+            }
         } else {
             // if changeset is not present that means that there was history shard but we need to
             // use newest value from plain state
