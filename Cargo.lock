@@ -4496,6 +4496,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc-types",
  "reth-stages",
+ "reth-tasks",
  "reth-tracing",
  "thiserror",
  "tokio",

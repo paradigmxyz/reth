@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, NetworkArgs, RpcServerArgs},
+    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
     dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
     prometheus_exporter,
     runner::CliContext,
@@ -42,7 +42,7 @@ use reth_network::{
     error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, TxHash, H256};
+use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
@@ -123,55 +123,11 @@ pub struct Command {
     #[clap(flatten)]
     network: NetworkArgs,
 
-    /// Prompt the downloader to download blocks one at a time.
-    ///
-    /// NOTE: This is for testing purposes only.
-    #[arg(long = "debug.continuous", help_heading = "Debug")]
-    continuous: bool,
-
-    /// Set the chain tip manually for testing purposes.
-    ///
-    /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip", help_heading = "Debug")]
-    tip: Option<H256>,
-
-    /// Runs the sync only up to the specified block
-    #[arg(long = "debug.max-block", help_heading = "Debug")]
-    max_block: Option<u64>,
-
-    /// Flag indicating whether the node should be terminated after the pipeline sync.
-    #[arg(long = "debug.terminate", help_heading = "Debug")]
-    terminate: bool,
-
     #[clap(flatten)]
     rpc: RpcServerArgs,
 
-    #[arg(long = "debug.print-inspector", help_heading = "Debug")]
-    print_inspector: bool,
-
-    #[arg(
-        long = "debug.hook-block",
-        help_heading = "Debug",
-        conflicts_with = "hook_transaction",
-        conflicts_with = "hook_all"
-    )]
-    hook_block: Option<u64>,
-
-    #[arg(
-        long = "debug.hook-transaction",
-        help_heading = "Debug",
-        conflicts_with = "hook_block",
-        conflicts_with = "hook_all"
-    )]
-    hook_transaction: Option<TxHash>,
-
-    #[arg(
-        long = "debug.hook-all",
-        help_heading = "Debug",
-        conflicts_with = "hook_block",
-        conflicts_with = "hook_transaction"
-    )]
-    hook_all: bool,
+    #[clap(flatten)]
+    debug: DebugArgs,
 }
 
 impl Command {
@@ -220,6 +176,7 @@ impl Command {
             .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
 
         let _rpc_server = self
             .rpc
@@ -234,7 +191,7 @@ impl Command {
             .await?;
         info!(target: "reth::cli", "Started RPC server");
 
-        if self.continuous {
+        if self.debug.continuous {
             info!(target: "reth::cli", "Continuous sync mode enabled");
         }
 
@@ -242,7 +199,7 @@ impl Command {
 
         // Forward the `debug.tip` as forkchoice state to the consensus engine.
         // This will initiate the sync up to the provided tip.
-        let _tip_rx = match self.tip {
+        let _tip_rx = match self.debug.tip {
             Some(tip) => {
                 let (tip_tx, tip_rx) = oneshot::channel();
                 let state = ForkchoiceState {
@@ -296,8 +253,13 @@ impl Command {
 
         ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
 
-        let beacon_consensus_engine =
-            self.build_consensus_engine(db.clone(), consensus, pipeline, consensus_engine_rx)?;
+        let beacon_consensus_engine = self.build_consensus_engine(
+            db.clone(),
+            &ctx.task_executor,
+            consensus,
+            pipeline,
+            consensus_engine_rx,
+        )?;
 
         // Run consensus engine
         let (rx, tx) = tokio::sync::oneshot::channel();
@@ -311,7 +273,7 @@ impl Command {
 
         info!(target: "reth::cli", "Consensus engine has exited.");
 
-        if self.terminate {
+        if self.debug.terminate {
             Ok(())
         } else {
             // The pipeline has finished downloading blocks up to `--debug.tip` or
@@ -330,9 +292,9 @@ impl Command {
     ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
     {
         let fetch_client = network.fetch_client().await?;
-        let max_block = if let Some(block) = self.max_block {
+        let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
-        } else if let Some(tip) = self.tip {
+        } else if let Some(tip) = self.debug.tip {
             Some(self.lookup_or_fetch_tip(db.clone(), fetch_client.clone(), tip).await?)
         } else {
             None
@@ -357,7 +319,7 @@ impl Command {
                 network.clone(),
                 consensus,
                 max_block,
-                self.continuous,
+                self.debug.continuous,
             )
             .await?;
 
@@ -371,10 +333,11 @@ impl Command {
     fn build_consensus_engine<DB, U, C>(
         &self,
         db: Arc<DB>,
+        task_executor: &TaskExecutor,
         consensus: C,
         pipeline: Pipeline<DB, U>,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> eyre::Result<BeaconConsensusEngine<DB, U, C, Factory>>
+    ) -> eyre::Result<BeaconConsensusEngine<DB, TaskExecutor, U, C, Factory>>
     where
         DB: Database + Unpin + 'static,
         U: SyncStateUpdater + Unpin + 'static,
@@ -385,7 +348,14 @@ impl Command {
             TreeExternals::new(db.clone(), consensus, executor_factory, self.chain.clone());
         let blockchain_tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
 
-        Ok(BeaconConsensusEngine::new(db, pipeline, blockchain_tree, message_rx, self.max_block))
+        Ok(BeaconConsensusEngine::new(
+            db,
+            task_executor.clone(),
+            pipeline,
+            blockchain_tree,
+            message_rx,
+            self.debug.max_block,
+        ))
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
@@ -587,12 +557,12 @@ impl Command {
         let factory = reth_executor::Factory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
-            use_printer_tracer: self.print_inspector,
-            hook: if let Some(hook_block) = self.hook_block {
+            use_printer_tracer: self.debug.print_inspector,
+            hook: if let Some(hook_block) = self.debug.hook_block {
                 Hook::Block(hook_block)
-            } else if let Some(tx) = self.hook_transaction {
+            } else if let Some(tx) = self.debug.hook_transaction {
                 Hook::Transaction(tx)
-            } else if self.hook_all {
+            } else if self.debug.hook_all {
                 Hook::All
             } else {
                 Hook::None

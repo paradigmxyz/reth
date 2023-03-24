@@ -43,15 +43,17 @@ impl<'a, 'b, TX: DbTx<'a>> AccountProvider for HistoricalStateProviderRef<'a, 'b
         // history key to search IntegerList of transition id changesets.
         let history_key = ShardedKey::new(address, self.transition);
 
-        let Some(changeset_transition_id) = self.tx.cursor_read::<tables::AccountHistory>()?
+        let changeset_transition_id = self
+            .tx
+            .cursor_read::<tables::AccountHistory>()?
             .seek(history_key)?
-            .filter(|(key,_)| key.key == address)
-            .map(|(_,list)| list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)) else {
-                return Ok(None)
-            };
+            .filter(|(key, _)| key.key == address)
+            .map(|(_, list)| {
+                list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)
+            });
 
         // if changeset transition id is present we are getting value from changeset
-        if let Some(changeset_transition_id) = changeset_transition_id {
+        if let Some(Some(changeset_transition_id)) = changeset_transition_id {
             let account = self
                 .tx
                 .cursor_dup_read::<tables::AccountChangeSet>()?
@@ -96,15 +98,17 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
         // history key to search IntegerList of transition id changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.transition);
 
-        let Some(changeset_transition_id) = self.tx.cursor_read::<tables::StorageHistory>()?
+        let changeset_transition_id = self
+            .tx
+            .cursor_read::<tables::StorageHistory>()?
             .seek(history_key)?
-            .filter(|(key,_)| key.address == address && key.sharded_key.key == storage_key)
-            .map(|(_,list)| list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)) else {
-                return Ok(None)
-            };
+            .filter(|(key, _)| key.address == address && key.sharded_key.key == storage_key)
+            .map(|(_, list)| {
+                list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)
+            });
 
         // if changeset transition id is present we are getting value from changeset
-        if let Some(changeset_transition_id) = changeset_transition_id {
+        if let Some(Some(changeset_transition_id)) = changeset_transition_id {
             let storage_entry = self
                 .tx
                 .cursor_dup_read::<tables::StorageChangeSet>()?

@@ -598,6 +598,25 @@ mod tests {
     };
     use std::sync::Arc;
 
+    // Ensure that the transition id is not incremented if postate is extended by another empty
+    // poststate.
+    #[test]
+    fn extend_empty() {
+        let mut a = PostState::new();
+        assert_eq!(a.current_transition_id, 0);
+
+        // Extend empty poststate with another empty poststate
+        a.extend(PostState::new());
+        assert_eq!(a.current_transition_id, 0);
+
+        // Add single transition and extend with empty poststate
+        a.create_account(Address::zero(), Account::default());
+        a.finish_transition();
+        let transition_id = a.current_transition_id;
+        a.extend(PostState::new());
+        assert_eq!(a.current_transition_id, transition_id);
+    }
+
     #[test]
     fn extend() {
         let mut a = PostState::new();

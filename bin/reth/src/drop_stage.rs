@@ -13,7 +13,7 @@ use reth_db::{
 };
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
-use reth_stages::stages::EXECUTION;
+use reth_stages::stages::{EXECUTION, MERKLE_EXECUTION};
 use std::sync::Arc;
 use tracing::info;
 
@@ -69,6 +69,19 @@ impl Command {
                     tx.clear::<tables::Bytecodes>()?;
                     tx.put::<tables::SyncStage>(EXECUTION.0.to_string(), 0)?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
+                    Ok::<_, eyre::Error>(())
+                })??;
+            }
+            StageEnum::Merkle => {
+                tool.db.update(|tx| {
+                    tx.clear::<tables::AccountsTrie>()?;
+                    tx.clear::<tables::StoragesTrie>()?;
+                    tx.put::<tables::SyncStageProgress>(
+                        // TODO: Extract to constant in `TrieLoader` in trie/mod.rs
+                        "TrieLoader".to_string(),
+                        Vec::new(),
+                    )?;
+                    tx.put::<tables::SyncStage>(MERKLE_EXECUTION.0.to_string(), 0)?;
                     Ok::<_, eyre::Error>(())
                 })??;
             }

@@ -13,12 +13,13 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
 };
 use reth_stages::Pipeline;
+use reth_tasks::TaskSpawner;
 use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
@@ -48,15 +49,18 @@ pub use pipeline_state::PipelineState;
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, U, C, EF>
+pub struct BeaconConsensusEngine<DB, TS, U, C, EF>
 where
     DB: Database,
+    TS: TaskSpawner,
     U: SyncStateUpdater,
     C: Consensus,
     EF: ExecutorFactory,
 {
     /// The database handle.
     db: Arc<DB>,
+    /// Task spawner for spawning the pipeline.
+    task_spawner: TS,
     /// The current state of the pipeline.
     /// Must always be [Some] unless the state is being reevaluated.
     /// The pipeline is used for historical sync by setting the current forkchoice head.
@@ -75,9 +79,10 @@ where
     max_block: Option<BlockNumber>,
 }
 
-impl<DB, U, C, EF> BeaconConsensusEngine<DB, U, C, EF>
+impl<DB, TS, U, C, EF> BeaconConsensusEngine<DB, TS, U, C, EF>
 where
     DB: Database + Unpin + 'static,
+    TS: TaskSpawner,
     U: SyncStateUpdater + 'static,
     C: Consensus,
     EF: ExecutorFactory + 'static,
@@ -88,6 +93,7 @@ where
     /// handle the messages received from the Consensus Layer.
     pub fn new(
         db: Arc<DB>,
+        task_spawner: TS,
         pipeline: Pipeline<DB, U>,
         blockchain_tree: BlockchainTree<DB, C, EF>,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
@@ -95,6 +101,7 @@ where
     ) -> Self {
         Self {
             db,
+            task_spawner,
             pipeline_state: Some(PipelineState::Idle(pipeline)),
             blockchain_tree,
             message_rx: UnboundedReceiverStream::new(message_rx),
@@ -138,10 +145,10 @@ where
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => PayloadStatus::from_status(PayloadStatusEnum::Valid),
                 Err(error) => {
-                    error!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
+                    warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
                     // If this is the first forkchoice received, start downloading from safe block
                     // hash.
-                    let target = if is_first_forkchoice {
+                    let target = if is_first_forkchoice && !state.safe_block_hash.is_zero() {
                         PipelineTarget::Safe
                     } else {
                         PipelineTarget::Head
@@ -161,6 +168,7 @@ where
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
+        trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         ForkchoiceUpdated::new(status)
     }
 
@@ -174,16 +182,20 @@ where
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
     fn on_new_payload(&mut self, payload: ExecutionPayload) -> PayloadStatus {
+        let block_number = payload.block_number.as_u64();
+        let block_hash = payload.block_hash;
+        trace!(target: "consensus::engine", ?block_hash, block_number, "Received new payload");
         let block = match SealedBlock::try_from(payload) {
             Ok(block) => block,
             Err(error) => {
+                error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
                 return PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
                     validation_error: error.to_string(),
                 })
             }
         };
 
-        if self.is_pipeline_idle() {
+        let status = if self.is_pipeline_idle() {
             let block_hash = block.hash;
             match self.blockchain_tree.insert_block(block) {
                 Ok(status) => {
@@ -208,7 +220,9 @@ where
             }
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
-        }
+        };
+        trace!(target: "consensus::engine", ?block_hash, block_number, ?status, "Returning payload status");
+        status
     }
 
     /// Returns the next pipeline state depending on the current value of the next action.
@@ -225,7 +239,16 @@ where
                 PipelineTarget::Safe => forkchoice_state.safe_block_hash,
             };
             trace!(target: "consensus::engine", ?tip, "Starting the pipeline");
-            PipelineState::Running(pipeline.run_as_fut(self.db.clone(), tip))
+            let (tx, rx) = oneshot::channel();
+            let db = self.db.clone();
+            self.task_spawner.spawn_critical(
+                "pipeline",
+                Box::pin(async move {
+                    let result = pipeline.run_as_fut(db, tip).await;
+                    let _ = tx.send(result);
+                }),
+            );
+            PipelineState::Running(rx)
         } else {
             PipelineState::Idle(pipeline)
         }
@@ -267,9 +290,10 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, U, C, EF> Future for BeaconConsensusEngine<DB, U, C, EF>
+impl<DB, TS, U, C, EF> Future for BeaconConsensusEngine<DB, TS, U, C, EF>
 where
     DB: Database + Unpin + 'static,
+    TS: TaskSpawner + Unpin,
     U: SyncStateUpdater + Unpin + 'static,
     C: Consensus + Unpin,
     EF: ExecutorFactory + Unpin + 'static,
@@ -315,18 +339,23 @@ where
             let next_state = match this.pipeline_state.take().expect("pipeline state is set") {
                 PipelineState::Running(mut fut) => {
                     match fut.poll_unpin(cx) {
-                        Poll::Ready((pipeline, result)) => {
+                        Poll::Ready(Ok((pipeline, result))) => {
                             if let Err(error) = result {
                                 return Poll::Ready(Err(error.into()))
                             }
 
                             match result {
-                                Ok(_) => {
-                                    // Terminate the sync early if it's reached the maximum user
-                                    // configured block.
-                                    let minimum_pipeline_progress = *pipeline.minimum_progress();
-                                    if this.has_reached_max_block(minimum_pipeline_progress) {
-                                        return Poll::Ready(Ok(()))
+                                Ok(ctrl) => {
+                                    if ctrl.is_unwind() {
+                                        this.require_pipeline_run(PipelineTarget::Head);
+                                    } else {
+                                        // Terminate the sync early if it's reached the maximum user
+                                        // configured block.
+                                        let minimum_pipeline_progress =
+                                            *pipeline.minimum_progress();
+                                        if this.has_reached_max_block(minimum_pipeline_progress) {
+                                            return Poll::Ready(Ok(()))
+                                        }
                                     }
                                 }
                                 // Any pipeline error at this point is fatal.
@@ -343,6 +372,10 @@ where
 
                             // Get next pipeline state.
                             this.next_pipeline_state(pipeline, forkchoice_state)
+                        }
+                        Poll::Ready(Err(error)) => {
+                            error!(target: "consensus::engine", ?error, "Failed to receive pipeline result");
+                            return Poll::Ready(Err(BeaconEngineError::PipelineChannelClosed))
                         }
                         Poll::Pending => {
                             this.pipeline_state = Some(PipelineState::Running(fut));
@@ -397,6 +430,7 @@ mod tests {
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
+    use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, time::Duration};
     use tokio::sync::{
         mpsc::{unbounded_channel, UnboundedSender},
@@ -406,6 +440,7 @@ mod tests {
 
     type TestBeaconConsensusEngine = BeaconConsensusEngine<
         Env<WriteMap>,
+        TokioTaskExecutor,
         NoopSyncStateUpdate,
         TestConsensus,
         TestExecutorFactory,
@@ -476,7 +511,14 @@ mod tests {
 
         let (sync_tx, sync_rx) = unbounded_channel();
         (
-            BeaconConsensusEngine::new(db.clone(), pipeline, tree, sync_rx, None),
+            BeaconConsensusEngine::new(
+                db.clone(),
+                TokioTaskExecutor::default(),
+                pipeline,
+                tree,
+                sync_rx,
+                None,
+            ),
             TestEnv::new(db, tip_rx, sync_tx),
         )
     }
