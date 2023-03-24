@@ -628,13 +628,7 @@ where
 
         let number_of_changed_accounts = changed_accounts.len();
         for (idx, (hashed_address, changed_storages)) in changed_accounts.into_iter().enumerate() {
-            println!("Entering with account {:?}", hashed_address);
             let res = if let Some(account) = trie.get(hashed_address.as_slice())? {
-                println!("Incrementally calculating storage root");
-                // NOTE: We need to remove the account here, because on some paths it is not
-                // re-inserted, leading to us hitting the second branch after certain checkpoints
-                // trie.remove(hashed_address.as_bytes())?;
-
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
                 self.update_storage_root(
                     checkpoint.storage_root.take().unwrap_or(storage_root),
@@ -644,7 +638,6 @@ where
                     checkpoint.storage_key.take(),
                 )?
             } else {
-                println!("Calculating storage root from scratch");
                 self.calculate_storage_root(
                     hashed_address,
                     &mut storage_cursor,
