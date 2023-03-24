@@ -775,7 +775,7 @@ mod tests {
             let block1 = random_block(1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
 
-            let _ = spawn_consensus_engine(consensus_engine).await;
+            let _engine = spawn_consensus_engine(consensus_engine);
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
@@ -784,6 +784,7 @@ mod tests {
             });
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            drop(_engine);
         }
 
         #[tokio::test]
@@ -809,7 +810,7 @@ mod tests {
 
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
 
-            let _ = spawn_consensus_engine(consensus_engine).await;
+            let _engine = spawn_consensus_engine(consensus_engine);
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
@@ -829,6 +830,7 @@ mod tests {
             })
             .with_latest_valid_hash(H256::zero());
             assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            drop(_engine);
         }
     }
 
