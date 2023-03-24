@@ -21,6 +21,7 @@ use reth_primitives::{
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tracing::trace;
 
 mod client;
 mod mode;
@@ -174,6 +175,7 @@ impl StorageInner {
     pub(crate) fn insert_new_block(&mut self, header: Header, body: BlockBody) {
         self.best_hash = header.hash_slow();
         self.best_block = header.number;
+        trace!(target: "consensus::auto", num=self.best_block, hash=?self.best_hash, "inserting new block");
         self.headers.insert(header.number, header);
         self.bodies.insert(self.best_hash, body);
         self.hash_to_number.insert(self.best_hash, self.best_block);

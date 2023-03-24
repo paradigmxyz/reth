@@ -13,6 +13,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tracing::trace;
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
 pub struct MiningTask<Pool: TransactionPool> {
@@ -111,6 +112,8 @@ where
                                 finalized_block_hash: new_hash,
                                 safe_block_hash: new_hash,
                             };
+
+                            trace!(target: "consensus::auto", ?state, "sending fork choice update");
                             let (tx, _rx) = oneshot::channel();
                             let _ = to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
                                 state,
