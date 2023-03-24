@@ -13,7 +13,7 @@ use reth_db::{
 };
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
-use reth_stages::stages::EXECUTION;
+use reth_stages::stages::{EXECUTION, MERKLE_EXECUTION};
 use std::sync::Arc;
 use tracing::info;
 
@@ -81,6 +81,7 @@ impl Command {
                         "TrieLoader".to_string(),
                         Vec::new(),
                     )?;
+                    tx.put::<tables::SyncStage>(MERKLE_EXECUTION.0.to_string(), 0)?;
                     Ok::<_, eyre::Error>(())
                 })??;
             }
