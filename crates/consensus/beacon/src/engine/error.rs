@@ -11,6 +11,9 @@ pub enum BeaconEngineError {
     /// Forkchoice zero hash head received.
     #[error("Received zero hash as forkchoice head")]
     ForkchoiceEmptyHead,
+    /// Pipeline channel closed.
+    #[error("Pipeline channel closed")]
+    PipelineChannelClosed,
     /// Encountered a payload error.
     #[error(transparent)]
     Payload(#[from] PayloadError),

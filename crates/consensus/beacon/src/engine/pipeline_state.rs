@@ -1,6 +1,7 @@
 use reth_db::database::Database;
 use reth_interfaces::sync::SyncStateUpdater;
-use reth_stages::{Pipeline, PipelineFut};
+use reth_stages::{Pipeline, PipelineWithResult};
+use tokio::sync::oneshot;
 
 /// The possible pipeline states within the sync controller.
 ///
@@ -15,7 +16,7 @@ pub enum PipelineState<DB: Database, U: SyncStateUpdater> {
     /// Pipeline is idle.
     Idle(Pipeline<DB, U>),
     /// Pipeline is running.
-    Running(PipelineFut<DB, U>),
+    Running(oneshot::Receiver<PipelineWithResult<DB, U>>),
 }
 
 impl<DB: Database, U: SyncStateUpdater> PipelineState<DB, U> {

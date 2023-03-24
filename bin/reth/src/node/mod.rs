@@ -241,8 +241,13 @@ impl Command {
 
         ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
 
-        let beacon_consensus_engine =
-            self.build_consensus_engine(db.clone(), consensus, pipeline, consensus_engine_rx)?;
+        let beacon_consensus_engine = self.build_consensus_engine(
+            db.clone(),
+            &ctx.task_executor,
+            consensus,
+            pipeline,
+            consensus_engine_rx,
+        )?;
 
         // Run consensus engine
         let (rx, tx) = tokio::sync::oneshot::channel();
@@ -316,10 +321,11 @@ impl Command {
     fn build_consensus_engine<DB, U, C>(
         &self,
         db: Arc<DB>,
+        task_executor: &TaskExecutor,
         consensus: C,
         pipeline: Pipeline<DB, U>,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> eyre::Result<BeaconConsensusEngine<DB, U, C, Factory>>
+    ) -> eyre::Result<BeaconConsensusEngine<DB, TaskExecutor, U, C, Factory>>
     where
         DB: Database + Unpin + 'static,
         U: SyncStateUpdater + Unpin + 'static,
@@ -332,6 +338,7 @@ impl Command {
 
         Ok(BeaconConsensusEngine::new(
             db,
+            task_executor.clone(),
             pipeline,
             blockchain_tree,
             message_rx,
