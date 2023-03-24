@@ -665,6 +665,16 @@ pub(crate) enum PendingSessionHandshakeError {
     Ecies(ECIESError),
 }
 
+impl PendingSessionHandshakeError {
+    /// Returns the [`DisconnectReason`] if the error is a disconnect message
+    pub fn as_disconnected(&self) -> Option<DisconnectReason> {
+        match self {
+            PendingSessionHandshakeError::Eth(eth_err) => eth_err.as_disconnected(),
+            _ => None,
+        }
+    }
+}
+
 /// The direction of the connection.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Direction {
