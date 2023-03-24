@@ -8,8 +8,8 @@ use reth_db::{
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
 };
 use reth_primitives::{
-    keccak256, proofs::EMPTY_ROOT, Account, Address, ProofCheckpoint, StorageEntry,
-    StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
+    hex_literal::hex, keccak256, proofs::EMPTY_ROOT, Account, Address, ProofCheckpoint,
+    StorageEntry, StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
@@ -433,7 +433,12 @@ impl TrieProgress {
 impl<'tx, TX> DBTrieLoader<'tx, TX> {
     /// Create new instance of trie loader.
     pub fn new(tx: &'tx TX) -> Self {
-        Self { tx, commit_threshold: 500_000, current: 0 }
+        Self { tx, commit_threshold: 2_000_000, current: 0 }
+    }
+
+    /// Create new instance of trie loader with a specific threshold.
+    pub fn new_with_threshold(tx: &'tx TX, commit_threshold: u64) -> Self {
+        Self { tx, commit_threshold, current: 0 }
     }
 }
 
@@ -603,10 +608,11 @@ where
         }
 
         let next_acc = checkpoint.hashed_address.take();
-        let changed_accounts = self
+        let changed_accounts: BTreeMap<_, _> = self
             .gather_changes(tid_range)?
             .into_iter()
-            .skip_while(|(addr, _)| next_acc.is_some() && next_acc.expect("is some") != *addr);
+            .skip_while(|(addr, _)| next_acc.is_some() && next_acc.expect("is some") != *addr)
+            .collect();
 
         let mut trie = PatriciaTrie::from(
             Arc::new(HashDatabaseMut::from_root(self.tx, previous_root)?),
@@ -620,9 +626,14 @@ where
         let storage_trie_cursor =
             Arc::new(Mutex::new(self.tx.cursor_dup_write::<tables::StoragesTrie>()?));
 
-        for (hashed_address, changed_storages) in changed_accounts {
+        let number_of_changed_accounts = changed_accounts.len();
+        for (idx, (hashed_address, changed_storages)) in changed_accounts.into_iter().enumerate() {
+            println!("Entering with account {:?}", hashed_address);
             let res = if let Some(account) = trie.get(hashed_address.as_slice())? {
-                trie.remove(hashed_address.as_bytes())?;
+                println!("Incrementally calculating storage root");
+                // NOTE: We need to remove the account here, because on some paths it is not
+                // re-inserted, leading to us hitting the second branch after certain checkpoints
+                // trie.remove(hashed_address.as_bytes())?;
 
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
                 self.update_storage_root(
@@ -633,6 +644,7 @@ where
                     checkpoint.storage_key.take(),
                 )?
             } else {
+                println!("Calculating storage root from scratch");
                 self.calculate_storage_root(
                     hashed_address,
                     &mut storage_cursor,
@@ -661,7 +673,8 @@ where
 
                 trie.insert(hashed_address.as_bytes(), out)?;
 
-                if self.has_hit_threshold() {
+                // check if done *before* we check the threshold
+                if self.has_hit_threshold() && idx != number_of_changed_accounts - 1 {
                     return self.save_account_checkpoint(
                         ProofCheckpoint::default(),
                         self.replace_account_root(trie, previous_root)?,
@@ -696,26 +709,34 @@ where
             )?))
         }
 
-        let mut trie = PatriciaTrie::new(
+        // NOTE(onbjerg): Will fail if account is new
+        // NOTE: We have to load with the previous storage root, otherwise all nodes in the trie we
+        // computed in the last run (where we checkpointed) are lost
+        let mut trie = PatriciaTrie::from(
             Arc::new(DupHashDatabaseMut::<TX>::from_root(
                 storage_trie_cursor.clone(),
                 address,
                 previous_root,
             )?),
             Arc::new(HasherKeccak::new()),
-        );
+            previous_root.as_bytes(),
+        )?;
 
-        let changed_storages = changed_storages
+        let changed_storages: BTreeSet<_> = changed_storages
             .into_iter()
-            .skip_while(|k| next_storage.is_some() && *k == next_storage.expect("is some"));
-
-        for key in changed_storages {
+            // We know the keys are sorted, so any key less than or equal to the checkpoint should
+            // be skipped (since the checkpoint is the last storage slot we have processed)
+            .skip_while(|k| next_storage.is_some() && *k <= next_storage.expect("is some"))
+            .collect();
+        let num_changed_storages = changed_storages.len();
+        for (idx, key) in changed_storages.into_iter().enumerate() {
             if let Some(StorageEntry { value, .. }) =
                 hashed_storage_cursor.seek_by_key_subkey(address, key)?.filter(|e| e.key == key)
             {
                 let out = encode_fixed_size(&value).to_vec();
                 trie.insert(key.as_bytes(), out)?;
-                if self.has_hit_threshold() {
+
+                if self.has_hit_threshold() && idx != num_changed_storages - 1 {
                     return Ok(TrieProgress::InProgress(ProofCheckpoint {
                         storage_root: Some(self.replace_storage_root(
                             H256::from_slice(trie.root()?.as_slice()),
@@ -1051,7 +1072,7 @@ mod tests {
         let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
         let storage_trie_cursor =
             Arc::new(Mutex::new(trie.tx.cursor_dup_write::<tables::StoragesTrie>().unwrap()));
-        let mut storage_cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
+        let mut storage_cursor = trie.tx.cursor_dup_read::<tables::HashedStorage>().unwrap();
 
         assert_matches!(
             trie.calculate_storage_root(hashed_address,&mut storage_cursor, storage_trie_cursor, None, None),
@@ -1161,6 +1182,124 @@ mod tests {
             create_test_loader(&tx).gather_changes(32..33),
             Ok(got) if got == expected
         );
+    }
+
+    #[test]
+    fn update_storage_root() {
+        let db = create_test_rw_db();
+        let mut tx = Transaction::new(db.as_ref()).unwrap();
+
+        // Addresses
+        let address = Address::from_str("9fe4abd71ad081f091bd06dd1c16f7e92927561e").unwrap();
+        let hashed_address = keccak256(address);
+
+        // Storage
+        let storage = HashMap::from([
+            (H256::zero(), U256::from(3)),
+            (H256::from_low_u64_be(2), U256::from(1)),
+        ]);
+        let code = "el buen fla";
+        let account = Account {
+            nonce: 155,
+            balance: U256::from(414241124u32),
+            bytecode_hash: Some(keccak256(code)),
+        };
+
+        // Insert hashed account
+        tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
+
+        // Insert hashed storage
+        for (k, v) in storage.clone() {
+            tx.put::<tables::HashedStorage>(
+                hashed_address,
+                StorageEntry { key: keccak256(k), value: v },
+            )
+            .unwrap();
+        }
+        let mut out = Vec::new();
+        let encoded_storage = storage.iter().map(|(k, v)| {
+            let out = encode_fixed_size(v).to_vec();
+            (k, out)
+        });
+
+        // Calculate expected roots
+        let storage_root = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
+        let eth_account = EthAccount::from(account).with_storage_root(storage_root);
+        eth_account.encode(&mut out);
+        let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0);
+
+        // Check that the root matched
+        let got = create_test_loader(&tx).calculate_root().unwrap().root().unwrap();
+        assert_matches!(got, expected);
+        let prev_root_hash = got;
+        // Commit
+        tx.commit().unwrap();
+
+        // Update storage (slot 0 changes from 3 to 4, slot 2 changes from 1 to 2)
+        // New storage:
+        // - Slot 0 changes from 3 to 4
+        // - Slot 2 changes from 1 to 2
+        // - Slot 3 is created with value 5
+        let new_storage = HashMap::from([
+            (H256::zero(), U256::from(4)),
+            (H256::from_low_u64_be(2), U256::from(2)),
+            (H256::from_low_u64_be(3), U256::from(5)),
+        ]);
+
+        // Insert hashed storage and changeset
+        tx.clear::<tables::HashedStorage>().unwrap();
+        for (k, v) in new_storage.clone() {
+            tx.put::<tables::HashedStorage>(
+                hashed_address,
+                StorageEntry { key: keccak256(k), value: v },
+            )
+            .unwrap();
+            tx.put::<tables::StorageChangeSet>(
+                (32, address).into(),
+                StorageEntry { key: k, value: storage.get(&k).cloned().unwrap_or_default() },
+            )
+            .unwrap();
+        }
+
+        let encoded_storage = new_storage.iter().map(|(k, v)| {
+            let out = encode_fixed_size(v).to_vec();
+            (k, out)
+        });
+
+        // Calculate expected roots
+        let mut out = Vec::new();
+        let storage_root = H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0);
+        let eth_account = EthAccount::from(account).with_storage_root(storage_root);
+        eth_account.encode(&mut out);
+        let expected = H256(sec_trie_root::<KeccakHasher, _, _, _>([(address, out)]).0);
+
+        // Check that the root matched
+        {
+            let mut loader = DBTrieLoader::new_with_threshold(tx.deref(), 1);
+            assert_matches!(
+                loader.update_root(prev_root_hash, 32..33),
+                // todo: check
+                Ok(TrieProgress::InProgress(_))
+            );
+            tx.commit().unwrap();
+        }
+        {
+            let mut loader = DBTrieLoader::new_with_threshold(tx.deref(), 1);
+            assert_matches!(
+                loader.update_root(prev_root_hash, 32..33),
+                // todo: check
+                Ok(TrieProgress::InProgress(_))
+            );
+            tx.commit().unwrap();
+        }
+        {
+            let mut loader = DBTrieLoader::new_with_threshold(tx.deref(), 1);
+            assert_matches!(
+                loader.update_root(prev_root_hash, 32..33),
+                // todo: check
+                Ok(got) if got.root().unwrap() == expected
+            );
+        }
     }
 
     fn test_with_accounts(accounts: BTreeMap<Address, (Account, BTreeSet<StorageEntry>)>) {
@@ -1305,7 +1444,7 @@ mod tests {
             ]
         ];
 
-        assert!(storage_root != EMPTY_ROOT);
+        assert_ne!(storage_root, EMPTY_ROOT);
 
         assert_eq!(account_proof.len(), 1);
         assert_eq!(account_proof[0], expected_account);
