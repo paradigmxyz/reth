@@ -112,8 +112,11 @@ where
                                 safe_block_hash: new_hash,
                             };
                             let (tx, _rx) = oneshot::channel();
-                            let _ = to_engine
-                                .send(BeaconEngineMessage::ForkchoiceUpdated(state, None, tx));
+                            let _ = to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
+                                state,
+                                payload_attrs: None,
+                                tx,
+                            });
                         }));
                     }
                     Poll::Pending => {
