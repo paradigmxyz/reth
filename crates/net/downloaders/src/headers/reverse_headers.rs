@@ -1057,11 +1057,7 @@ impl ReverseHeadersDownloaderBuilder {
 
     /// Build [ReverseHeadersDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<H>(
-        self,
-        client: Arc<H>,
-        consensus: Arc<dyn Consensus>,
-    ) -> ReverseHeadersDownloader<H>
+    pub fn build<H>(self, client: H, consensus: Arc<dyn Consensus>) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,
     {
@@ -1074,7 +1070,7 @@ impl ReverseHeadersDownloaderBuilder {
         } = self;
         ReverseHeadersDownloader {
             consensus,
-            client,
+            client: Arc::new(client),
             local_head: None,
             sync_target: None,
             // Note: we set these to `0` first, they'll be updated once the sync target response is

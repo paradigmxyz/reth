@@ -17,7 +17,7 @@ reth-transaction-pool = { path = "../../transaction-pool" }
 # async
 futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "time"] }
-tokio-stream = { version = "0.1", feautres = ["tokio-util"] }
+tokio-stream = "0.1"
 tracing = "0.1"
 
 [dev-dependencies]
