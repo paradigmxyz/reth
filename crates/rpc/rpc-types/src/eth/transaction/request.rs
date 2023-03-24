@@ -44,7 +44,7 @@ pub struct TransactionRequest {
 impl TransactionRequest {
     /// Converts the request into a [`TypedTransactionRequest`]
     ///
-    /// Returns None if mutual exclusive fields `gasPrice` and `max_fee_per_gas` are either missing
+    /// Returns None if mutual exclusive fields `gas_price` and `max_fee_per_gas` are either missing
     /// or both set.
     pub fn into_typed_request(self) -> Option<TypedTransactionRequest> {
         let TransactionRequest {

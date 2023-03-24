@@ -4,11 +4,12 @@ use crate::{
         error::{EthApiError, EthResult},
         utils::recover_raw_transaction,
     },
-    EthApi,
+    EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
 
 use crate::eth::error::SignError;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     TransactionSigned, TransactionSignedEcRecovered, H256, U256,
@@ -151,7 +152,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + 'static,
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
+    Network: NetworkInfo + 'static,
 {
     /// Send a transaction to the pool
     ///
@@ -161,13 +162,50 @@ where
             Some(from) => from,
             None => return Err(SignError::NoAccount.into()),
         };
+
+        let chain_id = self.chain_id();
+        let nonce = self.get_transaction_count(from, None)?;
+        // we might need an oracle to get the gas limit of the current n/w as well if i m right?
+        let gas_limit = request.gas.unwrap_or_default();
+        // we need an oracle to fetch the gas price of the current chain
+        let gas_price = request.gas_price.unwrap_or_default();
+        let max_fee_per_gas = request.max_fee_per_gas.unwrap_or_default();
+
         let transaction = match request.into_typed_request() {
-            Some(tx) => tx,
+            Some(TypedTransactionRequest::Legacy(mut m)) => {
+                // nonce was not specified, we now need to update it to the latest nonce
+                if m.nonce.eq(&U256::ZERO) {
+                    m.nonce = nonce
+                }
+
+                m.chain_id = Some(chain_id.as_u64());
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::Legacy(m)
+            }
+            Some(TypedTransactionRequest::EIP2930(mut m)) => {
+                if m.nonce.eq(&U256::ZERO) {
+                    m.nonce = nonce
+                }
+                m.chain_id = chain_id.as_u64();
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::EIP2930(m)
+            }
+            Some(TypedTransactionRequest::EIP1559(mut m)) => {
+                if m.nonce.eq(&U256::ZERO) {
+                    m.nonce = nonce
+                }
+                m.chain_id = chain_id.as_u64();
+                m.gas_limit = gas_limit;
+                m.max_fee_per_gas = max_fee_per_gas;
+
+                TypedTransactionRequest::EIP1559(m)
+            }
             None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
-
-        // TODO we need to update additional settings in the transaction: nonce, gaslimit, chainid,
-        // gasprice
 
         let signed_tx = self.sign_request(&from, transaction)?;
 
@@ -327,6 +365,7 @@ impl From<TransactionSource> for Transaction {
 #[cfg(test)]
 mod tests {
     use crate::eth::cache::EthStateCache;
+    use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
@@ -336,13 +375,14 @@ mod tests {
     #[tokio::test]
     async fn send_raw_transaction() {
         let noop_provider = NoopProvider::default();
+        let noop_network = NoopNetwork::default();
 
         let pool = testing_pool();
 
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
-            (),
+            noop_network,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 

@@ -10,6 +10,7 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
 };
 use jsonrpsee::core::RpcResult as Result;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{
     AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, Header, H256, H64, U256, U64,
 };
@@ -31,7 +32,7 @@ where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
