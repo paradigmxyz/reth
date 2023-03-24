@@ -303,7 +303,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Removes and returns all matching transactions from the pool.
-    pub(crate) fn remove_invalid(
+    pub(crate) fn remove_transactions(
         &mut self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
