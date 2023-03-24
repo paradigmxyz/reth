@@ -102,26 +102,32 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for HistoricalStateProviderRef<'a, 'b, 
         // history key to search IntegerList of transition id changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.transition);
 
-        let Some(changeset_transition_id) = self.tx.cursor_read::<tables::StorageHistory>()?
+        let changeset_transition_id = self
+            .tx
+            .cursor_read::<tables::StorageHistory>()?
             .seek(history_key)?
-            .filter(|(key,_)| key.address == address && key.sharded_key.key == storage_key)
-            .map(|(_,list)| list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)) else {
-                return Ok(None)
-            };
+            .filter(|(key, _)| key.address == address && key.sharded_key.key == storage_key)
+            .map(|(_, list)| {
+                list.0.enable_rank().successor(self.transition as usize).map(|i| i as u64)
+            });
 
         // if changeset transition id is present we are getting value from changeset
         if let Some(changeset_transition_id) = changeset_transition_id {
-            let storage_entry = self
-                .tx
-                .cursor_dup_read::<tables::StorageChangeSet>()?
-                .seek_by_key_subkey((changeset_transition_id, address).into(), storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .ok_or(ProviderError::StorageChangeset {
-                    transition_id: changeset_transition_id,
-                    address,
-                    storage_key,
-                })?;
-            Ok(Some(storage_entry.value))
+            if let Some(changeset_transition_id) = changeset_transition_id {
+                let storage_entry = self
+                    .tx
+                    .cursor_dup_read::<tables::StorageChangeSet>()?
+                    .seek_by_key_subkey((changeset_transition_id, address).into(), storage_key)?
+                    .filter(|entry| entry.key == storage_key)
+                    .ok_or(ProviderError::StorageChangeset {
+                        transition_id: changeset_transition_id,
+                        address,
+                        storage_key,
+                    })?;
+                Ok(Some(storage_entry.value))
+            } else {
+                Ok(None)
+            }
         } else {
             // if changeset is not present that means that there was history shard but we need to
             // use newest value from plain state
