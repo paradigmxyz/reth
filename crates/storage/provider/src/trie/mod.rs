@@ -629,6 +629,13 @@ where
         let number_of_changed_accounts = changed_accounts.len();
         for (idx, (hashed_address, changed_storages)) in changed_accounts.into_iter().enumerate() {
             let res = if let Some(account) = trie.get(hashed_address.as_slice())? {
+                if accounts_cursor.seek_exact(hashed_address)?.is_none() {
+                    // The account was self destructed
+                    // TODO: Clear the StoragesTrie as well
+                    trie.remove(hashed_address.as_bytes())?;
+                    continue
+                }
+
                 let storage_root = EthAccount::decode(&mut account.as_slice())?.storage_root;
                 self.update_storage_root(
                     checkpoint.storage_root.take().unwrap_or(storage_root),
