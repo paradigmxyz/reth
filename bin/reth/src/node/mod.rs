@@ -208,6 +208,7 @@ impl Command {
             .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
+        debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
 
         let _rpc_server = self
             .rpc
