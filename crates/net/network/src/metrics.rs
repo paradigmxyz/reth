@@ -1,4 +1,5 @@
 use metrics::{Counter, Gauge};
+use reth_eth_wire::DisconnectReason;
 use reth_metrics_derive::Metrics;
 
 /// Metrics for the entire network, handled by NetworkManager
@@ -87,4 +88,25 @@ pub struct DisconnectMetrics {
 
     /// Number of peer disconnects due to SubprotocolSpecific (0x10)
     pub(crate) subprotocol_specific: Counter,
+}
+
+impl DisconnectMetrics {
+    /// Increments the proper counter for the given disconnect reason
+    pub(crate) fn increment(&self, reason: DisconnectReason) {
+        match reason {
+            DisconnectReason::DisconnectRequested => self.disconnect_requested.increment(1),
+            DisconnectReason::TcpSubsystemError => self.tcp_subsystem_error.increment(1),
+            DisconnectReason::ProtocolBreach => self.protocol_breach.increment(1),
+            DisconnectReason::UselessPeer => self.useless_peer.increment(1),
+            DisconnectReason::TooManyPeers => self.too_many_peers.increment(1),
+            DisconnectReason::AlreadyConnected => self.already_connected.increment(1),
+            DisconnectReason::IncompatibleP2PProtocolVersion => self.incompatible.increment(1),
+            DisconnectReason::NullNodeIdentity => self.null_node_identity.increment(1),
+            DisconnectReason::ClientQuitting => self.client_quitting.increment(1),
+            DisconnectReason::UnexpectedHandshakeIdentity => self.unexpected_identity.increment(1),
+            DisconnectReason::ConnectedToSelf => self.connected_to_self.increment(1),
+            DisconnectReason::PingTimeout => self.ping_timeout.increment(1),
+            DisconnectReason::SubprotocolSpecific => self.subprotocol_specific.increment(1),
+        }
+    }
 }
