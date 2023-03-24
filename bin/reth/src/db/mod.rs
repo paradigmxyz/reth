@@ -166,14 +166,27 @@ impl Command {
                     Headers,
                     BlockBodies,
                     BlockOmmers,
+                    BlockWithdrawals,
+                    TransactionBlock,
+                    Transactions,
                     TxHashNumber,
+                    Receipts,
                     PlainStorageState,
                     PlainAccountState,
+                    Bytecodes,
                     BlockTransitionIndex,
                     TxTransitionIndex,
+                    AccountHistory,
+                    StorageHistory,
+                    AccountChangeSet,
+                    StorageChangeSet,
+                    HashedAccount,
+                    HashedStorage,
+                    AccountsTrie,
+                    StoragesTrie,
+                    TxSenders,
                     SyncStage,
-                    SyncStageProgress,
-                    Transactions
+                    SyncStageProgress
                 ]);
             }
             Subcommands::Drop => {
