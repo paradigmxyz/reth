@@ -7,7 +7,7 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
     Error,
 };
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock, H256};
+use reth_primitives::{BlockNumber, SealedBlock, H256};
 use reth_provider::ExecutorFactory;
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
