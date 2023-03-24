@@ -293,7 +293,7 @@ mod tests {
         assert_matches!(TryInto::<SealedBlock>::try_into(block_with_valid_extra_data), Ok(_));
 
         // Invalid extra data
-        let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze().into();
+        let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
         let invalid_extra_data_block = transform_block(block.clone(), |mut b| {
             b.header.extra_data = block_with_invalid_extra_data.clone().into();
             b

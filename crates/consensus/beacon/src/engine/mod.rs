@@ -518,7 +518,7 @@ mod tests {
         let _ = env.send_forkchoice_updated(ForkchoiceState {
             head_block_hash: H256::random(),
             ..Default::default()
-        });
+        }).await;
         assert_matches!(
             rx.await,
             Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
@@ -547,14 +547,14 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle
-        let _ = env.send_new_payload(SealedBlock::default().into());
+        let _ = env.send_new_payload(SealedBlock::default().into()).await;
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine receives a forkchoice state and triggers the pipeline
         let _ = env.send_forkchoice_updated(ForkchoiceState {
             head_block_hash: H256::random(),
             ..Default::default()
-        });
+        }).await;
         assert_matches!(
             rx.await,
             Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
@@ -586,7 +586,7 @@ mod tests {
         let _ = env.send_forkchoice_updated(ForkchoiceState {
             head_block_hash: H256::random(),
             ..Default::default()
-        });
+        }).await;
 
         assert_matches!(
             rx.await,
@@ -615,7 +615,7 @@ mod tests {
         let _ = env.send_forkchoice_updated(ForkchoiceState {
             head_block_hash: H256::random(),
             ..Default::default()
-        });
+        }).await;
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
@@ -767,7 +767,7 @@ mod tests {
             let block1 = random_block(1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
 
-            let _ = spawn_consensus_engine(consensus_engine);
+            let _ = spawn_consensus_engine(consensus_engine).await;
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
@@ -801,7 +801,7 @@ mod tests {
 
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
 
-            let _ = spawn_consensus_engine(consensus_engine);
+            let _ = spawn_consensus_engine(consensus_engine).await;
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
