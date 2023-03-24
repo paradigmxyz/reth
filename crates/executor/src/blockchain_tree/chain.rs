@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn test_number_split() {
         let mut base_state = PostState::default();
-        let account = Account{ nonce: 10, ..Default::default()};
+        let account = Account { nonce: 10, ..Default::default() };
         base_state.create_account(H160([1; 20]), account);
         base_state.finish_transition();
 

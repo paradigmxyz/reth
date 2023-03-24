@@ -515,10 +515,12 @@ mod tests {
         );
         let rx = spawn_consensus_engine(consensus_engine);
 
-        let _ = env.send_forkchoice_updated(ForkchoiceState {
-            head_block_hash: H256::random(),
-            ..Default::default()
-        }).await;
+        let _ = env
+            .send_forkchoice_updated(ForkchoiceState {
+                head_block_hash: H256::random(),
+                ..Default::default()
+            })
+            .await;
         assert_matches!(
             rx.await,
             Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
@@ -551,10 +553,12 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine receives a forkchoice state and triggers the pipeline
-        let _ = env.send_forkchoice_updated(ForkchoiceState {
-            head_block_hash: H256::random(),
-            ..Default::default()
-        }).await;
+        let _ = env
+            .send_forkchoice_updated(ForkchoiceState {
+                head_block_hash: H256::random(),
+                ..Default::default()
+            })
+            .await;
         assert_matches!(
             rx.await,
             Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
@@ -583,10 +587,12 @@ mod tests {
         );
         let rx = spawn_consensus_engine(consensus_engine);
 
-        let _ = env.send_forkchoice_updated(ForkchoiceState {
-            head_block_hash: H256::random(),
-            ..Default::default()
-        }).await;
+        let _ = env
+            .send_forkchoice_updated(ForkchoiceState {
+                head_block_hash: H256::random(),
+                ..Default::default()
+            })
+            .await;
 
         assert_matches!(
             rx.await,
@@ -612,10 +618,12 @@ mod tests {
         consensus_engine.max_block = Some(max_block);
         let rx = spawn_consensus_engine(consensus_engine);
 
-        let _ = env.send_forkchoice_updated(ForkchoiceState {
-            head_block_hash: H256::random(),
-            ..Default::default()
-        }).await;
+        let _ = env
+            .send_forkchoice_updated(ForkchoiceState {
+                head_block_hash: H256::random(),
+                ..Default::default()
+            })
+            .await;
         assert_matches!(rx.await, Ok(Ok(())));
     }
 
