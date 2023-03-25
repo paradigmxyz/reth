@@ -5,5 +5,4 @@
 /// be represented as a sequence of 64 nibbles.
 pub mod nibbles;
 
-
 pub mod node;

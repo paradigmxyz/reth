@@ -1,13 +1,16 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use super::nibbles::Nibbles;
 
 #[derive(Debug, Clone)]
 pub enum Node {
+    /// Blank node
     Empty,
+    /// Standard Leaf node, simple key-value pair
     Leaf(Rc<RefCell<LeafNode>>),
+    /// Optimization Branch nodes with 1 child, points to the child
     Extension(Rc<RefCell<ExtensionNode>>),
+    // InternalNode
     Branch(Rc<RefCell<BranchNode>>),
     Hash(Rc<RefCell<HashNode>>),
 }
@@ -58,12 +61,15 @@ impl Node {
 
 #[derive(Debug)]
 pub struct LeafNode {
+    /// rest_of_key: NibbleList
     pub key: Nibbles,
+    /// value: SmallVec<[u8; 36]>
     pub value: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct BranchNode {
+    /// subnodes: [ArraYvec<u8, 32>; 16]
     pub children: [Node; 16],
     pub value: Option<Vec<u8>>,
 }

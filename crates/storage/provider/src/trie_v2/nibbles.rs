@@ -1,8 +1,20 @@
 use std::cmp::min;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+/// Structure representing a sequence of nibbles.
+///
+/// A nibble is a 4-bit value, and this structure is used to store
+/// the nibble sequence representing the keys in a Merkle Patricia Trie (MPT).
+/// Using nibbles simplifies trie operations and enables consistent key
+/// representation in the MPT.
+///
+/// The `hex_data` field is a `Vec<u8>` that stores the nibbles, with each
+/// u8 value containing a single nibble. This means that each byte in
+/// `hex_data` has its upper 4 bits set to zero and the lower 4 bits
+/// representing the nibble value.
 pub struct Nibbles {
-    hex_data: Vec<u8>,
+    /// The inner representation of the nibble sequence.
+    pub hex_data: Vec<u8>,
 }
 
 impl Nibbles {
@@ -22,11 +34,60 @@ impl Nibbles {
         Nibbles { hex_data }
     }
 
+    /// The compact encoding is a space-efficient way to represent a nibble sequence.
+    ///
+    /// In this format, the first byte (flag) encodes two pieces of information:
+    /// 1. Whether the represented key corresponds to a leaf or an extension node in the trie.
+    /// 2. Whether the nibble sequence has an odd or even number of nibbles.
+    ///
+    /// The flag is a single byte (u8), and the code checks the upper 4 bits of this byte to
+    /// determine the type of node (leaf or extension) and the parity of the nibble count (odd
+    /// or even).
+    ///
+    /// Here's a breakdown of the flags and their meanings:
+    /// - 0x00: The key has an even number of nibbles and corresponds to an extension node.
+    /// - 0x10: The key has an odd number of nibbles and corresponds to an extension node.
+    /// - 0x20: The key has an even number of nibbles and corresponds to a leaf node.
+    /// - 0x30: The key has an odd number of nibbles and corresponds to a leaf node.
+    ///
+    /// The code uses a match statement to handle each of these cases accordingly, updating the
+    /// hex vector's prefix for 0x1 and 0x3, to declare it's an odd extension or leaf node.
+    ///
+    /// Finally, if it's a leaf node, it'll also push 0x0F (16) to the end of the hex vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use reth_provider::trie_v2::nibbles::Nibbles;
+    /// // Extension node with an even path length:
+    /// let compact = vec![0x00, 0xAB, 0xCD];
+    /// let nibbles = Nibbles::from_compact(compact);
+    /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C, 0x0D]);
+    ///
+    /// // Extension node with an odd path length:
+    /// let compact = vec![0x1A, 0xBC];
+    /// let nibbles = Nibbles::from_compact(compact);
+    /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C]);
+    ///
+    /// // Leaf node with an even path length:
+    /// let compact = vec![0x20, 0xAB, 0xCD];
+    /// let nibbles = Nibbles::from_compact(compact);
+    /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C, 0x0D, 0x10]);
+    ///
+    /// // Leaf node with an odd path length:
+    /// let compact = vec![0x3A, 0xBC];
+    /// let nibbles = Nibbles::from_compact(compact);
+    /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C, 0x10]);
+    /// ```
     pub fn from_compact(compact: Vec<u8>) -> Self {
         let mut hex = vec![];
         let flag = compact[0];
-
         let mut is_leaf = false;
+        // The code is using `/ 16` and `% 16` operations to extract the upper and lower nibbles
+        // from each byte in the compact encoding after the flag. Since a byte can store two
+        // nibbles (each nibble is 4 bits), dividing a byte by 16 (which is equivalent to 2^4) will
+        // give you the upper nibble, and taking the modulo of the byte with 16 will give you the
+        // lower nibble.
         match flag >> 4 {
             0x0 => {}
             0x1 => hex.push(flag % 16),
@@ -49,18 +110,61 @@ impl Nibbles {
         Nibbles { hex_data: hex }
     }
 
+    /// The last element of the hex vector is used to determine whether the nibble sequence
+    /// represents a leaf or an extension node. If the last element is 0xF (16), then it's a leaf.
     pub fn is_leaf(&self) -> bool {
         self.hex_data[self.hex_data.len() - 1] == 16
     }
 
+    /// Encodes the nibble sequence in the `hex_data` field into a compact byte representation
+    /// with a header byte, following the Ethereum Merkle Patricia Trie compact encoding format.
+    ///
+    /// The method creates a header byte based on the following rules:
+    /// - If the node is an extension and the path length is even, the header byte is 0x00.
+    /// - If the node is an extension and the path length is odd, the header byte is 0x10 + first
+    ///   hex char.
+    /// - If the node is a leaf and the path length is even, the header byte is 0x20.
+    /// - If the node is a leaf and the path length is odd, the header byte is 0x30 + first hex
+    ///   char.
+    ///
+    /// After the header byte is determined, the method merges the nibble pairs back into bytes,
+    /// similar to the `encode_raw` method, and appends them to the compact byte sequence.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<u8>` containing the compact byte representation of the nibble sequence, including the
+    /// header byte.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use reth_provider::trie_v2::nibbles::Nibbles;
+    ///
+    /// // Extension node with an even path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let compact = nibbles.encode_compact();
+    /// assert_eq!(compact, vec![0x00, 0xAB, 0xCD]);
+    ///
+    /// // Extension node with an odd path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C]);
+    /// let compact = nibbles.encode_compact();
+    /// assert_eq!(compact, vec![0x1A, 0xBC]);
+    ///
+    /// // Leaf node with an even path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D, 0x10]);
+    /// let compact = nibbles.encode_compact();
+    /// assert_eq!(compact, vec![0x20, 0xAB, 0xCD]);
+    ///
+    /// // Leaf node with an odd path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x10]);
+    /// let compact = nibbles.encode_compact();
+    /// assert_eq!(compact, vec![0x3A, 0xBC]);
+    /// ```
     pub fn encode_compact(&self) -> Vec<u8> {
         let mut compact = vec![];
         let is_leaf = self.is_leaf();
-        let mut hex = if is_leaf {
-            &self.hex_data[0..self.hex_data.len() - 1]
-        } else {
-            &self.hex_data[0..]
-        };
+        let mut hex =
+            if is_leaf { &self.hex_data[0..self.hex_data.len() - 1] } else { &self.hex_data[0..] };
         // node type    path length    |    prefix    hexchar
         // --------------------------------------------------
         // extension    even           |    0000      0x0
@@ -83,14 +187,36 @@ impl Nibbles {
         compact
     }
 
+    /// Converts the nibble sequence stored in the `hex_data` field back into a compact byte
+    /// representation.
+    ///
+    /// This method reverses the process of creating a nibble sequence from a compact byte
+    /// representation. It merges the nibble pairs back into bytes and returns the resulting
+    /// compact byte sequence as a `Vec<u8>`. Additionally, it returns a boolean value
+    /// indicating if the nibble sequence corresponds to a leaf node in the Merkle Patricia
+    /// Trie.
+    ///
+    /// # Returns
+    ///
+    /// A tuple `(Vec<u8>, bool)`, where:
+    /// - The first element is the compact byte representation of the nibble sequence.
+    /// - The second element is a boolean indicating if the nibble sequence corresponds to a leaf
+    ///   node.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use reth_provider::trie_v2::nibbles::Nibbles;
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
+    /// let (raw, is_leaf) = nibbles.encode_raw();
+    /// assert_eq!(raw, vec![0xAB, 0xCD]);
+    /// assert_eq!(is_leaf, false);
+    /// ```
     pub fn encode_raw(&self) -> (Vec<u8>, bool) {
         let mut raw = vec![];
         let is_leaf = self.is_leaf();
-        let hex = if is_leaf {
-            &self.hex_data[0..self.hex_data.len() - 1]
-        } else {
-            &self.hex_data[0..]
-        };
+        let hex =
+            if is_leaf { &self.hex_data[0..self.hex_data.len() - 1] } else { &self.hex_data[0..] };
 
         for i in 0..(hex.len() / 2) {
             raw.push((hex[i * 2] * 16) + (hex[i * 2 + 1]));
@@ -116,7 +242,7 @@ impl Nibbles {
         let mut i = 0usize;
         while i < s {
             if self.at(i) != other_partial.at(i) {
-                break;
+                break
             }
             i += 1;
         }
