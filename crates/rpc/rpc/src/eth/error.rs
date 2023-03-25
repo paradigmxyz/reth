@@ -60,9 +60,6 @@ pub enum EthApiError {
     /// When tracer config does not match the tracer
     #[error("invalid tracer config")]
     InvalidTracerConfig,
-    /// When no receipt is found for a transaction
-    #[error("receipt not found")]
-    ReceiptNotFound,
 }
 
 impl From<EthApiError> for RpcError {
@@ -82,9 +79,7 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockNumber |
-            EthApiError::UnknownBlockOrTxIndex |
-            EthApiError::ReceiptNotFound => {
+            EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),

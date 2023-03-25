@@ -304,51 +304,16 @@ where
         };
 
         // get the previous transaction cumulative gas used
-        let prev_tx_cumulative_gas_used = if meta.index == 0 {
-            0
+        let gas_used = if meta.index == 0 {
+            receipt.cumulative_gas_used
         } else {
-            match all_receipts.get((meta.index - 1) as usize) {
-                Some(prev_receipt) => prev_receipt.cumulative_gas_used,
-                None => 0,
-            }
+            let prev_tx_idx = (meta.index - 1) as usize;
+            all_receipts
+                .get(prev_tx_idx)
+                .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
+                .unwrap_or_default()
         };
-
-        res_receipt.gas_used =
-            Some(U256::from(receipt.cumulative_gas_used - prev_tx_cumulative_gas_used));
-
-        let mut all_receipts_iter = all_receipts.into_iter();
-        let prev_tx_receipts: Vec<_> =
-            all_receipts_iter.clone().take(meta.index as usize).collect();
-
-        let mut num_logs = 0;
-        for tx_receipt in prev_tx_receipts.into_iter() {
-            num_logs += tx_receipt.logs.len();
-            all_receipts_iter.next();
-        }
-
-        match all_receipts_iter.next() {
-            Some(tx_receipt) => {
-                if receipt == tx_receipt {
-                    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
-                        let rpclog = Log {
-                            address: log.address,
-                            topics: log.topics,
-                            data: log.data,
-                            block_hash: Some(meta.block_hash),
-                            block_number: Some(U256::from(meta.block_number)),
-                            transaction_hash: Some(meta.tx_hash),
-                            transaction_index: Some(U256::from(meta.index)),
-                            transaction_log_index: Some(U256::from(tx_log_idx)),
-                            log_index: Some(U256::from(num_logs + tx_log_idx)),
-                            removed: false,
-                        };
-                        res_receipt.logs.push(rpclog);
-                    }
-                }
-            }
-
-            None => return Err(EthApiError::ReceiptNotFound),
-        }
+        res_receipt.gas_used = Some(U256::from(gas_used));
 
         match tx.transaction.kind() {
             Create => {
@@ -382,6 +347,29 @@ where
                     U128::from(max_fee_per_gas + max_priority_fee_per_gas)
             }
         }
+
+        // get number of logs in the block
+        let mut num_logs = 0;
+        for prev_receipt in all_receipts.iter().take(meta.index as usize) {
+            num_logs += prev_receipt.logs.len();
+        }
+
+        for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
+            let rpclog = Log {
+                address: log.address,
+                topics: log.topics,
+                data: log.data,
+                block_hash: Some(meta.block_hash),
+                block_number: Some(U256::from(meta.block_number)),
+                transaction_hash: Some(meta.tx_hash),
+                transaction_index: Some(U256::from(meta.index)),
+                transaction_log_index: Some(U256::from(tx_log_idx)),
+                log_index: Some(U256::from(num_logs + tx_log_idx)),
+                removed: false,
+            };
+            res_receipt.logs.push(rpclog);
+        }
+
         Ok(res_receipt)
     }
 }
