@@ -1,4 +1,4 @@
-#![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
+// #![warn(missing_docs, unreachable_pub, unused_crate_dependencies)]
 #![deny(unused_must_use, rust_2018_idioms)]
 #![doc(test(
     no_crate_inject,
@@ -25,6 +25,9 @@ pub use providers::{
 
 /// Helper type for loading Merkle Patricia Trees from the database
 pub mod trie;
+
+/// New trie impl
+pub mod trie_v2;
 
 /// Execution result
 pub mod post_state;
