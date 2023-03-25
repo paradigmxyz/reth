@@ -71,6 +71,10 @@ where
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
 
+        // Disabled because eth_call is sometimes used with eoa senders
+        // See <htps://github.com/paradigmxyz/reth/issues/1959>
+        cfg.disable_eip3607 = true;
+
         let request_gas = request.gas;
 
         let mut env = build_call_evm_env(cfg, block, request)?;
@@ -106,7 +110,7 @@ where
     /// This will execute the [CallRequest] and find the best gas limit via binary search
     fn estimate_gas_with<S>(
         &self,
-        cfg: CfgEnv,
+        mut cfg: CfgEnv,
         block: BlockEnv,
         request: CallRequest,
         state: S,
@@ -114,6 +118,10 @@ where
     where
         S: StateProvider,
     {
+        // Disabled because eth_estimateGas is sometimes used with eoa senders
+        // See <htps://github.com/paradigmxyz/reth/issues/1959>
+        cfg.disable_eip3607 = true;
+
         // keep a copy of gas related request values
         let request_gas = request.gas;
         let request_gas_price = request.gas_price;

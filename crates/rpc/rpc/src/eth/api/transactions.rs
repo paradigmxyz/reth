@@ -1,14 +1,12 @@
 //! Contains RPC handler implementations specific to transactions
 use crate::{
     eth::{
-        error::{EthApiError, EthResult},
+        error::{EthApiError, EthResult, SignError},
         utils::recover_raw_transaction,
     },
     EthApi,
 };
 use async_trait::async_trait;
-
-use crate::eth::error::SignError;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     Receipt, Transaction as PrimitiveTransaction,
@@ -60,6 +58,15 @@ pub trait EthTransactions: Send + Sync {
     /// Returns None if the transaction does not exist or is pending
     /// Note: The tx receipt is not available for pending transactions.
     async fn transaction_receipt(&self, hash: H256) -> EthResult<Option<TransactionReceipt>>;
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// Returns the hash of the transaction.
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256>;
+
+    /// Signs transaction with a matching signer, if any and submits the transaction to the pool.
+    /// Returns the hash of the signed transaction.
+    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256>;
 }
 
 #[async_trait]
@@ -168,20 +175,19 @@ where
 
         Self::build_transaction_receipt(tx, meta, receipt).map(Some)
     }
-}
 
-// === impl EthApi ===
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
+        let recovered = recover_raw_transaction(tx)?;
 
-impl<Client, Pool, Network> EthApi<Client, Pool, Network>
-where
-    Pool: TransactionPool + 'static,
-    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: 'static,
-{
-    /// Send a transaction to the pool
-    ///
-    /// This will sign the transaction and submit it to the pool
-    pub(crate) async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
+        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
+
+        // submit the transaction to the pool with a `Local` origin
+        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+
+        Ok(hash)
+    }
+
+    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
         let from = match request.from {
             Some(from) => from,
             None => return Err(SignError::NoAccount.into()),
@@ -206,7 +212,16 @@ where
 
         Ok(hash)
     }
+}
 
+// === impl EthApi ===
+
+impl<Client, Pool, Network> EthApi<Client, Pool, Network>
+where
+    Pool: TransactionPool + 'static,
+    Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Network: 'static,
+{
     pub(crate) fn sign_request(
         &self,
         from: &Address,
@@ -250,20 +265,6 @@ where
         }
 
         Ok(None)
-    }
-
-    /// Decodes and recovers the transaction and submits it to the pool.
-    ///
-    /// Returns the hash of the transaction.
-    pub(crate) async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
-        let recovered = recover_raw_transaction(tx)?;
-
-        let pool_transaction = <Pool::Transaction>::from_recovered_transaction(recovered);
-
-        // submit the transaction to the pool with a `Local` origin
-        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
-
-        Ok(hash)
     }
 
     /// Helper function for `eth_getTransactionReceipt`
@@ -422,12 +423,11 @@ impl From<TransactionSource> for Transaction {
 
 #[cfg(test)]
 mod tests {
-    use crate::eth::cache::EthStateCache;
+    use super::*;
+    use crate::{eth::cache::EthStateCache, EthApi};
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
-
-    use crate::EthApi;
 
     #[tokio::test]
     async fn send_raw_transaction() {

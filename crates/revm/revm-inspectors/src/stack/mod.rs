@@ -29,11 +29,11 @@ pub enum Hook {
     All,
 }
 
-#[derive(Default, Clone)]
 /// An inspector that calls multiple inspectors in sequence.
 ///
 /// If a call to an inspector returns a value other than [InstructionResult::Continue] (or
 /// equivalent) the remaining inspectors are not called.
+#[derive(Default, Clone)]
 pub struct InspectorStack {
     /// An inspector that prints the opcode traces to the console.
     pub custom_print_tracer: Option<CustomPrintTracer>,

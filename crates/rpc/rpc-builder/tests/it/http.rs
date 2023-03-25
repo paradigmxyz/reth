@@ -95,6 +95,7 @@ where
         .await
         .unwrap();
     EthApiClient::syncing(client).await.unwrap();
+    EthApiClient::send_transaction(client, transaction_request).await.unwrap_err();
 
     // Unimplemented
     assert!(is_unimplemented(EthApiClient::author(client).await.err().unwrap()));
@@ -114,9 +115,6 @@ where
             .await
             .err()
             .unwrap()
-    ));
-    assert!(is_unimplemented(
-        EthApiClient::send_transaction(client, transaction_request).await.err().unwrap()
     ));
     assert!(is_unimplemented(
         EthApiClient::sign_transaction(client, call_request.clone()).await.err().unwrap()
