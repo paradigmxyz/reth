@@ -25,6 +25,8 @@ pub enum EthApiError {
     PoolError(RpcPoolError),
     #[error("Unknown block number")]
     UnknownBlockNumber,
+    #[error("Unknown block or tx index")]
+    UnknownBlockOrTxIndex,
     #[error("Invalid block range")]
     InvalidBlockRange,
     /// An internal error where prevrandao is not set in the evm's environment
@@ -77,7 +79,7 @@ impl From<EthApiError> for RpcError {
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
-            EthApiError::UnknownBlockNumber => {
+            EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
