@@ -4,6 +4,7 @@ use crate::{
         utils::recover_raw_transaction, EthTransactions,
     },
     result::internal_rpc_err,
+    TracingCallGuard,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
@@ -14,7 +15,6 @@ use reth_revm::{
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
-
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
@@ -22,6 +22,7 @@ use reth_rpc_types::{
 };
 use revm::primitives::{Env, ExecutionResult, ResultAndState};
 use std::collections::HashSet;
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
 ///
@@ -34,14 +35,29 @@ pub struct TraceApi<Client, Eth> {
     eth_api: Eth,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache,
+
+    // restrict the number of concurrent calls to `trace_*`
+    tracing_call_guard: TracingCallGuard,
 }
 
 // === impl TraceApi ===
 
 impl<Client, Eth> TraceApi<Client, Eth> {
     /// Create a new instance of the [TraceApi]
-    pub fn new(client: Client, eth_api: Eth, eth_cache: EthStateCache) -> Self {
-        Self { client, eth_api, eth_cache }
+    pub fn new(
+        client: Client,
+        eth_api: Eth,
+        eth_cache: EthStateCache,
+        tracing_call_guard: TracingCallGuard,
+    ) -> Self {
+        Self { client, eth_api, eth_cache, tracing_call_guard }
+    }
+
+    /// Acquires a permit to execute a tracing call.
+    async fn acquire_trace_permit(
+        &self,
+    ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
+        self.tracing_call_guard.clone().acquire_owned().await
     }
 }
 
@@ -90,6 +106,7 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> EthResult<TraceResults> {
+        let _permit = self.acquire_trace_permit().await;
         let tx = recover_raw_transaction(tx)?;
 
         let (cfg, block, at) = self
@@ -123,6 +140,8 @@ where
         hash: H256,
         trace_address: Vec<usize>,
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
+        let _permit = self.acquire_trace_permit().await;
+
         match self.trace_transaction(hash).await? {
             None => Ok(None),
             Some(traces) => {
@@ -138,6 +157,8 @@ where
         &self,
         hash: H256,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
+        let _permit = self.acquire_trace_permit().await;
+
         let (transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
             None => return Ok(None),
             Some(res) => res,
@@ -152,7 +173,6 @@ where
         // execute the trace
         self.trace_at(env, TracingInspectorConfig::default_parity(), at, |inspector, _| {
             let traces = inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-
             Ok(Some(traces))
         })
     }
