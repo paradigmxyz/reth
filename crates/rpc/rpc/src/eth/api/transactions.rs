@@ -3,6 +3,7 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         utils::recover_raw_transaction,
+        BYZANTIUM_FORK_BLKNUM,
     },
     EthApi,
 };
@@ -312,8 +313,13 @@ where
                     0
                 }
             }
-
             None => 0,
+        };
+
+        res_receipt.state_root = if receipt.success && meta.block_number >= BYZANTIUM_FORK_BLKNUM {
+            Some(H256::from_low_u64_be(1))
+        } else {
+            Some(H256::from_low_u64_be(0))
         };
 
         res_receipt.gas_used =
