@@ -173,7 +173,7 @@ where
             None => return Ok(None),
         };
 
-        Self::build_transaction_receipt(tx, meta, receipt).map(Some)
+        self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
     }
 
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<H256> {
@@ -270,13 +270,20 @@ where
     /// Helper function for `eth_getTransactionReceipt`
     ///
     /// Returns the receipt
-    pub(crate) fn build_transaction_receipt(
+    pub(crate) async fn build_transaction_receipt(
+        &self,
         tx: TransactionSigned,
         meta: TransactionMeta,
-        mut receipt: Receipt,
+        receipt: Receipt,
     ) -> EthResult<TransactionReceipt> {
         let transaction =
             tx.clone().into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
+
+        // get all receipts for the block
+        let all_receipts = match self.client().receipts_by_block((meta.block_number).into())? {
+            Some(recpts) => recpts,
+            None => return Err(EthApiError::UnknownBlockNumber),
+        };
 
         let mut res_receipt = TransactionReceipt {
             transaction_hash: Some(meta.tx_hash),
@@ -286,9 +293,9 @@ where
             from: transaction.signer(),
             to: None,
             cumulative_gas_used: U256::from(receipt.cumulative_gas_used),
-            gas_used: Some(U256::from(0)),
+            gas_used: None,
             contract_address: None,
-            logs: std::mem::take(&mut receipt.logs).into_iter().map(Log::from_primitive).collect(),
+            logs: vec![],
             effective_gas_price: U128::from(0),
             transaction_type: U256::from(0),
             // TODO: set state root after the block
@@ -296,6 +303,18 @@ where
             logs_bloom: receipt.bloom_slow(),
             status_code: if receipt.success { Some(U64::from(1)) } else { Some(U64::from(0)) },
         };
+
+        // get the previous transaction cumulative gas used
+        let gas_used = if meta.index == 0 {
+            receipt.cumulative_gas_used
+        } else {
+            let prev_tx_idx = (meta.index - 1) as usize;
+            all_receipts
+                .get(prev_tx_idx)
+                .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
+                .unwrap_or_default()
+        };
+        res_receipt.gas_used = Some(U256::from(gas_used));
 
         match tx.transaction.kind() {
             Create => {
@@ -311,31 +330,47 @@ where
         }
 
         match tx.transaction {
-            PrimitiveTransaction::Legacy(TxLegacy { gas_limit, gas_price, .. }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
+            PrimitiveTransaction::Legacy(TxLegacy { gas_price, .. }) => {
                 res_receipt.transaction_type = U256::from(0);
                 res_receipt.effective_gas_price = U128::from(gas_price);
             }
-            PrimitiveTransaction::Eip2930(TxEip2930 { gas_limit, gas_price, .. }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
+            PrimitiveTransaction::Eip2930(TxEip2930 { gas_price, .. }) => {
                 res_receipt.transaction_type = U256::from(1);
                 res_receipt.effective_gas_price = U128::from(gas_price);
             }
             PrimitiveTransaction::Eip1559(TxEip1559 {
-                gas_limit,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 ..
             }) => {
-                // TODO: set actual gas used
-                res_receipt.gas_used = Some(U256::from(gas_limit));
                 res_receipt.transaction_type = U256::from(2);
                 res_receipt.effective_gas_price =
                     U128::from(max_fee_per_gas + max_priority_fee_per_gas)
             }
         }
+
+        // get number of logs in the block
+        let mut num_logs = 0;
+        for prev_receipt in all_receipts.iter().take(meta.index as usize) {
+            num_logs += prev_receipt.logs.len();
+        }
+
+        for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
+            let rpclog = Log {
+                address: log.address,
+                topics: log.topics,
+                data: log.data,
+                block_hash: Some(meta.block_hash),
+                block_number: Some(U256::from(meta.block_number)),
+                transaction_hash: Some(meta.tx_hash),
+                transaction_index: Some(U256::from(meta.index)),
+                transaction_log_index: Some(U256::from(tx_log_idx)),
+                log_index: Some(U256::from(num_logs + tx_log_idx)),
+                removed: false,
+            };
+            res_receipt.logs.push(rpclog);
+        }
+
         Ok(res_receipt)
     }
 }

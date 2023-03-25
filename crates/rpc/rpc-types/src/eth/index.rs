@@ -22,6 +22,12 @@ impl From<Index> for U256 {
     }
 }
 
+impl From<usize> for Index {
+    fn from(idx: usize) -> Self {
+        Index(idx)
+    }
+}
+
 impl Serialize for Index {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
