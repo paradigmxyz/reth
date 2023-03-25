@@ -76,10 +76,9 @@ use std::{
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
-    sync::Arc,
 };
 use strum::{AsRefStr, EnumString, EnumVariantNames, ParseError, VariantNames};
-use tokio::sync::Semaphore;
+
 use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};

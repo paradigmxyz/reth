@@ -15,7 +15,6 @@ use reth_revm::{
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
-
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
@@ -23,6 +22,7 @@ use reth_rpc_types::{
 };
 use revm::primitives::{Env, ExecutionResult, ResultAndState};
 use std::collections::HashSet;
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
 ///
@@ -48,9 +48,16 @@ impl<Client, Eth> TraceApi<Client, Eth> {
         client: Client,
         eth_api: Eth,
         eth_cache: EthStateCache,
-        tracing_call_guard: CallGuardSemaphore,
+        tracing_call_guard: TracingCallGuard,
     ) -> Self {
         Self { client, eth_api, eth_cache, tracing_call_guard }
+    }
+
+    /// Acquires a permit to execute a tracing call.
+    async fn acquire_trace_permit(
+        &self,
+    ) -> std::result::Result<OwnedSemaphorePermit, AcquireError> {
+        self.tracing_call_guard.clone().acquire_owned().await
     }
 }
 
@@ -99,6 +106,7 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> EthResult<TraceResults> {
+        let _permit = self.acquire_trace_permit().await;
         let tx = recover_raw_transaction(tx)?;
 
         let (cfg, block, at) = self
@@ -132,8 +140,7 @@ where
         hash: H256,
         trace_address: Vec<usize>,
     ) -> EthResult<Option<LocalizedTransactionTrace>> {
-        let permit = self.tracing_call_guard.clone().acquire_owned().await.unwrap();
-        let drop_permit = || drop(permit);
+        let _permit = self.acquire_trace_permit().await;
 
         match self.trace_transaction(hash).await? {
             None => Ok(None),
@@ -150,8 +157,7 @@ where
         &self,
         hash: H256,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
-        let drop_permit = || drop(permit);
+        let _permit = self.acquire_trace_permit().await;
 
         let (transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
             None => return Ok(None),
