@@ -3,7 +3,6 @@ use crate::{
     eth::{
         error::{EthApiError, EthResult},
         utils::recover_raw_transaction,
-        BYZANTIUM_FORK_BLKNUM,
     },
     EthApi,
 };
@@ -305,21 +304,13 @@ where
         };
 
         // get the previous transaction cumulative gas used
-        let prev_tx_cumulative_gas_used = match all_receipts.get((meta.index - 1) as usize) {
-            Some(prev_receipt) => {
-                if meta.index > 0 {
-                    prev_receipt.cumulative_gas_used
-                } else {
-                    0
-                }
-            }
-            None => 0,
-        };
-
-        res_receipt.state_root = if receipt.success && meta.block_number >= BYZANTIUM_FORK_BLKNUM {
-            Some(H256::from_low_u64_be(1))
+        let prev_tx_cumulative_gas_used = if meta.index == 0 {
+            0
         } else {
-            Some(H256::from_low_u64_be(0))
+            match all_receipts.get((meta.index - 1) as usize) {
+                Some(prev_receipt) => prev_receipt.cumulative_gas_used,
+                None => 0,
+            }
         };
 
         res_receipt.gas_used =
@@ -335,22 +326,28 @@ where
             all_receipts_iter.next();
         }
 
-        if receipt == all_receipts_iter.next().unwrap() {
-            for (tx_log_idx, log) in receipt.clone().logs.into_iter().enumerate() {
-                let rpclog = Log {
-                    address: log.address,
-                    topics: log.topics,
-                    data: log.data,
-                    block_hash: Some(meta.block_hash),
-                    block_number: Some(U256::from(meta.block_number)),
-                    transaction_hash: Some(meta.tx_hash),
-                    transaction_index: Some(U256::from(meta.index)),
-                    transaction_log_index: Some(U256::from(tx_log_idx)),
-                    log_index: Some(U256::from(num_logs + tx_log_idx)),
-                    removed: false,
-                };
-                res_receipt.logs.push(rpclog);
+        match all_receipts_iter.next() {
+            Some(tx_receipt) => {
+                if receipt == tx_receipt {
+                    for (tx_log_idx, log) in receipt.logs.into_iter().enumerate() {
+                        let rpclog = Log {
+                            address: log.address,
+                            topics: log.topics,
+                            data: log.data,
+                            block_hash: Some(meta.block_hash),
+                            block_number: Some(U256::from(meta.block_number)),
+                            transaction_hash: Some(meta.tx_hash),
+                            transaction_index: Some(U256::from(meta.index)),
+                            transaction_log_index: Some(U256::from(tx_log_idx)),
+                            log_index: Some(U256::from(num_logs + tx_log_idx)),
+                            removed: false,
+                        };
+                        res_receipt.logs.push(rpclog);
+                    }
+                }
             }
+
+            None => return Err(EthApiError::ReceiptNotFound),
         }
 
         match tx.transaction.kind() {
