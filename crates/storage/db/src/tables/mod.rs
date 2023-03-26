@@ -63,7 +63,7 @@ pub const TABLES: [(TableType, &str); 27] = [
 ];
 
 #[macro_export]
-/// Macro to declare all necessary tables.
+/// Macro to declare key value table.
 macro_rules! table {
     ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty) => {
         $(#[$docs])+
@@ -93,6 +93,8 @@ macro_rules! table {
     };
 }
 
+#[macro_export]
+/// Macro to declare duplicate key value table.
 macro_rules! dupsort {
     ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | [$subkey:ty] $value:ty) => {
         table!(
