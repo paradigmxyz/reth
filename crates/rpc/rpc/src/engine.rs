@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::result::rpc_err;
 use async_trait::async_trait;
 use jsonrpsee::{
@@ -7,7 +5,7 @@ use jsonrpsee::{
     types::error::INVALID_PARAMS_CODE,
 };
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{BlockHash, BlockNumber, ChainSpec, Hardfork, H64};
+use reth_primitives::{BlockHash, ChainSpec, Hardfork, H64, U64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{
     EngineApiError, EngineApiHandle, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
@@ -17,6 +15,7 @@ use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
     TransitionConfiguration, CAPABILITIES,
 };
+use std::sync::Arc;
 use tokio::sync::oneshot::{self, Receiver};
 
 fn to_rpc_error<E: Into<EngineApiError>>(error: E) -> Error {
@@ -199,11 +198,15 @@ impl EngineApiServer for EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1>
     async fn get_payload_bodies_by_range_v1(
         &self,
-        start: BlockNumber,
-        count: u64,
+        start: U64,
+        count: U64,
     ) -> Result<ExecutionPayloadBodies> {
         let (tx, rx) = oneshot::channel();
-        self.delegate_request(EngineApiMessage::GetPayloadBodiesByRange(start, count, tx), rx).await
+        self.delegate_request(
+            EngineApiMessage::GetPayloadBodiesByRange(start.as_u64(), count.as_u64(), tx),
+            rx,
+        )
+        .await
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
