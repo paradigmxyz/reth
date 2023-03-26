@@ -2,24 +2,22 @@ use std::io;
 
 use thiserror::Error;
 
-/// Socket parsing error.
+/// Error thrown while parsing a socket address.
 #[derive(Error, Debug)]
-pub enum SocketParsingError {
-    /// Cannot parse socket address from empty string.
+#[allow(missing_docs)]
+pub enum SocketAddressParsingError {
     #[error("Cannot parse socket address: {0}")]
     Io(String),
 
-    /// Cannot parse socket address from empty string.
     #[error("Cannot parse socket address from empty string")]
     Empty,
 
-    /// Could not parse socket address from {0}.
     #[error("Could not parse socket address from {0}")]
     Parse(String),
 }
 
-impl From<io::Error> for SocketParsingError {
+impl From<io::Error> for SocketAddressParsingError {
     fn from(err: io::Error) -> Self {
-        SocketParsingError::Io(err.to_string())
+        SocketAddressParsingError::Io(err.to_string())
     }
 }

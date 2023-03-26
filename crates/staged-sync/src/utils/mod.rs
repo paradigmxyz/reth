@@ -8,7 +8,7 @@ use std::{
 };
 use walkdir::{DirEntry, WalkDir};
 
-use self::error::SocketParsingError;
+use self::error::SocketAddressParsingError;
 
 /// Utilities for parsing chainspecs
 pub mod chainspec;
@@ -53,9 +53,9 @@ pub fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber, eyre::
 /// - Otherwise it is assumed to be a hostname
 ///
 /// An error is returned if the value is empty.
-pub fn parse_socket_address(value: &str) -> Result<SocketAddr, SocketParsingError> {
+pub fn parse_socket_address(value: &str) -> Result<SocketAddr, SocketAddressParsingError> {
     if value.is_empty() {
-        return Err(SocketParsingError::Empty)
+        return Err(SocketAddressParsingError::Empty)
     }
 
     if value.starts_with(":") {
@@ -68,7 +68,7 @@ pub fn parse_socket_address(value: &str) -> Result<SocketAddr, SocketParsingErro
         (value, 9000).to_socket_addrs()
     }?
     .next()
-    .ok_or_else(|| SocketParsingError::Parse(value.to_string()))
+    .ok_or_else(|| SocketAddressParsingError::Parse(value.to_string()))
 }
 
 #[cfg(test)]
