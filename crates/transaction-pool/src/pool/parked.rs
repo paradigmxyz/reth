@@ -40,7 +40,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// If the transaction is already included.
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         let id = *tx.id();
-        assert!(!self.by_id.contains_key(&id), "transaction already included");
+        assert!(
+            !self.by_id.contains_key(&id),
+            "transaction already included {:?}",
+            self.by_id.contains_key(&id)
+        );
         let submission_id = self.next_id();
 
         // keep track of size
