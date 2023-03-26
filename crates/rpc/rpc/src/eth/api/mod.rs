@@ -77,7 +77,7 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     }
 
     /// Returns the state cache frontend
-    pub fn cache(&self) -> &EthStateCache {
+    pub(crate) fn cache(&self) -> &EthStateCache {
         &self.inner.eth_cache
     }
 
