@@ -17,11 +17,11 @@ use reth_network::{
     NetworkConfigBuilder, NetworkEvent, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
-use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId};
+use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord, PeerId, SEPOLIA};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -211,6 +211,42 @@ async fn test_connect_with_boot_nodes() {
     let handle = network.handle().clone();
     let mut events = handle.event_listener();
     tokio::task::spawn(network);
+
+    while let Some(ev) = events.next().await {
+        dbg!(ev);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_connect_to_specific() {
+    reth_tracing::init_test_tracing();
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+    let client = NoopProvider::default();
+    let config = NetworkConfigBuilder::new(secret_key)
+        .no_discv4_discovery()
+        .no_dns_discovery()
+        .chain_spec(Arc::new(SEPOLIA.clone()))
+        .build(client);
+    let (handle, network, _, requests) = NetworkManager::new(config)
+        .await
+        .unwrap()
+        .into_builder()
+        .request_handler(client)
+        .split_with_handle();
+
+    let mut events = handle.event_listener();
+
+    tokio::task::spawn(async move {
+        tokio::join!(network, requests);
+    });
+
+    let enode =     "enode://1031081ada4a530f51ac8ab6d8f48e5e2e5b033a73d8032119c2e123e0381d8e909dc78361475beaf12f1bf89343bfac14c5ad302532065a498b9150cbf4b35c@104.248.194.88:30303";
+
+    let node: NodeRecord = enode.parse().unwrap();
+
+    handle.add_trusted_peer(node.id, node.tcp_addr());
 
     while let Some(ev) = events.next().await {
         dbg!(ev);

@@ -210,11 +210,13 @@ impl ChainSpec {
         let mut curr_forkhash = ForkHash::from(self.genesis_hash());
         let mut current_applied_value = 0;
 
-        for (_, cond) in self.forks_iter() {
+        let mut forks_iter = self.forks_iter();
+
+        while let Some((_, cond)) = forks_iter.next() {
             let value = match cond {
                 ForkCondition::Block(block) => block,
-                ForkCondition::Timestamp(time) => time,
                 ForkCondition::TTD { fork_block: Some(block), .. } => block,
+                ForkCondition::Timestamp(_) => 0,
                 _ => continue,
             };
 
@@ -224,7 +226,14 @@ impl ChainSpec {
                     current_applied_value = value;
                 }
             } else {
-                return ForkId { hash: curr_forkhash, next: value }
+                let mut next = value;
+                if let Some((_, ForkCondition::Timestamp(_))) = forks_iter.next() {
+                    // The next block is still unknown, because subsequent forks are activated by
+                    // the timestamp If the next block is unknown it must be set to 0 <https://eips.ethereum.org/EIPS/eip-2124>
+                    next = 0;
+                }
+
+                return ForkId { hash: curr_forkhash, next }
             }
         }
         ForkId { hash: curr_forkhash, next: 0 }
