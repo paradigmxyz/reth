@@ -865,7 +865,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         let pool_tx = PoolInternalTransaction {
             transaction: transaction.clone(),
-            subpool: SubPool::Queued,
+            subpool: state.into(),
             state,
             cumulative_cost,
         };

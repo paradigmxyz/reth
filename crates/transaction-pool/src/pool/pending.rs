@@ -97,7 +97,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
     ///
     /// if the transaction is already included
     pub(crate) fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
-        assert!(!self.by_id.contains_key(tx.id()), "transaction already included");
+        assert!(
+            !self.by_id.contains_key(tx.id()),
+            "transaction already included {:?}",
+            self.by_id.contains_key(tx.id())
+        );
 
         let tx_id = *tx.id();
         let submission_id = self.next_id();
