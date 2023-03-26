@@ -259,6 +259,12 @@ impl Discv4 {
         self.safe_send_to_service(cmd);
     }
 
+    /// Adds the node to the table, if it is not already present.
+    pub fn add_node(&self, node_record: NodeRecord) {
+        let cmd = Discv4Command::Add(node_record);
+        self.safe_send_to_service(cmd);
+    }
+
     /// Adds the peer and id to the ban list.
     ///
     /// This will prevent any future inclusion in the table
@@ -1413,6 +1419,9 @@ impl Discv4Service {
                 while let Poll::Ready(cmd) = rx.poll_recv(cx) {
                     if let Some(cmd) = cmd {
                         match cmd {
+                            Discv4Command::Add(enr) => {
+                                self.add_node(enr);
+                            }
                             Discv4Command::Lookup { node_id, tx } => {
                                 let node_id = node_id.unwrap_or(self.local_node_record.id);
                                 self.lookup_with(node_id, tx);
@@ -1606,6 +1615,7 @@ pub(crate) async fn receive_loop(udp: Arc<UdpSocket>, tx: IngressSender, local_i
 
 /// The commands sent from the frontend to the service
 enum Discv4Command {
+    Add(NodeRecord),
     SetTcpPort(u16),
     SetEIP868RLPPair { key: Vec<u8>, rlp: Bytes },
     Ban(PeerId, IpAddr),
