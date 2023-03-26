@@ -8,8 +8,13 @@ use std::{
 };
 use walkdir::{DirEntry, WalkDir};
 
+use self::error::SocketParsingError;
+
 /// Utilities for parsing chainspecs
 pub mod chainspec;
+
+/// Custom error type while parsing socket addresses.
+pub mod error;
 
 /// Utilities for initializing parts of the chain
 pub mod init;
@@ -48,20 +53,22 @@ pub fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber, eyre::
 /// - Otherwise it is assumed to be a hostname
 ///
 /// An error is returned if the value is empty.
-pub fn parse_socket_address(value: &str) -> Result<SocketAddr, eyre::Error> {
+pub fn parse_socket_address(value: &str) -> Result<SocketAddr, SocketParsingError> {
     if value.is_empty() {
-        eyre::bail!("Cannot parse socket address from an empty string");
+        return Err(SocketParsingError::Empty)
     }
 
-    if value.starts_with(':') || value.parse::<u16>().is_ok() {
-        ("localhost", 9000).to_socket_addrs()
-    } else if value.contains(':') {
+    if value.starts_with(":") {
+        ("localhost", value.strip_prefix(":").unwrap().parse::<u16>().unwrap()).to_socket_addrs()
+    } else if value.contains(":") {
         value.to_socket_addrs()
+    } else if let Ok(port) = value.parse::<u16>() {
+        ("localhost", port).to_socket_addrs()
     } else {
         (value, 9000).to_socket_addrs()
     }?
     .next()
-    .ok_or_else(|| eyre::eyre!("Could not parse socket address from {}", value))
+    .ok_or_else(|| SocketParsingError::Parse(value.to_string()))
 }
 
 #[cfg(test)]
