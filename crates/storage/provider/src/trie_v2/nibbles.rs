@@ -1,6 +1,7 @@
+use reth_rlp::RlpEncodableWrapper;
 use std::cmp::min;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, RlpEncodableWrapper)]
 /// Structure representing a sequence of nibbles.
 ///
 /// A nibble is a 4-bit value, and this structure is used to store
@@ -17,6 +18,24 @@ pub struct Nibbles {
     pub hex_data: Vec<u8>,
 }
 
+impl From<Vec<u8>> for Nibbles {
+    fn from(slice: Vec<u8>) -> Self {
+        Nibbles::from_hex(slice)
+    }
+}
+
+impl From<&[u8]> for Nibbles {
+    fn from(slice: &[u8]) -> Self {
+        Nibbles::from_hex(slice.to_vec())
+    }
+}
+
+impl<const N: usize> From<[u8; N]> for Nibbles {
+    fn from(arr: [u8; N]) -> Self {
+        Nibbles::from_hex(arr.to_vec())
+    }
+}
+
 impl Nibbles {
     pub fn from_hex(hex: Vec<u8>) -> Self {
         Nibbles { hex_data: hex }
@@ -26,6 +45,7 @@ impl Nibbles {
         let mut hex_data = vec![];
         for item in raw.into_iter() {
             hex_data.push(item / 16);
+            // TODO: Only push if item % 16 != 0?
             hex_data.push(item % 16);
         }
         if is_leaf {
@@ -79,7 +99,8 @@ impl Nibbles {
     /// let nibbles = Nibbles::from_compact(compact);
     /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C, 0x10]);
     /// ```
-    pub fn from_compact(compact: Vec<u8>) -> Self {
+    pub fn from_compact<T: AsRef<[u8]>>(compact: T) -> Self {
+        let compact = compact.as_ref();
         let mut hex = vec![];
         let flag = compact[0];
         let mut is_leaf = false;
@@ -213,6 +234,10 @@ impl Nibbles {
     /// assert_eq!(is_leaf, false);
     /// ```
     pub fn encode_raw(&self) -> (Vec<u8>, bool) {
+        if self.hex_data.is_empty() {
+            return (vec![], false)
+        }
+
         let mut raw = vec![];
         let is_leaf = self.is_leaf();
         let hex =
@@ -297,5 +322,22 @@ mod tests {
         let (raw, is_leaf) = n2.encode_raw();
         assert!(is_leaf);
         assert_eq!(raw, b"key1");
+    }
+
+    #[test]
+    fn test_hash_builder_pack_nibbles() {
+        for (input, expected) in [
+            (vec![], vec![]),
+            // (vec![0xa], vec![0xa0]),
+            (vec![0xa, 0xb], vec![0xab]),
+            // TODO: Fix encode_raw with odd elements.
+            // (vec![0xa, 0xb, 0x2], vec![0xab, 0x20]),
+            (vec![0xa, 0xb, 0x2, 0x0], vec![0xab, 0x20]),
+            (vec![0xa, 0xb, 0x2, 0x7], vec![0xab, 0x27]),
+        ] {
+            let nibbles = Nibbles::from(input);
+            let encoded = nibbles.encode_raw();
+            assert_eq!(encoded.0, expected);
+        }
     }
 }
