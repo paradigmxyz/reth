@@ -218,7 +218,6 @@ async fn test_connect_with_boot_nodes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
 async fn test_connect_to_specific() {
     reth_tracing::init_test_tracing();
     let secret_key = SecretKey::new(&mut rand::thread_rng());
@@ -242,7 +241,8 @@ async fn test_connect_to_specific() {
         tokio::join!(network, requests);
     });
 
-    let enode =     "enode://1031081ada4a530f51ac8ab6d8f48e5e2e5b033a73d8032119c2e123e0381d8e909dc78361475beaf12f1bf89343bfac14c5ad302532065a498b9150cbf4b35c@104.248.194.88:30303";
+    let enode =     "enode://04e6773667200b776384caafa16e559a3fea9a0044c7608e4005777bf9baf7cd45c671003aba186c8a1ef7a2129b08031f60bac6405486dabb1ae10fc2e59911@65.21.89.157:30314";
+    // let enode =     "enode://1031081ada4a530f51ac8ab6d8f48e5e2e5b033a73d8032119c2e123e0381d8e909dc78361475beaf12f1bf89343bfac14c5ad302532065a498b9150cbf4b35c@104.248.194.88:30303";
 
     let node: NodeRecord = enode.parse().unwrap();
 

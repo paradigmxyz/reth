@@ -11,7 +11,7 @@ use crate::{
     },
 };
 pub use crate::{message::PeerRequestSender, session::handle::PeerInfo};
-
+use ethers_core::types::Chain::Sepolia;
 use fnv::FnvHashMap;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
@@ -25,7 +25,7 @@ use reth_net_common::{
     bandwidth_meter::{BandwidthMeter, MeteredStream},
     stream::HasRemoteAddr,
 };
-use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head, PeerId};
+use reth_primitives::{Chain, ForkFilter, ForkHash, ForkId, ForkTransition, Head, PeerId};
 use reth_tasks::TaskSpawner;
 use secp256k1::SecretKey;
 use std::{
@@ -48,6 +48,7 @@ mod active;
 mod config;
 mod handle;
 pub use config::SessionsConfig;
+use reth_primitives::hex_literal::hex;
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -856,9 +857,27 @@ async fn authenticate_stream(
     remote_addr: SocketAddr,
     direction: Direction,
     hello: HelloMessage,
-    status: Status,
+    mut status: Status,
     fork_filter: ForkFilter,
 ) -> PendingSessionEvent {
+    dbg!(&status);
+    let working = Status {
+        version: 68,
+        chain: Chain::Named(Sepolia),
+        total_difficulty: "0x000000000000000000000000000000000000000000000000003c656d23029ab0"
+            .parse()
+            .unwrap(),
+        blockhash: "0x3de6f2d042a84d0180cf977283d926ab8324fb2c3f5b5895907c552b2aed7380"
+            .parse()
+            .unwrap(),
+        genesis: "0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
+            .parse()
+            .unwrap(),
+        forkid: ForkId { hash: ForkHash(hex!("f7f9bc08")), next: 0 },
+    };
+
+    status.forkid = working.forkid;
+
     // conduct the p2p handshake and return the authenticated stream
     let (p2p_stream, their_hello) = match stream.handshake(hello).await {
         Ok(stream_res) => stream_res,
