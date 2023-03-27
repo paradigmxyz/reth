@@ -622,8 +622,8 @@ async fn run_network_until_shutdown<C>(
 
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
     use super::*;
+    use std::net::IpAddr;
 
     #[test]
     fn parse_help_node_command() {

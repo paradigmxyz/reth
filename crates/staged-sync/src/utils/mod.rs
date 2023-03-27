@@ -2,11 +2,10 @@
 use reth_primitives::{BlockHashOrNumber, H256};
 use std::{
     env::VarError,
-    net::{SocketAddr, ToSocketAddrs},
+    net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     str::FromStr,
 };
-use std::net::{IpAddr, Ipv4Addr};
 use walkdir::{DirEntry, WalkDir};
 
 /// Utilities for parsing chainspecs
@@ -53,7 +52,7 @@ pub enum SocketAddressParsingError {
     Parse(String),
     /// Failed to parse port
     #[error("Could not parse port: {0}")]
-    Port(#[from]std::num::ParseIntError),
+    Port(#[from] std::num::ParseIntError),
 }
 
 /// Parse a [SocketAddr] from a `str`.
@@ -72,20 +71,22 @@ pub fn parse_socket_address(value: &str) -> Result<SocketAddr, SocketAddressPars
     }
 
     if let Some(port) = value.strip_prefix(':').or_else(|| value.strip_prefix("localhost:")) {
-        let port : u16  = port.parse()?;
+        let port: u16 = port.parse()?;
         return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
     if let Ok(port) = value.parse::<u16>() {
         return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
-    value.to_socket_addrs()?.next()
+    value
+        .to_socket_addrs()?
+        .next()
         .ok_or_else(|| SocketAddressParsingError::Parse(value.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
-    use rand::{Rng, thread_rng};
     use super::*;
+    use rand::{thread_rng, Rng};
 
     #[test]
     fn parse_socket_addresses() {
@@ -100,7 +101,7 @@ mod tests {
 
     #[test]
     fn parse_socket_address_random() {
-        let port :u16 = thread_rng().gen();
+        let port: u16 = thread_rng().gen();
 
         for value in [format!("localhost:{port}"), format!(":{port}"), port.to_string()] {
             let socket_addr = parse_socket_address(&value)
