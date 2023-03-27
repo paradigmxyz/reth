@@ -6,15 +6,11 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
+use std::net::{IpAddr, Ipv4Addr};
 use walkdir::{DirEntry, WalkDir};
-
-use self::error::SocketAddressParsingError;
 
 /// Utilities for parsing chainspecs
 pub mod chainspec;
-
-/// Custom error type while parsing socket addresses.
-pub mod error;
 
 /// Utilities for initializing parts of the chain
 pub mod init;
@@ -43,6 +39,23 @@ pub fn hash_or_num_value_parser(value: &str) -> Result<BlockHashOrNumber, eyre::
     }
 }
 
+/// Error thrown while parsing a socket address.
+#[derive(thiserror::Error, Debug)]
+pub enum SocketAddressParsingError {
+    /// Failed to convert the string into a socket addr
+    #[error("Cannot parse socket address: {0}")]
+    Io(#[from] std::io::Error),
+    /// Input must not be empty
+    #[error("Cannot parse socket address from empty string")]
+    Empty,
+    /// Failed to parse the address
+    #[error("Could not parse socket address from {0}")]
+    Parse(String),
+    /// Failed to parse port
+    #[error("Could not parse port: {0}")]
+    Port(#[from]std::num::ParseIntError),
+}
+
 /// Parse a [SocketAddr] from a `str`.
 ///
 /// The following formats are checked:
@@ -58,31 +71,43 @@ pub fn parse_socket_address(value: &str) -> Result<SocketAddr, SocketAddressPars
         return Err(SocketAddressParsingError::Empty)
     }
 
-    if value.starts_with(":") {
-        ("localhost", value.strip_prefix(":").unwrap().parse::<u16>().unwrap()).to_socket_addrs()
-    } else if value.contains(":") {
-        value.to_socket_addrs()
-    } else if let Ok(port) = value.parse::<u16>() {
-        ("localhost", port).to_socket_addrs()
-    } else {
-        (value, 9000).to_socket_addrs()
-    }?
-    .next()
-    .ok_or_else(|| SocketAddressParsingError::Parse(value.to_string()))
+    if let Some(port) = value.strip_prefix(':').or_else(|| value.strip_prefix("localhost:")) {
+        let port : u16  = port.parse()?;
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+    }
+    if let Ok(port) = value.parse::<u16>() {
+        return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+    }
+    value.to_socket_addrs()?.next()
+        .ok_or_else(|| SocketAddressParsingError::Parse(value.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
+    use rand::{Rng, thread_rng};
     use super::*;
 
     #[test]
     fn parse_socket_addresses() {
-        for value in ["localhost:9000", ":9000", "9000", "localhost"] {
+        for value in ["localhost:9000", ":9000", "9000"] {
             let socket_addr = parse_socket_address(value)
                 .unwrap_or_else(|_| panic!("could not parse socket address: {value}"));
 
             assert!(socket_addr.ip().is_loopback());
             assert_eq!(socket_addr.port(), 9000);
+        }
+    }
+
+    #[test]
+    fn parse_socket_address_random() {
+        let port :u16 = thread_rng().gen();
+
+        for value in [format!("localhost:{port}"), format!(":{port}"), port.to_string()] {
+            let socket_addr = parse_socket_address(&value)
+                .unwrap_or_else(|_| panic!("could not parse socket address: {value}"));
+
+            assert!(socket_addr.ip().is_loopback());
+            assert_eq!(socket_addr.port(), port);
         }
     }
 }
