@@ -31,7 +31,7 @@ pub struct SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 10000 }
+        Self { commit_threshold: 5000 }
     }
 }
 
@@ -65,7 +65,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // No transactions to walk over
         if start_tx_index > end_tx_index {
             info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Target transaction already reached");
-            return Ok(ExecOutput { stage_progress: end_block, done })
+            return Ok(ExecOutput { stage_progress: end_block, done });
         }
 
         // Acquire the cursor for inserting elements
@@ -318,7 +318,7 @@ mod tests {
                     let end_block = output.stage_progress;
 
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
