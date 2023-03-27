@@ -1,6 +1,7 @@
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StateProvider, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    PostStateDataProvider, ProviderError, StateProvider, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
@@ -22,6 +23,9 @@ pub use state::{
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
+
+mod post_state_provider;
+pub use post_state_provider::PostStateProvider;
 
 /// A common provider that fetches data from a database.
 ///
@@ -437,6 +441,17 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
             .ok_or(ProviderError::BlockTransition { block_number })?;
 
         Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
+    }
+
+    fn pending<'a>(
+        &'a self,
+        post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<Box<dyn StateProvider + 'a>> {
+        let canonical_fork = post_state_data.canonical_fork();
+        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
+        let post_state_provider =
+            PostStateProvider { state_provider, post_state_data_provider: post_state_data };
+        Ok(Box::new(post_state_provider))
     }
 }
 

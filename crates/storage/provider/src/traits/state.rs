@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use super::AccountProvider;
 use crate::{post_state::PostState, BlockHashProvider};
 use auto_impl::auto_impl;
@@ -85,13 +83,19 @@ pub trait StateProviderFactory: Send + Sync {
     /// Returns a [StateProvider] indexed by the given block hash.
     fn history_by_block_hash<'a>(&'a self, block: BlockHash)
         -> Result<Box<dyn StateProvider + 'a>>;
+
+    /// Return a [StateProvider] that contains post state data provider.
+    /// Used to inspect or execute transaction on the pending state.
+    fn pending<'a>(
+        &'a self,
+        post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<Box<dyn StateProvider + 'a>>;
 }
 
 /// Blockchain trait provider
-#[async_trait]
 pub trait BlockchainTreePendingStateProvider: Send + Sync {
     /// Return state provider over pending state.
-    async fn pending_state_provider(
+    fn pending_state_provider(
         &self,
         block_hash: BlockHash,
     ) -> Result<Box<dyn PostStateDataProvider>>;

@@ -1,6 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, StateProvider, StateProviderFactory,
+    TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
@@ -335,6 +336,13 @@ impl StateProviderFactory for MockEthProvider {
     fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
         todo!()
     }
+
+    fn pending<'a>(
+        &'a self,
+        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<Box<dyn StateProvider + 'a>> {
+        todo!()
+    }
 }
 
 impl StateProviderFactory for Arc<MockEthProvider> {
@@ -350,6 +358,13 @@ impl StateProviderFactory for Arc<MockEthProvider> {
     }
 
     fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
+        todo!()
+    }
+
+    fn pending<'a>(
+        &'a self,
+        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<Box<dyn StateProvider + 'a>> {
         todo!()
     }
 }

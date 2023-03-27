@@ -2,17 +2,14 @@
 //!
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
-use crate::{
-    post_state::PostState,
-    substate::{PostStateDataRef, PostStateProvider},
-};
+use crate::{blockchain_tree::PostStateDataRef, post_state::PostState};
 use reth_db::database::Database;
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::ChainState, BlockExecutor, ExecutorFactory, PostStateDataProvider,
+    providers::PostStateProvider, BlockExecutor, ExecutorFactory, PostStateDataProvider,
     StateProviderFactory,
 };
 use std::collections::BTreeMap;
@@ -241,7 +238,7 @@ impl Chain {
         let db = externals.shareable_db();
         // TODO, small perf can check if caonical fork is the latest state.
         let history_provider = db.history_by_block_number(canonical_fork.number)?;
-        let state_provider = ChainState::boxed(history_provider);
+        let state_provider = history_provider;
 
         let provider = PostStateProvider { state_provider, post_state_data_provider };
 

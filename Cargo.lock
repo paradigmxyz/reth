@@ -4705,7 +4705,6 @@ name = "reth-executor"
 version = "0.1.0"
 dependencies = [
  "aquamarine",
- "async-trait",
  "auto_impl",
  "hash-db",
  "parking_lot 0.12.1",
@@ -4953,7 +4952,6 @@ name = "reth-provider"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
- "async-trait",
  "auto_impl",
  "cita_trie",
  "hasher",

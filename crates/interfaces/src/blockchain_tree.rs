@@ -1,8 +1,6 @@
-use std::collections::{BTreeMap, HashSet};
-
 use crate::{executor::Error as ExecutionError, Error};
-use async_trait::async_trait;
-use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
+use std::collections::{BTreeMap, HashSet};
 
 /// * [BlockchainTree::insert_block]: Connect block to chain, execute it and if valid insert block
 ///   inside tree.
@@ -11,22 +9,21 @@ use reth_primitives::{BlockHash, BlockNumber, SealedBlock, SealedBlockWithSender
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of block that we want to finalize
 ///   and commit it to db. If we dont have the block, pipeline syncing should start to fetch the
 ///   blocks from p2p. Do reorg in tables if canonical chain if needed.
-#[async_trait]
-pub trait BlockchainTreeEngine: BlockchainTreeViewer {
+pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Recover senders and call [`BlockchainTreeEngine::insert_block_with_senders`].
-    async fn insert_block(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
+    fn insert_block(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
         let block = block.seal_with_senders().ok_or(ExecutionError::SenderRecoveryError)?;
-        self.insert_block_with_senders(block).await
+        self.insert_block_with_senders(block)
     }
 
     /// Insert block with senders
-    async fn insert_block_with_senders(
+    fn insert_block_with_senders(
         &self,
         block: SealedBlockWithSenders,
     ) -> Result<BlockStatus, Error>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
-    async fn finalize_block(&self, finalized_block: BlockNumber);
+    fn finalize_block(&self, finalized_block: BlockNumber);
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree.
@@ -38,10 +35,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer {
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
     /// [`BlockchainTree::finalize_block`]).
-    async fn restore_canonical_hashes(
-        &self,
-        last_finalized_block: BlockNumber,
-    ) -> Result<(), Error>;
+    fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error>;
 
     /// Make a block and its parent part of the canonical chain.
     ///
@@ -53,10 +47,10 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer {
     /// # Returns
     ///
     /// Returns `Ok` if the blocks were canonicalized, or if the blocks were already canonical.
-    async fn make_canonical(&self, block_hash: &BlockHash) -> Result<(), Error>;
+    fn make_canonical(&self, block_hash: &BlockHash) -> Result<(), Error>;
 
     /// Unwind tables and put it inside state
-    async fn unwind(&self, unwind_to: BlockNumber) -> Result<(), Error>;
+    fn unwind(&self, unwind_to: BlockNumber) -> Result<(), Error>;
 }
 
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.
@@ -77,11 +71,13 @@ pub enum BlockStatus {
 }
 
 /// Allows read only functionality on the blockchain tree.
-#[async_trait]
-pub trait BlockchainTreeViewer {
+pub trait BlockchainTreeViewer: Send + Sync {
     /// Get all pending block numbers and their hashes.
-    async fn pending_blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
+    fn pending_blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
 
     /// Canonical block number and hashes best known by the tree.
-    async fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
+    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
+
+    /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
+    fn canonical_tip(&self) -> BlockNumHash;
 }

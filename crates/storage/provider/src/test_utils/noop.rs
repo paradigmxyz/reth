@@ -191,4 +191,11 @@ impl StateProviderFactory for NoopProvider {
     fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
         Ok(Box::new(*self))
     }
+
+    fn pending<'a>(
+        &'a self,
+        _post_state_data: Box<dyn crate::PostStateDataProvider + 'a>,
+    ) -> Result<Box<dyn StateProvider + 'a>> {
+        Ok(Box::new(*self))
+    }
 }
