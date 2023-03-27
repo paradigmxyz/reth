@@ -1,5 +1,5 @@
 #![allow(unused)]
-use std::default;
+use std::{default, fmt::Debug};
 
 use reth_primitives::{keccak256, proofs::EMPTY_ROOT, H256};
 
@@ -7,10 +7,19 @@ use crate::trie_v2::node::{rlp_hash, BranchNode, ExtensionNode, LeafNode, KECCAK
 
 use super::nibbles::Nibbles;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum HashBuilderValue {
     Bytes(Vec<u8>),
     Hash(H256),
+}
+
+impl Debug for HashBuilderValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bytes(bytes) => write!(f, "Bytes({:?})", hex::encode(&bytes)),
+            Self::Hash(hash) => write!(f, "Hash({:?})", hash),
+        }
+    }
 }
 
 impl From<Vec<u8>> for HashBuilderValue {
@@ -65,15 +74,18 @@ impl HashBuilder {
         }
         println!("============ END STACK ===============");
     }
+
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn add_leaf(&mut self, key: Nibbles, value: &[u8]) {
         assert!(key > self.key);
         self.add(key, value);
     }
 
+    #[tracing::instrument(skip_all)]
     pub fn add_branch(&mut self, key: Nibbles, value: H256) {
         assert!(key > self.key || (self.key.is_empty() && key.is_empty()));
         if self.key.is_empty() {
@@ -86,11 +98,14 @@ impl HashBuilder {
         if !self.key.is_empty() {
             self.update(&key);
         }
+        tracing::trace!(?self.key, ?self.value, "old key/value");
         self.key = key;
         self.value = value.into();
+        tracing::trace!(?self.key, ?self.value, "new key/value");
     }
 
     /// Returns the current root hash of the trie builder.
+    #[tracing::instrument(skip_all)]
     pub fn root(&mut self) -> H256 {
         // Clears the internal state
         if !self.key.is_empty() {
@@ -98,8 +113,6 @@ impl HashBuilder {
             self.key.clear();
             self.value = HashBuilderValue::Bytes(vec![]);
         }
-
-        self.stack_hex();
 
         if let Some(node_ref) = self.stack.last() {
             if node_ref.len() == KECCAK_LENGTH + 1 {
@@ -112,12 +125,25 @@ impl HashBuilder {
         }
     }
 
+    #[tracing::instrument(skip_all)]
     fn update(&mut self, succeeding: &Nibbles) {
         let mut build_extensions = false;
         // current / self.key is always the latest added element in the trie
         let mut current = self.key.clone();
 
+        tracing::debug!(?current, ?succeeding, "updating merkle tree");
+
+        let mut i = 0;
         loop {
+            let span = tracing::span!(
+                tracing::Level::TRACE,
+                "loop",
+                i,
+                current = hex::encode(&current.hex_data),
+                ?build_extensions
+            );
+            let _enter = span.enter();
+
             let preceding_exists = !self.groups.is_empty();
             let preceding_len: usize = self.groups.len().saturating_sub(1);
 
@@ -125,30 +151,48 @@ impl HashBuilder {
             let len = std::cmp::max(preceding_len, common_prefix_len);
             assert!(len < current.len());
 
+            tracing::trace!(
+                ?len,
+                ?common_prefix_len,
+                ?preceding_len,
+                preceding_exists,
+                "prefix lengths after comparing keys"
+            );
+
             let extra_digit = current[len];
             if self.groups.len() <= len {
+                tracing::trace!(new_len = len + 1, "scaling state masks to fit");
                 self.groups.resize(len + 1, 0u16);
             }
             self.groups[len] |= 1u16 << extra_digit;
+
+            tracing::trace!(
+                ?extra_digit,
+                groups =
+                    self.groups.iter().map(|x| format!("{:016b}", x)).collect::<Vec<_>>().join(","),
+            );
 
             let mut len_from = len;
             if !succeeding.is_empty() || preceding_exists {
                 len_from += 1;
             }
+            tracing::trace!("skipping {} nibbles", len_from);
 
             // The key without the common prefix
             let short_node_key = current.offset(len_from);
+            tracing::trace!(?short_node_key);
 
             // Concatenate the 2 nodes together
             if !build_extensions {
-                let value = self.value.clone();
-                match &value {
+                match &self.value {
                     HashBuilderValue::Bytes(leaf_value) => {
                         let leaf_node = LeafNode::new(&short_node_key, leaf_value);
-                        println!("[+] Pushing leaf node: {:?}", hex::encode(&leaf_node.rlp()));
+                        tracing::debug!(?leaf_node, "pushing leaf node");
+                        tracing::trace!(rlp = hex::encode(&leaf_node.rlp()), "leaf node rlp");
                         self.stack.push(leaf_node.rlp());
                     }
                     HashBuilderValue::Hash(hash) => {
+                        tracing::debug!(?hash, "pushing branch node hash");
                         self.stack.push(rlp_hash(*hash));
                         build_extensions = true;
                     }
@@ -156,43 +200,57 @@ impl HashBuilder {
             }
 
             if build_extensions && !short_node_key.is_empty() {
-                let stack_last = self.stack.pop().unwrap();
-                println!("[-] Popping stack top: {:?}", hex::encode(&stack_last));
-                println!("[-] Short Node KEy {:?}", short_node_key);
+                let stack_last =
+                    self.stack.pop().expect("there shoudl be at least one stack item; qed");
                 let extension_node = ExtensionNode::new(&short_node_key, &stack_last);
-
-                println!("[+] Pushing extension node: {:?}", hex::encode(&extension_node.rlp()));
+                tracing::debug!(?extension_node, "pushing extension node");
+                tracing::trace!(rlp = hex::encode(&extension_node.rlp()), "extension node rlp");
                 self.stack.push(extension_node.rlp());
             }
 
             if preceding_len <= common_prefix_len && !succeeding.is_empty() {
-                return;
+                tracing::trace!("no common prefix to create branch nodes from, returning");
+                return
             }
 
             // Insert branch nodes in the stack
             if !succeeding.is_empty() || preceding_exists {
                 let state_mask = self.groups[len];
-                self.stack_hex();
-                let rlp = BranchNode::new(&self.stack).rlp(self.groups[len]);
+                let branch_node = BranchNode::new(&self.stack);
+                let rlp = branch_node.rlp(self.groups[len]);
 
                 // Clears the stack from the branch node elements
                 let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
+                tracing::debug!(
+                    new_len = first_child_idx,
+                    old_len = self.stack.len(),
+                    "resizing stack to prepare branch node"
+                );
                 self.stack.resize(first_child_idx, vec![]);
+
+                tracing::debug!("pushing branch node with {:b} mask from stack", state_mask);
+                tracing::trace!(rlp = hex::encode(&rlp), "branch node rlp");
                 self.stack.push(rlp);
             }
 
             self.groups.resize(len, 0u16);
 
             if preceding_len == 0 {
-                return;
+                tracing::trace!("0 or 1 state masks means we have no more elements to process");
+                return
             }
 
             current.truncate(preceding_len);
+            tracing::trace!(?current, "truncated nibbles to {} bytes", preceding_len);
+
+            tracing::trace!(?self.groups, "popping empty state masks");
             while self.groups.last() == Some(&0) {
                 self.groups.pop();
             }
 
             build_extensions = true;
+
+            i += 1;
         }
     }
 }
@@ -267,9 +325,12 @@ mod tests {
     // TODO: Expand these to include more complex cases.
     #[test]
     fn test_root_raw_data() {
+        reth_tracing::init_test_tracing();
         let data = vec![
             (hex!("646f").to_vec(), hex!("76657262").to_vec()),
             (hex!("676f6f64").to_vec(), hex!("7075707079").to_vec()),
+            (hex!("676f6b32").to_vec(), hex!("7075707079").to_vec()),
+            (hex!("676f6b34").to_vec(), hex!("7075707079").to_vec()),
         ];
         assert_trie_root(data.into_iter());
     }
