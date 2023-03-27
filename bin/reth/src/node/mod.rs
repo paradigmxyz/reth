@@ -623,6 +623,7 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::IpAddr;
 
     #[test]
     fn parse_help_node_command() {
@@ -650,5 +651,17 @@ mod tests {
             Command::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
         assert_eq!(cmd.network.port, Some(99));
+    }
+
+    #[test]
+    fn parse_metrics_port() {
+        let cmd = Command::try_parse_from(["reth", "--metrics", "9000"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+
+        let cmd = Command::try_parse_from(["reth", "--metrics", ":9000"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+
+        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9000"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
     }
 }
