@@ -2,6 +2,7 @@ use reth_primitives::PeerId;
 use std::fmt::Debug;
 
 /// Generic download client for peer penalization
+#[auto_impl::auto_impl(&, Arc, Box)]
 pub trait DownloadClient: Send + Sync + Debug {
     /// Penalize the peer for responding with a message
     /// that violates validation rules
