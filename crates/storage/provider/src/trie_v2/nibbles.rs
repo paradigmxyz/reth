@@ -340,6 +340,10 @@ impl Nibbles {
     pub fn push(&mut self, e: u8) {
         self.hex_data.push(e)
     }
+
+    pub fn last(&mut self) -> Option<u8> {
+        self.hex_data.last().copied()
+    }
 }
 
 #[cfg(test)]

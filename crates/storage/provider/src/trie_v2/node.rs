@@ -9,7 +9,7 @@ fn assert_subset(sub: u16, sup: u16) {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntermediateNode {
+pub struct BranchNodeCompact {
     pub state_mask: u16,
     pub tree_mask: u16,
     pub hash_mask: u16,
@@ -17,7 +17,7 @@ pub struct IntermediateNode {
     pub root_hash: Option<H256>,
 }
 
-impl IntermediateNode {
+impl BranchNodeCompact {
     pub fn new(
         state_mask: u16,
         tree_mask: u16,
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn node_marshalling() {
-        let n = IntermediateNode::new(
+        let n = BranchNodeCompact::new(
             0xf607,
             0x0005,
             0x4004,
@@ -297,6 +297,6 @@ mod tests {
             Some(hex!("aaaabbbb0006767767776fffffeee44444000005567645600000000eeddddddd").into()),
         );
 
-        assert_eq!(IntermediateNode::unmarshal(&n.marshal()).unwrap(), n);
+        assert_eq!(BranchNodeCompact::unmarshal(&n.marshal()).unwrap(), n);
     }
 }
