@@ -94,7 +94,7 @@ impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool> {
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage>,
     ) -> Self {
-        let mode = MiningMode::interval(std::time::Duration::from_secs(4));
+        let mode = MiningMode::interval(std::time::Duration::from_secs(1));
         // let mode = MiningMode::instant(100, pool.pending_transactions_listener());
         Self {
             storage: Storage::new(&chain_spec),

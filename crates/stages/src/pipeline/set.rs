@@ -190,7 +190,8 @@ where
     ///
     /// See [Self::disable]
     pub fn disable_if<F>(self, stage_id: StageId, f: F) -> Self
-    where F: FnOnce() -> bool
+    where
+        F: FnOnce() -> bool,
     {
         if f() {
             return self.disable(stage_id)
