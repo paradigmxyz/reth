@@ -318,11 +318,8 @@ where
 
         match tx.transaction.kind() {
             Create => {
-                // set contract address if creation was successful
-                if receipt.success {
-                    res_receipt.contract_address =
-                        Some(create_address(transaction.signer(), tx.transaction.nonce()));
-                }
+                res_receipt.contract_address =
+                    Some(create_address(transaction.signer(), tx.transaction.nonce()));
             }
             Call(addr) => {
                 res_receipt.to = Some(*addr);

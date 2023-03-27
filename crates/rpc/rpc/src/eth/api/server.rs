@@ -84,9 +84,7 @@ where
         full: bool,
     ) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
-        let mut block = EthApi::block(self, number, full).await?.unwrap();
-        dbg!(&block);
-        Ok(Some(block))
+        Ok(EthApi::block(self, number, full).await?)
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
@@ -165,9 +163,7 @@ where
     /// Handler for: `eth_getTransactionReceipt`
     async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
-        let receipt = EthTransactions::transaction_receipt(self, hash).await?;
-        dbg!(&receipt);
-        Ok(receipt)
+        Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
 
     /// Handler for: `eth_getBalance`

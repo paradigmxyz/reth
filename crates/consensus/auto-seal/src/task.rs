@@ -4,8 +4,9 @@ use reth_beacon_consensus::BeaconEngineMessage;
 use reth_executor::executor::Executor;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
-    constants::EMPTY_TRANSACTIONS, proofs, Block, BlockBody, ChainSpec, Header,
-    IntoRecoveredTransaction, EMPTY_OMMER_ROOT, U256,
+    constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
+    proofs, Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, ReceiptWithBloom,
+    EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::{State, SubState};
@@ -123,21 +124,19 @@ where
                         extra_data: Default::default(),
                     };
 
+                    let transactions = transactions
+                        .into_iter()
+                        .map(|tx| tx.to_recovered_transaction().into_signed())
+                        .collect::<Vec<_>>();
+
                     header.transactions_root = if transactions.is_empty() {
                         EMPTY_TRANSACTIONS
                     } else {
                         proofs::calculate_transaction_root(transactions.iter())
                     };
 
-                    let block = Block {
-                        header,
-                        body: transactions
-                            .into_iter()
-                            .map(|tx| tx.to_recovered_transaction().into_signed())
-                            .collect(),
-                        ommers: vec![],
-                        withdrawals: None,
-                    };
+                    let block =
+                        Block { header, body: transactions, ommers: vec![], withdrawals: None };
 
                     // execute the new block
                     let substate = SubState::new(State::new(client.latest().unwrap()));
@@ -146,12 +145,23 @@ where
                     trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
                     match executor.execute_transactions(&block, U256::ZERO, None) {
-                        Ok((_, gas_used)) => {
+                        Ok((res, gas_used)) => {
                             let Block { mut header, body, .. } = block;
 
                             // clear all transactions from pool
                             // TODO this should happen automatically via events
                             pool.remove_transactions(body.iter().map(|tx| tx.hash));
+
+                            header.receipts_root = if res.receipts().is_empty() {
+                                EMPTY_RECEIPTS
+                            } else {
+                                let receipts_with_bloom = res
+                                    .receipts()
+                                    .iter()
+                                    .map(|r| r.clone().into())
+                                    .collect::<Vec<ReceiptWithBloom>>();
+                                proofs::calculate_receipt_root(receipts_with_bloom.iter())
+                            };
 
                             let body =
                                 BlockBody { transactions: body, ommers: vec![], withdrawals: None };
