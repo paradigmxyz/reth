@@ -71,6 +71,7 @@ use tokio::sync::{
 use tracing::*;
 
 use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_stages::stages::MERKLE_BOTH;
 
 pub mod events;
 
@@ -632,7 +633,8 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold)),
+                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
+                    .disable_if(MERKLE_BOTH, || self.auto_mine)
             )
             .build();
 
