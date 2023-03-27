@@ -45,7 +45,7 @@ impl MiningMode {
         MiningMode::FixedBlockTime(FixedBlockTimeMiner::new(duration))
     }
 
-    /// polls the [Pool] and returns those transactions that should be put in a block, if any.
+    /// polls the Pool and returns those transactions that should be put in a block, if any.
     pub(crate) fn poll<Pool>(
         &mut self,
         pool: &Pool,

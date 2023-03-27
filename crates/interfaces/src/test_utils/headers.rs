@@ -37,7 +37,7 @@ use tokio::sync::{
 /// A test downloader which just returns the values that have been pushed to it.
 #[derive(Debug)]
 pub struct TestHeaderDownloader {
-    client: Arc<TestHeadersClient>,
+    client: TestHeadersClient,
     consensus: Arc<TestConsensus>,
     limit: u64,
     download: Option<TestDownload>,
@@ -48,7 +48,7 @@ pub struct TestHeaderDownloader {
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
     pub fn new(
-        client: Arc<TestHeadersClient>,
+        client: TestHeadersClient,
         consensus: Arc<TestConsensus>,
         limit: u64,
         batch_size: usize,
@@ -58,7 +58,7 @@ impl TestHeaderDownloader {
 
     fn create_download(&self) -> TestDownload {
         TestDownload {
-            client: Arc::clone(&self.client),
+            client: self.client.clone(),
             consensus: Arc::clone(&self.consensus),
             limit: self.limit,
             fut: None,
@@ -107,7 +107,7 @@ impl Stream for TestHeaderDownloader {
 type TestHeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send>>;
 
 struct TestDownload {
-    client: Arc<TestHeadersClient>,
+    client: TestHeadersClient,
     consensus: Arc<TestConsensus>,
     limit: u64,
     fut: Option<TestHeadersFut>,
@@ -123,7 +123,7 @@ impl TestDownload {
                 direction: HeadersDirection::Rising,
                 start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
             };
-            let client = Arc::clone(&self.client);
+            let client = self.client.clone();
             self.fut = Some(Box::pin(client.get_headers(request)));
         }
         self.fut.as_mut().unwrap()
@@ -187,11 +187,11 @@ impl Stream for TestDownload {
 }
 
 /// A test client for fetching headers
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TestHeadersClient {
     responses: Arc<Mutex<Vec<Header>>>,
     error: Arc<Mutex<Option<RequestError>>>,
-    request_attempts: AtomicU64,
+    request_attempts: Arc<AtomicU64>,
 }
 
 impl TestHeadersClient {

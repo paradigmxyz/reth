@@ -262,7 +262,10 @@ impl Command {
                 )
                 .await?;
 
-            ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
+            ctx.task_executor.spawn_critical(
+                "events task",
+                events::handle_events(Some(network.clone()), events),
+            );
 
             pipeline
         } else {
@@ -279,7 +282,7 @@ impl Command {
                 .await?;
 
             ctx.task_executor.spawn_critical(
-                "auto mine task",
+                "events task",
                 events::handle_events(Some(network.clone()), events),
             );
 
