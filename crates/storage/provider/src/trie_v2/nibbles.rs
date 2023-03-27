@@ -96,7 +96,7 @@ impl Nibbles {
         let n = (nibbles.len() + 1) / 2;
         let mut out = vec![0u8; n];
         if n == 0 {
-            return out;
+            return out
         }
 
         let mut i = 0;
@@ -249,9 +249,9 @@ impl Nibbles {
     pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {
         // Handle leaf being empty edge case
         if is_leaf && self.is_empty() {
-            return vec![0x20];
+            return vec![0x20]
         } else if self.is_empty() {
-            return vec![0x00];
+            return vec![0x00]
         }
 
         let mut compact = Vec::with_capacity(self.len() / 2 + 1);
@@ -270,7 +270,7 @@ impl Nibbles {
             if is_odd {
                 compact[0] += 0x10;
             }
-            return compact;
+            return compact
         }
 
         if is_odd {
@@ -301,7 +301,7 @@ impl Nibbles {
         let len = std::cmp::min(self.len(), other.len());
         for i in 0..len {
             if self[i] != other[i] {
-                return i;
+                return i
             }
         }
         len
@@ -313,7 +313,7 @@ impl Nibbles {
         let mut i = 0usize;
         while i < s {
             if self.at(i) != other_partial.at(i) {
-                break;
+                break
             }
             i += 1;
         }

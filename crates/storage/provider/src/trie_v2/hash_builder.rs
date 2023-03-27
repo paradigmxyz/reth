@@ -147,7 +147,9 @@ impl HashBuilder {
                 let value = self.value.clone();
                 match &value {
                     HashBuilderValue::Bytes(leaf_value) => {
+                        dbg!(&short_node_key);
                         let leaf_node = LeafNode::new(&short_node_key, leaf_value);
+                        dbg!(&leaf_node);
                         println!("[+] Pushing leaf node: {:?}", hex::encode(&leaf_node.rlp()));
                         self.stack.push(leaf_node.rlp());
                     }
@@ -229,10 +231,6 @@ mod tests {
 
     #[test]
     fn test_hash_builder_1() {
-        // let mut data =
-        //     vec![(H256::from_low_u64_be(1), vec![2u8]), (H256::from_low_u64_be(3), vec![4u8])];
-
-        // TODO: Figure out why it doesnt wokr with this
         let data = vec![
             (hex!("646f").to_vec(), hex!("76657262").to_vec()),
             (hex!("676f6f64").to_vec(), hex!("7075707079").to_vec()),

@@ -29,13 +29,12 @@ impl<'a> LeafNode<'a> {
 // Handroll because `key` must be encoded as a slice
 impl Encodable for LeafNode<'_> {
     fn encode(&self, out: &mut dyn BufMut) {
-        let h = reth_rlp::Header {
-            list: true,
-            payload_length: self.key.as_slice().length() + self.value.len(),
-        };
-        h.encode(out);
-        self.key.as_slice().encode(out);
-        self.value.encode(out);
+        #[derive(reth_rlp::RlpEncodable)]
+        struct S<'a> {
+            encoded_path: &'a [u8],
+            value: &'a [u8],
+        }
+        S { encoded_path: &self.key, value: self.value }.encode(out);
     }
 }
 
@@ -176,4 +175,30 @@ pub fn rlp_hash(hash: H256) -> Vec<u8> {
 
 fn matches_mask(mask: u16, idx: usize) -> bool {
     mask & (1 << idx) != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hex_literal::hex;
+
+    // From manual regression test
+    #[test]
+    fn encode_leaf_node_nibble() {
+        let nibble = Nibbles { hex_data: hex!("0604060f").to_vec() };
+        let encoded = nibble.encode_path_leaf(true);
+        let expected = hex!("20646f").to_vec();
+        assert_eq!(encoded, expected);
+    }
+
+    #[test]
+    fn rlp_leaf_node_roundtrip() {
+        let nibble = Nibbles { hex_data: hex!("0604060f").to_vec() };
+        let val = hex!("76657262").to_vec();
+        let leaf = LeafNode::new(&nibble, &val);
+        let rlp = leaf.rlp();
+
+        let expected = hex!("c98320646f8476657262").to_vec();
+        assert_eq!(rlp, expected);
+    }
 }
