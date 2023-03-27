@@ -90,7 +90,7 @@ impl HashBuilder {
     }
 
     /// Returns the current root hash of the trie builder.
-    fn root(&mut self) -> H256 {
+    pub fn root(&mut self) -> H256 {
         // Clears the internal state
         if !self.key.is_empty() {
             self.update(&Nibbles::default());

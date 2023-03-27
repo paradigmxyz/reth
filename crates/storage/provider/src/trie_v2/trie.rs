@@ -5,6 +5,8 @@
 // 2. Update root given a list of updates
 // Be able to calculate incremental state root without taking a write lock
 
+use crate::trie_v2::hash_builder::HashBuilder;
+
 use super::nibbles::Nibbles;
 
 use reth_db::{
@@ -47,17 +49,20 @@ impl<'a, TX: DbTx<'a>> StorageRoot<TX> {
         // Instantiate the walker
         let mut cursor = self.tx.cursor_dup_read::<tables::HashedStorage>()?;
         let hashed_address = keccak256(self.address);
-        dbg!(&cursor.next_dup_val());
         let mut walker = cursor.walk_dup(Some(hashed_address), None)?;
 
-        dbg!(&hashed_address);
+        let mut hash_builder = HashBuilder::new();
         while let Some(item) = walker.next() {
             let (hashed_address, entry) = item?;
             let StorageEntry { key: hashed_slot, value } = entry;
-            dbg!(&hashed_address, &hashed_slot, &value);
+
+            let nibbles = Nibbles::unpack(hashed_slot);
+            hash_builder.add_leaf(nibbles, reth_rlp::encode_fixed_size(&value).as_ref());
         }
 
-        Ok(unimplemented!())
+        let root = hash_builder.root();
+
+        Ok(root)
     }
 }
 
@@ -96,7 +101,6 @@ mod tests {
         storage: &HashMap<H256, U256>,
     ) {
         let hashed_address = keccak256(address);
-        dbg!(&hashed_address);
         tx.put::<tables::HashedAccount>(hashed_address, account).unwrap();
 
         for (k, v) in storage {
@@ -109,12 +113,9 @@ mod tests {
     }
 
     fn storage_root(storage: &HashMap<H256, U256>) -> H256 {
-        let encoded_storage = storage.iter().map(|(k, v)| {
-            let out = encode_fixed_size(v).to_vec();
-            (k, out)
-        });
+        let encoded_storage = storage.iter().map(|(k, v)| (k, encode_fixed_size(v).to_vec()));
 
-        H256(sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0)
+        H256(triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0)
     }
 
     #[test]
