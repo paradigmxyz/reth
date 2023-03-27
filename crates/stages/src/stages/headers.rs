@@ -298,7 +298,7 @@ mod tests {
         use std::sync::Arc;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {
-            pub(crate) client: Arc<TestHeadersClient>,
+            pub(crate) client: TestHeadersClient,
             channel: (watch::Sender<H256>, watch::Receiver<H256>),
             downloader_factory: Box<dyn Fn() -> D + Send + Sync + 'static>,
             tx: TestTransaction,
@@ -306,7 +306,7 @@ mod tests {
 
         impl Default for HeadersTestRunner<TestHeaderDownloader> {
             fn default() -> Self {
-                let client = Arc::new(TestHeadersClient::default());
+                let client = TestHeadersClient::default();
                 Self {
                     client: client.clone(),
                     channel: watch::channel(H256::zero()),
@@ -416,7 +416,7 @@ mod tests {
 
         impl HeadersTestRunner<ReverseHeadersDownloader<TestHeadersClient>> {
             pub(crate) fn with_linear_downloader() -> Self {
-                let client = Arc::new(TestHeadersClient::default());
+                let client = TestHeadersClient::default();
                 Self {
                     client: client.clone(),
                     channel: watch::channel(H256::zero()),
