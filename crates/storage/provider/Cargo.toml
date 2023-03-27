@@ -32,6 +32,7 @@ auto_impl = "1.0"
 itertools = "0.10"
 
 parking_lot = "0.12"
+hex = "0.4.3"
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
