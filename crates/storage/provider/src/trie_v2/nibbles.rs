@@ -1,7 +1,11 @@
 use reth_rlp::RlpEncodableWrapper;
-use std::cmp::min;
+use std::{
+    cmp::min,
+    fmt::Debug,
+    ops::{Index, Range, RangeFrom},
+};
 
-#[derive(Debug, Clone, Eq, PartialEq, RlpEncodableWrapper)]
+#[derive(Default, Clone, Eq, PartialEq, RlpEncodableWrapper, PartialOrd, Ord)]
 /// Structure representing a sequence of nibbles.
 ///
 /// A nibble is a 4-bit value, and this structure is used to store
@@ -16,6 +20,36 @@ use std::cmp::min;
 pub struct Nibbles {
     /// The inner representation of the nibble sequence.
     pub hex_data: Vec<u8>,
+}
+
+impl Debug for Nibbles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Nibbles").field("hex_data", &hex::encode(&self.hex_data)).finish()
+    }
+}
+
+impl Index<usize> for Nibbles {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.hex_data[index]
+    }
+}
+
+impl Index<RangeFrom<usize>> for Nibbles {
+    type Output = [u8];
+
+    fn index(&self, index: RangeFrom<usize>) -> &Self::Output {
+        &self.hex_data[index]
+    }
+}
+
+impl Index<Range<usize>> for Nibbles {
+    type Output = [u8];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        &self.hex_data[index]
+    }
 }
 
 impl From<Vec<u8>> for Nibbles {
@@ -37,15 +71,20 @@ impl<const N: usize> From<[u8; N]> for Nibbles {
 }
 
 impl Nibbles {
+    /// Clears the nibble sequence.
+    pub fn clear(&mut self) {
+        self.hex_data.clear();
+    }
+
     pub fn from_hex(hex: Vec<u8>) -> Self {
         Nibbles { hex_data: hex }
     }
 
-    pub fn from_raw(raw: &[u8], is_leaf: bool) -> Self {
-        let mut hex_data = vec![];
+    pub fn from_raw<T: AsRef<[u8]>>(raw: T, is_leaf: bool) -> Self {
+        let raw = raw.as_ref();
+        let mut hex_data = Vec::with_capacity(raw.len() * 2 + is_leaf as usize);
         for item in raw.into_iter() {
             hex_data.push(item / 16);
-            // TODO: Only push if item % 16 != 0?
             hex_data.push(item % 16);
         }
         if is_leaf {
@@ -182,10 +221,19 @@ impl Nibbles {
     /// assert_eq!(compact, vec![0x3A, 0xBC]);
     /// ```
     pub fn encode_compact(&self) -> Vec<u8> {
-        let mut compact = vec![];
         let is_leaf = self.is_leaf();
+        self.encode_compact_leaf(is_leaf)
+    }
+
+    pub fn encode_compact_leaf(&self, is_leaf: bool) -> Vec<u8> {
+        // Handle leaf being empty edge case
+        if is_leaf && self.is_empty() {
+            return vec![0x20]
+        }
+
         let mut hex =
             if is_leaf { &self.hex_data[0..self.hex_data.len() - 1] } else { &self.hex_data[0..] };
+        let mut compact = Vec::with_capacity(self.len());
         // node type    path length    |    prefix    hexchar
         // --------------------------------------------------
         // extension    even           |    0000      0x0
@@ -262,6 +310,17 @@ impl Nibbles {
         self.hex_data[i] as usize
     }
 
+    pub fn prefix_length(&self, other: &Nibbles) -> usize {
+        let len = std::cmp::min(self.len(), other.len());
+        for i in 0..len {
+            if self[i] != other[i] {
+                return i
+            }
+        }
+        len
+    }
+
+    // Same as prefix_length:w
     pub fn common_prefix(&self, other_partial: &Nibbles) -> usize {
         let s = min(self.len(), other_partial.len());
         let mut i = 0usize;
