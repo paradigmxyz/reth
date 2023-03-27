@@ -113,17 +113,31 @@ where
                 };
 
                 self.inner
-                    .filter_logs(&filter, from_block_number, to_block_number)
+                    .get_logs_in_block_range(&filter, from_block_number, to_block_number)
                     .map(FilterChanges::Logs)
             }
         }
     }
 
-    /// Returns all logs matching given filter (in a range 'from' - 'to').
+    /// Returns an array of all logs matching filter with given id.
+    ///
+    /// Returns an error if no matching log filter exists.
     ///
     /// Handler for `eth_getFilterLogs`
-    async fn filter_logs(&self, _id: FilterId) -> RpcResult<Vec<Log>> {
-        todo!()
+    async fn filter_logs(&self, id: FilterId) -> RpcResult<Vec<Log>> {
+        let filter = {
+            let filters = self.inner.active_filters.inner.lock().await;
+            if let FilterKind::Log(ref filter) =
+                filters.get(&id).ok_or_else(|| FilterError::FilterNotFound(id.clone()))?.kind
+            {
+                *filter.clone()
+            } else {
+                // Not a log filter
+                return Err(FilterError::FilterNotFound(id).into())
+            }
+        };
+
+        self.inner.logs_for_filter(filter).await
     }
 
     /// Handler for `eth_uninstallFilter`
@@ -141,38 +155,7 @@ where
     ///
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
-        match filter.block_option {
-            FilterBlockOption::AtBlockHash(block_hash) => {
-                let mut all_logs = Vec::new();
-                // all matching logs in the block, if it exists
-                if let Some(block) = self.inner.client.block(block_hash.into()).to_rpc_result()? {
-                    // get receipts for the block
-                    if let Some(receipts) =
-                        self.inner.client.receipts_by_block(block.number.into()).to_rpc_result()?
-                    {
-                        let filter = FilteredParams::new(Some(filter));
-                        logs_utils::append_matching_block_logs(
-                            &mut all_logs,
-                            &filter,
-                            block_hash,
-                            block.number,
-                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
-                        );
-                    }
-                }
-                Ok(all_logs)
-            }
-            FilterBlockOption::Range { from_block, to_block } => {
-                // compute the range
-                let info = self.inner.client.chain_info().to_rpc_result()?;
-
-                // we start at the most recent block if unset in filter
-                let start_block = info.best_number;
-                let (from_block_number, to_block_number) =
-                    logs_utils::get_filter_block_range(from_block, to_block, start_block, info);
-                self.inner.filter_logs(&filter, from_block_number, to_block_number)
-            }
-        }
+        self.inner.logs_for_filter(filter).await
     }
 }
 
@@ -196,6 +179,42 @@ where
     Client: BlockProvider + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
 {
+    /// Returns logs matching given filter object.
+    async fn logs_for_filter(&self, filter: Filter) -> RpcResult<Vec<Log>> {
+        match filter.block_option {
+            FilterBlockOption::AtBlockHash(block_hash) => {
+                let mut all_logs = Vec::new();
+                // all matching logs in the block, if it exists
+                if let Some(block) = self.client.block(block_hash.into()).to_rpc_result()? {
+                    // get receipts for the block
+                    if let Some(receipts) =
+                        self.client.receipts_by_block(block.number.into()).to_rpc_result()?
+                    {
+                        let filter = FilteredParams::new(Some(filter));
+                        logs_utils::append_matching_block_logs(
+                            &mut all_logs,
+                            &filter,
+                            block_hash,
+                            block.number,
+                            block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                        );
+                    }
+                }
+                Ok(all_logs)
+            }
+            FilterBlockOption::Range { from_block, to_block } => {
+                // compute the range
+                let info = self.client.chain_info().to_rpc_result()?;
+
+                // we start at the most recent block if unset in filter
+                let start_block = info.best_number;
+                let (from_block_number, to_block_number) =
+                    logs_utils::get_filter_block_range(from_block, to_block, start_block, info);
+                self.get_logs_in_block_range(&filter, from_block_number, to_block_number)
+            }
+        }
+    }
+
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.client.chain_info().to_rpc_result()?.best_number;
@@ -217,7 +236,12 @@ where
     /// Returns an error if:
     ///  - underlying database error
     ///  - amount of matches exceeds configured limit
-    fn filter_logs(&self, filter: &Filter, from_block: u64, to_block: u64) -> RpcResult<Vec<Log>> {
+    fn get_logs_in_block_range(
+        &self,
+        filter: &Filter,
+        from_block: u64,
+        to_block: u64,
+    ) -> RpcResult<Vec<Log>> {
         let mut all_logs = Vec::new();
         let filter_params = FilteredParams::new(Some(filter.clone()));
 

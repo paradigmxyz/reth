@@ -444,7 +444,7 @@ mod tests {
             assert_matches!(
                 result_rx.await,
                 Ok(Err(EngineApiError::TerminalBlockHash { execution, consensus }))
-                    if execution == None && consensus == transition_config.terminal_block_hash
+                    if execution.is_none() && consensus == transition_config.terminal_block_hash
             );
 
             // Add block and to provider local store and test for mismatch

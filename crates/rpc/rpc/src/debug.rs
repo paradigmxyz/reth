@@ -5,7 +5,7 @@ use crate::{
         EthTransactions, TransactionSource,
     },
     result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec,
+    EthApiSpec, TracingCallGuard,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -35,14 +35,17 @@ pub struct DebugApi<Client, Eth> {
     client: Client,
     /// The implementation of `eth` API
     eth_api: Eth,
+
+    // restrict the number of concurrent calls to `debug_traceTransaction`
+    tracing_call_guard: TracingCallGuard,
 }
 
 // === impl DebugApi ===
 
 impl<Client, Eth> DebugApi<Client, Eth> {
     /// Create a new instance of the [DebugApi]
-    pub fn new(client: Client, eth: Eth) -> Self {
-        Self { client, eth_api: eth }
+    pub fn new(client: Client, eth: Eth, tracing_call_guard: TracingCallGuard) -> Self {
+        Self { client, eth_api: eth, tracing_call_guard }
     }
 }
 

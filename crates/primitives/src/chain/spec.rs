@@ -799,7 +799,11 @@ mod tests {
                     ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
                 ),
                 (
-                    Head { number: 1735372, timestamp: 1677557090, ..Default::default() },
+                    Head { number: 1735372, timestamp: 1677557087, ..Default::default() },
+                    ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
+                ),
+                (
+                    Head { number: 1735372, timestamp: 1677557088, ..Default::default() },
                     ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 0 },
                 ),
             ],

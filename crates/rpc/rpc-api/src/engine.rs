@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
-use reth_primitives::{BlockHash, BlockNumber, H64};
+use reth_primitives::{BlockHash, H64, U64};
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceState, ForkchoiceUpdated,
     PayloadAttributes, PayloadStatus, TransitionConfiguration,
@@ -56,8 +56,8 @@ pub trait EngineApi {
     #[method(name = "engine_getPayloadBodiesByRangeV1")]
     async fn get_payload_bodies_by_range_v1(
         &self,
-        start: BlockNumber,
-        count: u64,
+        start: U64,
+        count: U64,
     ) -> Result<ExecutionPayloadBodies>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_exchangetransitionconfigurationv1>

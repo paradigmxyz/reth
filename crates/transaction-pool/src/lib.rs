@@ -283,17 +283,28 @@ where
         self.pool.pooled_transactions()
     }
 
+    fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash> {
+        self.pooled_transaction_hashes().into_iter().take(max).collect()
+    }
+
+    fn pooled_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pooled_transactions().into_iter().take(max).collect()
+    }
+
     fn best_transactions(
         &self,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(self.pool.best_transactions())
     }
 
-    fn remove_invalid(
+    fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.remove_invalid(hashes)
+        self.pool.remove_transactions(hashes)
     }
 
     fn retain_unknown(&self, hashes: &mut Vec<TxHash>) {
