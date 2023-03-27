@@ -30,6 +30,7 @@ tracing = "0.1"
 thiserror = "1.0.37"
 auto_impl = "1.0"
 itertools = "0.10"
+async-trait = "0.1"
 
 parking_lot = "0.12"
 

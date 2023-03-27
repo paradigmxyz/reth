@@ -1,7 +1,8 @@
 use futures::{Future, FutureExt, StreamExt};
 use reth_db::{database::Database, tables, transaction::DbTx};
-use reth_executor::blockchain_tree::{BlockStatus, BlockchainTree};
+use reth_executor::blockchain_tree::BlockchainTree;
 use reth_interfaces::{
+    blockchain_tree::BlockStatus,
     consensus::{Consensus, ForkchoiceState},
     executor::Error as ExecutorError,
     sync::SyncStateUpdater,

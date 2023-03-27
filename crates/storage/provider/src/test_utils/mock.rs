@@ -321,41 +321,37 @@ impl EvmEnvProvider for MockEthProvider {
 }
 
 impl StateProviderFactory for MockEthProvider {
-    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
-    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(self)
+    fn latest(&self) -> Result<Box<dyn StateProvider>> {
+        // TODO(rakita) fix Ok(self)
+        todo!()
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Self::HistorySP<'_>> {
+    ) -> Result<Box<dyn StateProvider>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
         todo!()
     }
 }
 
 impl StateProviderFactory for Arc<MockEthProvider> {
-    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
-    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(self)
+    fn latest(&self) -> Result<Box<dyn StateProvider>> {
+        // TODO(rakita) fix Ok(self)
+        todo!()
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Self::HistorySP<'_>> {
+    ) -> Result<Box<dyn StateProvider>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
         todo!()
     }
 }

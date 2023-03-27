@@ -1,10 +1,12 @@
+use async_trait::async_trait;
+
 use super::AccountProvider;
-use crate::BlockHashProvider;
+use crate::{post_state::PostState, BlockHashProvider};
 use auto_impl::auto_impl;
 use reth_interfaces::Result;
 use reth_primitives::{
-    Address, BlockHash, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256, KECCAK_EMPTY,
-    U256,
+    Address, BlockHash, BlockNumHash, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256,
+    KECCAK_EMPTY, U256,
 };
 
 /// An abstraction for a type that provides state data.
@@ -71,21 +73,39 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
 /// Light wrapper that returns `StateProvider` implementations that correspond to the given
 /// `BlockNumber` or the latest state.
 pub trait StateProviderFactory: Send + Sync {
-    /// History State provider.
-    type HistorySP<'a>: StateProvider
-    where
-        Self: 'a;
-    /// Latest state provider.
-    type LatestSP<'a>: StateProvider
-    where
-        Self: 'a;
-
     /// Storage provider for latest block.
-    fn latest(&self) -> Result<Self::LatestSP<'_>>;
+    fn latest<'a>(&'a self) -> Result<Box<dyn StateProvider + 'a>>;
 
     /// Returns a [StateProvider] indexed by the given block number.
-    fn history_by_block_number(&self, block: BlockNumber) -> Result<Self::HistorySP<'_>>;
+    fn history_by_block_number<'a>(
+        &'a self,
+        block: BlockNumber,
+    ) -> Result<Box<dyn StateProvider + 'a>>;
 
     /// Returns a [StateProvider] indexed by the given block hash.
-    fn history_by_block_hash(&self, block: BlockHash) -> Result<Self::HistorySP<'_>>;
+    fn history_by_block_hash<'a>(&'a self, block: BlockHash)
+        -> Result<Box<dyn StateProvider + 'a>>;
+}
+
+/// Blockchain trait provider
+#[async_trait]
+pub trait BlockchainTreePendingStateProvider: Send + Sync {
+    /// Return state provider over pending state.
+    async fn pending_state_provider(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<Box<dyn PostStateDataProvider>>;
+}
+
+/// Post state data needs for execution on it.
+#[auto_impl[Box,&]]
+pub trait PostStateDataProvider: Send + Sync {
+    /// Return post state
+    fn state(&self) -> &PostState;
+    /// Return block hash of asked block number
+    fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
+    /// return canonical fork, the block on what post state was forked from.
+    ///
+    /// Needed to create state provider.
+    fn canonical_fork(&self) -> BlockNumHash;
 }

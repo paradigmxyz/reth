@@ -1,13 +1,8 @@
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    ProviderError, StateProvider, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{
-    cursor::DbCursorRO,
-    database::{Database, DatabaseGAT},
-    tables,
-    transaction::DbTx,
-};
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
@@ -407,15 +402,18 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
-    type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
-    type LatestSP<'a> = LatestStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
+    // type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
+    // type LatestSP<'a> = LatestStateProvider<'a,<DB sa DatabaseGAT<'a>>::TX> where Self: 'a;
 
     /// Storage provider for latest block
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(LatestStateProvider::new(self.db.tx()?))
+    fn latest<'a>(&'a self) -> Result<Box<dyn StateProvider + 'a>> {
+        Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
 
-    fn history_by_block_number(&self, block_number: BlockNumber) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_number<'a>(
+        &'a self,
+        block_number: BlockNumber,
+    ) -> Result<Box<dyn StateProvider + 'a>> {
         let tx = self.db.tx()?;
 
         // get transition id
@@ -423,10 +421,13 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
             .get::<tables::BlockTransitionIndex>(block_number)?
             .ok_or(ProviderError::BlockTransition { block_number })?;
 
-        Ok(HistoricalStateProvider::new(tx, transition))
+        Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
     }
 
-    fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash<'a>(
+        &'a self,
+        block_hash: BlockHash,
+    ) -> Result<Box<dyn StateProvider + 'a>> {
         let tx = self.db.tx()?;
         // get block number
         let block_number = tx
@@ -438,7 +439,7 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
             .get::<tables::BlockTransitionIndex>(block_number)?
             .ok_or(ProviderError::BlockTransition { block_number })?;
 
-        Ok(HistoricalStateProvider::new(tx, transition))
+        Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
     }
 }
 

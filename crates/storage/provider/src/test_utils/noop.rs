@@ -180,18 +180,15 @@ impl EvmEnvProvider for NoopProvider {
 }
 
 impl StateProviderFactory for NoopProvider {
-    type HistorySP<'a> = NoopProvider where Self: 'a;
-    type LatestSP<'a> = NoopProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(*self)
+    fn latest(&self) -> Result<Box<dyn StateProvider>> {
+        Ok(Box::new(*self))
     }
 
-    fn history_by_block_number(&self, _block: BlockNumber) -> Result<Self::HistorySP<'_>> {
-        Ok(*self)
+    fn history_by_block_number(&self, _block: BlockNumber) -> Result<Box<dyn StateProvider>> {
+        Ok(Box::new(*self))
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
-        Ok(*self)
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
+        Ok(Box::new(*self))
     }
 }

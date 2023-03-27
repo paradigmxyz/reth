@@ -7,8 +7,10 @@ use crate::eth::{cache::EthStateCache, signer::EthSigner};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
-use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U64};
+use reth_provider::{
+    providers::ChainState, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
+};
 use reth_rpc_types::{FeeHistoryCache, SyncInfo, SyncStatus};
 use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc};
@@ -141,10 +143,7 @@ where
     }
 
     /// Returns the state at the given block number
-    pub fn state_at_hash(
-        &self,
-        block_hash: H256,
-    ) -> Result<<Client as StateProviderFactory>::HistorySP<'_>> {
+    pub fn state_at_hash(&self, block_hash: H256) -> Result<Box<dyn StateProvider + '_>> {
         self.client().history_by_block_hash(block_hash)
     }
 
@@ -157,7 +156,7 @@ where
     }
 
     /// Returns the _latest_ state
-    pub fn latest_state(&self) -> Result<<Client as StateProviderFactory>::LatestSP<'_>> {
+    pub fn latest_state(&self) -> Result<Box<dyn StateProvider + '_>> {
         self.client().latest()
     }
 }

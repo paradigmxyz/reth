@@ -4953,6 +4953,7 @@ name = "reth-provider"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "async-trait",
  "auto_impl",
  "cita_trie",
  "hasher",

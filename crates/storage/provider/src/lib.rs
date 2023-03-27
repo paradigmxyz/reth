@@ -12,8 +12,9 @@
 mod traits;
 pub use traits::{
     AccountProvider, BlockExecutor, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, ExecutorFactory, HeaderProvider, ReceiptProvider, StateProvider,
-    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    BlockchainTreePendingStateProvider, EvmEnvProvider, ExecutorFactory, HeaderProvider,
+    PostStateDataProvider, ReceiptProvider, StateProvider, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
