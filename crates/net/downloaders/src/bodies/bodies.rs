@@ -498,7 +498,7 @@ impl BodiesDownloaderBuilder {
     /// Consume self and return the concurrent donwloader.
     pub fn build<B, DB>(
         self,
-        client: Arc<B>,
+        client: B,
         consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
     ) -> BodiesDownloader<B, DB>
@@ -515,7 +515,7 @@ impl BodiesDownloaderBuilder {
         let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
         let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
         BodiesDownloader {
-            client,
+            client: Arc::new(client),
             consensus,
             db,
             request_limit,
