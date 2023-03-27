@@ -43,6 +43,7 @@ assert_matches = "1.5"
 
 # trie
 triehash = "0.8"
+hex-literal = "0.3.4"
 
 [features]
 bench = []

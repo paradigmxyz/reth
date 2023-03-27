@@ -4,6 +4,7 @@ use reth_rlp::{BufMut, Encodable, EMPTY_STRING_CODE};
 
 pub const KECCAK_LENGTH: usize = H256::len_bytes();
 
+#[derive(Default)]
 pub struct LeafNode<'a> {
     /// Compact RLP encoded Nibbles
     pub key: Vec<u8>,
