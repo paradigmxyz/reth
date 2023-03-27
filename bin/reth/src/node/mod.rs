@@ -409,7 +409,7 @@ impl Command {
         let client = config.client.clone();
         let (handle, network, txpool, eth) = NetworkManager::builder(config)
             .await?
-            .transactions(pool)
+            // .transactions(pool)
             .request_handler(client)
             .split_with_handle();
 
@@ -419,7 +419,7 @@ impl Command {
         });
 
         task_executor.spawn_critical("p2p eth request handler", eth);
-        task_executor.spawn_critical("p2p txpool request handler", txpool);
+        // task_executor.spawn_critical("p2p txpool request handler", txpool);
 
         Ok(handle)
     }
