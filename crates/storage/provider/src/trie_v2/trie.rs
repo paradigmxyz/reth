@@ -5,10 +5,7 @@
 // 2. Update root given a list of updates
 // Be able to calculate incremental state root without taking a write lock
 
-use super::{
-    nibbles::Nibbles,
-    node::{empty_children, BranchNode, ExtensionNode, HashNode, LeafNode, Node},
-};
+use super::nibbles::Nibbles;
 
 use reth_db::{
     cursor::DbDupCursorRO,
@@ -86,7 +83,7 @@ mod tests {
         proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
         Address, Bytes, ChainSpec, Genesis, MAINNET,
     };
-    use reth_rlp::encode_fixed_size;
+    use reth_rlp::{encode_fixed_size, Encodable};
     use std::{collections::HashMap, ops::Deref, str::FromStr};
     use triehash::sec_trie_root;
 

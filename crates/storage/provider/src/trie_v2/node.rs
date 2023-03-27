@@ -103,6 +103,7 @@ impl<'a> BranchNode<'a> {
 
     /// Given the hash and state mask of children present, return an iterator over the stack items
     /// that match the mask.
+    // TODO: Test this!
     pub fn children(
         &self,
         state_mask: u16,
@@ -163,12 +164,12 @@ fn rlp_node(rlp: &[u8]) -> Vec<u8> {
     if rlp.len() < KECCAK_LENGTH {
         rlp.to_vec()
     } else {
-        rlp_hash(&keccak256(rlp))
+        rlp_hash(keccak256(rlp))
     }
 }
 
 // Optimization for quick encoding of a hash as RLP
-pub fn rlp_hash(hash: &H256) -> Vec<u8> {
+pub fn rlp_hash(hash: H256) -> Vec<u8> {
     [[EMPTY_STRING_CODE + KECCAK_LENGTH as u8].as_slice(), hash.0.as_slice()].concat()
 }
 
