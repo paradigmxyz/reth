@@ -1,7 +1,7 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
-use super::chain::{BlockChainId, Chain, ForkBlock};
-use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
+use super::chain::{BlockChainId, Chain};
+use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
@@ -44,7 +44,7 @@ impl BlockIndices {
     }
 
     /// Return internal index that maps all pending block number to their hash.
-    pub fn index_number_to_pending_blocks(&self) -> &BTreeMap<BlockNumber, HashSet<BlockHash>> {
+    pub fn index_of_number_to_pending_blocks(&self) -> &BTreeMap<BlockNumber, HashSet<BlockHash>> {
         &self.index_number_to_block
     }
 
@@ -305,10 +305,11 @@ impl BlockIndices {
     }
 
     /// get canonical tip
-    pub fn canonical_tip(&self) -> ForkBlock {
-        let (&number, &hash) =
-            self.canonical_chain.last_key_value().expect("There is always the canonical chain");
-        ForkBlock { number, hash }
+    pub fn canonical_tip(&self) -> BlockNumHash {
+        self.canonical_chain
+            .last_key_value()
+            .map(|(&number, &hash)| BlockNumHash { number, hash })
+            .unwrap_or_default()
     }
 
     /// Canonical chain needed for execution of EVM. It should contains last 256 block hashes.

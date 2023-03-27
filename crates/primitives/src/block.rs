@@ -602,7 +602,7 @@ impl AsRef<H256> for RpcBlockHash {
 }
 
 /// Block number and hash.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct BlockNumHash {
     /// Block number
     pub number: BlockNumber,

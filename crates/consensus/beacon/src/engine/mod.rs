@@ -269,8 +269,8 @@ where
     }
 
     /// Check if the engine reached max block as specified by `max_block` parameter.
-    fn has_reached_max_block(&self, progress: Option<BlockNumber>) -> bool {
-        if progress.zip(self.max_block).map_or(false, |(progress, target)| progress >= target) {
+    fn has_reached_max_block(&self, progress: BlockNumber) -> bool {
+        if self.max_block.map_or(false, |target| progress >= target) {
             trace!(
                 target: "consensus::engine",
                 ?progress,
@@ -318,7 +318,7 @@ where
                         // Terminate the sync early if it's reached the maximum user
                         // configured block.
                         if is_valid_response {
-                            let tip_number = this.blockchain_tree.canonical_tip_number();
+                            let tip_number = this.blockchain_tree.canonical_tip().number;
                             if this.has_reached_max_block(tip_number) {
                                 return Poll::Ready(Ok(()))
                             }
@@ -353,7 +353,7 @@ where
                                         // Terminate the sync early if it's reached the maximum user
                                         // configured block.
                                         let minimum_pipeline_progress =
-                                            *pipeline.minimum_progress();
+                                            pipeline.minimum_progress().unwrap_or_default();
                                         if this.has_reached_max_block(minimum_pipeline_progress) {
                                             return Poll::Ready(Ok(()))
                                         }

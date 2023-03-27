@@ -5,13 +5,10 @@ use reth_interfaces::{
     blockchain_tree::BlockStatus, consensus::Consensus, executor::Error as ExecError, Error,
 };
 use reth_primitives::{
-    BlockHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders, U256,
+    BlockHash, BlockNumHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders, U256,
 };
 use reth_provider::{post_state::PostState, ExecutorFactory, HeaderProvider, Transaction};
-use std::{
-    collections::{BTreeMap, HashMap},
-    ops::DerefMut,
-};
+use std::collections::{BTreeMap, HashMap};
 
 pub mod block_indices;
 use block_indices::BlockIndices;
@@ -620,6 +617,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         tx.commit()?;
 
         Ok(Chain::new(blocks_and_execution))
+    }
+
+    /// Return best known canonical tip
+    pub fn canonical_tip(&self) -> BlockNumHash {
+        self.block_indices.canonical_tip()
     }
 }
 

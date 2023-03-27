@@ -10,7 +10,7 @@ use reth_primitives::{
 };
 
 /// An abstraction for a type that provides state data.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
     /// Get storage of given account.
     fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>>;

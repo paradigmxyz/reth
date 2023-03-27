@@ -1,5 +1,8 @@
 //! Wrapper around BlockchainTree that allows for it to be shared.
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use reth_db::database::Database;
@@ -17,12 +20,14 @@ use super::BlockchainTree;
 /// Shareable blockchain tree that is behind tokio::RwLock
 pub struct ShareableBlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// BlockchainTree
-    tree: RwLock<BlockchainTree<DB, C, EF>>,
+    pub tree: Arc<RwLock<BlockchainTree<DB, C, EF>>>,
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> ShareableBlockchainTree<DB, C, EF> {
     /// Create New sharable database.
-    pub fn new() {}
+    pub fn new(tree: BlockchainTree<DB, C, EF>) -> Self {
+        Self { tree: Arc::new(RwLock::new(tree)) }
+    }
 }
 
 #[async_trait]
@@ -61,7 +66,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     for ShareableBlockchainTree<DB, C, EF>
 {
     async fn pending_blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        self.tree.read().await.block_indices().index_number_to_pending_blocks().clone()
+        self.tree.read().await.block_indices().index_of_number_to_pending_blocks().clone()
     }
 
     async fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {

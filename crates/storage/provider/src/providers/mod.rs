@@ -402,9 +402,6 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
-    // type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
-    // type LatestSP<'a> = LatestStateProvider<'a,<DB sa DatabaseGAT<'a>>::TX> where Self: 'a;
-
     /// Storage provider for latest block
     fn latest<'a>(&'a self) -> Result<Box<dyn StateProvider + 'a>> {
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))

@@ -7,7 +7,7 @@ use crate::eth::{cache::EthStateCache, signer::EthSigner};
 use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U64};
+use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
 use reth_provider::{
     providers::ChainState, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };

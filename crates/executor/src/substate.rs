@@ -120,7 +120,7 @@ impl<SP: StateProvider, PSDP: PostStateDataProvider> StateProvider for PostState
         account: Address,
         storage_key: reth_primitives::StorageKey,
     ) -> Result<Option<reth_primitives::StorageValue>> {
-        if let Some(storage) = self.state.account_storage(&account) {
+        if let Some(storage) = self.post_state_data_provider.state().account_storage(&account) {
             if let Some(value) =
                 storage.storage.get(&U256::from_be_bytes(storage_key.to_fixed_bytes()))
             {

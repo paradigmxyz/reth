@@ -322,8 +322,7 @@ impl EvmEnvProvider for MockEthProvider {
 
 impl StateProviderFactory for MockEthProvider {
     fn latest(&self) -> Result<Box<dyn StateProvider>> {
-        // TODO(rakita) fix Ok(self)
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
@@ -340,8 +339,7 @@ impl StateProviderFactory for MockEthProvider {
 
 impl StateProviderFactory for Arc<MockEthProvider> {
     fn latest(&self) -> Result<Box<dyn StateProvider>> {
-        // TODO(rakita) fix Ok(self)
-        todo!()
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
