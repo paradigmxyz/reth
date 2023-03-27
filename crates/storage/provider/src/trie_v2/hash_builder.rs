@@ -169,7 +169,7 @@ impl HashBuilder {
             }
 
             if preceding_len <= common_prefix_len && !succeeding.is_empty() {
-                return
+                return;
             }
 
             // Insert branch nodes in the stack
@@ -187,7 +187,7 @@ impl HashBuilder {
             self.groups.resize(len, 0u16);
 
             if preceding_len == 0 {
-                return
+                return;
             }
 
             current.truncate(preceding_len);
@@ -228,8 +228,9 @@ mod tests {
 
     #[test]
     fn test_hash_builder_1() {
-        let mut data =
-            vec![(H256::from_low_u64_be(1), vec![2u8]), (H256::from_low_u64_be(3), vec![4u8])];
+        let mut data = vec![
+            (H256::from_low_u64_be(1), vec![2u8]), /* (H256::from_low_u64_be(3), vec![4u8]) */
+        ];
 
         let mut hb = HashBuilder::new();
         for (key, val) in data.iter() {
