@@ -83,7 +83,7 @@ impl HashBuilder {
 
     fn add<T: Into<HashBuilderValue>>(&mut self, key: Nibbles, value: T) {
         if !self.key.is_empty() {
-            self.gen_struct_step(&key);
+            self.update(&key);
         }
         self.key = key;
         self.value = value.into();
@@ -93,7 +93,7 @@ impl HashBuilder {
     fn root(&mut self) -> H256 {
         // Clears the internal state
         if !self.key.is_empty() {
-            self.gen_struct_step(&Nibbles::default());
+            self.update(&Nibbles::default());
             self.key.clear();
             self.value = HashBuilderValue::Bytes(vec![]);
         }
@@ -111,16 +111,12 @@ impl HashBuilder {
         }
     }
 
-    // 1. Updates the hash calculation stack with the
-    fn gen_struct_step(&mut self, succeeding: &Nibbles) {
+    fn update(&mut self, succeeding: &Nibbles) {
         let mut build_extensions = false;
         // current / self.key is always the latest added element in the trie
         let mut current = self.key.clone();
 
-        let mut i = 0;
         loop {
-            println!("Looping {i}");
-            i += 1;
             let preceding_exists = !self.groups.is_empty();
             let preceding_len: usize = self.groups.len().saturating_sub(1);
 
@@ -147,9 +143,7 @@ impl HashBuilder {
                 let value = self.value.clone();
                 match &value {
                     HashBuilderValue::Bytes(leaf_value) => {
-                        dbg!(&short_node_key);
                         let leaf_node = LeafNode::new(&short_node_key, leaf_value);
-                        dbg!(&leaf_node);
                         println!("[+] Pushing leaf node: {:?}", hex::encode(&leaf_node.rlp()));
                         self.stack.push(leaf_node.rlp());
                     }
@@ -256,5 +250,50 @@ mod tests {
         let mut hb = HashBuilder::new();
         hb.add_branch(Nibbles::default(), root_hash);
         assert_eq!(hb.root(), root_hash);
+    }
+
+    #[test]
+    fn test_hash_builder_2() {
+        let raw_input = vec![
+            (hex!("646f").to_vec(), hex!("76657262").to_vec()),
+            (hex!("676f6f64").to_vec(), hex!("7075707079").to_vec()),
+        ];
+
+        let input =
+            raw_input.iter().map(|(key, value)| (Nibbles::unpack(key), value)).collect::<Vec<_>>();
+
+        let mut hb0 = HashBuilder::new();
+        hb0.add_leaf(input[0].0.clone(), &input[0].1);
+
+        let hash0 = trie_root(vec![raw_input[0].clone()]);
+        assert_eq!(hb0.root(), hash0);
+
+        let mut hb1 = HashBuilder::new();
+        for (key, val) in input.iter() {
+            hb1.add_leaf(key.clone(), val.as_slice());
+        }
+
+        let hash1 = trie_root(raw_input.clone());
+        assert_eq!(hb1.root(), hash1);
+
+        let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
+
+        let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);
+
+        let mut branch: [&dyn Encodable; 17] = [b""; 17];
+        branch[4] = &leaf1;
+        branch[7] = &leaf2;
+
+        use reth_primitives::bytes::BytesMut;
+        use reth_rlp::Encodable;
+
+        let mut branch_node_rlp = BytesMut::new();
+        reth_rlp::encode_list::<dyn Encodable, _>(&branch, &mut branch_node_rlp);
+
+        let branch_node_hash = keccak256(branch_node_rlp);
+        let mut hb2 = HashBuilder::new();
+        hb2.add_branch(Nibbles::from_hex(vec![0x6]), branch_node_hash);
+
+        assert_eq!(hb2.root(), hash1);
     }
 }
