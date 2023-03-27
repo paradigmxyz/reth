@@ -138,12 +138,9 @@ pub(crate) struct Storage {
 
 impl Storage {
     fn new(chain_spec: &ChainSpec) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(StorageInner {
-                best_hash: chain_spec.genesis_hash.unwrap_or_default(),
-                ..Default::default()
-            })),
-        }
+        let header = chain_spec.genesis_header();
+        let best_hash = header.hash_slow();
+        Self { inner: Arc::new(RwLock::new(StorageInner { best_hash, ..Default::default() })) }
     }
 
     /// Returns the write lock of the storage
@@ -192,9 +189,13 @@ impl StorageInner {
     }
 
     /// Inserts a new header+body pair
-    pub(crate) fn insert_new_block(&mut self, header: Header, body: BlockBody) {
+    pub(crate) fn insert_new_block(&mut self, mut header: Header, body: BlockBody) {
+        header.number = self.best_block + 1;
+        header.parent_hash = self.best_hash;
+
         self.best_hash = header.hash_slow();
         self.best_block = header.number;
+
         trace!(target: "consensus::auto", num=self.best_block, hash=?self.best_hash, "inserting new block");
         self.headers.insert(header.number, header);
         self.bodies.insert(self.best_hash, body);
