@@ -169,7 +169,7 @@ impl HashBuilder {
             }
 
             if preceding_len <= common_prefix_len && !succeeding.is_empty() {
-                return;
+                return
             }
 
             // Insert branch nodes in the stack
@@ -187,7 +187,7 @@ impl HashBuilder {
             self.groups.resize(len, 0u16);
 
             if preceding_len == 0 {
-                return;
+                return
             }
 
             current.truncate(preceding_len);
@@ -234,7 +234,7 @@ mod tests {
 
         let mut hb = HashBuilder::new();
         for (key, val) in data.iter() {
-            let nibbles = Nibbles::from_raw(key, false);
+            let nibbles = Nibbles::unpack(key);
             hb.add_leaf(nibbles, val.as_slice());
         }
 

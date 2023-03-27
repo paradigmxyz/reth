@@ -80,17 +80,38 @@ impl Nibbles {
         Nibbles { hex_data: hex }
     }
 
-    pub fn from_raw<T: AsRef<[u8]>>(raw: T, is_leaf: bool) -> Self {
-        let raw = raw.as_ref();
-        let mut hex_data = Vec::with_capacity(raw.len() * 2 + is_leaf as usize);
+    pub fn unpack<T: AsRef<[u8]>>(data: T) -> Self {
+        let raw = data.as_ref();
+        let mut hex_data = Vec::with_capacity(raw.len() * 2);
         for item in raw.into_iter() {
             hex_data.push(item / 16);
             hex_data.push(item % 16);
         }
-        if is_leaf {
-            hex_data.push(16);
-        }
         Nibbles { hex_data }
+    }
+
+    pub fn pack(&self) -> Vec<u8> {
+        let nibbles = &self.hex_data;
+
+        let n = (nibbles.len() + 1) / 2;
+        let mut out = vec![0u8; n];
+        if n == 0 {
+            return out
+        }
+
+        let mut i = 0;
+        let mut j = 0;
+        while j < nibbles.len() {
+            out[i] = nibbles[j] << 4;
+            j += 1;
+            if j < nibbles.len() {
+                out[i] += nibbles[j];
+                j += 1;
+                i += 1;
+            }
+        }
+
+        out
     }
 
     /// The compact encoding is a space-efficient way to represent a nibble sequence.
@@ -120,25 +141,25 @@ impl Nibbles {
     /// # use reth_provider::trie_v2::nibbles::Nibbles;
     /// // Extension node with an even path length:
     /// let compact = vec![0x00, 0xAB, 0xCD];
-    /// let nibbles = Nibbles::from_compact(compact);
+    /// let nibbles = Nibbles::decode_path(compact);
     /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C, 0x0D]);
     ///
     /// // Extension node with an odd path length:
     /// let compact = vec![0x1A, 0xBC];
-    /// let nibbles = Nibbles::from_compact(compact);
+    /// let nibbles = Nibbles::decode_path(compact);
     /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C]);
     ///
     /// // Leaf node with an even path length:
     /// let compact = vec![0x20, 0xAB, 0xCD];
-    /// let nibbles = Nibbles::from_compact(compact);
+    /// let nibbles = Nibbles::decode_path(compact);
     /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C, 0x0D, 0x10]);
     ///
     /// // Leaf node with an odd path length:
     /// let compact = vec![0x3A, 0xBC];
-    /// let nibbles = Nibbles::from_compact(compact);
+    /// let nibbles = Nibbles::decode_path(compact);
     /// assert_eq!(nibbles.hex_data, vec![0x0A, 0x0B, 0x0C, 0x10]);
     /// ```
-    pub fn from_compact<T: AsRef<[u8]>>(compact: T) -> Self {
+    pub fn decode_path<T: AsRef<[u8]>>(compact: T) -> Self {
         let compact = compact.as_ref();
         let mut hex = vec![];
         let flag = compact[0];
@@ -202,100 +223,66 @@ impl Nibbles {
     ///
     /// // Extension node with an even path length:
     /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
-    /// let compact = nibbles.encode_compact();
+    /// let compact = nibbles.encode_path_leaf();
     /// assert_eq!(compact, vec![0x00, 0xAB, 0xCD]);
     ///
     /// // Extension node with an odd path length:
     /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C]);
-    /// let compact = nibbles.encode_compact();
+    /// let compact = nibbles.encode_path_leaf();
     /// assert_eq!(compact, vec![0x1A, 0xBC]);
     ///
     /// // Leaf node with an even path length:
     /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D, 0x10]);
-    /// let compact = nibbles.encode_compact();
+    /// let compact = nibbles.encode_path_leaf();
     /// assert_eq!(compact, vec![0x20, 0xAB, 0xCD]);
     ///
     /// // Leaf node with an odd path length:
     /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x10]);
-    /// let compact = nibbles.encode_compact();
+    /// let compact = nibbles.encode_path_leaf();
     /// assert_eq!(compact, vec![0x3A, 0xBC]);
     /// ```
-    pub fn encode_compact(&self) -> Vec<u8> {
+    pub fn encode_path(&self) -> Vec<u8> {
         let is_leaf = self.is_leaf();
-        self.encode_compact_leaf(is_leaf)
+        self.encode_path_leaf(is_leaf)
     }
 
-    pub fn encode_compact_leaf(&self, is_leaf: bool) -> Vec<u8> {
+    pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {
         // Handle leaf being empty edge case
         if is_leaf && self.is_empty() {
             return vec![0x20]
+        } else if self.is_empty() {
+            return vec![0x00]
         }
 
-        let mut hex =
-            if is_leaf { &self.hex_data[0..self.hex_data.len() - 1] } else { &self.hex_data[0..] };
-        let mut compact = Vec::with_capacity(self.len());
+        let mut compact = Vec::with_capacity(self.len() / 2 + 1);
+        let is_odd = self.len() % 2 == 1;
         // node type    path length    |    prefix    hexchar
         // --------------------------------------------------
         // extension    even           |    0000      0x0
         // extension    odd            |    0001      0x1
         // leaf         even           |    0010      0x2
         // leaf         odd            |    0011      0x3
-        let v = if hex.len() % 2 == 1 {
-            let v = 0x10 + hex[0];
-            hex = &hex[1..];
-            v
-        } else {
-            0x00
-        };
+        compact.push(if is_leaf { 0x20 } else { 0x00 });
+        let mut hex = self.hex_data.as_slice();
 
-        compact.push(v + if is_leaf { 0x20 } else { 0x00 });
+        if self.len() == 1 {
+            compact[0] += hex[0];
+            if is_odd {
+                compact[0] += 0x10;
+            }
+            return compact
+        }
+
+        if is_odd {
+            compact[0] += 0x10;
+            hex = &hex[1..];
+        }
+
         for i in 0..(hex.len() / 2) {
             compact.push((hex[i * 2] * 16) + (hex[i * 2 + 1]));
         }
 
         compact
-    }
-
-    /// Converts the nibble sequence stored in the `hex_data` field back into a compact byte
-    /// representation.
-    ///
-    /// This method reverses the process of creating a nibble sequence from a compact byte
-    /// representation. It merges the nibble pairs back into bytes and returns the resulting
-    /// compact byte sequence as a `Vec<u8>`. Additionally, it returns a boolean value
-    /// indicating if the nibble sequence corresponds to a leaf node in the Merkle Patricia
-    /// Trie.
-    ///
-    /// # Returns
-    ///
-    /// A tuple `(Vec<u8>, bool)`, where:
-    /// - The first element is the compact byte representation of the nibble sequence.
-    /// - The second element is a boolean indicating if the nibble sequence corresponds to a leaf
-    ///   node.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use reth_provider::trie_v2::nibbles::Nibbles;
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
-    /// let (raw, is_leaf) = nibbles.encode_raw();
-    /// assert_eq!(raw, vec![0xAB, 0xCD]);
-    /// assert_eq!(is_leaf, false);
-    /// ```
-    pub fn encode_raw(&self) -> (Vec<u8>, bool) {
-        if self.hex_data.is_empty() {
-            return (vec![], false)
-        }
-
-        let mut raw = vec![];
-        let is_leaf = self.is_leaf();
-        let hex =
-            if is_leaf { &self.hex_data[0..self.hex_data.len() - 1] } else { &self.hex_data[0..] };
-
-        for i in 0..(hex.len() / 2) {
-            raw.push((hex[i * 2] * 16) + (hex[i * 2 + 1]));
-        }
-
-        (raw, is_leaf)
     }
 
     pub fn len(&self) -> usize {
@@ -374,29 +361,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_nibble() {
-        let n = Nibbles::from_raw(b"key1", true);
-        let compact = n.encode_compact();
-        let n2 = Nibbles::from_compact(compact);
-        let (raw, is_leaf) = n2.encode_raw();
-        assert!(is_leaf);
-        assert_eq!(raw, b"key1");
-    }
-
-    #[test]
-    fn test_hash_builder_pack_nibbles() {
+    fn pack_nibbles() {
         for (input, expected) in [
-            (vec![], vec![]),
-            // (vec![0xa], vec![0xa0]),
-            (vec![0xa, 0xb], vec![0xab]),
-            // TODO: Fix encode_raw with odd elements.
-            // (vec![0xa, 0xb, 0x2], vec![0xab, 0x20]),
+            (vec![], vec![0]),
+            (vec![0xa], vec![0x1a]),
+            (vec![0xa, 0xb], vec![0x00, 0xab]),
+            (vec![0xa, 0xb, 0x2], vec![0xab, 0x20]),
             (vec![0xa, 0xb, 0x2, 0x0], vec![0xab, 0x20]),
             (vec![0xa, 0xb, 0x2, 0x7], vec![0xab, 0x27]),
         ] {
             let nibbles = Nibbles::from(input);
-            let encoded = nibbles.encode_raw();
-            assert_eq!(encoded.0, expected);
+            let encoded = nibbles.pack();
+            assert_eq!(encoded, expected);
         }
+    }
+
+    #[test]
+    // TODO: Covnert to proptest
+    fn pack_unpack_roundtrip() {
+        let input = vec![0xab, 0x27];
+        let nibbles = Nibbles::unpack(&input);
+        let packed = nibbles.pack();
+        assert_eq!(packed, input);
+    }
+
+    #[test]
+    // TODO: Covnert to proptest
+    fn path_even_leaf_roundtrip() {
+        let input = Nibbles::unpack(vec![0xab, 0x27]);
+        let compact = input.encode_path_leaf(false);
+        let decoded = Nibbles::decode_path(compact);
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
+    // TODO: Covnert to proptest
+    fn path_odd_leaf_roundtrip() {
+        let input = Nibbles::unpack(vec![0xab, 0x27, 0xc]);
+        let compact = input.encode_path_leaf(false);
+        let decoded = Nibbles::decode_path(compact);
+        assert_eq!(decoded, input);
     }
 }

@@ -14,7 +14,7 @@ pub struct LeafNode<'a> {
 
 impl<'a> LeafNode<'a> {
     pub fn new(key: &Nibbles, value: &'a [u8]) -> Self {
-        Self { key: key.encode_compact_leaf(true), value }
+        Self { key: key.encode_path_leaf(true), value }
     }
 
     /// RLP encodes the node and returns either RLP(Node) or RLP(keccak(RLP(node)))
@@ -55,7 +55,7 @@ pub struct ExtensionNode<'a> {
 
 impl<'a> ExtensionNode<'a> {
     pub fn new(prefix: &Nibbles, node: &'a [u8]) -> Self {
-        Self { prefix: prefix.encode_compact_leaf(false), node }
+        Self { prefix: prefix.encode_path_leaf(false), node }
     }
 
     pub fn rlp(&self) -> Vec<u8> {
