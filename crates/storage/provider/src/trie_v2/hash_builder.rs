@@ -59,10 +59,11 @@ pub struct HashBuilder {
 
 impl HashBuilder {
     pub fn stack_hex(&self) {
-        println!("STACK");
+        println!("============ STACK ===============");
         for item in &self.stack {
             println!("{}", hex::encode(item));
         }
+        println!("============ END STACK ===============");
     }
     pub fn new() -> Self {
         Self::default()
@@ -165,7 +166,7 @@ impl HashBuilder {
             }
 
             if preceding_len <= common_prefix_len && !succeeding.is_empty() {
-                return
+                return;
             }
 
             // Insert branch nodes in the stack
@@ -183,7 +184,7 @@ impl HashBuilder {
             self.groups.resize(len, 0u16);
 
             if preceding_len == 0 {
-                return
+                return;
             }
 
             current.truncate(preceding_len);
@@ -198,12 +199,14 @@ impl HashBuilder {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::trie_v2::nibbles::Nibbles;
     use hex_literal::hex;
-    use std::str::FromStr;
-
-    use super::*;
-    use reth_primitives::proofs::KeccakHasher;
+    use reth_primitives::{proofs::KeccakHasher, H256, U256};
+    use std::{
+        collections::{BTreeMap, HashMap},
+        str::FromStr,
+    };
 
     fn trie_root<I, K, V>(iter: I) -> H256
     where
@@ -218,31 +221,70 @@ mod tests {
         triehash::trie_root::<KeccakHasher, _, _, _>(iter)
     }
 
+    // Hashes the keys, RLP encodes the values, compares the trie builder with the upstream root.
+    fn assert_hashed_trie_root<'a, I, K>(iter: I)
+    where
+        I: Iterator<Item = (K, &'a U256)>,
+        K: AsRef<[u8]> + Ord,
+    {
+        let hashed = iter
+            .map(|(k, v)| (keccak256(k.as_ref()), reth_rlp::encode_fixed_size(v).to_vec()))
+            // Collect into a btree map to sort the data
+            .collect::<BTreeMap<_, _>>();
+
+        let mut hb = HashBuilder::new();
+
+        hashed.iter().for_each(|(key, val)| {
+            let nibbles = Nibbles::unpack(key);
+            hb.add_leaf(nibbles, &val);
+        });
+
+        assert_eq!(hb.root(), trie_root(&hashed));
+    }
+
+    // No hashing involved
+    fn assert_trie_root<I, K, V>(iter: I)
+    where
+        I: Iterator<Item = (K, V)>,
+        K: AsRef<[u8]> + Ord,
+        V: AsRef<[u8]>,
+    {
+        let mut hb = HashBuilder::new();
+
+        let data = iter.collect::<BTreeMap<_, _>>();
+        data.iter().for_each(|(key, val)| {
+            let nibbles = Nibbles::unpack(key);
+            hb.add_leaf(nibbles, val.as_ref());
+        });
+        assert_eq!(hb.root(), trie_root(data));
+    }
+
     #[test]
     fn empty() {
         assert_eq!(HashBuilder::new().root(), EMPTY_ROOT);
     }
 
+    // TODO: Expand these to include more complex cases.
     #[test]
-    fn test_hash_builder_1() {
+    fn test_root_raw_data() {
         let data = vec![
             (hex!("646f").to_vec(), hex!("76657262").to_vec()),
             (hex!("676f6f64").to_vec(), hex!("7075707079").to_vec()),
         ];
-
-        let mut hb = HashBuilder::new();
-        for (key, val) in data.iter() {
-            let nibbles = Nibbles::unpack(key);
-            hb.add_leaf(nibbles, val.as_slice());
-            hb.stack_hex();
-        }
-
-        let root_hash = hb.root();
-        assert_eq!(root_hash, trie_root(data));
+        assert_trie_root(data.into_iter());
     }
 
     #[test]
-    fn test_hash_builder_known_root_hash() {
+    fn test_root_rlp_hashed_data() {
+        let data = HashMap::from([
+            (H256::from_low_u64_le(1), U256::from(2)),
+            (H256::from_low_u64_be(3), U256::from(4)),
+        ]);
+        assert_hashed_trie_root(data.iter());
+    }
+
+    #[test]
+    fn test_root_known_hash() {
         let root_hash =
             H256::from_str("9fa752911d55c3a1246133fe280785afbdba41f357e9cae1131d5f5b0a078b9c")
                 .unwrap();
@@ -253,47 +295,40 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_builder_2() {
+    fn manual_branch_node_ok() {
         let raw_input = vec![
             (hex!("646f").to_vec(), hex!("76657262").to_vec()),
             (hex!("676f6f64").to_vec(), hex!("7075707079").to_vec()),
         ];
-
         let input =
             raw_input.iter().map(|(key, value)| (Nibbles::unpack(key), value)).collect::<Vec<_>>();
 
-        let mut hb0 = HashBuilder::new();
-        hb0.add_leaf(input[0].0.clone(), &input[0].1);
-
-        let hash0 = trie_root(vec![raw_input[0].clone()]);
-        assert_eq!(hb0.root(), hash0);
-
-        let mut hb1 = HashBuilder::new();
+        // We create the hash builder and add the leaves
+        let mut hb = HashBuilder::new();
         for (key, val) in input.iter() {
-            hb1.add_leaf(key.clone(), val.as_slice());
+            hb.add_leaf(key.clone(), val.as_slice());
         }
 
-        let hash1 = trie_root(raw_input.clone());
-        assert_eq!(hb1.root(), hash1);
-
-        let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
-
-        let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);
-
-        let mut branch: [&dyn Encodable; 17] = [b""; 17];
-        branch[4] = &leaf1;
-        branch[7] = &leaf2;
-
+        // Manually create the branch node that should be there after the first 2 leaves are added
         use reth_primitives::bytes::BytesMut;
         use reth_rlp::Encodable;
-
+        let leaf1 = LeafNode::new(&Nibbles::unpack(&raw_input[0].0[1..]), input[0].1);
+        let leaf2 = LeafNode::new(&Nibbles::unpack(&raw_input[1].0[1..]), input[1].1);
+        let mut branch: [&dyn Encodable; 17] = [b""; 17];
+        // We set this to `4` and `7` because that mathces the 2nd element of the corresponding
+        // leaves. We set this to `7` because the 2nd element of Leaf 1 is `7`.
+        branch[4] = &leaf1;
+        branch[7] = &leaf2;
         let mut branch_node_rlp = BytesMut::new();
         reth_rlp::encode_list::<dyn Encodable, _>(&branch, &mut branch_node_rlp);
-
         let branch_node_hash = keccak256(branch_node_rlp);
+
         let mut hb2 = HashBuilder::new();
+        // Insert the branch with the `0x6` shared prefix.
         hb2.add_branch(Nibbles::from_hex(vec![0x6]), branch_node_hash);
 
-        assert_eq!(hb2.root(), hash1);
+        let expected = trie_root(raw_input.clone());
+        assert_eq!(hb.root(), expected);
+        assert_eq!(hb2.root(), expected);
     }
 }
