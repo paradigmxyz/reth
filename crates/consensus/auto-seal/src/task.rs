@@ -142,7 +142,7 @@ where
 
                     // clear all transactions from pool
                     // TODO this should happen automatically via events
-                    pool.remove_invalid(body.iter().map(|tx| tx.hash));
+                    pool.remove_transactions(body.iter().map(|tx| tx.hash));
 
                     let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
                     header.gas_used = gas_used;
