@@ -3,7 +3,10 @@ use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_executor::executor::Executor;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{Block, BlockBody, ChainSpec, Header, IntoRecoveredTransaction, U256};
+use reth_primitives::{
+    constants::EMPTY_TRANSACTIONS, proofs, Block, BlockBody, ChainSpec, Header,
+    IntoRecoveredTransaction, EMPTY_OMMER_ROOT, U256,
+};
 use reth_provider::StateProviderFactory;
 use reth_revm::database::{State, SubState};
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
@@ -16,7 +19,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// A Future that listens for new ready transactions and puts new blocks into storage
 pub struct MiningTask<Client, Pool: TransactionPool> {
@@ -97,9 +100,9 @@ where
                 let pool = this.pool.clone();
                 this.insert_task = Some(Box::pin(async move {
                     let mut storage = storage.write().await;
-                    let header = Header {
+                    let mut header = Header {
                         parent_hash: storage.best_hash,
-                        ommers_hash: Default::default(),
+                        ommers_hash: EMPTY_OMMER_ROOT,
                         beneficiary: Default::default(),
                         state_root: Default::default(),
                         transactions_root: Default::default(),
@@ -120,6 +123,12 @@ where
                         extra_data: Default::default(),
                     };
 
+                    header.transactions_root = if transactions.is_empty() {
+                        EMPTY_TRANSACTIONS
+                    } else {
+                        proofs::calculate_transaction_root(transactions.iter())
+                    };
+
                     let block = Block {
                         header,
                         body: transactions
@@ -136,33 +145,39 @@ where
 
                     trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");
 
-                    let (_, gas_used) =
-                        executor.execute_transactions(&block, U256::ZERO, None).unwrap();
-                    let Block { mut header, body, .. } = block;
+                    match executor.execute_transactions(&block, U256::ZERO, None) {
+                        Ok((_, gas_used)) => {
+                            let Block { mut header, body, .. } = block;
 
-                    // clear all transactions from pool
-                    // TODO this should happen automatically via events
-                    pool.remove_transactions(body.iter().map(|tx| tx.hash));
+                            // clear all transactions from pool
+                            // TODO this should happen automatically via events
+                            pool.remove_transactions(body.iter().map(|tx| tx.hash));
 
-                    let body = BlockBody { transactions: body, ommers: vec![], withdrawals: None };
-                    header.gas_used = gas_used;
+                            let body =
+                                BlockBody { transactions: body, ommers: vec![], withdrawals: None };
+                            header.gas_used = gas_used;
 
-                    storage.insert_new_block(header, body);
+                            storage.insert_new_block(header, body);
 
-                    let new_hash = storage.best_hash;
-                    let state = ForkchoiceState {
-                        head_block_hash: new_hash,
-                        finalized_block_hash: new_hash,
-                        safe_block_hash: new_hash,
-                    };
+                            let new_hash = storage.best_hash;
+                            let state = ForkchoiceState {
+                                head_block_hash: new_hash,
+                                finalized_block_hash: new_hash,
+                                safe_block_hash: new_hash,
+                            };
 
-                    trace!(target: "consensus::auto", ?state, "sending fork choice update");
-                    let (tx, _rx) = oneshot::channel();
-                    let _ = to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs: None,
-                        tx,
-                    });
+                            trace!(target: "consensus::auto", ?state, "sending fork choice update");
+                            let (tx, _rx) = oneshot::channel();
+                            let _ = to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
+                                state,
+                                payload_attrs: None,
+                                tx,
+                            });
+                        }
+                        Err(err) => {
+                            warn!(target: "consensus::auto", ?err, "failed to execute block")
+                        }
+                    }
                 }));
             }
 
