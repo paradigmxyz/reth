@@ -54,8 +54,9 @@
 //! ```
 
 use constants::*;
+use error::{RpcError, RpcHandle};
 use jsonrpsee::{
-    core::{server::rpc_module::Methods, Error as RpcError},
+    core::server::rpc_module::Methods,
     server::{IdProvider, Server, ServerHandle},
     RpcModule,
 };
@@ -88,6 +89,9 @@ pub mod auth;
 
 /// Cors utilities.
 mod cors;
+
+/// Rpc error utilities.
+pub mod error;
 
 /// Eth utils
 mod eth;
@@ -864,12 +868,19 @@ impl RpcServerConfig {
             if let Some(cors) = self.http_cors_domains.as_deref().map(cors::create_cors_layer) {
                 let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
                 let middleware = tower::ServiceBuilder::new().layer(cors);
-                let http_server =
-                    builder.set_middleware(middleware).build(http_socket_addr).await?;
+                let http_server = builder
+                    .set_middleware(middleware)
+                    .build(http_socket_addr)
+                    .await
+                    .map_err(|err| {
+                        RpcError::from_jsonrpsee_error(err, Some(RpcHandle::Http(http_socket_addr)))
+                    })?;
                 server.http_local_addr = http_server.local_addr().ok();
                 server.http = Some(WsHttpServer::WithCors(http_server));
             } else {
-                let http_server = builder.build(http_socket_addr).await?;
+                let http_server = builder.build(http_socket_addr).await.map_err(|err| {
+                    RpcError::from_jsonrpsee_error(err, Some(RpcHandle::Http(http_socket_addr)))
+                })?;
                 server.http_local_addr = http_server.local_addr().ok();
                 server.http = Some(WsHttpServer::Plain(http_server));
             }
@@ -884,11 +895,18 @@ impl RpcServerConfig {
             if let Some(cors) = self.ws_cors_domains.as_deref().map(cors::create_cors_layer) {
                 let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
                 let middleware = tower::ServiceBuilder::new().layer(cors);
-                let ws_server = builder.set_middleware(middleware).build(ws_socket_addr).await?;
+                let ws_server =
+                    builder.set_middleware(middleware).build(ws_socket_addr).await.map_err(
+                        |err| {
+                            RpcError::from_jsonrpsee_error(err, Some(RpcHandle::WS(ws_socket_addr)))
+                        },
+                    )?;
                 server.http_local_addr = ws_server.local_addr().ok();
                 server.ws = Some(WsHttpServer::WithCors(ws_server));
             } else {
-                let ws_server = builder.build(ws_socket_addr).await?;
+                let ws_server = builder.build(ws_socket_addr).await.map_err(|err| {
+                    RpcError::from_jsonrpsee_error(err, Some(RpcHandle::WS(ws_socket_addr)))
+                })?;
                 server.ws_local_addr = ws_server.local_addr().ok();
                 server.ws = Some(WsHttpServer::Plain(ws_server));
             }
@@ -898,7 +916,9 @@ impl RpcServerConfig {
             let ipc_path = self
                 .ipc_endpoint
                 .unwrap_or_else(|| Endpoint::new(DEFAULT_IPC_ENDPOINT.to_string()));
-            let ipc = builder.build(ipc_path.path())?;
+            let ipc = builder
+                .build(ipc_path.path())
+                .map_err(|err| RpcError::from_jsonrpsee_error(err, None))?;
             server.ipc = Some(ipc);
         }
 
@@ -1080,10 +1100,18 @@ impl RpcServer {
         {
             match server {
                 WsHttpServer::Plain(server) => {
-                    handle.http = Some(server.start(module)?);
+                    handle.http = Some(
+                        server
+                            .start(module)
+                            .map_err(|err| RpcError::from_jsonrpsee_error(err, None))?,
+                    );
                 }
                 WsHttpServer::WithCors(server) => {
-                    handle.http = Some(server.start(module)?);
+                    handle.http = Some(
+                        server
+                            .start(module)
+                            .map_err(|err| RpcError::from_jsonrpsee_error(err, None))?,
+                    );
                 }
             }
         }
@@ -1092,10 +1120,18 @@ impl RpcServer {
         {
             match server {
                 WsHttpServer::Plain(server) => {
-                    handle.ws = Some(server.start(module)?);
+                    handle.ws = Some(
+                        server
+                            .start(module)
+                            .map_err(|err| RpcError::from_jsonrpsee_error(err, None))?,
+                    );
                 }
                 WsHttpServer::WithCors(server) => {
-                    handle.ws = Some(server.start(module)?);
+                    handle.ws = Some(
+                        server
+                            .start(module)
+                            .map_err(|err| RpcError::from_jsonrpsee_error(err, None))?,
+                    );
                 }
             }
         }
@@ -1103,7 +1139,12 @@ impl RpcServer {
         if let Some((server, module)) =
             self.ipc.and_then(|server| ipc.map(|module| (server, module)))
         {
-            handle.ipc = Some(server.start(module).await?);
+            handle.ipc = Some(
+                server
+                    .start(module)
+                    .await
+                    .map_err(|err| RpcError::from_jsonrpsee_error(err, None))?,
+            );
         }
 
         Ok(handle)
@@ -1150,15 +1191,15 @@ impl RpcServerHandle {
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), RpcError> {
         if let Some(handle) = self.http {
-            handle.stop()?
+            handle.stop().map_err(|err| RpcError::from_jsonrpsee_error(err, None))?
         }
 
         if let Some(handle) = self.ws {
-            handle.stop()?
+            handle.stop().map_err(|err| RpcError::from_jsonrpsee_error(err, None))?
         }
 
         if let Some(handle) = self.ipc {
-            handle.stop()?
+            handle.stop().map_err(|err| RpcError::from_jsonrpsee_error(err, None))?
         }
 
         Ok(())

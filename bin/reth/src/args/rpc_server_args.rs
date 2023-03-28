@@ -2,15 +2,15 @@
 
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
-use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
+use jsonrpsee::server::ServerHandle;
 use reth_interfaces::events::ChainEventSubscriptions;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
-    constants, IpcServerBuilder, RethRpcModule, RpcModuleSelection, RpcServerConfig,
-    RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
+    constants, error::RpcError, IpcServerBuilder, RethRpcModule, RpcModuleSelection,
+    RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApiHandle;
 use reth_tasks::TaskSpawner;
