@@ -9,33 +9,34 @@ use crate::{
     Error,
 };
 
-/// Read only cursor over table.
+/// A read-only cursor over table `T`.
 pub trait DbCursorRO<'tx, T: Table> {
-    /// First item in table
+    /// Positions the cursor at the first entry in the table, returning it.
     fn first(&mut self) -> PairResult<T>;
 
-    /// Seeks for the exact `(key, value)` pair with `key`.
+    /// Seeks to the KV pair exactly at `key`.
     fn seek_exact(&mut self, key: T::Key) -> PairResult<T>;
 
-    /// Seeks for a `(key, value)` pair greater or equal than `key`.
+    /// Seeks to the KV pair whose key is greater than or equal to `key`.
     fn seek(&mut self, key: T::Key) -> PairResult<T>;
 
-    /// Returns the next `(key, value)` pair.
+    /// Position the cursor at the next KV pair, returning it.
     #[allow(clippy::should_implement_trait)]
     fn next(&mut self) -> PairResult<T>;
 
-    /// Returns the previous `(key, value)` pair.
+    /// Position the cursor at the previous KV pair, returning it.
     fn prev(&mut self) -> PairResult<T>;
 
-    /// Returns the last `(key, value)` pair.
+    /// Positions the cursor at the last entry in the table, returning it.
     fn last(&mut self) -> PairResult<T>;
 
-    /// Returns the current `(key, value)` pair of the cursor.
+    /// Get the KV pair at the cursor's current position.
     fn current(&mut self) -> PairResult<T>;
 
-    /// Returns an iterator that walks through the table. If `start_key`
-    /// is None, starts from the first entry of the table. If it not, starts at a key
-    /// greater or equal than the key value wrapped inside Some().
+    /// Get an iterator that walks through the table.
+    ///
+    /// If `start_key` is `None`, then the walker will start from the first entry of the table,
+    /// otherwise it starts at the entry greater than or equal to the provided key.
     fn walk<'cursor>(
         &'cursor mut self,
         start_key: Option<T::Key>,
@@ -43,7 +44,7 @@ pub trait DbCursorRO<'tx, T: Table> {
     where
         Self: Sized;
 
-    /// Returns an iterator for the keys in the specified range.
+    /// Get an iterator that walks over a range of keys in the table.
     fn walk_range<'cursor>(
         &'cursor mut self,
         range: impl RangeBounds<T::Key>,
@@ -51,9 +52,10 @@ pub trait DbCursorRO<'tx, T: Table> {
     where
         Self: Sized;
 
-    /// Returns an iterator that walks backwards through the table. If `start_key`
-    /// is None, starts from the last entry of the table. If it not, starts at a key
-    /// greater or equal than the key value wrapped inside Some().
+    /// Get an iterator that walks through the table in reverse order.
+    ///
+    /// If `start_key` is `None`, then the walker will start from the last entry of the table,
+    /// otherwise it starts at the entry greater than or equal to the provided key.
     fn walk_back<'cursor>(
         &'cursor mut self,
         start_key: Option<T::Key>,
@@ -62,22 +64,36 @@ pub trait DbCursorRO<'tx, T: Table> {
         Self: Sized;
 }
 
-/// Read only cursor over DupSort table.
+/// A read-only cursor over the dup table `T`.
 pub trait DbDupCursorRO<'tx, T: DupSort> {
-    /// Returns the next `(key, value)` pair of a DupSort table.
+    /// Positions the cursor at the next KV pair of the table, returning it.
     fn next_dup(&mut self) -> PairResult<T>;
 
-    /// Returns the next `(key, value)` pair skipping the duplicates.
+    /// Positions the cursor at the next KV pair of the table, skipping duplicates.
     fn next_no_dup(&mut self) -> PairResult<T>;
 
-    /// Returns the next `value` of a duplicate `key`.
+    /// Positions the cursor at the next duplicate value of the current key.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T>;
 
-    /// Seek by key and subkey. Make sure that the returned value subkey matches the queried one.
+    /// Positions the cursor at the entry greater than or equal to the provided key/subkey pair.
+    ///
+    /// # Note
+    ///
+    /// The position of the cursor might not correspond to the key/subkey pair if the entry does not
+    /// exist.
     fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T>;
 
-    /// Returns an iterator starting at a key greater or equal than `start_key` of a DupSort
-    /// table.
+    /// Get an iterator that walks through the dup table.
+    ///
+    /// The cursor will start at different points in the table depending on the values of `key` and
+    /// `subkey`:
+    ///
+    /// | `key`  | `subkey` | **Equivalent starting position**        |
+    /// |--------|----------|-----------------------------------------|
+    /// | `None` | `None`   | [`DbCursorRO::first()`]                 |
+    /// | `Some` | `None`   | [`DbCursorRO::seek()`]               |
+    /// | `None` | `Some`   | [`DbDupCursorRO::seek_by_key_subkey()`] |
+    /// | `Some` | `Some`   | [`DbDupCursorRo::seek_by_key_subkey()`] |
     fn walk_dup<'cursor>(
         &'cursor mut self,
         key: Option<T::Key>,

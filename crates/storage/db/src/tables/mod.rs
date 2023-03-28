@@ -1,8 +1,19 @@
-//! Table and data structures
+//! Tables and data models.
+//!
+//! # Overview
+//!
+//! This module defines the tables in reth, as well as some table-related abstractions:
+//!
+//! - [`codecs`] integrates different codecs into [`Encode`] and [`Decode`]
+//! - [`models`] defines the values written to tables
+//!
+//! # Database Tour
+//!
+//! TODO(onbjerg): Find appropriate format for this...
 
 pub mod codecs;
 pub mod models;
-pub mod utils;
+pub(crate) mod utils;
 
 /// Declaration of all Database tables.
 use crate::{
