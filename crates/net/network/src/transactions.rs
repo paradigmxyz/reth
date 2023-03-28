@@ -461,6 +461,7 @@ where
     }
 
     /// Penalize the peers that sent the bad transaction
+    #[allow(unused)]
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
@@ -526,7 +527,10 @@ where
                 }
                 Err(err) => {
                     if err.is_bad_transaction() {
-                        this.on_bad_import(*err.hash());
+                        trace!(target: "net::tx", ?err, "Bad transaction import");
+                        // TODO disabled until properly tested
+                        // this.on_bad_import(*err.hash());
+                        this.on_good_import(*err.hash());
                     } else {
                         this.on_good_import(*err.hash());
                     }
