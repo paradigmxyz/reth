@@ -68,7 +68,7 @@ where
         };
 
         // TODO: remove when HistoricalStateProviderRef::proof is implemented
-        if is_blockid_latest {
+        if !is_blockid_latest {
             return Err(EthApiError::InvalidBlockRange)
         }
 
