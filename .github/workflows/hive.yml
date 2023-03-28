@@ -98,7 +98,7 @@ jobs:
             experimental: true
             # running `eth_getProof` tests separately because eth_getProof/get-account-proof-blockhash relies on historical proofs, which we do not support yet
           - sim: ethereum/rpc-compat
-            include: [eth_getProof/get-account-proof-with-storage, eth_getProof/get-account-proof$]
+            include: [eth_getProof/get-account-proof-with-storage, eth_getProof/get-account-proof]
             experimental: true
             # debug_ rpc methods
           - sim: ethereum/rpc-compat
