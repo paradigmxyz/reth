@@ -350,6 +350,7 @@ impl Nibbles {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn hashed_regression() {
@@ -378,30 +379,20 @@ mod tests {
         }
     }
 
-    #[test]
-    // TODO: Covnert to proptest
-    fn pack_unpack_roundtrip() {
-        let input = vec![0xab, 0x27];
-        let nibbles = Nibbles::unpack(&input);
-        let packed = nibbles.pack();
-        assert_eq!(packed, input);
-    }
+    proptest! {
+        #[test]
+        fn pack_unpack_roundtrip(input in any::<Vec<u8>>()) {
+            let nibbles = Nibbles::unpack(&input);
+            let packed = nibbles.pack();
+            prop_assert_eq!(packed, input);
+        }
 
-    #[test]
-    // TODO: Covnert to proptest
-    fn path_even_leaf_roundtrip() {
-        let input = Nibbles::unpack(vec![0xab, 0x27]);
-        let compact = input.encode_path_leaf(false);
-        let decoded = Nibbles::decode_path(compact);
-        assert_eq!(decoded, input);
-    }
-
-    #[test]
-    // TODO: Covnert to proptest
-    fn path_odd_leaf_roundtrip() {
-        let input = Nibbles::unpack(vec![0xab, 0x27, 0xc]);
-        let compact = input.encode_path_leaf(false);
-        let decoded = Nibbles::decode_path(compact);
-        assert_eq!(decoded, input);
+        #[test]
+        fn path_leaf_roundtrip(input in any::<Vec<u8>>()) {
+            let input = Nibbles::unpack(input);
+            let compact = input.encode_path_leaf(false);
+            let decoded = Nibbles::decode_path(compact);
+            prop_assert_eq!(decoded, input);
+        }
     }
 }
