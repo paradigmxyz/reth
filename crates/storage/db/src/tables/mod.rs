@@ -4,7 +4,8 @@
 //!
 //! This module defines the tables in reth, as well as some table-related abstractions:
 //!
-//! - [`codecs`] integrates different codecs into [`Encode`] and [`Decode`]
+//! - [`codecs`] integrates different codecs into [`Encode`](crate::abstraction::table::Encode) and
+//!   [`Decode`](crate::abstraction::table::Decode)
 //! - [`models`] defines the values written to tables
 //!
 //! # Database Tour

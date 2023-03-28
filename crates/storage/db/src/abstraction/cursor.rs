@@ -93,7 +93,7 @@ pub trait DbDupCursorRO<'tx, T: DupSort> {
     /// | `None` | `None`   | [`DbCursorRO::first()`]                 |
     /// | `Some` | `None`   | [`DbCursorRO::seek()`]               |
     /// | `None` | `Some`   | [`DbDupCursorRO::seek_by_key_subkey()`] |
-    /// | `Some` | `Some`   | [`DbDupCursorRo::seek_by_key_subkey()`] |
+    /// | `Some` | `Some`   | [`DbDupCursorRO::seek_by_key_subkey()`] |
     fn walk_dup<'cursor>(
         &'cursor mut self,
         key: Option<T::Key>,
