@@ -62,7 +62,7 @@ jobs:
     strategy:
       matrix:
         experimental: [true]
-        sim: [issues/go-ethereum-14359, ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
+        sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync, ethereum/pyspec]
         include:
           - sim: devp2p
             limit: discv4
