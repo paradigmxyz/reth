@@ -12,6 +12,8 @@ pub enum ServerKind {
     WS(SocketAddr),
     /// Auth.
     Auth(SocketAddr),
+    /// Unknown.
+    Unknown,
 }
 
 impl std::fmt::Display for ServerKind {
@@ -20,6 +22,7 @@ impl std::fmt::Display for ServerKind {
             ServerKind::Http(addr) => write!(f, "{addr} (HTTP-RPC server)"),
             ServerKind::WS(addr) => write!(f, "{addr} (WS-RPC server)"),
             ServerKind::Auth(addr) => write!(f, "{addr} (AUTH server)"),
+            ServerKind::Unknown => write!(f, "(UNKNOWN server)"),
         }
     }
 }
@@ -31,8 +34,13 @@ pub enum RpcError {
     #[error(transparent)]
     RpcError(JsonRpseeError),
     /// Address already in use.
-    #[error("Address {0} is already in use (os error 98)")]
-    AddressAlreadyInUse(ServerKind),
+    #[error("Address {kind} is already in use (os error 98)")]
+    AddressAlreadyInUse {
+        /// Server kind.
+        kind: ServerKind,
+        /// Io error.
+        error: IoError,
+    },
     /// Custom error.
     #[error("{0}")]
     Custom(String),
@@ -42,14 +50,18 @@ impl RpcError {
     /// Converts a `jsonrpsee::core::Error` to a more descriptive `RpcError`.
     pub fn from_jsonrpsee_error(error: JsonRpseeError, handle: Option<ServerKind>) -> RpcError {
         match error {
-            JsonRpseeError::Transport(error) => {
-                if let Some(io_error) = error.downcast_ref::<IoError>() {
+            JsonRpseeError::Transport(err) => match err.downcast::<IoError>() {
+                Ok(io_error) => {
                     if io_error.kind() == ErrorKind::AddrInUse {
-                        return RpcError::AddressAlreadyInUse(handle.unwrap())
+                        return RpcError::AddressAlreadyInUse {
+                            kind: handle.unwrap_or(ServerKind::Unknown),
+                            error: io_error,
+                        }
                     }
+                    RpcError::RpcError(JsonRpseeError::Transport(io_error.into()))
                 }
-                RpcError::RpcError(JsonRpseeError::Transport(error))
-            }
+                Err(error) => RpcError::RpcError(JsonRpseeError::Transport(error)),
+            },
             _ => RpcError::RpcError(error),
         }
     }
