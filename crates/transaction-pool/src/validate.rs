@@ -230,30 +230,18 @@ where
             .latest()
             .and_then(|state| state.basic_account(transaction.sender()))
         {
-            Ok(account) => account,
+            Ok(account) => account.unwrap_or_default(),
             Err(err) => return TransactionValidationOutcome::Error(transaction, Box::new(err)),
         };
 
-        let account = match account {
-            Some(account) => {
-                // Signer account shouldn't have bytecode. Presence of bytecode means this is a
-                // smartcontract.
-                if account.has_bytecode() {
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidTransactionError::SignerAccountHasBytecode.into(),
-                    )
-                } else {
-                    account
-                }
-            }
-            None => {
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidPoolTransactionError::AccountNotFound,
-                )
-            }
-        };
+        // Signer account shouldn't have bytecode. Presence of bytecode means this is a
+        // smartcontract.
+        if account.has_bytecode() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::SignerAccountHasBytecode.into(),
+            )
+        }
 
         // Checks for nonce
         if transaction.nonce() < account.nonce {
