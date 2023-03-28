@@ -11,9 +11,9 @@ pub enum PoolError {
     /// Thrown if a replacement transaction's gas price is below the already imported transaction
     #[error("[{0:?}]: insufficient gas price to replace existing transaction.")]
     ReplacementUnderpriced(TxHash),
-    /// Encountered a transaction that was already added into the poll
+    /// The fee cap of the transaction is below the minimum fee cap determined by the protocol
     #[error("[{0:?}] Transaction feeCap {1} below chain minimum.")]
-    ProtocolFeeCapTooLow(TxHash, u128),
+    FeeCapBelowMinimumProtocolFeeCap(TxHash, u128),
     /// Thrown when the number of unique transactions of a sender exceeded the slot capacity.
     #[error("{0:?} identified as spammer. Transaction {1:?} rejected.")]
     SpammerExceededCapacity(Address, TxHash),
@@ -37,11 +37,54 @@ impl PoolError {
     pub fn hash(&self) -> &TxHash {
         match self {
             PoolError::ReplacementUnderpriced(hash) => hash,
-            PoolError::ProtocolFeeCapTooLow(hash, _) => hash,
+            PoolError::FeeCapBelowMinimumProtocolFeeCap(hash, _) => hash,
             PoolError::SpammerExceededCapacity(_, hash) => hash,
             PoolError::DiscardedOnInsert(hash) => hash,
             PoolError::InvalidTransaction(hash, _) => hash,
             PoolError::Other(hash, _) => hash,
+        }
+    }
+
+    /// Returns `true` if the error was caused by a transaction that is considered bad in the
+    /// context of the transaction pool.
+    ///
+    /// Not all error variants are caused by the incorrect composition of the transaction (See also
+    /// [InvalidPoolTransactionError]) and can be caused by the current state of the transaction
+    /// pool. For example the transaction pool is already full or the error was caused my an
+    /// internal error, such as database errors.
+    ///
+    /// This function returns true only if the transaction will never make it into the pool because
+    /// its composition is invalid and the original sender should have detected this as well. This
+    /// is used to determine whether the original sender should be penalized for sending an
+    /// erroneous transaction.
+    #[inline]
+    pub fn is_bad_transaction(&self) -> bool {
+        match self {
+            PoolError::ReplacementUnderpriced(_) => {
+                // already imported but not bad
+                false
+            }
+            PoolError::FeeCapBelowMinimumProtocolFeeCap(_, _) => {
+                // fee cap of the tx below the technical minimum determined by the protocol: always
+                // invalid
+                true
+            }
+            PoolError::SpammerExceededCapacity(_, _) => {
+                // spammer detected
+                true
+            }
+            PoolError::DiscardedOnInsert(_) => {
+                // valid tx but dropped due to size constraints
+                false
+            }
+            PoolError::InvalidTransaction(_, _) => {
+                // transaction rejected because it violates constraints
+                true
+            }
+            PoolError::Other(_, _) => {
+                // internal error unrelated to the transaction
+                false
+            }
         }
     }
 }

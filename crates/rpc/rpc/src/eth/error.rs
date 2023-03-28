@@ -341,7 +341,7 @@ impl From<PoolError> for RpcPoolError {
     fn from(err: PoolError) -> RpcPoolError {
         match err {
             PoolError::ReplacementUnderpriced(_) => RpcPoolError::ReplaceUnderpriced,
-            PoolError::ProtocolFeeCapTooLow(_, _) => RpcPoolError::Underpriced,
+            PoolError::FeeCapBelowMinimumProtocolFeeCap(_, _) => RpcPoolError::Underpriced,
             PoolError::SpammerExceededCapacity(_, _) => RpcPoolError::TxPoolOverflow,
             PoolError::DiscardedOnInsert(_) => RpcPoolError::TxPoolOverflow,
             PoolError::InvalidTransaction(_, err) => err.into(),
