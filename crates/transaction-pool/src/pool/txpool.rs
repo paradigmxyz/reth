@@ -1157,7 +1157,7 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
-        let valid_tx = f.validated(tx.clone());
+        let valid_tx = f.validated(tx);
         let InsertOk { updates, replaced_tx, move_to, state, .. } =
             pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
         assert!(updates.is_empty());
