@@ -29,6 +29,7 @@ pub mod trie;
 
 /// Execution result
 pub mod post_state;
+pub use post_state::PostState;
 
 /// Helper types for interacting with the database
 mod transaction;

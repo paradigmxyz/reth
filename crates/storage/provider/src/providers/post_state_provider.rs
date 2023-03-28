@@ -2,8 +2,8 @@ use crate::{AccountProvider, BlockHashProvider, PostStateDataProvider, StateProv
 use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, Bytes, H256, U256};
 
-/// A state provider that either resolves to data in a wrapped [`PostState`], or an underlying state
-/// provider.
+/// A state provider that either resolves to data in a wrapped [`crate::PostState`], or an
+/// underlying state provider.
 pub struct PostStateProvider<SP: StateProvider, PSDP: PostStateDataProvider> {
     /// The inner state provider.
     pub state_provider: SP,

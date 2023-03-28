@@ -2,13 +2,13 @@ use crate::{executor::Error as ExecutionError, Error};
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
 use std::collections::{BTreeMap, HashSet};
 
-/// * [BlockchainTree::insert_block]: Connect block to chain, execute it and if valid insert block
-///   inside tree.
-/// * [BlockchainTree::finalize_block]: Remove chains that join to now finalized block, as chain
-///   becomes invalid.
-/// * [BlockchainTree::make_canonical]: Check if we have the hash of block that we want to finalize
-///   and commit it to db. If we dont have the block, pipeline syncing should start to fetch the
-///   blocks from p2p. Do reorg in tables if canonical chain if needed.
+/// * [BlockchainTreeEngine::insert_block]: Connect block to chain, execute it and if valid insert
+///   block inside tree.
+/// * [BlockchainTreeEngine::finalize_block]: Remove chains that join to now finalized block, as
+///   chain becomes invalid.
+/// * [BlockchainTreeEngine::make_canonical]: Check if we have the hash of block that we want to
+///   finalize and commit it to db. If we dont have the block, pipeline syncing should start to
+///   fetch the blocks from p2p. Do reorg in tables if canonical chain if needed.
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// Recover senders and call [`BlockchainTreeEngine::insert_block_with_senders`].
     fn insert_block(&self, block: SealedBlock) -> Result<BlockStatus, Error> {
@@ -34,7 +34,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// # Note
     ///
     /// This finalizes `last_finalized_block` prior to reading the canonical hashes (using
-    /// [`BlockchainTree::finalize_block`]).
+    /// [`BlockchainTreeEngine::finalize_block`]).
     fn restore_canonical_hashes(&self, last_finalized_block: BlockNumber) -> Result<(), Error>;
 
     /// Make a block and its parent part of the canonical chain.
