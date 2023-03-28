@@ -34,7 +34,7 @@ pub enum RpcError {
     #[error("Address {0} is already in use (os error 98)")]
     AddressAlreadyInUse(ServerKind),
     /// Custom error.
-    #[error("Custom error: {0}")]
+    #[error("{0}")]
     Custom(String),
 }
 
