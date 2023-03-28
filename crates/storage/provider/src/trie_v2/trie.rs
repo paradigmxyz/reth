@@ -69,28 +69,14 @@ impl<'a, TX: DbTx<'a>> StorageRoot<TX> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::Transaction;
-    use std::ops::DerefMut;
-
-    use super::*;
-    use assert_matches::assert_matches;
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{
-        database::{Database, DatabaseGAT},
-        mdbx::{test_utils::create_test_rw_db, Env, WriteMap},
-        tables,
-        transaction::DbTxMut,
+        database::Database, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
     };
-    use reth_primitives::{
-        hex_literal::hex,
-        keccak256,
-        proofs::{genesis_state_root, KeccakHasher, EMPTY_ROOT},
-        Address, Bytes, ChainSpec, Genesis, MAINNET,
-    };
-    use reth_rlp::{encode_fixed_size, Encodable};
-    use std::{collections::HashMap, ops::Deref, str::FromStr};
-    use triehash::sec_trie_root;
+    use reth_primitives::{keccak256, proofs::KeccakHasher, Address};
+    use reth_rlp::encode_fixed_size;
+    use std::collections::HashMap;
 
     use reth_primitives::{Account, H256, U256};
 
@@ -112,14 +98,40 @@ mod tests {
         }
     }
 
-    fn storage_root(storage: &HashMap<H256, U256>) -> H256 {
-        let encoded_storage = storage.iter().map(|(k, v)| (k, encode_fixed_size(v).to_vec()));
+    fn storage_root<I: Iterator<Item = (H256, U256)>>(storage: I) -> H256 {
+        let encoded_storage = storage.map(|(k, v)| (k, encode_fixed_size(&v).to_vec()));
 
         H256(triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_storage).0)
     }
 
     #[test]
-    fn storage_root_full() {
+    // TODO: Figure out why this fails.
+    fn arbitrary_storage_root() {
+        proptest!(ProptestConfig::with_cases(1), |(item: (Address, std::collections::BTreeMap<H256, U256>))| {
+            let (address, storage) = item;
+
+            let hashed_address = keccak256(address);
+            let db = create_test_rw_db();
+            let mut tx = Transaction::new(db.as_ref()).unwrap();
+            for (key, value) in &storage {
+                tx.put::<tables::HashedStorage>(
+                    hashed_address,
+                    StorageEntry { key: keccak256(key), value: *value },
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+
+            let got = StorageRoot::new(db.tx().unwrap(), address).root().unwrap();
+            let expected = storage_root(storage.into_iter());
+            dbg!(&got, &expected);
+            assert_eq!(expected, got);
+        });
+    }
+
+    #[test]
+    // This ensures that the walker goes over all the accounts.
+    fn test_storage_root() {
         let db = create_test_rw_db();
         let mut tx = Transaction::new(db.as_ref()).unwrap();
 
@@ -141,6 +153,6 @@ mod tests {
 
         let got = StorageRoot::new(db.tx().unwrap(), address).root().unwrap();
 
-        assert_eq!(storage_root(&storage), got);
+        assert_eq!(storage_root(storage.into_iter()), got);
     }
 }
