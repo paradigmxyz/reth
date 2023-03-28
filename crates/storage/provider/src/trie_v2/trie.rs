@@ -105,7 +105,6 @@ mod tests {
     }
 
     #[test]
-    // TODO: Figure out why this fails.
     fn arbitrary_storage_root() {
         proptest!(ProptestConfig::with_cases(1), |(item: (Address, std::collections::BTreeMap<H256, U256>))| {
             let (address, storage) = item;

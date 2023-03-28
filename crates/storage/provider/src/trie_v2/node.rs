@@ -191,14 +191,16 @@ impl<'a> BranchNode<'a> {
         state_mask: u16,
         hash_mask: u16,
     ) -> impl Iterator<Item = &'a Vec<u8>> + '_ {
-        let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
-        self.stack.iter().skip(first_child_idx).enumerate().filter_map(move |(idx, item)| {
-            let idx = first_child_idx + idx;
-            if matches_mask(state_mask, idx) && matches_mask(hash_mask, idx) {
-                Some(item)
-            } else {
-                None
+        let mut index = self.stack.len() - state_mask.count_ones() as usize;
+        (0..16).filter_map(move |digit| {
+            let mut child = None;
+            if matches_mask(state_mask, digit) {
+                if matches_mask(hash_mask, digit) {
+                    child = Some(&self.stack[index]);
+                }
+                index += 1;
             }
+            child
         })
     }
 

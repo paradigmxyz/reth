@@ -186,12 +186,9 @@ impl HashBuilder {
             // Adjust the state masks for branch calculation
             let extra_digit = current[len];
             if self.groups.len() <= len {
-                tracing::trace!(
-                    new_len = len + 1,
-                    old_len = self.groups.len(),
-                    "scaling state masks to fit"
-                );
-                self.groups.resize(len + 1, 0u16);
+                let new_len = len + 1;
+                tracing::trace!(new_len, old_len = self.groups.len(), "scaling state masks to fit");
+                self.groups.resize(new_len, 0u16);
             }
             self.groups[len] |= 1u16 << extra_digit;
             tracing::trace!(
@@ -241,7 +238,7 @@ impl HashBuilder {
             if build_extensions && !short_node_key.is_empty() {
                 self.update_masks(&current, len_from);
                 let stack_last =
-                    self.stack.pop().expect("there shoudl be at least one stack item; qed");
+                    self.stack.pop().expect("there should be at least one stack item; qed");
                 let extension_node = ExtensionNode::new(&short_node_key, &stack_last);
                 tracing::debug!(?extension_node, "pushing extension node");
                 tracing::trace!(rlp = hex::encode(&extension_node.rlp()), "extension node rlp");
