@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use jsonrpsee::core::Error as JsonRpseeError;
-use std::io::{Error as IoError, ErrorKind};
+use std::{io, io::ErrorKind};
 
 /// Rpc server kind.
 #[derive(Debug)]
@@ -38,8 +38,8 @@ pub enum RpcError {
     AddressAlreadyInUse {
         /// Server kind.
         kind: ServerKind,
-        /// Io error.
-        error: IoError,
+        /// IO error.
+        error: io::Error,
     },
     /// Custom error.
     #[error("{0}")]
@@ -48,12 +48,9 @@ pub enum RpcError {
 
 impl RpcError {
     /// Converts a `jsonrpsee::core::Error` to a more descriptive `RpcError`.
-    pub fn from_jsonrpsee_error(
-        error: JsonRpseeError,
-        server_kind: Option<ServerKind>,
-    ) -> RpcError {
-        match error {
-            JsonRpseeError::Transport(err) => match err.downcast::<IoError>() {
+    pub fn from_jsonrpsee_error(err: JsonRpseeError, server_kind: Option<ServerKind>) -> RpcError {
+        match err {
+            JsonRpseeError::Transport(err) => match err.downcast::<io::Error>() {
                 Ok(io_error) => {
                     if io_error.kind() == ErrorKind::AddrInUse {
                         return RpcError::AddressAlreadyInUse {
@@ -63,9 +60,9 @@ impl RpcError {
                     }
                     RpcError::RpcError(JsonRpseeError::Transport(io_error.into()))
                 }
-                Err(error) => RpcError::RpcError(JsonRpseeError::Transport(error)),
+                Err(err) => RpcError::RpcError(JsonRpseeError::Transport(err)),
             },
-            _ => RpcError::RpcError(error),
+            _ => RpcError::RpcError(err),
         }
     }
 }
