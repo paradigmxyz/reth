@@ -94,7 +94,11 @@ jobs:
             experimental: true
             # eth_ rpc methods
           - sim: ethereum/rpc-compat
-            include: [eth_]
+            include: [eth_blockNumber, eth_call, eth_chainId, eth_createAccessList, eth_estimateGas, eth_feeHistory, eth_getBalance, eth_getBlockBy, eth_getBlockTransactionCountBy, eth_getCode, eth_getStorage, eth_getTransactionBy, eth_getTransactionCount, eth_sendRawTransaction, eth_syncing]
+            experimental: true
+            # running `eth_getProof` tests separately because eth_getProof/get-account-proof-blockhash relies on historical proofs, which we do not support yet
+          - sim: ethereum/rpc-compat
+            include: [eth_getProof/get-account-proof-with-storage, eth_getProof/get-account-proof$]
             experimental: true
             # debug_ rpc methods
           - sim: ethereum/rpc-compat
