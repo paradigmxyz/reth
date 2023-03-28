@@ -214,6 +214,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
+        if self.contains(tx.hash()) {
+            return Err(PoolError::AlreadyImported(*tx.hash()))
+        }
+
         // Update sender info with balance and nonce
         self.sender_info
             .entry(tx.sender_id())
@@ -1146,7 +1150,7 @@ impl SenderInfo {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{MockTransaction, MockTransactionFactory},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };
 
@@ -1211,6 +1215,21 @@ mod tests {
         assert_eq!(pool.len(), 2);
         let inserted = pool.get(valid_tx.id()).unwrap();
         assert!(inserted.state.intersects(expected_state));
+    }
+
+    #[test]
+    fn insert_already_imported() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let tx = f.validated(tx);
+        pool.add_transaction(tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        match pool.add_transaction(tx, on_chain_balance, on_chain_nonce).unwrap_err() {
+            PoolError::AlreadyImported(_) => {}
+            _ => unreachable!(),
+        }
     }
 
     #[test]
