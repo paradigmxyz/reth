@@ -1,4 +1,4 @@
-use crate::error::{RpcError, RpcHandle};
+use crate::error::{RpcError, ServerKind};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::server::{RpcModule, ServerHandle};
 use reth_network_api::{NetworkInfo, Peers};
@@ -77,7 +77,7 @@ where
     // By default, both http and ws are enabled.
     let server =
         ServerBuilder::new().set_middleware(middleware).build(socket_addr).await.map_err(
-            |err| RpcError::from_jsonrpsee_error(err, Some(RpcHandle::Auth(socket_addr))),
+            |err| RpcError::from_jsonrpsee_error(err, Some(ServerKind::Auth(socket_addr))),
         )?;
 
     server.start(module).map_err(|err| RpcError::from_jsonrpsee_error(err, None))
