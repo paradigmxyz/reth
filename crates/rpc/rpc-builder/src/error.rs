@@ -48,13 +48,16 @@ pub enum RpcError {
 
 impl RpcError {
     /// Converts a `jsonrpsee::core::Error` to a more descriptive `RpcError`.
-    pub fn from_jsonrpsee_error(error: JsonRpseeError, handle: Option<ServerKind>) -> RpcError {
+    pub fn from_jsonrpsee_error(
+        error: JsonRpseeError,
+        server_kind: Option<ServerKind>,
+    ) -> RpcError {
         match error {
             JsonRpseeError::Transport(err) => match err.downcast::<IoError>() {
                 Ok(io_error) => {
                     if io_error.kind() == ErrorKind::AddrInUse {
                         return RpcError::AddressAlreadyInUse {
-                            kind: handle.unwrap_or(ServerKind::Unknown),
+                            kind: server_kind.unwrap_or(ServerKind::Unknown),
                             error: io_error,
                         }
                     }
