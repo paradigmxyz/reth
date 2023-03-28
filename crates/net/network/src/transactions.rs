@@ -451,13 +451,16 @@ where
     }
 
     fn report_bad_message(&self, peer_id: PeerId) {
+        trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
     }
 
+    /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
         self.transactions_by_peers.remove(&hash);
     }
 
+    /// Penalize the peers that sent the bad transaction
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
@@ -522,7 +525,11 @@ where
                     this.on_good_import(hash);
                 }
                 Err(err) => {
-                    this.on_bad_import(*err.hash());
+                    if err.is_bad_transaction() {
+                        this.on_bad_import(*err.hash());
+                    } else {
+                        this.on_good_import(*err.hash());
+                    }
                 }
             }
         }
