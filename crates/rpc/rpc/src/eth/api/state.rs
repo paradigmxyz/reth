@@ -54,10 +54,33 @@ where
         keys: Vec<H256>,
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
+        let latest_block = self.client().block(BlockId::Number(BlockNumberOrTag::Latest))?;
         let block_id = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
 
+        // if we are trying to create a proof for the latest block, but have a BlockId as input
+        // that is not BlockNumberOrTag::Latest, then we need to figure out whether or not the
+        // BlockId corresponds to the latest block
+        let is_blockid_latest = match block_id {
+            BlockId::Number(BlockNumberOrTag::Number(num)) => {
+                if let Some(block) = latest_block {
+                    block.number == num
+                } else {
+                    false
+                }
+            }
+            BlockId::Hash(hash) => {
+                if let Some(block) = latest_block {
+                    block.hash_slow() == hash.into()
+                } else {
+                    false
+                }
+            }
+            BlockId::Number(BlockNumberOrTag::Latest) => true,
+            _ => false,
+        };
+
         // TODO: remove when HistoricalStateProviderRef::proof is implemented
-        if !block_id.is_latest() {
+        if is_blockid_latest {
             return Err(EthApiError::InvalidBlockRange)
         }
 
