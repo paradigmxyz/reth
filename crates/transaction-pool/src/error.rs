@@ -8,6 +8,9 @@ pub type PoolResult<T> = Result<T, PoolError>;
 /// All errors the Transaction pool can throw.
 #[derive(Debug, thiserror::Error)]
 pub enum PoolError {
+    /// Same transaction already imported
+    #[error("[{0:?}] Already imported")]
+    AlreadyImported(TxHash),
     /// Thrown if a replacement transaction's gas price is below the already imported transaction
     #[error("[{0:?}]: insufficient gas price to replace existing transaction.")]
     ReplacementUnderpriced(TxHash),
@@ -36,6 +39,7 @@ impl PoolError {
     /// Returns the hash of the transaction that resulted in this error.
     pub fn hash(&self) -> &TxHash {
         match self {
+            PoolError::AlreadyImported(hash) => hash,
             PoolError::ReplacementUnderpriced(hash) => hash,
             PoolError::FeeCapBelowMinimumProtocolFeeCap(hash, _) => hash,
             PoolError::SpammerExceededCapacity(_, hash) => hash,
@@ -60,6 +64,10 @@ impl PoolError {
     #[inline]
     pub fn is_bad_transaction(&self) -> bool {
         match self {
+            PoolError::AlreadyImported(_) => {
+                // already imported but not bad
+                false
+            }
             PoolError::ReplacementUnderpriced(_) => {
                 // already imported but not bad
                 false

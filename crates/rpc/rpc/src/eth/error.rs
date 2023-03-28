@@ -346,6 +346,7 @@ impl From<PoolError> for RpcPoolError {
             PoolError::DiscardedOnInsert(_) => RpcPoolError::TxPoolOverflow,
             PoolError::InvalidTransaction(_, err) => err.into(),
             PoolError::Other(_, err) => RpcPoolError::Other(err),
+            PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
         }
     }
 }
