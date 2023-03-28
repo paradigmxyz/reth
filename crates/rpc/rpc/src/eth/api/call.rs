@@ -30,6 +30,7 @@ use revm::{
     },
     Database,
 };
+use tracing::trace;
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;
@@ -86,11 +87,18 @@ where
             apply_state_overrides(state_overrides, &mut db)?;
         }
 
+        // The basefee should be ignored for eth_call
+        // See:
+        // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
+        env.block.basefee = U256::ZERO;
+
         if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
+            trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap");
             // no gas limit was provided in the request, so we need to cap the request's gas limit
             cap_tx_gas_limit_with_caller_allowance(&mut db, &mut env.tx)?;
         }
 
+        trace!(target: "rpc::eth::call", ?env, "Executing call");
         transact(&mut db, env)
     }
 
