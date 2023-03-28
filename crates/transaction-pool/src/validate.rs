@@ -146,7 +146,6 @@ where
             LEGACY_TX_TYPE_ID => {
                 // Accept legacy transactions
             }
-
             EIP2930_TX_TYPE_ID => {
                 // Accept only legacy transactions until EIP-2718/2930 activates
                 if !self.eip2718 {
@@ -217,11 +216,13 @@ where
         }
 
         // Checks for chainid
-        if transaction.chain_id() != Some(self.chain_id()) {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::ChainIdMismatch.into(),
-            )
+        if let Some(chain_id) = transaction.chain_id() {
+            if chain_id != self.chain_id() {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::ChainIdMismatch.into(),
+                )
+            }
         }
 
         let account = match self
