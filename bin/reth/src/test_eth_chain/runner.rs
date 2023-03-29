@@ -68,7 +68,7 @@ pub fn should_skip(path: &Path) -> bool {
         return true
     }
 
-    // Skip test where basefee/accesslist/diffuculty is present but it shouldn't be supported in
+    // Skip test where basefee/accesslist/difficulty is present but it shouldn't be supported in
     // London/Berlin/TheMerge. https://github.com/ethereum/tests/blob/5b7e1ab3ffaf026d99d20b17bb30f533a2c80c8b/GeneralStateTests/stExample/eip1559.json#L130
     // It is expected to not execute these tests.
     if path.file_name() == Some(OsStr::new("accessListExample.json")) ||

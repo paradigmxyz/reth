@@ -82,7 +82,7 @@ where
     cfg.disable_block_gas_limit = true;
 
     // Disabled because eth_call is sometimes used with eoa senders
-    // See <htps://github.com/paradigmxyz/reth/issues/1959>
+    // See <https://github.com/paradigmxyz/reth/issues/1959>
     cfg.disable_eip3607 = true;
 
     let request_gas = request.gas;

@@ -11,7 +11,7 @@
 pub mod access_list;
 
 /// An inspector stack abstracting the implementation details of
-/// each inspector and allowing to hook on block/transaciton execution,
+/// each inspector and allowing to hook on block/transaction execution,
 /// used in the main RETH executor.
 pub mod stack;
 
