@@ -815,7 +815,7 @@ where
     TX: DbTx<'db> + Send + Sync,
 {
     /// Returns a Merkle proof of the given account, plus its storage root hash.
-    pub fn generate_acount_proof(
+    pub fn generate_account_proof(
         &self,
         root: H256,
         address: H256,
@@ -1165,8 +1165,9 @@ mod tests {
         let address = Address::from(hex!("000d836201318ec6899a67540690382780743280"));
 
         let trie = create_test_loader(&tx);
-        let (proof, storage_root) =
-            trie.generate_acount_proof(root, keccak256(address)).expect("failed to generate proof");
+        let (proof, storage_root) = trie
+            .generate_account_proof(root, keccak256(address))
+            .expect("failed to generate proof");
 
         // values extracted from geth via rpc:
         // {
@@ -1228,7 +1229,7 @@ mod tests {
 
         let trie = create_test_loader(&tx);
         let (account_proof, storage_root) =
-            trie.generate_acount_proof(root, hashed_address).expect("failed to generate proof");
+            trie.generate_account_proof(root, hashed_address).expect("failed to generate proof");
 
         // values extracted from geth via rpc:
         let expected_account = hex!("f86fa1205126413e7857595763591580306b3f228f999498c4c5dfa74f633364936e7651b84bf849819b8418b0d164a029ff6f4d518044318d75b118cf439d8d3d7249c8afcba06ba9ecdf8959410571a02ce1a85814ad94a94ed2a1abaf7c57e9b64326622c1b8c21b4ba4d0e7df61392").as_slice();

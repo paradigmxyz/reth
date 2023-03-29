@@ -89,7 +89,7 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .state_root;
 
         let (account_proof, storage_root) = loader
-            .generate_acount_proof(root, hashed_address)
+            .generate_account_proof(root, hashed_address)
             .map_err(|_| ProviderError::StateTrie)?;
         let account_proof = account_proof.into_iter().map(Bytes::from).collect();
 
