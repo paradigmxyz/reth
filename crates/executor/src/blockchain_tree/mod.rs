@@ -412,6 +412,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 return Ok(BlockStatus::Accepted)
             }
         }
+
+        // check if block is part of canonical chain
+        if self.block_indices.canonical_hash(&block.number) == Some(block.hash()) {
+            // block is part of canonical chain
+            return Ok(BlockStatus::Valid)
+        }
+
         self.try_insert_block(block)
     }
 

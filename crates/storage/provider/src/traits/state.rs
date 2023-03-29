@@ -102,11 +102,17 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 }
 
 /// Post state data needs for execution on it.
+/// This trait is used to create state provider over pending state.
+///
+/// Pending state contains:
+/// * [`PostState`] contains all changed of accounts and storage of pending chain
+/// * block hashes of pending chain and canonical blocks.
+/// * canonical fork, the block on what pending chain was forked from.
 #[auto_impl[Box,&]]
 pub trait PostStateDataProvider: Send + Sync {
     /// Return post state
     fn state(&self) -> &PostState;
-    /// Return block hash of asked block number
+    /// Return block hash by block number of pending or canonical chain.
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
     /// return canonical fork, the block on what post state was forked from.
     ///
