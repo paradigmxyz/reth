@@ -2,11 +2,19 @@
 //!
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
-use crate::{post_state::PostState, substate::PostStateProvider};
+use crate::{blockchain_tree::PostStateDataRef, post_state::PostState};
+use reth_db::database::Database;
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
-use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders, SealedHeader, U256};
-use reth_provider::{BlockExecutor, ExecutorFactory, StateProvider};
+use reth_primitives::{
+    BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders, SealedHeader, U256,
+};
+use reth_provider::{
+    providers::PostStateProvider, BlockExecutor, ExecutorFactory, PostStateDataProvider,
+    StateProviderFactory,
+};
 use std::collections::BTreeMap;
+
+use super::externals::TreeExternals;
 
 /// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
 pub(crate) type BlockChainId = u64;
@@ -33,26 +41,38 @@ pub struct Chain {
     block_transitions: BTreeMap<BlockNumber, usize>,
 }
 
-/// Describes a fork block by its number and hash.
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub struct ForkBlock {
-    /// Block number of block that chains branches from
-    pub number: u64,
-    /// Block hash of block that chains branches from
-    pub hash: BlockHash,
-}
-
-impl ForkBlock {
-    /// Return the `(block_number, block_hash)` tuple for this fork block.
-    pub fn num_hash(&self) -> (BlockNumber, BlockHash) {
-        (self.number, self.hash)
-    }
-}
+/// Block number and hash of the forked block.
+pub type ForkBlock = BlockNumHash;
 
 impl Chain {
     /// Get the blocks in this chain.
     pub fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
         &self.blocks
+    }
+
+    /// Get post state of this chain
+    pub fn state(&self) -> &PostState {
+        &self.state
+    }
+
+    /// Return block number of the block hash.
+    pub fn block_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
+        self.blocks.iter().find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
+    }
+
+    /// Return post state of the block at the `block_number` or None if block is not known
+    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<PostState> {
+        let mut state = self.state.clone();
+        if self.tip().number == block_number {
+            return Some(state)
+        }
+
+        if let Some(&transition_id) = self.block_transitions.get(&block_number) {
+            state.revert_to(transition_id);
+            return Some(state)
+        }
+
+        None
     }
 
     /// Destructure the chain into its inner components, the blocks and the state.
@@ -105,41 +125,53 @@ impl Chain {
     }
 
     /// Create a new chain that forks off of the canonical chain.
-    pub fn new_canonical_fork<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
+    pub fn new_canonical_fork<DB, C, EF>(
         block: &SealedBlockWithSenders,
         parent_header: &SealedHeader,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        provider: &SP,
-        consensus: &C,
-        factory: &EF,
-    ) -> Result<Self, Error> {
+        canonical_fork: ForkBlock,
+        externals: &TreeExternals<DB, C, EF>,
+    ) -> Result<Self, Error>
+    where
+        DB: Database,
+        C: Consensus,
+        EF: ExecutorFactory,
+    {
         let state = PostState::default();
         let empty = BTreeMap::new();
 
-        let state_provider =
-            PostStateProvider::new(&state, provider, &empty, canonical_block_hashes);
+        let state_provider = PostStateDataRef {
+            state: &state,
+            sidechain_block_hashes: &empty,
+            canonical_block_hashes,
+            canonical_fork,
+        };
 
         let changeset = Self::validate_and_execute(
             block.clone(),
             parent_header,
+            canonical_fork,
             state_provider,
-            consensus,
-            factory,
+            externals,
         )?;
 
         Ok(Self::new(vec![(block.clone(), changeset)]))
     }
 
     /// Create a new chain that forks off of an existing sidechain.
-    pub fn new_chain_fork<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
+    pub fn new_chain_fork<DB, C, EF>(
         &self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        provider: &SP,
-        consensus: &C,
-        factory: &EF,
-    ) -> Result<Self, Error> {
+        canonical_fork: ForkBlock,
+        externals: &TreeExternals<DB, C, EF>,
+    ) -> Result<Self, Error>
+    where
+        DB: Database,
+        C: Consensus,
+        EF: ExecutorFactory,
+    {
         let parent_number = block.number - 1;
         let parent = self
             .blocks
@@ -156,14 +188,19 @@ impl Chain {
         state.revert_to(*revert_to_transition_id);
 
         // Revert changesets to get the state of the parent that we need to apply the change.
-        let state_provider = PostStateProvider::new(
-            &state,
-            provider,
-            &side_chain_block_hashes,
+        let post_state_data = PostStateDataRef {
+            state: &state,
+            sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
-        );
-        let block_state =
-            Self::validate_and_execute(block.clone(), parent, state_provider, consensus, factory)?;
+            canonical_fork,
+        };
+        let block_state = Self::validate_and_execute(
+            block.clone(),
+            parent,
+            canonical_fork,
+            post_state_data,
+            externals,
+        )?;
         state.extend(block_state);
 
         let chain = Self {
@@ -177,49 +214,67 @@ impl Chain {
     }
 
     /// Validate and execute the given block.
-    fn validate_and_execute<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
+    fn validate_and_execute<PSDP, DB, C, EF>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
-        state_provider: PostStateProvider<'_, SP>,
-        consensus: &C,
-        factory: &EF,
-    ) -> Result<PostState, Error> {
-        consensus.validate_header(&block, U256::MAX)?;
-        consensus.pre_validate_header(&block, parent_block)?;
-        consensus.pre_validate_block(&block)?;
+        canonical_fork: ForkBlock,
+        post_state_data_provider: PSDP,
+        externals: &TreeExternals<DB, C, EF>,
+    ) -> Result<PostState, Error>
+    where
+        PSDP: PostStateDataProvider,
+        DB: Database,
+        C: Consensus,
+        EF: ExecutorFactory,
+    {
+        externals.consensus.validate_header(&block, U256::MAX)?;
+        externals.consensus.pre_validate_header(&block, parent_block)?;
+        externals.consensus.pre_validate_block(&block)?;
 
         let (unseal, senders) = block.into_components();
         let unseal = unseal.unseal();
 
-        factory
-            .with_sp(state_provider)
-            .execute_and_verify_receipt(&unseal, U256::MAX, Some(senders))
-            .map_err(Into::into)
+        //get state provider.
+        let db = externals.shareable_db();
+        // TODO, small perf can check if caonical fork is the latest state.
+        let history_provider = db.history_by_block_number(canonical_fork.number)?;
+        let state_provider = history_provider;
+
+        let provider = PostStateProvider { state_provider, post_state_data_provider };
+
+        let mut executor = externals.executor_factory.with_sp(&provider);
+        executor.execute_and_verify_receipt(&unseal, U256::MAX, Some(senders)).map_err(Into::into)
     }
 
     /// Validate and execute the given block, and append it to this chain.
-    pub fn append_block<SP: StateProvider, C: Consensus, EF: ExecutorFactory>(
+    pub fn append_block<DB, C, EF>(
         &mut self,
         block: SealedBlockWithSenders,
         side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
-        provider: &SP,
-        consensus: &C,
-        factory: &EF,
-    ) -> Result<(), Error> {
+        canonical_fork: ForkBlock,
+        externals: &TreeExternals<DB, C, EF>,
+    ) -> Result<(), Error>
+    where
+        DB: Database,
+        C: Consensus,
+        EF: ExecutorFactory,
+    {
         let (_, parent_block) = self.blocks.last_key_value().expect("Chain has at least one block");
+
+        let post_state_data = PostStateDataRef {
+            state: &self.state,
+            sidechain_block_hashes: &side_chain_block_hashes,
+            canonical_block_hashes,
+            canonical_fork,
+        };
 
         let block_state = Self::validate_and_execute(
             block.clone(),
             parent_block,
-            PostStateProvider::new(
-                &self.state,
-                provider,
-                &side_chain_block_hashes,
-                canonical_block_hashes,
-            ),
-            consensus,
-            factory,
+            canonical_fork,
+            post_state_data,
+            externals,
         )?;
         self.state.extend(block_state);
         self.block_transitions.insert(block.number, self.state.transitions_count());
@@ -235,7 +290,7 @@ impl Chain {
         if chain_tip.hash != chain.fork_block_hash() {
             return Err(ExecError::AppendChainDoesntConnect {
                 chain_tip: chain_tip.num_hash(),
-                other_chain_fork: chain.fork_block().num_hash(),
+                other_chain_fork: chain.fork_block().into_components(),
             }
             .into())
         }
@@ -273,11 +328,7 @@ impl Chain {
         let chain_tip = *self.blocks.last_entry().expect("chain is never empty").key();
         let block_number = match split_at {
             SplitAt::Hash(block_hash) => {
-                let block_number = self
-                    .blocks
-                    .iter()
-                    .find_map(|(num, block)| (block.hash() == block_hash).then_some(*num));
-                let Some(block_number) = block_number else { return ChainSplit::NoSplitPending(self)};
+                let Some(block_number) = self.block_number(block_hash) else { return ChainSplit::NoSplitPending(self)};
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
                     return ChainSplit::NoSplitCanonical(self)
@@ -299,7 +350,7 @@ impl Chain {
 
         let mut canonical_state = std::mem::take(&mut self.state);
         let new_state = canonical_state.split_at(
-            *self.block_transitions.get(&(block_number)).expect("Unknown block transition ID"),
+            *self.block_transitions.get(&block_number).expect("Unknown block transition ID"),
         );
         self.state = new_state;
 
@@ -432,6 +483,12 @@ mod tests {
             block_transitions: chain.block_transitions.clone(),
             blocks: BTreeMap::from([(2, block2.clone())]),
         };
+
+        // return tip state
+        assert_eq!(chain.state_at_block(block2.number), Some(chain.state.clone()));
+        assert_eq!(chain.state_at_block(block1.number), Some(chain_split1.state.clone()));
+        // state at unknown block
+        assert_eq!(chain.state_at_block(100), None);
 
         // split in two
         assert_eq!(
