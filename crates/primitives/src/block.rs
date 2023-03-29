@@ -1,4 +1,7 @@
-use crate::{Address, Header, SealedHeader, TransactionSigned, Withdrawal, H256, U64};
+use crate::{
+    Address, BlockHash, BlockNumber, Header, SealedHeader, TransactionSigned, Withdrawal, H256,
+};
+use ethers_core::types::{BlockNumber as EthersBlockNumber, U64};
 use reth_codecs::derive_arbitrary;
 use reth_rlp::{Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable};
 use serde::{
@@ -225,7 +228,7 @@ impl Decodable for BlockHashOrNumber {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BlockId {
     /// A block hash and an optional bool that defines if it's canonical
-    Hash(BlockHash),
+    Hash(RpcBlockHash),
     /// A block number
     Number(BlockNumberOrTag),
 }
@@ -266,18 +269,18 @@ impl From<BlockNumberOrTag> for BlockId {
 
 impl From<H256> for BlockId {
     fn from(block_hash: H256) -> Self {
-        BlockId::Hash(BlockHash { block_hash, require_canonical: None })
+        BlockId::Hash(RpcBlockHash { block_hash, require_canonical: None })
     }
 }
 
 impl From<(H256, Option<bool>)> for BlockId {
     fn from(hash_can: (H256, Option<bool>)) -> Self {
-        BlockId::Hash(BlockHash { block_hash: hash_can.0, require_canonical: hash_can.1 })
+        BlockId::Hash(RpcBlockHash { block_hash: hash_can.0, require_canonical: hash_can.1 })
     }
 }
 
-impl From<BlockHash> for BlockId {
-    fn from(hash_can: BlockHash) -> Self {
+impl From<RpcBlockHash> for BlockId {
+    fn from(hash_can: RpcBlockHash) -> Self {
         BlockId::Hash(hash_can)
     }
 }
@@ -297,7 +300,7 @@ impl Serialize for BlockId {
         S: Serializer,
     {
         match *self {
-            BlockId::Hash(BlockHash { ref block_hash, ref require_canonical }) => {
+            BlockId::Hash(RpcBlockHash { ref block_hash, ref require_canonical }) => {
                 let mut s = serializer.serialize_struct("BlockIdEip1898", 1)?;
                 s.serialize_field("blockHash", block_hash)?;
                 if let Some(require_canonical) = require_canonical {
@@ -384,7 +387,7 @@ impl<'de> Deserialize<'de> for BlockId {
                 if let Some(number) = number {
                     Ok(BlockId::Number(number))
                 } else if let Some(block_hash) = block_hash {
-                    Ok(BlockId::Hash(BlockHash { block_hash, require_canonical }))
+                    Ok(BlockId::Hash(RpcBlockHash { block_hash, require_canonical }))
                 } else {
                     Err(serde::de::Error::custom(
                         "Expected `blockNumber` or `blockHash` with `requireCanonical` optionally",
@@ -461,22 +464,22 @@ impl From<u64> for BlockNumberOrTag {
     }
 }
 
-impl From<U64> for BlockNumberOrTag {
-    fn from(num: U64) -> Self {
-        num.as_u64().into()
+impl From<EthersBlockNumber> for BlockNumberOrTag {
+    fn from(value: EthersBlockNumber) -> Self {
+        match value {
+            EthersBlockNumber::Latest => BlockNumberOrTag::Latest,
+            EthersBlockNumber::Finalized => BlockNumberOrTag::Finalized,
+            EthersBlockNumber::Safe => BlockNumberOrTag::Safe,
+            EthersBlockNumber::Earliest => BlockNumberOrTag::Earliest,
+            EthersBlockNumber::Pending => BlockNumberOrTag::Pending,
+            EthersBlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
+        }
     }
 }
 
-impl From<ethers_core::types::BlockNumber> for BlockNumberOrTag {
-    fn from(value: ethers_core::types::BlockNumber) -> Self {
-        match value {
-            ethers_core::types::BlockNumber::Latest => BlockNumberOrTag::Latest,
-            ethers_core::types::BlockNumber::Finalized => BlockNumberOrTag::Finalized,
-            ethers_core::types::BlockNumber::Safe => BlockNumberOrTag::Safe,
-            ethers_core::types::BlockNumber::Earliest => BlockNumberOrTag::Earliest,
-            ethers_core::types::BlockNumber::Pending => BlockNumberOrTag::Pending,
-            ethers_core::types::BlockNumber::Number(num) => BlockNumberOrTag::Number(num.as_u64()),
-        }
+impl From<U64> for BlockNumberOrTag {
+    fn from(num: U64) -> Self {
+        num.as_u64().into()
     }
 }
 
@@ -567,34 +570,62 @@ pub struct HexStringMissingPrefixError;
 /// the block is not in the canonical chain.
 /// <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md#specification>
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct BlockHash {
+pub struct RpcBlockHash {
     /// A block hash
     pub block_hash: H256,
     /// Whether the block must be a canonical block
     pub require_canonical: Option<bool>,
 }
 
-impl BlockHash {
+impl RpcBlockHash {
     pub fn from_hash(block_hash: H256, require_canonical: Option<bool>) -> Self {
-        BlockHash { block_hash, require_canonical }
+        RpcBlockHash { block_hash, require_canonical }
     }
 }
 
-impl From<H256> for BlockHash {
+impl From<H256> for RpcBlockHash {
     fn from(value: H256) -> Self {
         Self::from_hash(value, None)
     }
 }
 
-impl From<BlockHash> for H256 {
-    fn from(value: BlockHash) -> Self {
+impl From<RpcBlockHash> for H256 {
+    fn from(value: RpcBlockHash) -> Self {
         value.block_hash
     }
 }
 
-impl AsRef<H256> for BlockHash {
+impl AsRef<H256> for RpcBlockHash {
     fn as_ref(&self) -> &H256 {
         &self.block_hash
+    }
+}
+
+/// Block number and hash.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct BlockNumHash {
+    /// Block number
+    pub number: BlockNumber,
+    /// Block hash
+    pub hash: BlockHash,
+}
+
+impl std::fmt::Debug for BlockNumHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("").field(&self.number).field(&self.hash).finish()
+    }
+}
+
+impl BlockNumHash {
+    /// Consumes `Self` and returns [`BlockNumber`], [`BlockHash`]
+    pub fn into_components(self) -> (BlockNumber, BlockHash) {
+        (self.number, self.hash)
+    }
+}
+
+impl From<(BlockNumber, BlockHash)> for BlockNumHash {
+    fn from(val: (BlockNumber, BlockHash)) -> Self {
+        BlockNumHash { number: val.0, hash: val.1 }
     }
 }
 
@@ -657,7 +688,7 @@ mod test {
         let block_hash =
             H256::from_str("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
                 .unwrap();
-        let block_id = BlockId::Hash(BlockHash::from_hash(block_hash, Some(true)));
+        let block_id = BlockId::Hash(RpcBlockHash::from_hash(block_hash, Some(true)));
         let block_hash_json = serde_json::json!(
             { "blockHash": "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3", "requireCanonical": true }
         );

@@ -26,7 +26,10 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_executor::{
-    blockchain_tree::{config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree},
+    blockchain_tree::{
+        config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
+        ShareableBlockchainTree,
+    },
     Factory,
 };
 use reth_interfaces::{
@@ -324,6 +327,7 @@ impl Command {
         Ok((pipeline, events))
     }
 
+    #[allow(clippy::type_complexity)]
     fn build_consensus_engine<DB, U, C>(
         &self,
         db: Arc<DB>,
@@ -331,7 +335,9 @@ impl Command {
         consensus: C,
         pipeline: Pipeline<DB, U>,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> eyre::Result<BeaconConsensusEngine<DB, TaskExecutor, U, C, Factory>>
+    ) -> eyre::Result<
+        BeaconConsensusEngine<DB, TaskExecutor, U, ShareableBlockchainTree<Arc<DB>, C, Factory>>,
+    >
     where
         DB: Database + Unpin + 'static,
         U: SyncStateUpdater + Unpin + 'static,
@@ -340,7 +346,10 @@ impl Command {
         let executor_factory = Factory::new(self.chain.clone());
         let tree_externals =
             TreeExternals::new(db.clone(), consensus, executor_factory, self.chain.clone());
-        let blockchain_tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
+        let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
+            tree_externals,
+            BlockchainTreeConfig::default(),
+        )?);
 
         Ok(BeaconConsensusEngine::new(
             db,

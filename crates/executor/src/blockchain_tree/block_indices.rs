@@ -1,8 +1,8 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
-use super::chain::{BlockChainId, Chain, ForkBlock};
-use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
-use std::collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet};
+use super::chain::{BlockChainId, Chain};
+use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
+use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
 ///
@@ -25,7 +25,7 @@ pub struct BlockIndices {
     blocks_to_chain: HashMap<BlockHash, BlockChainId>,
     /// Utility index. Block number to block hash. Can be used for
     /// RPC to fetch all pending block in chain by its number.
-    index_number_to_block: HashMap<BlockNumber, HashSet<BlockHash>>,
+    index_number_to_block: BTreeMap<BlockNumber, HashSet<BlockHash>>,
 }
 
 impl BlockIndices {
@@ -41,6 +41,11 @@ impl BlockIndices {
             blocks_to_chain: Default::default(),
             index_number_to_block: Default::default(),
         }
+    }
+
+    /// Return internal index that maps all pending block number to their hash.
+    pub fn index_of_number_to_pending_blocks(&self) -> &BTreeMap<BlockNumber, HashSet<BlockHash>> {
+        &self.index_number_to_block
     }
 
     /// Return fork to child indices
@@ -169,7 +174,9 @@ impl BlockIndices {
         block_hash: BlockHash,
     ) -> BTreeSet<BlockChainId> {
         // rm number -> block
-        if let Entry::Occupied(mut entry) = self.index_number_to_block.entry(block_number) {
+        if let btree_map::Entry::Occupied(mut entry) =
+            self.index_number_to_block.entry(block_number)
+        {
             let set = entry.get_mut();
             set.remove(&block_hash);
             // remove set if empty
@@ -214,7 +221,9 @@ impl BlockIndices {
                 self.blocks_to_chain.remove(&hash);
 
                 // rm number -> block
-                if let Entry::Occupied(mut entry) = self.index_number_to_block.entry(number) {
+                if let btree_map::Entry::Occupied(mut entry) =
+                    self.index_number_to_block.entry(number)
+                {
                     let set = entry.get_mut();
                     set.remove(&hash);
                     // remove set if empty
@@ -223,7 +232,8 @@ impl BlockIndices {
                     }
                 }
                 // rm fork block -> hash
-                if let Entry::Occupied(mut entry) = self.fork_to_child.entry(parent_hash) {
+                if let hash_map::Entry::Occupied(mut entry) = self.fork_to_child.entry(parent_hash)
+                {
                     let set = entry.get_mut();
                     set.remove(&hash);
                     // remove set if empty
@@ -295,13 +305,14 @@ impl BlockIndices {
     }
 
     /// get canonical tip
-    pub fn canonical_tip(&self) -> ForkBlock {
-        let (&number, &hash) =
-            self.canonical_chain.last_key_value().expect("There is always the canonical chain");
-        ForkBlock { number, hash }
+    pub fn canonical_tip(&self) -> BlockNumHash {
+        self.canonical_chain
+            .last_key_value()
+            .map(|(&number, &hash)| BlockNumHash { number, hash })
+            .unwrap_or_default()
     }
 
-    /// Canonical chain needs for execution of EVM. It should contains last 256 block hashes.
+    /// Canonical chain needed for execution of EVM. It should contains last 256 block hashes.
     pub fn canonical_chain(&self) -> &BTreeMap<BlockNumber, BlockHash> {
         &self.canonical_chain
     }

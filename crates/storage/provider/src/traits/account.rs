@@ -3,7 +3,7 @@ use reth_interfaces::Result;
 use reth_primitives::{Account, Address};
 
 /// Account provider
-#[auto_impl(&,Box)]
+#[auto_impl(&, Arc, Box)]
 pub trait AccountProvider: Send + Sync {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> Result<Option<Account>>;
