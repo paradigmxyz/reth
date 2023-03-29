@@ -242,14 +242,19 @@ where
         at: Option<BlockId>,
     ) -> EthResult<AccessList> {
         let block_id = at.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-        let (mut cfg, block, at) = self.evm_env_at(block_id).await?;
+        let (cfg, block, at) = self.evm_env_at(block_id).await?;
         let state = self.state_at(at)?;
+
+        let mut env = build_call_evm_env(cfg, block, request.clone())?;
 
         // we want to disable this in eth_call, since this is common practice used by other node
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        cfg.disable_block_gas_limit = true;
+        env.cfg.disable_block_gas_limit = true;
 
-        let mut env = build_call_evm_env(cfg, block, request.clone())?;
+        // The basefee should be ignored for eth_createAccessList
+        // See:
+        // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
+        env.block.basefee = U256::ZERO;
 
         let mut db = SubState::new(State::new(state));
 
