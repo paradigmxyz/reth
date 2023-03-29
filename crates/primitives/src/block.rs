@@ -40,12 +40,54 @@ impl Block {
             withdrawals: self.withdrawals,
         }
     }
+
+    /// Transform into a [`BlockWithSenders`].
+    pub fn with_senders(self, senders: Vec<Address>) -> BlockWithSenders {
+        assert_eq!(self.body.len(), senders.len(), "Unequal number of senders");
+
+        BlockWithSenders { block: self, senders }
+    }
 }
 
 impl Deref for Block {
     type Target = Header;
     fn deref(&self) -> &Self::Target {
         &self.header
+    }
+}
+
+/// Sealed block with senders recovered from transactions.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BlockWithSenders {
+    /// Block
+    pub block: Block,
+    /// List of senders that match the transactions in the block
+    pub senders: Vec<Address>,
+}
+
+impl BlockWithSenders {
+    /// New block with senders. Return none if len of tx and senders does not match
+    pub fn new(block: Block, senders: Vec<Address>) -> Option<Self> {
+        (!block.body.len() != senders.len()).then_some(Self { block, senders })
+    }
+
+    /// Split Structure to its components
+    pub fn into_components(self) -> (Block, Vec<Address>) {
+        (self.block, self.senders)
+    }
+}
+
+impl Deref for BlockWithSenders {
+    type Target = Block;
+    fn deref(&self) -> &Self::Target {
+        &self.block
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl std::ops::DerefMut for BlockWithSenders {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.block
     }
 }
 
