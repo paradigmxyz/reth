@@ -160,7 +160,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let target_root = tx.get_header(input.unwind_to)?.state_root;
 
-        // If the merkle stage fails to execute, the trie changes weren't commited
+        // If the merkle stage fails to execute, the trie changes weren't committed
         // and the root stayed the same
         if tx.get::<tables::AccountsTrie>(target_root)?.is_some() {
             info!(target: "sync::stages::merkle::unwind", "Stage skipped");

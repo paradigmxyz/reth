@@ -33,7 +33,7 @@ pub fn init(layers: Vec<BoxedLayer<Registry>>) {
 
 /// Builds a new tracing layer that writes to stdout.
 ///
-/// The events are filtered by `default_directive`, unless overriden by `RUST_LOG`.
+/// The events are filtered by `default_directive`, unless overridden by `RUST_LOG`.
 ///
 /// Colors can be disabled with `RUST_LOG_STYLE=never`, and event targets can be displayed with
 /// `RUST_LOG_TARGET=1`.

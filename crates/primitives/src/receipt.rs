@@ -21,7 +21,7 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    /// Cacluates [`Log`]'s bloom filter. this is slow operatio and [ReceiptWithBloom] can
+    /// Calculates [`Log`]'s bloom filter. this is slow operation and [ReceiptWithBloom] can
     /// be used to cache this value.
     pub fn bloom_slow(&self) -> Bloom {
         logs_bloom(self.logs.iter())

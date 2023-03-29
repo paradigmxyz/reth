@@ -50,7 +50,7 @@ pub struct TransactionsManagerMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct DisconnectMetrics {
-    /// Number of peer disconnects due to DisconnectRequestd (0x00)
+    /// Number of peer disconnects due to DisconnectRequested (0x00)
     pub(crate) disconnect_requested: Counter,
 
     /// Number of peer disconnects due to TcpSubsystemError (0x01)

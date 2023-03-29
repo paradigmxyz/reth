@@ -6,7 +6,7 @@ use std::{
 };
 use tokio::sync::oneshot::{error::RecvError, Receiver};
 
-/// Flattern a [Receiver] message in order to get rid of the [RecvError] result
+/// Flatten a [Receiver] message in order to get rid of the [RecvError] result
 #[derive(Debug)]
 #[pin_project]
 pub struct FlattenedResponse<T> {
