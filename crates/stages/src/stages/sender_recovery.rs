@@ -57,10 +57,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let done = !capped;
 
         // Look up the start index for the transaction range
-        let start_tx_index = tx.get_block_body(start_block)?.start_tx_id;
+        let start_tx_index = tx.get_block_meta(start_block)?.start_tx_id;
 
         // Look up the end index for transaction range (inclusive)
-        let end_tx_index = tx.get_block_body(end_block)?.last_tx_index();
+        let end_tx_index = tx.get_block_meta(end_block)?.last_tx_index();
 
         // No transactions to walk over
         if start_tx_index > end_tx_index {
@@ -136,7 +136,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, "Unwinding");
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.get_block_body(input.unwind_to)?.last_tx_index();
+        let latest_tx_id = tx.get_block_meta(input.unwind_to)?.last_tx_index();
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -267,7 +267,7 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body(block);
+            let body_result = self.tx.inner().get_block_meta(block);
             match body_result {
                 Ok(body) => self
                     .tx

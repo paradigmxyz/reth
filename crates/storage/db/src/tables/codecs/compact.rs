@@ -41,7 +41,7 @@ impl_compression_for_compact!(
     TxType,
     StorageEntry,
     StorageTrieEntry,
-    StoredBlockBody,
+    StoredBlockMeta,
     StoredBlockOmmers,
     StoredBlockWithdrawals,
     Bytecode,

@@ -8,7 +8,9 @@ use crate::{
     Error,
 };
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{bytes::Bytes, BlockHash, BlockNumber, Header, TxNumber, Withdrawal, H256};
+use reth_primitives::{
+    bytes::Bytes, BlockHash, BlockNumber, Header, TransitionId, TxNumber, Withdrawal, H256,
+};
 use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.
@@ -20,29 +22,53 @@ pub type NumTransactions = u64;
 /// transaction in the block and the total number of transactions
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[main_codec]
-pub struct StoredBlockBody {
-    /// The id of the first transaction in this block
-    pub start_tx_id: TxNumber,
+pub struct StoredBlockMeta {
+    /// The number of the first transaction in this block
+    pub first_tx_num: TxNumber,
+    /// The id of first transition in this block.
+    pub first_transition_id: TransitionId,
     /// The total number of transactions in the block
     pub tx_count: NumTransactions,
+    /// Flags if additional transition changeset of the withdrawal or uncle rewards.
+    pub has_block_change: bool,
 }
 
-impl StoredBlockBody {
-    /// Return the range of transaction ids for this body
-    pub fn tx_id_range(&self) -> Range<u64> {
-        self.start_tx_id..self.start_tx_id + self.tx_count
+impl StoredBlockMeta {
+    /// Return the range of transaction ids for this block.
+    pub fn tx_num_range(&self) -> Range<TxNumber> {
+        self.first_tx_num..self.first_tx_num + self.tx_count
+    }
+
+    /// Return the range of transition ids for this block.
+    pub fn transition_range(&self) -> Range<TransitionId> {
+        self.first_transition_id..self.first_transition_id + self.tx_count
+    }
+
+    /// Return transition id of the state after block executed.
+    pub fn transition_after_block(&self) -> TransitionId {
+        self.first_transition_id + self.tx_count + (self.has_block_change as u64)
+    }
+
+    /// Return transition id of the state at the block execution.
+    pub fn transition_at_block(&self) -> TransitionId {
+        self.first_transition_id
     }
 
     /// Return the index of last transaction in this block unless the block
     /// is empty in which case it refers to the last transaction in a previous
     /// non-empty block
-    pub fn last_tx_index(&self) -> TxNumber {
-        self.start_tx_id.saturating_add(self.tx_count).saturating_sub(1)
+    pub fn last_tx_num(&self) -> TxNumber {
+        self.first_tx_num.saturating_add(self.tx_count).saturating_sub(1)
     }
 
     /// First transaction index.
-    pub fn first_tx_index(&self) -> TxNumber {
-        self.start_tx_id
+    pub fn first_tx_num(&self) -> TxNumber {
+        self.first_tx_num
+    }
+
+    /// Return the index of the next transaction after this block.
+    pub fn next_tx_num(&self) -> TxNumber {
+        self.first_tx_num+self.tx_count
     }
 
     /// Return a flag whether the block is empty
@@ -51,8 +77,16 @@ impl StoredBlockBody {
     }
 
     /// Return number of transaction inside block
+    /// 
+    /// NOTE: This is not the same as the number of transitions.
     pub fn tx_count(&self) -> NumTransactions {
         self.tx_count
+    }
+
+    /// Return flag signifying whether the block has additional
+    /// transition changeset (withdrawal or uncle/block rewards).
+    pub fn has_block_change(&self) -> bool {
+        self.has_block_change
     }
 }
 
