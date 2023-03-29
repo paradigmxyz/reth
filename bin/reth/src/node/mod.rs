@@ -353,7 +353,9 @@ impl Command {
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
-        confy::load_path::<Config>(&self.config).wrap_err("Could not load config")
+        confy::load_path::<Config>(&self.config).wrap_err_with(|| {
+            format!("Could not load config file {}", self.config.as_ref().display())
+        })
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
