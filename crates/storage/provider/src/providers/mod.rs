@@ -1,6 +1,6 @@
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    PostStateDataProvider, ProviderError, StateProvider, StateProviderFactory,
+    PostStateDataProvider, ProviderError, StateProviderBox, StateProviderFactory,
     TransactionsProvider, WithdrawalsProvider,
 };
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
@@ -19,7 +19,6 @@ use std::{ops::RangeBounds, sync::Arc};
 mod state;
 use crate::traits::ReceiptProvider;
 pub use state::{
-    chain::ChainState,
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
@@ -407,14 +406,11 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
 
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
     /// Storage provider for latest block
-    fn latest<'a>(&'a self) -> Result<Box<dyn StateProvider + 'a>> {
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
 
-    fn history_by_block_number<'a>(
-        &'a self,
-        block_number: BlockNumber,
-    ) -> Result<Box<dyn StateProvider + 'a>> {
+    fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
         let tx = self.db.tx()?;
 
         // get transition id
@@ -425,10 +421,7 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
     }
 
-    fn history_by_block_hash<'a>(
-        &'a self,
-        block_hash: BlockHash,
-    ) -> Result<Box<dyn StateProvider + 'a>> {
+    fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
         let tx = self.db.tx()?;
         // get block number
         let block_number = tx
@@ -443,10 +436,10 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
     }
 
-    fn pending<'a>(
-        &'a self,
-        post_state_data: Box<dyn PostStateDataProvider + 'a>,
-    ) -> Result<Box<dyn StateProvider + 'a>> {
+    fn pending(
+        &self,
+        post_state_data: Box<dyn PostStateDataProvider>,
+    ) -> Result<StateProviderBox<'_>> {
         let canonical_fork = post_state_data.canonical_fork();
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
         let post_state_provider =

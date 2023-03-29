@@ -1,7 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, PostStateDataProvider, StateProvider, StateProviderFactory,
-    TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
@@ -322,49 +322,49 @@ impl EvmEnvProvider for MockEthProvider {
 }
 
 impl StateProviderFactory for MockEthProvider {
-    fn latest(&self) -> Result<Box<dyn StateProvider>> {
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
         Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Box<dyn StateProvider>> {
+    ) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
     fn pending<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
-    ) -> Result<Box<dyn StateProvider + 'a>> {
+    ) -> Result<StateProviderBox<'a>> {
         todo!()
     }
 }
 
 impl StateProviderFactory for Arc<MockEthProvider> {
-    fn latest(&self) -> Result<Box<dyn StateProvider>> {
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
         Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Box<dyn StateProvider>> {
+    ) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Box<dyn StateProvider>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
     fn pending<'a>(
         &'a self,
         _post_state_data: Box<dyn PostStateDataProvider + 'a>,
-    ) -> Result<Box<dyn StateProvider + 'a>> {
+    ) -> Result<StateProviderBox<'a>> {
         todo!()
     }
 }

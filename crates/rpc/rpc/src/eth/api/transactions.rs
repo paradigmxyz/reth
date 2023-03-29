@@ -14,7 +14,7 @@ use reth_primitives::{
     TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
     TxLegacy, H256, U128, U256, U64,
 };
-use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_types::{
     Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
     TypedTransactionRequest,
@@ -27,12 +27,12 @@ use revm_primitives::utilities::create_address;
 #[async_trait::async_trait]
 pub trait EthTransactions: Send + Sync {
     /// Returns the state at the given [BlockId]
-    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>>;
+    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
     /// Executes the closure with the state that corresponds to the given [BlockId].
     fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
     where
-        F: FnOnce(ChainState<'_>) -> EthResult<T>;
+        F: FnOnce(StateProviderBox<'_>) -> EthResult<T>;
 
     /// Returns the revm evm env for the requested [BlockId]
     ///
@@ -76,13 +76,13 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
-    fn state_at(&self, at: BlockId) -> EthResult<ChainState<'_>> {
+    fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         self.state_at_block_id(at)
     }
 
     fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(ChainState<'_>) -> EthResult<T>,
+        F: FnOnce(StateProviderBox<'_>) -> EthResult<T>,
     {
         let state = self.state_at(at)?;
         f(state)

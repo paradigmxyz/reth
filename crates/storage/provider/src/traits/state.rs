@@ -7,6 +7,9 @@ use reth_primitives::{
     KECCAK_EMPTY, U256,
 };
 
+/// Type alias of boxed [StateProvider].
+pub type StateProviderBox<'a> = Box<dyn StateProvider + 'a>;
+
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Arc, Box)]
 pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
@@ -72,24 +75,20 @@ pub trait StateProvider: BlockHashProvider + AccountProvider + Send + Sync {
 /// `BlockNumber` or the latest state.
 pub trait StateProviderFactory: Send + Sync {
     /// Storage provider for latest block.
-    fn latest<'a>(&'a self) -> Result<Box<dyn StateProvider + 'a>>;
+    fn latest(&self) -> Result<StateProviderBox<'_>>;
 
     /// Returns a [StateProvider] indexed by the given block number.
-    fn history_by_block_number<'a>(
-        &'a self,
-        block: BlockNumber,
-    ) -> Result<Box<dyn StateProvider + 'a>>;
+    fn history_by_block_number(&self, block: BlockNumber) -> Result<StateProviderBox<'_>>;
 
     /// Returns a [StateProvider] indexed by the given block hash.
-    fn history_by_block_hash<'a>(&'a self, block: BlockHash)
-        -> Result<Box<dyn StateProvider + 'a>>;
+    fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
 
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
-    fn pending<'a>(
-        &'a self,
-        post_state_data: Box<dyn PostStateDataProvider + 'a>,
-    ) -> Result<Box<dyn StateProvider + 'a>>;
+    fn pending(
+        &self,
+        post_state_data: Box<dyn PostStateDataProvider>,
+    ) -> Result<StateProviderBox<'_>>;
 }
 
 /// Blockchain trait provider
