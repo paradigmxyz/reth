@@ -707,11 +707,11 @@ where
         }
 
         // Merge transaction into blocks
-        let mut block_tx = Vec::new();
+        let mut block_tx = Vec::with_capacity(block_bodies.len());
         let mut senders = senders.into_iter();
         let mut transactions = transactions.into_iter();
         for (block_number, block_body) in block_bodies {
-            let mut one_block_tx = Vec::new();
+            let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
             for _ in block_body.tx_id_range() {
                 let tx = transactions.next();
                 let sender = senders.next();
