@@ -88,4 +88,7 @@ pub enum ProviderError {
     /// Thrown when the cache service task dropped
     #[error("cache service task stopped")]
     CacheServiceUnavailable,
+    /// Thrown when we failed to lookup a block for the pending state
+    #[error("Unknown block hash: {0:}")]
+    UnknownBlockHash(H256),
 }
