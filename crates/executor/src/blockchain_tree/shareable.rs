@@ -17,6 +17,7 @@ use std::{
 use super::BlockchainTree;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
+#[derive(Clone)]
 pub struct ShareableBlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// BlockchainTree
     pub tree: Arc<RwLock<BlockchainTree<DB, C, EF>>>,
