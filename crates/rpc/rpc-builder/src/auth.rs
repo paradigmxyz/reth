@@ -75,10 +75,11 @@ where
         tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
     // By default, both http and ws are enabled.
-    let server =
-        ServerBuilder::new().set_middleware(middleware).build(socket_addr).await.map_err(
-            |err| RpcError::from_jsonrpsee_error(err, Some(ServerKind::Auth(socket_addr))),
-        )?;
+    let server = ServerBuilder::new()
+        .set_middleware(middleware)
+        .build(socket_addr)
+        .await
+        .map_err(|err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)))?;
 
-    server.start(module).map_err(|err| RpcError::from_jsonrpsee_error(err, None))
+    Ok(server.start(module)?)
 }

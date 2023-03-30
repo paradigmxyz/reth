@@ -12,8 +12,6 @@ pub enum ServerKind {
     WS(SocketAddr),
     /// Auth.
     Auth(SocketAddr),
-    /// Unknown.
-    Unknown,
 }
 
 impl std::fmt::Display for ServerKind {
@@ -22,7 +20,6 @@ impl std::fmt::Display for ServerKind {
             ServerKind::Http(addr) => write!(f, "{addr} (HTTP-RPC server)"),
             ServerKind::WS(addr) => write!(f, "{addr} (WS-RPC server)"),
             ServerKind::Auth(addr) => write!(f, "{addr} (AUTH server)"),
-            ServerKind::Unknown => write!(f, "(UNKNOWN server)"),
         }
     }
 }
@@ -32,7 +29,7 @@ impl std::fmt::Display for ServerKind {
 pub enum RpcError {
     /// Wrapper for `jsonrpsee::core::Error`.
     #[error(transparent)]
-    RpcError(JsonRpseeError),
+    RpcError(#[from] JsonRpseeError),
     /// Address already in use.
     #[error("Address {kind} is already in use (os error 98)")]
     AddressAlreadyInUse {
@@ -48,21 +45,20 @@ pub enum RpcError {
 
 impl RpcError {
     /// Converts a `jsonrpsee::core::Error` to a more descriptive `RpcError`.
-    pub fn from_jsonrpsee_error(err: JsonRpseeError, server_kind: Option<ServerKind>) -> RpcError {
+    pub fn from_jsonrpsee_error(err: JsonRpseeError, kind: ServerKind) -> RpcError {
         match err {
-            JsonRpseeError::Transport(err) => match err.downcast::<io::Error>() {
-                Ok(io_error) => {
+            JsonRpseeError::Transport(err) => {
+                if let Some(io_error) = err.downcast_ref::<io::Error>() {
                     if io_error.kind() == ErrorKind::AddrInUse {
                         return RpcError::AddressAlreadyInUse {
-                            kind: server_kind.unwrap_or(ServerKind::Unknown),
-                            error: io_error,
+                            kind,
+                            error: io::Error::from(io_error.kind()),
                         }
                     }
-                    RpcError::RpcError(JsonRpseeError::Transport(io_error.into()))
                 }
-                Err(err) => RpcError::RpcError(JsonRpseeError::Transport(err)),
-            },
-            _ => RpcError::RpcError(err),
+                RpcError::RpcError(err.into())
+            }
+            _ => err.into(),
         }
     }
 }
