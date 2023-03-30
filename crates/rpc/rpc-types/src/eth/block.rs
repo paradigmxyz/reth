@@ -1,8 +1,8 @@
 //! Contains types that represent ethereum types in [reth_primitives] when used in RPC
 use crate::Transaction;
 use reth_primitives::{
-    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, Withdrawal, H256,
-    H64, U256,
+    Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader,
+    Withdrawal, H256, H64, U256,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -166,7 +166,7 @@ impl Block {
         let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
         let base_fee_per_gas = block.header.base_fee_per_gas;
 
-        let header = Header::from_primitive_with_hash(block.header, block_hash);
+        let header = Header::from_primitive_with_hash(block.header.seal(block_hash));
 
         Self {
             header,
@@ -183,7 +183,7 @@ impl Block {
     /// an Uncle from its header.
     pub fn uncle_block_from_header(header: PrimitiveHeader) -> Self {
         let hash = header.hash_slow();
-        let rpc_header = Header::from_primitive_with_hash(header.clone(), hash);
+        let rpc_header = Header::from_primitive_with_hash(header.clone().seal(hash));
         let uncle_block = PrimitiveBlock { header, ..Default::default() };
         let size = Some(U256::from(uncle_block.length()));
         Self {
@@ -246,29 +246,33 @@ impl Header {
     /// Converts the primitive header type to this RPC type
     ///
     /// CAUTION: this takes the header's hash as is and does _not_ calculate the hash.
-    pub fn from_primitive_with_hash(primitive_header: PrimitiveHeader, block_hash: H256) -> Self {
-        let PrimitiveHeader {
-            parent_hash,
-            ommers_hash,
-            beneficiary,
-            state_root,
-            transactions_root,
-            receipts_root,
-            logs_bloom,
-            difficulty,
-            number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            mix_hash,
-            nonce,
-            base_fee_per_gas: _,
-            extra_data,
-            withdrawals_root,
+    pub fn from_primitive_with_hash(primitive_header: SealedHeader) -> Self {
+        let SealedHeader {
+            header:
+                PrimitiveHeader {
+                    parent_hash,
+                    ommers_hash,
+                    beneficiary,
+                    state_root,
+                    transactions_root,
+                    receipts_root,
+                    logs_bloom,
+                    difficulty,
+                    number,
+                    gas_limit,
+                    gas_used,
+                    timestamp,
+                    mix_hash,
+                    nonce,
+                    base_fee_per_gas: _,
+                    extra_data,
+                    withdrawals_root,
+                },
+            hash,
         } = primitive_header;
 
         Header {
-            hash: Some(block_hash),
+            hash: Some(hash),
             parent_hash,
             uncles_hash: ommers_hash,
             miner: beneficiary,
