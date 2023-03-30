@@ -1485,7 +1485,7 @@ fn unwind_account_history_shards<DB: Database>(
 /// Unwind all history shards. For boundary shard, remove it from database and
 /// return last part of shard with still valid items. If all full shard were removed, return list
 /// would be empty but this does not mean that there is none shard left but that there is no
-/// splitted shards.
+/// split shards.
 fn unwind_storage_history_shards<DB: Database>(
     cursor: &mut <<DB as DatabaseGAT<'_>>::TXMut as DbTxMutGAT<'_>>::CursorMut<
         tables::StorageHistory,

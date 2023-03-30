@@ -214,6 +214,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
+        if self.contains(tx.hash()) {
+            return Err(PoolError::AlreadyImported(*tx.hash()))
+        }
+
         // Update sender info with balance and nonce
         self.sender_info
             .entry(tx.sender_id())
@@ -247,9 +251,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                     InsertErr::Underpriced { existing, .. } => {
                         Err(PoolError::ReplacementUnderpriced(existing))
                     }
-                    InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap } => {
-                        Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
-                    }
+                    InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => Err(
+                        PoolError::FeeCapBelowMinimumProtocolFeeCap(*transaction.hash(), fee_cap),
+                    ),
                     InsertErr::ExceededSenderTransactionsCapacity { transaction } => {
                         Err(PoolError::SpammerExceededCapacity(
                             transaction.sender(),
@@ -846,7 +850,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // Check dynamic fee
         if let Some(fee_cap) = transaction.max_fee_per_gas() {
             if fee_cap < self.minimal_protocol_basefee {
-                return Err(InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap })
+                return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
             }
             if fee_cap >= self.pending_basefee {
                 state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
@@ -1028,7 +1032,7 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     /// The transactions feeCap is lower than the chain's minimum fee requirement.
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
-    ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: u128 },
+    FeeCapBelowMinimumProtocolFeeCap { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: u128 },
     /// Sender currently exceeds the configured limit for max account slots.
     ///
     /// The sender can be considered a spammer at this point.
@@ -1146,7 +1150,7 @@ impl SenderInfo {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{MockTransaction, MockTransactionFactory},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };
 
@@ -1157,7 +1161,7 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
         let tx = MockTransaction::eip1559().inc_price().inc_limit();
-        let valid_tx = f.validated(tx.clone());
+        let valid_tx = f.validated(tx);
         let InsertOk { updates, replaced_tx, move_to, state, .. } =
             pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
         assert!(updates.is_empty());
@@ -1211,6 +1215,21 @@ mod tests {
         assert_eq!(pool.len(), 2);
         let inserted = pool.get(valid_tx.id()).unwrap();
         assert!(inserted.state.intersects(expected_state));
+    }
+
+    #[test]
+    fn insert_already_imported() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let tx = f.validated(tx);
+        pool.add_transaction(tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        match pool.add_transaction(tx, on_chain_balance, on_chain_nonce).unwrap_err() {
+            PoolError::AlreadyImported(_) => {}
+            _ => unreachable!(),
+        }
     }
 
     #[test]

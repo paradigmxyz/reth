@@ -73,7 +73,7 @@ impl<C> EthRequestHandler<C>
 where
     C: BlockProvider + HeaderProvider,
 {
-    /// Returns the list of requested heders
+    /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 

@@ -72,7 +72,7 @@ pub struct Transaction {
 
 impl Transaction {
     /// Create a new rpc transaction result for a mined transaction, using the given block hash,
-    /// number, and tx index fields to populate the corresponing fields in the rpc result.
+    /// number, and tx index fields to populate the corresponding fields in the rpc result.
     ///
     /// The block hash, number, and tx index fields should be from the original block where the
     /// transaction was mined.

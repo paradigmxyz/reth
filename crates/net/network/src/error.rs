@@ -69,6 +69,15 @@ pub enum BackoffKind {
     High,
 }
 
+// === impl BackoffKind ===
+
+impl BackoffKind {
+    /// Returns true if the backoff is considered severe.
+    pub(crate) fn is_severe(&self) -> bool {
+        matches!(self, BackoffKind::Medium | BackoffKind::High)
+    }
+}
+
 impl SessionError for EthStreamError {
     fn merits_discovery_ban(&self) -> bool {
         match self {

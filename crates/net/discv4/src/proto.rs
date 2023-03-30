@@ -652,7 +652,7 @@ mod tests {
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
 
         let (encoded, _) = msg.encode(&secret_key);
-        // Assret that 16 nodes never fit into one packet
+        // Assert that 16 nodes never fit into one packet
         assert!(encoded.len() > MAX_PACKET_SIZE, "{} {msg:?}", encoded.len());
     }
 

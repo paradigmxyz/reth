@@ -208,7 +208,7 @@ where
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, "Serving eth_call");
         let (res, _env) = self
-            .execute_call_at(
+            .transact_call_at(
                 request,
                 block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
                 state_overrides,

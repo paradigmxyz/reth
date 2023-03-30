@@ -1,6 +1,7 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
@@ -321,41 +322,49 @@ impl EvmEnvProvider for MockEthProvider {
 }
 
 impl StateProviderFactory for MockEthProvider {
-    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
-    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(self)
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Self::HistorySP<'_>> {
+    ) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending<'a>(
+        &'a self,
+        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<StateProviderBox<'a>> {
         todo!()
     }
 }
 
 impl StateProviderFactory for Arc<MockEthProvider> {
-    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
-    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(self)
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Self::HistorySP<'_>> {
+    ) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending<'a>(
+        &'a self,
+        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<StateProviderBox<'a>> {
         todo!()
     }
 }

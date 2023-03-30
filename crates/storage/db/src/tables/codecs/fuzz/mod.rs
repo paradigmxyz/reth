@@ -5,7 +5,7 @@ mod inputs;
 /// Fuzzer generates a random instance of the object and proceeds to encode and decode it. It then
 /// makes sure that it matches the original object.
 ///
-/// Some types like [`IntegerList`] might have some restrictons on how they're fuzzed. For example,
+/// Some types like [`IntegerList`] might have some restrictions on how they're fuzzed. For example,
 /// the list is assumed to be sorted before creating the object.
 macro_rules! impl_fuzzer_with_input {
     ($(($name:tt, $input_type:tt, $encode:tt, $encode_method:tt, $decode:tt, $decode_method:tt)),+) => {
@@ -86,5 +86,5 @@ macro_rules! impl_fuzzer_value_with_input {
     };
 }
 
-impl_fuzzer_key!(BlockNumHash, TransitionIdAddress);
+impl_fuzzer_key!(TransitionIdAddress);
 impl_fuzzer_value_with_input!((IntegerList, IntegerListInput));

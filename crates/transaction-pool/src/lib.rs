@@ -279,12 +279,12 @@ where
         self.pool.pooled_transactions_hashes()
     }
 
-    fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool.pooled_transactions()
-    }
-
     fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash> {
         self.pooled_transaction_hashes().into_iter().take(max).collect()
+    }
+
+    fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pooled_transactions()
     }
 
     fn pooled_transactions_max(

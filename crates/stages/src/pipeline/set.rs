@@ -10,7 +10,7 @@ use std::{
 /// A [`StageSet`] is a logical chunk of stages that depend on each other. It is up to the
 /// individual stage sets to determine what kind of configuration they expose.
 ///
-/// Individual stages in the set can be added, removed and overriden using [`StageSetBuilder`].
+/// Individual stages in the set can be added, removed and overridden using [`StageSetBuilder`].
 pub trait StageSet<DB: Database>: Sized {
     /// Configures the stages in the set.
     fn builder(self) -> StageSetBuilder<DB>;
@@ -44,7 +44,7 @@ impl<DB: Database> Debug for StageEntry<DB> {
 /// The builder provides ordering helpers to ensure that stages that depend on each other are added
 /// to the final sync pipeline before/after their dependencies.
 ///
-/// Stages inside the set can be disabled, enabled, overriden and reordered.
+/// Stages inside the set can be disabled, enabled, overridden and reordered.
 pub struct StageSetBuilder<DB> {
     stages: HashMap<StageId, StageEntry<DB>>,
     order: Vec<StageId>,
