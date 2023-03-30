@@ -1,5 +1,6 @@
 use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
+use revm::primitives::ExecutionResult;
 use std::collections::HashSet;
 
 /// A type for creating parity style traces
@@ -80,6 +81,24 @@ impl ParityTraceBuilder {
         info: TransactionInfo,
     ) -> Vec<LocalizedTransactionTrace> {
         self.into_localized_transaction_traces_iter(info).collect()
+    }
+
+    /// Consumes the inspector and returns the trace results according to the configured trace
+    /// types.
+    pub fn into_trace_results(
+        self,
+        res: ExecutionResult,
+        trace_types: &HashSet<TraceType>,
+    ) -> TraceResults {
+        let output = match res {
+            ExecutionResult::Success { output, .. } => output.into_data(),
+            ExecutionResult::Revert { output, .. } => output,
+            ExecutionResult::Halt { .. } => Default::default(),
+        };
+
+        let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
+
+        TraceResults { output: output.into(), trace, vm_trace, state_diff }
     }
 
     /// Returns the tracing types that are configured in the set
