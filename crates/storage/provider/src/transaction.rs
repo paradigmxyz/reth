@@ -11,7 +11,7 @@ use reth_db::{
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
-        AccountBeforeTx, ShardedKey, TransitionIdAddress, StoredBlockMeta,
+        AccountBeforeTx, ShardedKey, StoredBlockMeta, TransitionIdAddress,
     },
     table::Table,
     tables,
@@ -150,7 +150,8 @@ where
     pub fn get_block_transition(&self, key: BlockNumber) -> Result<TransitionId, TransactionError> {
         let last_transition_id = self
             .get::<tables::BlockMeta>(key)?
-            .ok_or(ProviderError::BlockTransition { block_number: key })?.transition_after_block();
+            .ok_or(ProviderError::BlockTransition { block_number: key })?
+            .transition_after_block();
         Ok(last_transition_id)
     }
 
@@ -671,8 +672,7 @@ where
         }
 
         // iterate over and get all transaction and signers
-        let first_transaction =
-            block_bodies.first().expect("If we have headers").1.first_tx_num();
+        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
         let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
 
         let transactions =
@@ -850,8 +850,7 @@ where
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<PostState>, TransactionError> {
         // We are not removing block meta as it is used to get block transitions.
-        let block_transition =
-            self.get_or_take::<tables::BlockMeta, false>(range.clone())?;
+        let block_transition = self.get_or_take::<tables::BlockMeta, false>(range.clone())?;
 
         if block_transition.is_empty() {
             return Ok(Vec::new())
@@ -862,7 +861,11 @@ where
 
         // get block transition of parent block.
         let from = self.get_block_transition(first_block_number.saturating_sub(1))?;
-        let to = block_transition.last().expect("Check for empty is already done").1.transition_after_block();
+        let to = block_transition
+            .last()
+            .expect("Check for empty is already done")
+            .1
+            .transition_after_block();
 
         // NOTE: Just get block bodies dont remove them
         // it is connection point for bodies getter and execution result getter.

@@ -145,14 +145,14 @@ table!(
 
 table!(
     /// Stores block meta inteformation that contains indexes of transaction and transitions.
-    /// 
+    ///
     /// TODO refactor comment:
     /// Stores the mapping of block number to state transition id.
     /// The block transition marks the final state at the end of the block.
     /// Increment the transition if the block contains an addition block reward.
     /// If the block does not have a reward and transaction, the transition will be the same as the
     /// transition at the last transaction of this block.
-    /// 
+    ///
     /// Stores the mapping of transaction number to state transition id.
     ( BlockMeta ) BlockNumber | StoredBlockMeta
 );

@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
-        let mut cursor_bodies = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut cursor_bodies = tx.cursor_read::<tables::BlockMeta>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
 
         // Walk over block bodies within a specified range.
@@ -68,7 +68,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_list = vec![];
         for body_entry in bodies {
             let (_, body) = body_entry?;
-            let transactions = tx_cursor.walk(Some(body.start_tx_id))?.take(body.tx_count as usize);
+            let transactions =
+                tx_cursor.walk(Some(body.first_tx_num()))?.take(body.tx_count() as usize);
 
             for tx_entry in transactions {
                 let (id, transaction) = tx_entry?;
@@ -111,7 +112,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind tx hash to number
-        let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut body_cursor = tx.cursor_read::<tables::BlockMeta>()?;
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
         let mut rev_walker = body_cursor.walk_back(None)?;
@@ -121,7 +122,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
 
             // Delete all transactions that belong to this block
-            for tx_id in body.tx_id_range() {
+            for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
                 if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
                     if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
@@ -249,7 +250,7 @@ mod tests {
             let body_result = self.tx.inner().get_block_meta(number);
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
-                    body.last_tx_index(),
+                    body.last_tx_num(),
                     |key| key,
                 )?,
                 Err(_) => {
@@ -299,11 +300,11 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+                    let mut body_cursor = tx.cursor_read::<tables::BlockMeta>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
-                        for tx_id in body.tx_id_range() {
+                        for tx_id in body.tx_num_range() {
                             let transaction = tx
                                 .get::<tables::Transactions>(tx_id)?
                                 .expect("no transaction entry");

@@ -33,7 +33,7 @@ fn find_stage_range(db: &Path) -> StageRange {
     TestTransaction::new(db)
         .tx
         .view(|tx| {
-            let mut cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
+            let mut cursor = tx.cursor_read::<tables::BlockMeta>()?;
             let from = cursor.first()?.unwrap().0;
             let to = cursor.last()?.unwrap().0;
 

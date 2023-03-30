@@ -6,7 +6,7 @@ use reth_db::{
         tx::Tx,
         Env, EnvKind, WriteMap, RW,
     },
-    models::{AccountBeforeTx, BlockNumHash, StoredBlockBody},
+    models::{AccountBeforeTx, BlockNumHash, StoredBlockMeta},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
@@ -235,20 +235,20 @@ impl TestTransaction {
             blocks.into_iter().try_for_each(|block| {
                 Self::insert_header(tx, &block.header)?;
                 // Insert into body tables.
-                tx.put::<tables::BlockBodies>(
+                tx.put::<tables::BlockMeta>(
                     block.number,
-                    StoredBlockBody {
-                        start_tx_id: current_tx_id,
+                    StoredBlockMeta {
+                        first_tx_num: current_tx_id,
+                        first_transition_id: current_tx_id,
                         tx_count: block.body.len() as u64,
+                        has_block_change: false,
                     },
                 )?;
                 block.body.iter().try_for_each(|body_tx| {
-                    tx.put::<tables::TxTransitionIndex>(current_tx_id, current_tx_id)?;
                     tx.put::<tables::Transactions>(current_tx_id, body_tx.clone())?;
                     current_tx_id += 1;
                     Ok(())
-                })?;
-                tx.put::<tables::BlockTransitionIndex>(block.number, current_tx_id)
+                })
             })
         })
     }

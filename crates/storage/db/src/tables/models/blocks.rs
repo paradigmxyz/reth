@@ -68,7 +68,7 @@ impl StoredBlockMeta {
 
     /// Return the index of the next transaction after this block.
     pub fn next_tx_num(&self) -> TxNumber {
-        self.first_tx_num+self.tx_count
+        self.first_tx_num + self.tx_count
     }
 
     /// Return a flag whether the block is empty
@@ -77,7 +77,7 @@ impl StoredBlockMeta {
     }
 
     /// Return number of transaction inside block
-    /// 
+    ///
     /// NOTE: This is not the same as the number of transitions.
     pub fn tx_count(&self) -> NumTransactions {
         self.tx_count

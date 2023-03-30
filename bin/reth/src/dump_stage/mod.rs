@@ -123,17 +123,15 @@ pub(crate) fn setup<DB: Database>(
     let output_db = init_db(output_db)?;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockTransitionIndex, _>(
+        tx.import_table_with_range::<tables::BlockMeta, _>(
             &db_tool.db.tx()?,
             Some(from - 1),
             to + 1,
         )
     })??;
 
-    let (tip_block_number, _) = db_tool
-        .db
-        .view(|tx| tx.cursor_read::<tables::BlockTransitionIndex>()?.last())??
-        .expect("some");
+    let (tip_block_number, _) =
+        db_tool.db.view(|tx| tx.cursor_read::<tables::BlockMeta>()?.last())??.expect("some");
 
     Ok((output_db, tip_block_number))
 }

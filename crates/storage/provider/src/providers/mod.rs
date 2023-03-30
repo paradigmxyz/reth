@@ -421,7 +421,8 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         // get transition id
         let transition = tx
             .get::<tables::BlockMeta>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?.transition_after_block();
+            .ok_or(ProviderError::BlockTransition { block_number })?
+            .transition_after_block();
 
         Ok(HistoricalStateProvider::new(tx, transition))
     }
@@ -436,7 +437,8 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         // get transition id
         let transition = tx
             .get::<tables::BlockMeta>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?.transition_after_block();
+            .ok_or(ProviderError::BlockTransition { block_number })?
+            .transition_after_block();
 
         Ok(HistoricalStateProvider::new(tx, transition))
     }

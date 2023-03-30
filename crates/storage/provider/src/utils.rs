@@ -59,10 +59,8 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         StoredBlockMeta::default()
     } else {
         let prev_block_num = block.number - 1;
-        let prev_body_meta = tx
-            .get::<tables::BlockMeta>(prev_block_num)?
-            .ok_or(ProviderError::BlockMeta { number: prev_block_num })?;
-        prev_body_meta
+        tx.get::<tables::BlockMeta>(prev_block_num)?
+            .ok_or(ProviderError::BlockMeta { number: prev_block_num })?
     };
     let tx_count = block.body.len() as u64;
     let mut tx_num = parent_block_meta.next_tx_num();

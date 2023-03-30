@@ -99,7 +99,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Get total difficulty
         let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
         // Get bodies with canonical hashes.
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut bodies_cursor = tx.cursor_read::<tables::BlockMeta>()?;
         // Get ommers with canonical hashes.
         let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
         // Get block withdrawals.
@@ -117,7 +117,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     .seek_exact(number)?
                     .ok_or(ProviderError::TotalDifficulty { number })?;
                 let (_, body) =
-                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockBody { number })?;
+                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockMeta { number })?;
                 let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
                 let withdrawals =
                     withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);
@@ -136,10 +136,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
 
             // iterate over all transactions
-            let mut tx_walker = tx_cursor.walk(Some(body.start_tx_id))?;
+            let mut tx_walker = tx_cursor.walk(Some(body.first_tx_num()))?;
             let mut transactions = Vec::with_capacity(body.tx_count as usize);
             // get next N transactions.
-            for index in body.tx_id_range() {
+            for index in body.tx_num_range() {
                 let (tx_index, tx) =
                     tx_walker.next().ok_or(ProviderError::EndOfTransactionTable)??;
                 if tx_index != index {
@@ -150,9 +150,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
 
             // take signers
-            let mut tx_sender_walker = tx_sender.walk(Some(body.start_tx_id))?;
+            let mut tx_sender_walker = tx_sender.walk(Some(body.first_tx_num()))?;
             let mut signers = Vec::with_capacity(body.tx_count as usize);
-            for index in body.tx_id_range() {
+            for index in body.tx_num_range() {
                 let (tx_index, tx) =
                     tx_sender_walker.next().ok_or(ProviderError::EndOfTransactionSenderTable)??;
                 if tx_index != index {

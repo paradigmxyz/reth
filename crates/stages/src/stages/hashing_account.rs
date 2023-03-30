@@ -126,8 +126,8 @@ impl AccountHashingStage {
             }
 
             // seed account changeset
-            let (_, last_transition) =
-                tx.cursor_read::<tables::BlockTransitionIndex>()?.last()?.unwrap();
+            let last_transition =
+                tx.cursor_read::<tables::BlockMeta>()?.last()?.unwrap().1.transition_after_block();
 
             let first_transition = last_transition.checked_sub(transitions).unwrap_or_default();
 
