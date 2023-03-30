@@ -5400,7 +5400,7 @@ dependencies = [
 [[package]]
 name = "ruint"
 version = "1.7.0"
-source = "git+https://github.com/paradigmxyz/uint#c14ed24f9611546e6614b6f9b3524de11cb35ea5"
+source = "git+https://github.com/paradigmxyz/uint#f496239f58dcaa11cf275f292f50c971bbccfbad"
 dependencies = [
  "arbitrary",
  "derive_more",
@@ -5416,7 +5416,7 @@ dependencies = [
 [[package]]
 name = "ruint-macro"
 version = "1.0.2"
-source = "git+https://github.com/paradigmxyz/uint#c14ed24f9611546e6614b6f9b3524de11cb35ea5"
+source = "git+https://github.com/paradigmxyz/uint#f496239f58dcaa11cf275f292f50c971bbccfbad"
 
 [[package]]
 name = "rustc-demangle"
