@@ -4,7 +4,7 @@ use jsonrpsee::core::Error as JsonRpseeError;
 use std::{io, io::ErrorKind};
 
 /// Rpc server kind.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ServerKind {
     /// Http.
     Http(SocketAddr),
@@ -59,6 +59,18 @@ impl RpcError {
                 RpcError::RpcError(err.into())
             }
             _ => err.into(),
+        }
+    }
+}
+
+impl PartialEq for RpcError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                RpcError::AddressAlreadyInUse { kind: kind1, error: error1 },
+                RpcError::AddressAlreadyInUse { kind: kind2, error: error2 },
+            ) => kind1 == kind2 && error1.raw_os_error() == error2.raw_os_error(),
+            _ => false,
         }
     }
 }
