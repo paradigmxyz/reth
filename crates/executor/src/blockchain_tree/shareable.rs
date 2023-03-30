@@ -83,7 +83,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
             .tree
             .read()
             .post_state_data(block_hash)
-            .ok_or_else(|| ProviderError::UnknownBlockHash(block_hash))
+            .ok_or(ProviderError::UnknownBlockHash(block_hash))
             .map(Box::new)?;
         Ok(Box::new(post_state))
     }
