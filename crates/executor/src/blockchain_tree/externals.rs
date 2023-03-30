@@ -17,7 +17,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct TreeExternals<DB, C, EF> {
     /// The database, used to commit the canonical chain, or unwind it.
-    pub db: Arc<DB>,
+    pub db: DB,
     /// The consensus engine.
     pub consensus: C,
     /// The executor factory to execute blocks with.
@@ -28,12 +28,7 @@ pub struct TreeExternals<DB, C, EF> {
 
 impl<DB, C, EF> TreeExternals<DB, C, EF> {
     /// Create new tree externals.
-    pub fn new(
-        db: Arc<DB>,
-        consensus: C,
-        executor_factory: EF,
-        chain_spec: Arc<ChainSpec>,
-    ) -> Self {
+    pub fn new(db: DB, consensus: C, executor_factory: EF, chain_spec: Arc<ChainSpec>) -> Self {
         Self { db, consensus, executor_factory, chain_spec }
     }
 }

@@ -123,6 +123,13 @@ impl Discovery {
         self.local_enr.id
     }
 
+    /// Add a node to the discv4 table.
+    pub(crate) fn add_discv4_node(&self, node: NodeRecord) {
+        if let Some(discv4) = &self.discv4 {
+            discv4.add_node(node);
+        }
+    }
+
     /// Processes an incoming [NodeRecord] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
@@ -179,6 +186,7 @@ impl Discovery {
             while let Some(Poll::Ready(Some(update))) =
                 self.dns_discovery_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
+                self.add_discv4_node(update.node_record);
                 self.on_node_record_update(update.node_record, update.fork_id);
             }
 

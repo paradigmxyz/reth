@@ -1,8 +1,20 @@
-//! Table and data structures
+//! Tables and data models.
+//!
+//! # Overview
+//!
+//! This module defines the tables in reth, as well as some table-related abstractions:
+//!
+//! - [`codecs`] integrates different codecs into [`Encode`](crate::abstraction::table::Encode) and
+//!   [`Decode`](crate::abstraction::table::Decode)
+//! - [`models`] defines the values written to tables
+//!
+//! # Database Tour
+//!
+//! TODO(onbjerg): Find appropriate format for this...
 
 pub mod codecs;
 pub mod models;
-pub mod utils;
+pub(crate) mod utils;
 
 /// Declaration of all Database tables.
 use crate::{
@@ -63,7 +75,7 @@ pub const TABLES: [(TableType, &str); 27] = [
 ];
 
 #[macro_export]
-/// Macro to declare all necessary tables.
+/// Macro to declare key value table.
 macro_rules! table {
     ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | $value:ty) => {
         $(#[$docs])+
@@ -93,6 +105,8 @@ macro_rules! table {
     };
 }
 
+#[macro_export]
+/// Macro to declare duplicate key value table.
 macro_rules! dupsort {
     ($(#[$docs:meta])+ ( $table_name:ident ) $key:ty | [$subkey:ty] $value:ty) => {
         table!(

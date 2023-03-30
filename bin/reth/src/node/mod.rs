@@ -12,7 +12,7 @@ use clap::{crate_version, Parser};
 use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{pin_mut, stream::select as stream_select, Stream, StreamExt};
+use futures::{pin_mut, stream::select as stream_select, FutureExt, Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
 use reth_db::{
     database::Database,
@@ -26,21 +26,21 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_executor::{
-    blockchain_tree::{config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree},
+    blockchain_tree::{externals::TreeExternals, BlockchainTree, ShareableBlockchainTree},
     Factory,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
-        bodies::downloader::BodyDownloader,
-        headers::{client::StatusUpdater, downloader::HeaderDownloader},
+        bodies::{client::BodiesClient, downloader::BodyDownloader},
+        headers::{
+            client::{HeadersClient, StatusUpdater},
+            downloader::HeaderDownloader,
+        },
     },
     sync::SyncStateUpdater,
-    test_utils::TestChainEventSubscriptions,
 };
-use reth_network::{
-    error::NetworkError, FetchClient, NetworkConfig, NetworkHandle, NetworkManager,
-};
+use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
@@ -67,7 +67,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
 };
 use tracing::*;
@@ -153,8 +153,7 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let consensus = Arc::new(BeaconConsensus::new(self.chain.clone())) as Arc<dyn Consensus>;
-        info!(target: "reth::cli", "Consensus engine initialized");
+        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
 
         self.init_trusted_nodes(&mut config);
 
@@ -177,19 +176,6 @@ impl Command {
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
         debug!(target: "reth::cli", peer_id = ?network.peer_id(), "Full peer ID");
-
-        let _rpc_server = self
-            .rpc
-            .start_rpc_server(
-                shareable_db.clone(),
-                transaction_pool.clone(),
-                network.clone(),
-                ctx.task_executor.clone(),
-                // TODO use real implementation
-                TestChainEventSubscriptions::default(),
-            )
-            .await?;
-        info!(target: "reth::cli", "Started RPC server");
 
         if self.debug.continuous {
             info!(target: "reth::cli", "Continuous sync mode enabled");
@@ -224,45 +210,79 @@ impl Command {
             }
         };
 
-        let engine_api_handle =
-            self.init_engine_api(Arc::clone(&db), consensus_engine_tx, &ctx.task_executor);
-        info!(target: "reth::cli", "Engine API handler initialized");
-
-        let _auth_server = self
-            .rpc
-            .start_auth_server(
-                shareable_db,
-                transaction_pool,
-                network.clone(),
-                ctx.task_executor.clone(),
-                self.chain.clone(),
-                engine_api_handle,
-            )
-            .await?;
-        info!(target: "reth::cli", "Started Auth server");
-
+        let client = network.fetch_client().await?;
         let (pipeline, events) = self
             .build_networked_pipeline(
                 &mut config,
                 network.clone(),
-                &consensus,
+                client,
+                Arc::clone(&consensus),
                 db.clone(),
                 &ctx.task_executor,
             )
             .await?;
 
-        ctx.task_executor.spawn(events::handle_events(Some(network.clone()), events));
+        ctx.task_executor
+            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
-        let beacon_consensus_engine = self.build_consensus_engine(
+        // configure blockchain tree
+        let tree_externals = TreeExternals::new(
             db.clone(),
-            &ctx.task_executor,
             consensus,
-            pipeline,
-            consensus_engine_rx,
-        )?;
+            Factory::new(self.chain.clone()),
+            Arc::clone(&self.chain),
+        );
+        let blockchain_tree =
+            ShareableBlockchainTree::new(BlockchainTree::new(tree_externals, Default::default())?);
 
-        // Run consensus engine
-        let (rx, tx) = tokio::sync::oneshot::channel();
+        let beacon_consensus_engine = BeaconConsensusEngine::new(
+            Arc::clone(&db),
+            ctx.task_executor.clone(),
+            pipeline,
+            blockchain_tree.clone(),
+            consensus_engine_rx,
+            self.debug.max_block,
+        );
+
+        info!(target: "reth::cli", "Consensus engine initialized");
+
+        let engine_api_handle =
+            self.init_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
+        info!(target: "reth::cli", "Engine API handler initialized");
+
+        let launch_rpc = self
+            .rpc
+            .start_rpc_server(
+                shareable_db.clone(),
+                transaction_pool.clone(),
+                network.clone(),
+                ctx.task_executor.clone(),
+                blockchain_tree,
+            )
+            .inspect(|_| {
+                info!(target: "reth::cli", "Started RPC server");
+            });
+
+        let launch_auth = self
+            .rpc
+            .start_auth_server(
+                shareable_db.clone(),
+                transaction_pool.clone(),
+                network.clone(),
+                ctx.task_executor.clone(),
+                self.chain.clone(),
+                engine_api_handle,
+            )
+            .inspect(|_| {
+                info!(target: "reth::cli", "Started Auth server");
+            });
+
+        // launch servers
+        let (_rpc_server, _auth_server) =
+            futures::future::try_join(launch_rpc, launch_auth).await?;
+
+        // Run consensus engine to completion
+        let (rx, tx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
             let res = beacon_consensus_engine.await;
@@ -282,33 +302,35 @@ impl Command {
         }
     }
 
-    async fn build_networked_pipeline(
+    /// Constructs a [Pipeline] that's wired to the network
+    async fn build_networked_pipeline<Client>(
         &self,
         config: &mut Config,
         network: NetworkHandle,
-        consensus: &Arc<dyn Consensus>,
+        client: Client,
+        consensus: Arc<dyn Consensus>,
         db: Arc<Env<WriteMap>>,
         task_executor: &TaskExecutor,
-    ) -> eyre::Result<(Pipeline<Env<WriteMap>, impl SyncStateUpdater>, impl Stream<Item = NodeEvent>)>
+    ) -> eyre::Result<(Pipeline<Env<WriteMap>, NetworkHandle>, impl Stream<Item = NodeEvent>)>
+    where
+        Client: HeadersClient + BodiesClient + Clone + 'static,
     {
-        let fetch_client = network.fetch_client().await?;
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
         } else if let Some(tip) = self.debug.tip {
-            Some(self.lookup_or_fetch_tip(db.clone(), fetch_client.clone(), tip).await?)
+            Some(self.lookup_or_fetch_tip(db.clone(), &client, tip).await?)
         } else {
             None
         };
 
         // TODO: remove Arc requirement from downloader builders.
         // building network downloaders using the fetch client
-        let fetch_client = Arc::new(fetch_client);
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
-            .build(fetch_client.clone(), consensus.clone())
+            .build(client.clone(), Arc::clone(&consensus))
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::from(config.stages.bodies)
-            .build(fetch_client.clone(), consensus.clone(), db.clone())
+            .build(client, Arc::clone(&consensus), db.clone())
             .into_task_with(task_executor);
 
         let mut pipeline = self
@@ -330,36 +352,10 @@ impl Command {
         Ok((pipeline, events))
     }
 
-    fn build_consensus_engine<DB, U, C>(
-        &self,
-        db: Arc<DB>,
-        task_executor: &TaskExecutor,
-        consensus: C,
-        pipeline: Pipeline<DB, U>,
-        message_rx: UnboundedReceiver<BeaconEngineMessage>,
-    ) -> eyre::Result<BeaconConsensusEngine<DB, TaskExecutor, U, C, Factory>>
-    where
-        DB: Database + Unpin + 'static,
-        U: SyncStateUpdater + Unpin + 'static,
-        C: Consensus + Unpin + 'static,
-    {
-        let executor_factory = Factory::new(self.chain.clone());
-        let tree_externals =
-            TreeExternals::new(db.clone(), consensus, executor_factory, self.chain.clone());
-        let blockchain_tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
-
-        Ok(BeaconConsensusEngine::new(
-            db,
-            task_executor.clone(),
-            pipeline,
-            blockchain_tree,
-            message_rx,
-            self.debug.max_block,
-        ))
-    }
-
     fn load_config(&self) -> eyre::Result<Config> {
-        confy::load_path::<Config>(&self.config).wrap_err("Could not load config")
+        confy::load_path::<Config>(&self.config).wrap_err_with(|| {
+            format!("Could not load config file {}", self.config.as_ref().display())
+        })
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
@@ -457,24 +453,30 @@ impl Command {
     /// If it doesn't exist, download the header and return the block number.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn lookup_or_fetch_tip(
+    async fn lookup_or_fetch_tip<Client>(
         &self,
         db: Arc<Env<WriteMap>>,
-        fetch_client: FetchClient,
+        client: Client,
         tip: H256,
-    ) -> Result<u64, reth_interfaces::Error> {
-        Ok(self.fetch_tip(db, fetch_client, BlockHashOrNumber::Hash(tip)).await?.number)
+    ) -> Result<u64, reth_interfaces::Error>
+    where
+        Client: HeadersClient,
+    {
+        Ok(self.fetch_tip(db, client, BlockHashOrNumber::Hash(tip)).await?.number)
     }
 
     /// Attempt to look up the block with the given number and return the header.
     ///
     /// NOTE: The download is attempted with infinite retries.
-    async fn fetch_tip(
+    async fn fetch_tip<Client>(
         &self,
         db: Arc<Env<WriteMap>>,
-        fetch_client: FetchClient,
+        client: Client,
         tip: BlockHashOrNumber,
-    ) -> Result<SealedHeader, reth_interfaces::Error> {
+    ) -> Result<SealedHeader, reth_interfaces::Error>
+    where
+        Client: HeadersClient,
+    {
         let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
             let number = match tip {
                 BlockHashOrNumber::Hash(hash) => tx.get::<tables::HeaderNumbers>(hash)?,
@@ -491,7 +493,7 @@ impl Command {
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         loop {
-            match get_single_header(fetch_client.clone(), tip).await {
+            match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
                     return Ok(tip_header)
@@ -534,7 +536,7 @@ impl Command {
         header_downloader: H,
         body_downloader: B,
         updater: U,
-        consensus: &Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus>,
         max_block: Option<u64>,
         continuous: bool,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
@@ -579,14 +581,14 @@ impl Command {
             .add_stages(
                 DefaultStages::new(
                     header_mode,
-                    consensus.clone(),
+                    Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
                     updater,
                     factory.clone(),
                 )
                 .set(
-                    TotalDifficultyStage::new(consensus.clone())
+                    TotalDifficultyStage::new(consensus)
                         .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
                 )
                 .set(SenderRecoveryStage {
@@ -636,6 +638,7 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::IpAddr;
 
     #[test]
     fn parse_help_node_command() {
@@ -663,5 +666,17 @@ mod tests {
             Command::try_parse_from(["reth", "--discovery.port", "300", "--port", "99"]).unwrap();
         assert_eq!(cmd.network.discovery.port, Some(300));
         assert_eq!(cmd.network.port, Some(99));
+    }
+
+    #[test]
+    fn parse_metrics_port() {
+        let cmd = Command::try_parse_from(["reth", "--metrics", "9000"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+
+        let cmd = Command::try_parse_from(["reth", "--metrics", ":9000"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+
+        let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9000"]).unwrap();
+        assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
     }
 }

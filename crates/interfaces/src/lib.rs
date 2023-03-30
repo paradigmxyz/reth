@@ -32,6 +32,9 @@ pub mod provider;
 /// Syncing related traits.
 pub mod sync;
 
+/// BlockchainTree related traits.
+pub mod blockchain_tree;
+
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out Consensus, Downloaders and Header Clients.
 pub mod test_utils;

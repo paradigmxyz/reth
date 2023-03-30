@@ -368,15 +368,14 @@ where
 
                     let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
 
-                    let pooled_txs = self.pool.pooled_transactions();
+                    let pooled_txs =
+                        self.pool.pooled_transactions_max(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT);
                     if pooled_txs.is_empty() {
                         // do not send a message if there are no transactions in the pool
                         return
                     }
 
-                    for pooled_tx in
-                        pooled_txs.into_iter().take(NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT)
-                    {
+                    for pooled_tx in pooled_txs.into_iter() {
                         peer.transactions.insert(*pooled_tx.hash());
                         msg_builder.push_pooled(pooled_tx);
                     }
@@ -435,7 +434,6 @@ where
 
                         let pool = self.pool.clone();
 
-                        #[allow(clippy::redundant_async_block)]
                         let import = Box::pin(async move {
                             pool.add_external_transaction(pool_transaction).await
                         });
@@ -453,13 +451,17 @@ where
     }
 
     fn report_bad_message(&self, peer_id: PeerId) {
+        trace!(target: "net::tx", ?peer_id, "Penalizing peer for bad transaction");
         self.network.reputation_change(peer_id, ReputationChangeKind::BadTransactions);
     }
 
+    /// Clear the transaction
     fn on_good_import(&mut self, hash: TxHash) {
         self.transactions_by_peers.remove(&hash);
     }
 
+    /// Penalize the peers that sent the bad transaction
+    #[allow(unused)]
     fn on_bad_import(&mut self, hash: TxHash) {
         if let Some(peers) = self.transactions_by_peers.remove(&hash) {
             for peer_id in peers {
@@ -524,7 +526,14 @@ where
                     this.on_good_import(hash);
                 }
                 Err(err) => {
-                    this.on_bad_import(*err.hash());
+                    if err.is_bad_transaction() {
+                        trace!(target: "net::tx", ?err, "Bad transaction import");
+                        // TODO disabled until properly tested
+                        // this.on_bad_import(*err.hash());
+                        this.on_good_import(*err.hash());
+                    } else {
+                        this.on_good_import(*err.hash());
+                    }
                 }
             }
         }

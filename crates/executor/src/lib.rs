@@ -8,7 +8,6 @@
 //! Reth executor executes transaction in block of data.
 
 pub mod eth_dao_fork;
-pub mod substate;
 
 /// Execution result types.
 pub use reth_provider::post_state;

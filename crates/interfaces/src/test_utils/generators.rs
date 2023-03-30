@@ -260,7 +260,7 @@ pub fn random_storage_entry(key_range: std::ops::Range<u64>) -> StorageEntry {
     StorageEntry { key, value }
 }
 
-/// Generate random Externaly Owned Account (EOA account without contract).
+/// Generate random Externally Owned Account (EOA account without contract).
 pub fn random_eoa_account() -> (Address, Account) {
     let nonce: u64 = rand::random();
     let balance = U256::from(rand::random::<u32>());
@@ -269,7 +269,7 @@ pub fn random_eoa_account() -> (Address, Account) {
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
 
-/// Generate random Externaly Owned Accounts
+/// Generate random Externally Owned Accounts
 pub fn random_eoa_account_range(acc_range: std::ops::Range<u64>) -> Vec<(Address, Account)> {
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {

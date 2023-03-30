@@ -9,23 +9,24 @@ use reth_db::{
 };
 use reth_interfaces::{
     p2p::{
-        download::DownloadClient,
         headers::client::{HeadersClient, HeadersRequest},
         priority::Priority,
     },
     test_utils::generators::random_block_range,
 };
-use reth_network::FetchClient;
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
 use reth_provider::insert_canonical_block;
 use std::collections::BTreeMap;
 use tracing::info;
 
 /// Get a single header from network
-pub async fn get_single_header(
-    client: FetchClient,
+pub async fn get_single_header<Client>(
+    client: Client,
     id: BlockHashOrNumber,
-) -> eyre::Result<SealedHeader> {
+) -> eyre::Result<SealedHeader>
+where
+    Client: HeadersClient,
+{
     let request = HeadersRequest { direction: HeadersDirection::Rising, limit: 1, start: id };
 
     let (peer_id, response) =

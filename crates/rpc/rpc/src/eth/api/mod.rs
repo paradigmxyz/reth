@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use reth_interfaces::Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, ChainInfo, H256, U256, U64};
-use reth_provider::{providers::ChainState, BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_types::{FeeHistoryCache, SyncInfo, SyncStatus};
 use reth_transaction_pool::TransactionPool;
 use std::{num::NonZeroUsize, sync::Arc};
@@ -82,17 +82,17 @@ impl<Client, Pool, Network> EthApi<Client, Pool, Network> {
     }
 
     /// Returns the inner `Client`
-    pub(crate) fn client(&self) -> &Client {
+    pub fn client(&self) -> &Client {
         &self.inner.client
     }
 
     /// Returns the inner `Network`
-    pub(crate) fn network(&self) -> &Network {
+    pub fn network(&self) -> &Network {
         &self.inner.network
     }
 
     /// Returns the inner `Pool`
-    pub(crate) fn pool(&self) -> &Pool {
+    pub fn pool(&self) -> &Pool {
         &self.inner.pool
     }
 }
@@ -108,9 +108,9 @@ where
     }
 
     /// Returns the state at the given [BlockId] enum.
-    pub(crate) fn state_at_block_id(&self, at: BlockId) -> EthResult<ChainState<'_>> {
+    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         match at {
-            BlockId::Hash(hash) => Ok(self.state_at_hash(hash.into()).map(ChainState::boxed)?),
+            BlockId::Hash(hash) => Ok(self.state_at_hash(hash.into())?),
             BlockId::Number(num) => {
                 self.state_at_block_number(num)?.ok_or(EthApiError::UnknownBlockNumber)
             }
@@ -118,24 +118,24 @@ where
     }
 
     /// Returns the state at the given [BlockId] enum or the latest.
-    pub(crate) fn state_at_block_id_or_latest(
+    pub fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> EthResult<ChainState<'_>> {
+    ) -> EthResult<StateProviderBox<'_>> {
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
-            Ok(self.latest_state().map(ChainState::boxed)?)
+            Ok(self.latest_state()?)
         }
     }
 
     /// Returns the state at the given [BlockNumberOrTag] enum
     ///
     /// Returns `None` if no state available.
-    pub(crate) fn state_at_block_number(
+    pub fn state_at_block_number(
         &self,
         num: BlockNumberOrTag,
-    ) -> Result<Option<ChainState<'_>>> {
+    ) -> Result<Option<StateProviderBox<'_>>> {
         if let Some(number) = self.convert_block_number(num)? {
             self.state_at_number(number).map(Some)
         } else {
@@ -144,23 +144,20 @@ where
     }
 
     /// Returns the state at the given block number
-    pub(crate) fn state_at_hash(
-        &self,
-        block_hash: H256,
-    ) -> Result<<Client as StateProviderFactory>::HistorySP<'_>> {
+    pub fn state_at_hash(&self, block_hash: H256) -> Result<StateProviderBox<'_>> {
         self.client().history_by_block_hash(block_hash)
     }
 
     /// Returns the state at the given block number
-    pub(crate) fn state_at_number(&self, block_number: u64) -> Result<ChainState<'_>> {
+    pub fn state_at_number(&self, block_number: u64) -> Result<StateProviderBox<'_>> {
         match self.convert_block_number(BlockNumberOrTag::Latest)? {
-            Some(num) if num == block_number => self.latest_state().map(ChainState::boxed),
-            _ => self.client().history_by_block_number(block_number).map(ChainState::boxed),
+            Some(num) if num == block_number => self.latest_state(),
+            _ => self.client().history_by_block_number(block_number),
         }
     }
 
     /// Returns the _latest_ state
-    pub(crate) fn latest_state(&self) -> Result<<Client as StateProviderFactory>::LatestSP<'_>> {
+    pub fn latest_state(&self) -> Result<StateProviderBox<'_>> {
         self.client().latest()
     }
 }

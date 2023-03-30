@@ -18,8 +18,17 @@ pub struct EthHandlers<Client, Pool, Network, Events> {
 }
 
 /// Additional config values for the eth namespace
-#[derive(Debug, Clone, Eq, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
+
+    /// The maximum number of tracing calls that can be executed in concurrently.
+    pub max_tracing_requests: usize,
+}
+
+impl Default for EthConfig {
+    fn default() -> Self {
+        Self { cache: EthStateCacheConfig::default(), max_tracing_requests: 10 }
+    }
 }

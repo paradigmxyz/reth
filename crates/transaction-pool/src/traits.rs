@@ -79,12 +79,25 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Consumer: P2P
     fn pooled_transaction_hashes(&self) -> Vec<TxHash>;
 
+    /// Returns only the first `max` hashes of transactions in the pool.
+    ///
+    /// Consumer: P2P
+    fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash>;
+
     /// Returns the _full_ transaction objects all transactions in the pool.
     ///
     /// Note: This returns a `Vec` but should guarantee that all transactions are unique.
     ///
     /// Consumer: P2P
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns only the first `max` transactions in the pool.
+    ///
+    /// Consumer: P2P
+    fn pooled_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -98,7 +111,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     /// Also removes all dependent transactions.
     ///
     /// Consumer: Block production
-    fn remove_invalid(
+    fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
