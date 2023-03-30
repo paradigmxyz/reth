@@ -6,7 +6,7 @@ use reth_db::{
         tx::Tx,
         Env, EnvKind, WriteMap, RW,
     },
-    models::{AccountBeforeTx, BlockNumHash, StoredBlockMeta},
+    models::{AccountBeforeTx, StoredBlockMeta},
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
