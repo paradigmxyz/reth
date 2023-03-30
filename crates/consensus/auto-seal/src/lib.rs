@@ -5,11 +5,11 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! A [Consensus](reth_interfaces::consensus::Consensus) implementation for local testing purposes
+//! A [Consensus] implementation for local testing purposes
 //! that automatically seals blocks.
 //!
-//! The Mining task polls a [], and will return a list of transactions that are ready to be
-//! mined.
+//! The Mining task polls a [MiningMode], and will return a list of transactions that are ready to
+//! be mined.
 //!
 //! These downloaders poll the miner, assemble the block, and return transactions that are ready to
 //! be mined.
