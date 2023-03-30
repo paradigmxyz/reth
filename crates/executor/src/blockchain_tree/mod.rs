@@ -2,13 +2,21 @@
 use chain::{BlockChainId, Chain, ForkBlock};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    blockchain_tree::BlockStatus, consensus::Consensus, executor::Error as ExecError, Error,
+    blockchain_tree::BlockStatus,
+    consensus::Consensus,
+    events::{NewBlockNotifications, NewBlockNotificationsSender},
+    executor::Error as ExecError,
+    Error,
 };
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders, U256,
+    BlockHash, BlockNumHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, U256,
 };
 use reth_provider::{post_state::PostState, ExecutorFactory, HeaderProvider, Transaction};
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 pub mod block_indices;
 use block_indices::BlockIndices;
@@ -80,6 +88,8 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     externals: TreeExternals<DB, C, EF>,
     /// Tree configuration
     config: BlockchainTreeConfig,
+    /// Unbounded channel for sending new block notifications.
+    new_block_notication_sender: NewBlockNotificationsSender,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -118,6 +128,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 last_canonical_hashes.last().cloned().unwrap_or_default()
             };
 
+        // size of the broadcast is double of max reorg depth because at max reorg depth we can have
+        // send at least N block at the time.
+        let (new_block_notication_sender, _) =
+            tokio::sync::broadcast::channel(2 * max_reorg_depth as usize);
+
         Ok(Self {
             externals,
             block_chain_id_generator: 0,
@@ -127,6 +142,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 BTreeMap::from_iter(last_canonical_hashes.into_iter()),
             ),
             config,
+            new_block_notication_sender,
         })
     }
 
@@ -549,6 +565,8 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // update canonical index
         self.block_indices.canonicalize_blocks(new_canon_chain.blocks());
 
+        let headers: Vec<Arc<SealedHeader>> =
+            new_canon_chain.blocks().iter().map(|(_, b)| Arc::new(b.header.clone())).collect();
         // if joins to the tip
         if new_canon_chain.fork_block_hash() == old_tip.hash {
             // append to database
@@ -565,11 +583,25 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
             let old_canon_chain = self.revert_canonical(canon_fork.number)?;
             // commit new canonical chain.
             self.commit_canonical(new_canon_chain)?;
+
             // insert old canon chain
             self.insert_chain(old_canon_chain);
         }
 
+        // Broadcast new canonical blocks.
+        headers.into_iter().for_each(|header| {
+            // ignore if receiver is dropped.
+            let _ = self.new_block_notication_sender.send(header);
+        });
+
         Ok(())
+    }
+
+    /// Subscribe to new blocks events.
+    ///
+    /// Note: Only canonical blocks are send.
+    pub fn subscribe_new_blocks(&self) -> NewBlockNotifications {
+        self.new_block_notication_sender.subscribe()
     }
 
     /// Canonicalize the given chain and commit it to the database.
@@ -726,8 +758,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn sanity_path() {
+    #[tokio::test]
+    async fn sanity_path() {
         let data = BlockChainTestData::default();
         let (mut block1, exec1) = data.blocks[0].clone();
         block1.number = 11;
@@ -743,6 +775,7 @@ mod tests {
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3);
         let mut tree = BlockchainTree::new(externals, config).expect("failed to create tree");
+        let mut new_block_notification = tree.subscribe_new_blocks();
 
         // genesis block 10 is already canonical
         assert_eq!(tree.make_canonical(&H256::zero()), Ok(()));
@@ -789,8 +822,13 @@ mod tests {
 
         // make block1 canonical
         assert_eq!(tree.make_canonical(&block1.hash()), Ok(()));
+        // check notification
+        assert_eq!(new_block_notification.try_recv(), Ok(Arc::new(block1.header.clone())));
+
         // make block2 canonical
         assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
+        // check notification.
+        assert_eq!(new_block_notification.try_recv(), Ok(Arc::new(block2.header.clone())));
 
         // Trie state:
         // b2 (canonical block)
@@ -847,6 +885,9 @@ mod tests {
 
         // make b2a canonical
         assert_eq!(tree.make_canonical(&block2a_hash), Ok(()));
+        // check notification.
+        assert_eq!(new_block_notification.try_recv(), Ok(Arc::new(block2a.header.clone())));
+
         // Trie state:
         // b2a   b2 (side chain)
         // |   /
@@ -866,6 +907,9 @@ mod tests {
             .assert(&tree);
 
         assert_eq!(tree.make_canonical(&block1a_hash), Ok(()));
+        // check notification.
+        assert_eq!(new_block_notification.try_recv(), Ok(Arc::new(block1a.header.clone())));
+
         // Trie state:
         //       b2a   b2 (side chain)
         //       |   /
@@ -890,6 +934,11 @@ mod tests {
 
         // make b2 canonical
         assert_eq!(tree.make_canonical(&block2.hash()), Ok(()));
+
+        // check notification.
+        assert_eq!(new_block_notification.try_recv(), Ok(Arc::new(block1.header.clone())));
+        assert_eq!(new_block_notification.try_recv(), Ok(Arc::new(block2.header.clone())));
+
         // Trie state:
         // b2   b2a (side chain)
         // |   /
@@ -947,6 +996,9 @@ mod tests {
 
         // commit b2a
         assert_eq!(tree.make_canonical(&block2.hash), Ok(()));
+        // check notification.
+        assert_eq!(new_block_notification.try_recv(), Ok(Arc::new(block2.header.clone())));
+
         // Trie state:
         // b2   b2a (side chain)
         // |   /
