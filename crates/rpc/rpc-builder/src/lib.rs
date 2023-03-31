@@ -54,8 +54,9 @@
 //! ```
 
 use constants::*;
+use error::{RpcError, ServerKind};
 use jsonrpsee::{
-    core::{server::rpc_module::Methods, Error as RpcError},
+    core::server::rpc_module::Methods,
     server::{IdProvider, Server, ServerHandle},
     RpcModule,
 };
@@ -88,6 +89,9 @@ pub mod auth;
 
 /// Cors utilities.
 mod cors;
+
+/// Rpc error utilities.
+pub mod error;
 
 /// Eth utils
 mod eth;
@@ -865,11 +869,17 @@ impl RpcServerConfig {
                 let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
                 let middleware = tower::ServiceBuilder::new().layer(cors);
                 let http_server =
-                    builder.set_middleware(middleware).build(http_socket_addr).await?;
+                    builder.set_middleware(middleware).build(http_socket_addr).await.map_err(
+                        |err| {
+                            RpcError::from_jsonrpsee_error(err, ServerKind::Http(http_socket_addr))
+                        },
+                    )?;
                 server.http_local_addr = http_server.local_addr().ok();
                 server.http = Some(WsHttpServer::WithCors(http_server));
             } else {
-                let http_server = builder.build(http_socket_addr).await?;
+                let http_server = builder.build(http_socket_addr).await.map_err(|err| {
+                    RpcError::from_jsonrpsee_error(err, ServerKind::Http(http_socket_addr))
+                })?;
                 server.http_local_addr = http_server.local_addr().ok();
                 server.http = Some(WsHttpServer::Plain(http_server));
             }
@@ -884,11 +894,16 @@ impl RpcServerConfig {
             if let Some(cors) = self.ws_cors_domains.as_deref().map(cors::create_cors_layer) {
                 let cors = cors.map_err(|err| RpcError::Custom(err.to_string()))?;
                 let middleware = tower::ServiceBuilder::new().layer(cors);
-                let ws_server = builder.set_middleware(middleware).build(ws_socket_addr).await?;
+                let ws_server =
+                    builder.set_middleware(middleware).build(ws_socket_addr).await.map_err(
+                        |err| RpcError::from_jsonrpsee_error(err, ServerKind::WS(ws_socket_addr)),
+                    )?;
                 server.http_local_addr = ws_server.local_addr().ok();
                 server.ws = Some(WsHttpServer::WithCors(ws_server));
             } else {
-                let ws_server = builder.build(ws_socket_addr).await?;
+                let ws_server = builder.build(ws_socket_addr).await.map_err(|err| {
+                    RpcError::from_jsonrpsee_error(err, ServerKind::WS(ws_socket_addr))
+                })?;
                 server.ws_local_addr = ws_server.local_addr().ok();
                 server.ws = Some(WsHttpServer::Plain(ws_server));
             }
