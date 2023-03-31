@@ -56,16 +56,17 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
-        let mut cursor_block_meta = tx.cursor_read::<tables::BlockMeta>()?;
-        let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut block_meta_cursor = tx.cursor_read::<tables::BlockMeta>()?;
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
 
         // Walk over block bodies within a specified range.
-        let bodies = cursor_block_meta.walk_range(start_block..=end_block)?;
+        let bodies = block_meta_cursor.walk_range(start_block..=end_block)?;
 
         // Collect transactions for each body
         let mut tx_list = vec![];
         for block_meta_entry in bodies {
             let (_, block_meta) = block_meta_entry?;
+            //println!("block meta {block_meta:?}");
             let transactions = tx_cursor.walk_range(block_meta.tx_num_range())?;
 
             for tx_entry in transactions {
@@ -78,17 +79,35 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
 
         let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
-
+        println!("TX_LIST:{tx_list:?}");
         // If the last inserted element in the database is smaller than the first in our set, then
         // we can just append into the DB. This probably only ever happens during sync, on
         // the first table insertion.
         let append = tx_list
             .first()
             .zip(txhash_cursor.last()?)
-            .map(|((first, _), (last, _))| &last < first)
+            .map(|((first, _), (last, _))| {
+                println!("last:{last}, first:{first}");
+                &last < first
+            })
             .unwrap_or_default();
+        println!("APPEND:{append}");
+        /*
+        // If the last inserted element in the database is equal or bigger than the first
+        // in our set, then we need to insert inside the DB. If it is smaller then last
+        // element in the DB, we can append to the DB.
+        // Append probably only ever happens during sync, on the first table insertion.
+        let insert = tx_list
+            .first()
+            .zip(txhash_cursor.last()?)
+            .map(|((first, _), (last, _))| first <= &last)
+            .unwrap_or_default();
+        // if txhash_cursor.last() is None we will insert. `zip` would return none if any item is none.
+        // if it is some and
+         */
 
         for (tx_hash, id) in tx_list {
+            println!("INSERTING {} {}", tx_hash, id);
             if append {
                 txhash_cursor.append(tx_hash, id)?;
             } else {
@@ -160,7 +179,7 @@ mod tests {
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
         let non_empty_block_number = stage_progress + 10;
-        let blocks = (stage_progress..input.previous_stage_progress() + 1)
+        let blocks = (stage_progress..=input.previous_stage_progress())
             .map(|number| {
                 random_block(number, None, Some((number == non_empty_block_number) as u8), None)
             })
