@@ -6,6 +6,15 @@ use reth_rpc_builder::{
 };
 use std::io;
 
+fn is_addr_in_use_kind(err: RpcError, kind: ServerKind) -> bool {
+    match err {
+        RpcError::AddressAlreadyInUse { kind: k, error } => {
+            k == kind && error.kind() == io::ErrorKind::AddrInUse
+        }
+        _ => false,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_http_addr_in_use() {
     let handle = launch_http(vec![RethRpcModule::Admin]).await;
@@ -15,11 +24,7 @@ async fn test_http_addr_in_use() {
     let result = server
         .start_server(RpcServerConfig::http(Default::default()).with_http_address(addr))
         .await;
-    let expected = RpcError::AddressAlreadyInUse {
-        kind: ServerKind::Http(addr),
-        error: io::Error::from(io::ErrorKind::AddrInUse),
-    };
-    assert_eq!(result.unwrap_err(), expected);
+    assert!(is_addr_in_use_kind(result.unwrap_err(), ServerKind::Http(addr)));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -30,9 +35,5 @@ async fn test_ws_addr_in_use() {
     let server = builder.build(TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]));
     let result =
         server.start_server(RpcServerConfig::ws(Default::default()).with_ws_address(addr)).await;
-    let expected = RpcError::AddressAlreadyInUse {
-        kind: ServerKind::WS(addr),
-        error: io::Error::from(io::ErrorKind::AddrInUse),
-    };
-    assert_eq!(result.unwrap_err(), expected);
+    assert!(is_addr_in_use_kind(result.unwrap_err(), ServerKind::WS(addr)));
 }

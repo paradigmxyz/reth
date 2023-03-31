@@ -62,15 +62,3 @@ impl RpcError {
         }
     }
 }
-
-impl PartialEq for RpcError {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                RpcError::AddressAlreadyInUse { kind: kind1, error: error1 },
-                RpcError::AddressAlreadyInUse { kind: kind2, error: error2 },
-            ) => kind1 == kind2 && error1.raw_os_error() == error2.raw_os_error(),
-            _ => false,
-        }
-    }
-}
