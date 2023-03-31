@@ -230,6 +230,14 @@ mod tests {
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
 
+        // returning nothing
+        let mut walker = cursor.walk_range(1..1).unwrap();
+        assert_eq!(walker.next(), None);
+
+        // returning nothing if range is empty
+        let mut walker = cursor.walk_range(2..1).unwrap();
+        assert_eq!(walker.next(), None);
+
         // [1, 3)
         let mut walker = cursor.walk_range(1..3).unwrap();
         assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));

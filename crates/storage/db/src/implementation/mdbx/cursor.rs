@@ -94,12 +94,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         Self: Sized,
     {
         let start = match range.start_bound().cloned() {
-            Bound::Included(key) => {
-                if matches!(range.end_bound().cloned(), Bound::Included(end_key) | Bound::Excluded(end_key) if end_key < key) {
-                    return Err(Error::Read(2))
-                }
-                self.inner.set_range(key.encode().as_ref())
-            }
+            Bound::Included(key) => self.inner.set_range(key.encode().as_ref()),
             Bound::Excluded(_key) => {
                 unreachable!("Rust doesn't allow for Bound::Excluded in starting bounds");
             }
@@ -108,7 +103,7 @@ impl<'tx, K: TransactionKind, T: Table> DbCursorRO<'tx, T> for Cursor<'tx, K, T>
         .map_err(|e| Error::Read(e.into()))?
         .map(decoder::<T>);
 
-        Ok(RangeWalker::new(self, start, range.start_bound().cloned(), range.end_bound().cloned()))
+        Ok(RangeWalker::new(self, start, range.end_bound().cloned()))
     }
 
     fn walk_back<'cursor>(
