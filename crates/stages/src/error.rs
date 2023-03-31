@@ -72,7 +72,8 @@ impl StageError {
                 StageError::StageProgress(_) |
                 StageError::ExecutionError { .. } |
                 StageError::ChannelClosed |
-                StageError::Fatal(_)
+                StageError::Fatal(_) |
+                StageError::Transaction(_)
         )
     }
 }
