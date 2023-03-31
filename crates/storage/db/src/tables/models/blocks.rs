@@ -15,12 +15,21 @@ pub type NumTransactions = u64;
 #[main_codec]
 pub struct StoredBlockMeta {
     /// The number of the first transaction in this block
+    ///
+    /// Note: If the block is empty, this is the number of the first transaction
+    /// in the next non-empty block.
     pub first_tx_num: TxNumber,
-    /// The id of first transition in this block.
+    /// The id of the first transition in this block.
+    ///
+    /// Note: If the block is empty, this is the id of the first transition
+    /// in the next non-empty block.
     pub first_transition_id: TransitionId,
     /// The total number of transactions in the block
+    ///
+    /// Note: Number of transitions is equal to number of transactions with
+    /// additional transition for block change if block has block reward or withdrawal.
     pub tx_count: NumTransactions,
-    /// Flags if additional transition changeset of the withdrawal or uncle rewards.
+    /// Flags if there is additional transition changeset of the withdrawal or block reward.
     pub has_block_change: bool,
 }
 
@@ -32,7 +41,7 @@ impl StoredBlockMeta {
 
     /// Return the range of transition ids for this block.
     pub fn transition_range(&self) -> Range<TransitionId> {
-        self.first_transition_id..self.first_transition_id + self.tx_count
+        self.transition_at_block()..self.transition_after_block()
     }
 
     /// Return transition id of the state after block executed.
@@ -105,9 +114,8 @@ pub type HeaderHash = H256;
 
 #[cfg(test)]
 mod test {
-    use crate::table::{Compress, Decompress};
-
     use super::*;
+    use crate::table::{Compress, Decompress};
 
     #[test]
     fn test_ommer() {
@@ -117,5 +125,30 @@ mod test {
         assert!(
             ommer.clone() == StoredBlockOmmers::decompress::<Vec<_>>(ommer.compress()).unwrap()
         );
+    }
+
+    #[test]
+    fn block_meta_indices() {
+        let first_tx_num = 10;
+        let first_transition_id = 14;
+        let tx_count = 6;
+        let has_block_change = true;
+        let mut block_meta =
+            StoredBlockMeta { first_tx_num, first_transition_id, tx_count, has_block_change };
+
+        assert_eq!(block_meta.first_tx_num(), first_tx_num);
+        assert_eq!(block_meta.last_tx_num(), first_tx_num + tx_count - 1);
+        assert_eq!(block_meta.next_tx_num(), first_tx_num + tx_count);
+        assert_eq!(block_meta.tx_count(), tx_count);
+        assert!(block_meta.has_block_change());
+        assert_eq!(block_meta.transition_at_block(), first_transition_id);
+        assert_eq!(block_meta.transition_after_block(), first_transition_id + tx_count + 1);
+        assert_eq!(block_meta.tx_num_range(), first_tx_num..first_tx_num + tx_count);
+        assert_eq!(
+            block_meta.transition_range(),
+            first_transition_id..first_transition_id + tx_count + 1
+        );
+        block_meta.has_block_change = false;
+        assert_eq!(block_meta.transition_after_block(), first_transition_id + tx_count);
     }
 }

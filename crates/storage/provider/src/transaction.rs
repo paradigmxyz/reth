@@ -855,12 +855,13 @@ where
         if block_transition.is_empty() {
             return Ok(Vec::new())
         }
-        // get block transitions
-        let first_block_number =
-            block_transition.first().expect("Check for empty is already done").0;
 
         // get block transition of parent block.
-        let from = self.get_block_transition(first_block_number.saturating_sub(1))?;
+        let from = block_transition
+            .first()
+            .expect("Check for empty is already done")
+            .1
+            .transition_at_block();
         let to = block_transition
             .last()
             .expect("Check for empty is already done")

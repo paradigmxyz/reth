@@ -64,12 +64,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
             .ok_or(ProviderError::BlockMeta { number: prev_block_num })?
     };
     let tx_count = block.body.len() as u64;
-    let mut tx_num = parent_block_meta.next_tx_num();
-
-    if !block.body.is_empty() {
-        // -1 is here as current_tx_id points to the next transaction.
-        tx.put::<tables::TransactionBlock>(tx_num + block.body.len() as u64 - 1, block.number)?;
-    }
+    let mut next_tx_num = parent_block_meta.next_tx_num();
 
     let senders_len = senders.as_ref().map(|s| s.len());
     let tx_iter = if Some(block.body.len()) == senders_len {
@@ -87,10 +82,10 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     for (transaction, sender) in tx_iter {
         let hash = transaction.hash();
-        tx.put::<tables::TxSenders>(tx_num, sender)?;
-        tx.put::<tables::Transactions>(tx_num, transaction)?;
-        tx.put::<tables::TxHashNumber>(hash, tx_num)?;
-        tx_num += 1;
+        tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+        tx.put::<tables::Transactions>(next_tx_num, transaction)?;
+        tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+        next_tx_num += 1;
     }
 
     let mut has_withdrawals = false;
@@ -113,6 +108,10 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         has_block_change,
     };
     tx.put::<tables::BlockMeta>(block_number, block_meta.clone())?;
+
+    if block_meta.is_empty() {
+        tx.put::<tables::TransactionBlock>(block_meta.last_tx_num(), block_number)?;
+    }
 
     Ok(block_meta)
 }

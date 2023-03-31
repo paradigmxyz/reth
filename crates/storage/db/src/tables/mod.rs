@@ -144,16 +144,10 @@ table!(
 );
 
 table!(
-    /// Stores block meta inteformation that contains indexes of transaction and transitions.
+    /// Stores block meta inteformation that contains indexes of transaction and transitions,
+    /// number of transactions and if block has a block change (block reward or withdrawals).
     ///
-    /// TODO refactor comment:
-    /// Stores the mapping of block number to state transition id.
-    /// The block transition marks the final state at the end of the block.
-    /// Increment the transition if the block contains an addition block reward.
-    /// If the block does not have a reward and transaction, the transition will be the same as the
-    /// transition at the last transaction of this block.
-    ///
-    /// Stores the mapping of transaction number to state transition id.
+    /// More information about block meta can be found in the [`StoredBlockMeta`] struct.
     ( BlockMeta ) BlockNumber | StoredBlockMeta
 );
 
