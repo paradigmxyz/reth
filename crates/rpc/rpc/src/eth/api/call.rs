@@ -80,6 +80,11 @@ where
         // See <htps://github.com/paradigmxyz/reth/issues/1959>
         cfg.disable_eip3607 = true;
 
+        // The basefee should be ignored for eth_createAccessList
+        // See:
+        // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
+        cfg.disable_base_fee = true;
+
         // keep a copy of gas related request values
         let request_gas = request.gas;
         let request_gas_price = request.gas_price;
@@ -247,14 +252,14 @@ where
 
         let mut env = build_call_evm_env(cfg, block, request.clone())?;
 
-        // we want to disable this in eth_call, since this is common practice used by other node
-        // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+        // we want to disable this in eth_createAccessList, since this is common practice used by
+        // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         env.cfg.disable_block_gas_limit = true;
 
         // The basefee should be ignored for eth_createAccessList
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-        env.block.basefee = U256::ZERO;
+        env.cfg.disable_base_fee = true;
 
         let mut db = SubState::new(State::new(state));
 

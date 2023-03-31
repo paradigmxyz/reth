@@ -85,6 +85,11 @@ where
     // See <https://github.com/paradigmxyz/reth/issues/1959>
     cfg.disable_eip3607 = true;
 
+    // The basefee should be ignored for eth_call
+    // See:
+    // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
+    cfg.disable_base_fee = true;
+
     let request_gas = request.gas;
 
     let mut env = build_call_evm_env(cfg, block, request)?;
@@ -93,11 +98,6 @@ where
     if let Some(state_overrides) = state_overrides {
         apply_state_overrides(state_overrides, db)?;
     }
-
-    // The basefee should be ignored for eth_call
-    // See:
-    // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-    env.block.basefee = U256::ZERO;
 
     if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
         trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap");
