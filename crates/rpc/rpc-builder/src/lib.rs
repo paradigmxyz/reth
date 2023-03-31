@@ -661,6 +661,7 @@ where
                 self.pool.clone(),
                 self.events.clone(),
                 self.network.clone(),
+                cache.clone(),
             );
 
             let eth = EthHandlers { api, cache, filter, pubsub };
