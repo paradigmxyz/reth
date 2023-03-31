@@ -120,7 +120,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Fetch transactions, execute them and generate results
         let mut state = PostState::default();
         for block_number in start_block..=end_block {
-            let (block, td) = Self::read_block_with_senders(&tx, block_number)?;
+            let (block, td) = Self::read_block_with_senders(tx, block_number)?;
 
             // Configure the executor to use the current state.
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
