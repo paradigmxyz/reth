@@ -230,14 +230,6 @@ mod tests {
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
 
-        // returning nothing
-        let mut walker = cursor.walk_range(1..1).unwrap();
-        assert_eq!(walker.next(), None);
-
-        // returning nothing if range is empty
-        let mut walker = cursor.walk_range(2..1).unwrap();
-        assert_eq!(walker.next(), None);
-
         // [1, 3)
         let mut walker = cursor.walk_range(1..3).unwrap();
         assert_eq!(walker.next(), Some(Ok((1, H256::zero()))));
@@ -304,12 +296,16 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
 
         // start bound greater than end bound
-        let res = cursor.walk_range(3..1);
-        assert!(matches!(res, Err(Error::Read(2))));
+        let mut res = cursor.walk_range(3..1).unwrap();
+        assert_eq!(res.next(), None);
 
         // start bound greater than end bound
-        let res = cursor.walk_range(15..=2);
-        assert!(matches!(res, Err(Error::Read(2))));
+        let mut res = cursor.walk_range(15..=2).unwrap();
+        assert_eq!(res.next(), None);
+
+        // returning nothing
+        let mut walker = cursor.walk_range(1..1).unwrap();
+        assert_eq!(walker.next(), None);
     }
 
     #[test]
