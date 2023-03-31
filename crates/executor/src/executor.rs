@@ -381,6 +381,10 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<(PostState, u64), Error> {
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((PostState::default(), 0))
+        }
         let senders = self.recover_senders(&block.body, senders)?;
 
         self.init_env(&block.header, total_difficulty);
@@ -439,11 +443,8 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<PostState, Error> {
-        let (mut post_state, cumulative_gas_used) = if block.body.is_empty() {
-            (PostState::default(), 0)
-        } else {
-            self.execute_transactions(block, total_difficulty, senders)?
-        };
+        let (mut post_state, cumulative_gas_used) =
+            self.execute_transactions(block, total_difficulty, senders)?;
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
