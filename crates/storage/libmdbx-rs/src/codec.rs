@@ -1,4 +1,4 @@
-use crate::{error::mdbx_result, Error, TransactionKind};
+use crate::{Error, TransactionKind};
 use derive_more::*;
 use std::{borrow::Cow, slice};
 
@@ -29,14 +29,26 @@ impl<'tx> TableObject<'tx> for Cow<'tx, [u8]> {
 
     #[doc(hidden)]
     unsafe fn decode_val<K: TransactionKind>(
-        txn: *const ffi::MDBX_txn,
+        _txn: *const ffi::MDBX_txn,
         data_val: &ffi::MDBX_val,
     ) -> Result<Self, Error> {
-        let is_dirty = (!K::ONLY_CLEAN) && mdbx_result(ffi::mdbx_is_dirty(txn, data_val.iov_base))?;
-
         let s = slice::from_raw_parts(data_val.iov_base as *const u8, data_val.iov_len);
 
-        Ok(if is_dirty { Cow::Owned(s.to_vec()) } else { Cow::Borrowed(s) })
+        #[cfg(feature = "return-borrowed")]
+        {
+            Ok(Cow::Borrowed(s))
+        }
+
+        #[cfg(not(feature = "return-borrowed"))]
+        {
+            let is_dirty = (!K::ONLY_CLEAN) &&
+                crate::error::mdbx_result::mdbx_result(ffi::mdbx_is_dirty(
+                    _txn,
+                    data_val.iov_base,
+                ))?;
+
+            Ok(if is_dirty { Cow::Owned(s.to_vec()) } else { Cow::Borrowed(s) })
+        }
     }
 }
 
