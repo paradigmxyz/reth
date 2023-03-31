@@ -4,7 +4,7 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use reth_primitives::{bytes::Bytes, TransitionId, H160, H256};
+use reth_primitives::{TransitionId, H160, H256};
 
 use super::ShardedKey;
 
@@ -44,15 +44,14 @@ impl Encode for StorageShardedKey {
 }
 
 impl Decode for StorageShardedKey {
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        let value: Bytes = value.into();
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        let value = value.as_ref();
         let tx_num_index = value.len() - 8;
 
-        let highest_tx_number = u64::from_be_bytes(
-            value.as_ref()[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?,
-        );
-        let address = H160::decode(value.slice(..20))?;
-        let storage_key = H256::decode(value.slice(20..52))?;
+        let highest_tx_number =
+            u64::from_be_bytes(value[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?);
+        let address = H160::decode(&value[..20])?;
+        let storage_key = H256::decode(&value[20..52])?;
 
         Ok(Self { address, sharded_key: ShardedKey::new(storage_key, highest_tx_number) })
     }

@@ -23,6 +23,10 @@ ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
 
 lifetimed-bytes = { version = "0.1", optional = true }
 
+[features]
+default = []
+return-borrowed = []
+
 [dev-dependencies]
 pprof = { version = "0.11", features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion = "0.4"

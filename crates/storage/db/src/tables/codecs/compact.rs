@@ -23,8 +23,8 @@ macro_rules! impl_compression_for_compact {
 
             impl Decompress for $name
             {
-                fn decompress<B: Into<bytes::Bytes>>(value: B) -> Result<$name, Error> {
-                    let value = value.into();
+                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, Error> {
+                    let value = value.as_ref();
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)
                 }

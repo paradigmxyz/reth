@@ -4,7 +4,7 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use reth_primitives::{bytes::Bytes, TransitionId};
+use reth_primitives::TransitionId;
 
 /// Number of indices in one shard.
 pub const NUM_OF_INDICES_IN_SHARD: usize = 100;
@@ -48,14 +48,14 @@ impl<T> Decode for ShardedKey<T>
 where
     T: Decode,
 {
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        let value: Bytes = value.into();
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        let value = value.as_ref();
+
         let tx_num_index = value.len() - 8;
 
-        let highest_tx_number = u64::from_be_bytes(
-            value.as_ref()[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?,
-        );
-        let key = T::decode(value.slice(..tx_num_index))?;
+        let highest_tx_number =
+            u64::from_be_bytes(value[tx_num_index..].try_into().map_err(|_| Error::DecodeError)?);
+        let key = T::decode(&value[..tx_num_index])?;
 
         Ok(ShardedKey::new(key, highest_tx_number))
     }
