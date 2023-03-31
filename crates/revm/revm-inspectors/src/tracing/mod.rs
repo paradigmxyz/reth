@@ -1,9 +1,6 @@
-use crate::{
-    stack::MaybeOwnedInspector,
-    tracing::{
-        types::{CallKind, LogCallOrder, RawLog},
-        utils::{gas_used, get_create_address},
-    },
+use crate::tracing::{
+    types::{CallKind, LogCallOrder, RawLog},
+    utils::{gas_used, get_create_address},
 };
 pub use arena::CallTraceArena;
 use reth_primitives::{bytes::Bytes, Address, H256, U256};
@@ -46,10 +43,7 @@ pub struct TracingInspector {
     /// Tracks the return value of the last call
     last_call_return_data: Option<Bytes>,
     /// The gas inspector used to track remaining gas.
-    ///
-    /// This is either owned by this inspector directly or part of a stack of inspectors, in which
-    /// case all delegated functions are no-ops.
-    gas_inspector: MaybeOwnedInspector<GasInspector>,
+    gas_inspector: GasInspector,
 }
 
 // === impl TracingInspector ===
@@ -75,20 +69,6 @@ impl TracingInspector {
     /// Consumes the Inspector and returns a [GethTraceBuilder].
     pub fn into_geth_builder(self) -> GethTraceBuilder {
         GethTraceBuilder::new(self.traces.arena, self.config)
-    }
-
-    /// Configures a [GasInspector]
-    ///
-    /// If this [TracingInspector] is part of a stack [InspectorStack](crate::stack::InspectorStack)
-    /// which already uses a [GasInspector], it can be reused as [MaybeOwnedInspector::Stacked] in
-    /// which case the `gas_inspector`'s usage will be a no-op within the context of this
-    /// [TracingInspector].
-    pub fn with_stacked_gas_inspector(
-        mut self,
-        gas_inspector: MaybeOwnedInspector<GasInspector>,
-    ) -> Self {
-        self.gas_inspector = gas_inspector;
-        self
     }
 
     /// Returns the last trace [CallTrace] index from the stack.
@@ -201,7 +181,7 @@ impl TracingInspector {
             stack,
             memory,
             memory_size: interp.memory.len(),
-            gas: self.gas_inspector.as_ref().gas_remaining(),
+            gas: self.gas_inspector.gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
             // fields will be populated end of call
@@ -251,7 +231,7 @@ impl TracingInspector {
                 };
             }
 
-            step.gas_cost = step.gas - self.gas_inspector.as_ref().gas_remaining();
+            step.gas_cost = step.gas - self.gas_inspector.gas_remaining();
         }
 
         // set the status
