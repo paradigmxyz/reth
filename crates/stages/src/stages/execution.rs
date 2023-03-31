@@ -16,6 +16,7 @@ use reth_primitives::{Address, Block, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
+use std::time::Instant;
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
@@ -182,7 +183,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // put execution results to database
         let first_transition_id = tx.get_block_transition(last_block)?;
+
+        let start = Instant::now();
+        trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
         state.write_to_db(&**tx, first_transition_id)?;
+        trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
