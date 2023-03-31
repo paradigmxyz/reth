@@ -1,8 +1,8 @@
 //! Async caching support for eth RPC
 
-use futures::StreamExt;
+use futures::{future::Either, StreamExt};
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{Block, Receipt, H256};
+use reth_primitives::{Block, Receipt, TransactionSigned, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv};
@@ -24,13 +24,21 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 /// The type that can send the response to a requested [Block]
 type BlockResponseSender = oneshot::Sender<Result<Option<Block>>>;
 
+/// The type that can send the response to a requested [Block]
+type BlockTransactionsResponseSender = oneshot::Sender<Result<Option<Vec<TransactionSigned>>>>;
+
 /// The type that can send the response to the requested receipts of a block.
 type ReceiptsResponseSender = oneshot::Sender<Result<Option<Vec<Receipt>>>>;
 
 /// The type that can send the response to a requested env
 type EnvResponseSender = oneshot::Sender<Result<(CfgEnv, BlockEnv)>>;
 
-type BlockLruCache<L> = MultiConsumerLruCache<H256, Block, L, BlockResponseSender>;
+type BlockLruCache<L> = MultiConsumerLruCache<
+    H256,
+    Block,
+    L,
+    Either<BlockResponseSender, BlockTransactionsResponseSender>,
+>;
 
 type ReceiptsLruCache<L> = MultiConsumerLruCache<H256, Vec<Receipt>, L, ReceiptsResponseSender>;
 
@@ -141,6 +149,18 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
+    /// Requests the transactions of the [Block]
+    ///
+    /// Returns `None` if the block does not exist.
+    pub(crate) async fn get_block_transactions(
+        &self,
+        block_hash: H256,
+    ) -> Result<Option<Vec<TransactionSigned>>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetBlockTransactions { block_hash, response_tx });
+        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
+
     /// Requests the [Receipt] for the block hash
     ///
     /// Returns `None` if the block was not found.
@@ -231,7 +251,25 @@ where
                             }
 
                             // block is not in the cache, request it if this is the first consumer
-                            if this.full_block_cache.queue(block_hash, response_tx) {
+                            if this.full_block_cache.queue(block_hash, Either::Left(response_tx)) {
+                                let client = this.client.clone();
+                                let action_tx = this.action_tx.clone();
+                                this.action_task_spawner.spawn(Box::pin(async move {
+                                    let res = client.block_by_hash(block_hash);
+                                    let _ = action_tx
+                                        .send(CacheAction::BlockResult { block_hash, res });
+                                }));
+                            }
+                        }
+                        CacheAction::GetBlockTransactions { block_hash, response_tx } => {
+                            // check if block is cached
+                            if let Some(block) = this.full_block_cache.cache.get(&block_hash) {
+                                let _ = response_tx.send(Ok(Some(block.body.clone())));
+                                continue
+                            }
+
+                            // block is not in the cache, request it if this is the first consumer
+                            if this.full_block_cache.queue(block_hash, Either::Right(response_tx)) {
                                 let client = this.client.clone();
                                 let action_tx = this.action_tx.clone();
                                 this.action_task_spawner.spawn(Box::pin(async move {
@@ -290,7 +328,16 @@ where
                             if let Some(queued) = this.full_block_cache.queued.remove(&block_hash) {
                                 // send the response to queued senders
                                 for tx in queued {
-                                    let _ = tx.send(res.clone());
+                                    match tx {
+                                        Either::Left(block_tx) => {
+                                            let _ = block_tx.send(res.clone());
+                                        }
+                                        Either::Right(transaction_tx) => {
+                                            let _ = transaction_tx.send(res.clone().map(
+                                                |maybe_block| maybe_block.map(|block| block.body),
+                                            ));
+                                        }
+                                    }
                                 }
                             }
 
@@ -381,6 +428,7 @@ where
 /// All message variants sent through the channel
 enum CacheAction {
     GetBlock { block_hash: H256, response_tx: BlockResponseSender },
+    GetBlockTransactions { block_hash: H256, response_tx: BlockTransactionsResponseSender },
     GetEnv { block_hash: H256, response_tx: EnvResponseSender },
     GetReceipts { block_hash: H256, response_tx: ReceiptsResponseSender },
     BlockResult { block_hash: H256, res: Result<Option<Block>> },
