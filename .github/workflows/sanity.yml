@@ -1,17 +1,11 @@
 # Runs a series of sanity checks for crate consumers.
 #
 # Currently the only check is that the version constraints in each `Cargo.toml` do not lead to a breaking dependency.
-#on:
-#  workflow_dispatch: {}
-#  # Once per day at 00:00 UTC
-#  schedule:
-#    - cron: '0 0 * * *'
-
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch: {}
+  # Once per day at 00:00 UTC
+  schedule:
+    - cron: '0 0 * * *'
 
 env:
   RUSTFLAGS: -D warnings
