@@ -88,9 +88,8 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             .zip(txhash_cursor.last()?)
             .map(|((first, _), (last, _))| first <= &last)
             .unwrap_or_default();
-        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is none.
-        // if it is some and if first is smaller than last, we will do append.
-        
+        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is
+        // none. if it is some and if first is smaller than last, we will do append.
 
         for (tx_hash, id) in tx_list {
             if insert {

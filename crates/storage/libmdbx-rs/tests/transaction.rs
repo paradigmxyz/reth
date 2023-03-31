@@ -233,7 +233,7 @@ fn test_concurrent_readers_single_writer() {
 
     let txn = env.begin_rw_txn().unwrap();
     let db = txn.open_db(None).unwrap();
-    
+
     barrier.wait();
     txn.put(&db, key, val, WriteFlags::empty()).unwrap();
     txn.commit().unwrap();
