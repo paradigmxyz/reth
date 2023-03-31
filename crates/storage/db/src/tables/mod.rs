@@ -144,7 +144,7 @@ table!(
 );
 
 table!(
-    /// Stores block meta inteformation that contains indexes of transaction and transitions,
+    /// Stores block meta intformation that contains indexes of transaction and transitions,
     /// number of transactions and if block has a block change (block reward or withdrawals).
     ///
     /// More information about block meta can be found in the [`StoredBlockMeta`] struct.

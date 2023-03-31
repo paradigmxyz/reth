@@ -56,20 +56,17 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
-        let mut cursor_bodies = tx.cursor_read::<tables::BlockMeta>()?;
+        let mut cursor_block_meta = tx.cursor_read::<tables::BlockMeta>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
 
         // Walk over block bodies within a specified range.
-        let bodies = cursor_bodies.walk(Some(start_block))?.take_while(|entry| {
-            entry.as_ref().map(|(num, _)| *num <= end_block).unwrap_or_default()
-        });
+        let bodies = cursor_block_meta.walk_range(start_block..=end_block)?;
 
         // Collect transactions for each body
         let mut tx_list = vec![];
-        for body_entry in bodies {
-            let (_, body) = body_entry?;
-            let transactions =
-                tx_cursor.walk(Some(body.first_tx_num()))?.take(body.tx_count() as usize);
+        for block_meta_entry in bodies {
+            let (_, block_meta) = block_meta_entry?;
+            let transactions = tx_cursor.walk_range(block_meta.tx_num_range())?;
 
             for tx_entry in transactions {
                 let (id, transaction) = tx_entry?;
