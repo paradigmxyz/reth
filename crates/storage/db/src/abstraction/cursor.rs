@@ -239,8 +239,6 @@ pub struct RangeWalker<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> {
     cursor: &'cursor mut CURSOR,
     /// `(key, value)` where to start the walk.
     start: IterPairResult<T>,
-    /// `key` where to start the walk.
-    start_key: Bound<T::Key>,
     /// `key` where to stop the walk.
     end_key: Bound<T::Key>,
     /// flag whether is ended
@@ -258,12 +256,9 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> std::iter::Iterator
             return None
         }
 
-        let start = self.start.take();
-        if start.is_some() && matches!(self.start_key, Bound::Included(_) | Bound::Unbounded) {
-            return start
-        }
+        let next_item = self.start.take().or_else(|| self.cursor.next().transpose());
 
-        match self.cursor.next().transpose() {
+        match next_item {
             Some(Ok((key, value))) => match &self.end_key {
                 Bound::Included(end_key) if &key <= end_key => Some(Ok((key, value))),
                 Bound::Excluded(end_key) if &key < end_key => Some(Ok((key, value))),
@@ -288,17 +283,19 @@ impl<'cursor, 'tx, T: Table, CURSOR: DbCursorRO<'tx, T>> RangeWalker<'cursor, 't
     pub fn new(
         cursor: &'cursor mut CURSOR,
         start: IterPairResult<T>,
-        start_key: Bound<T::Key>,
         end_key: Bound<T::Key>,
     ) -> Self {
-        Self {
-            cursor,
-            start,
-            start_key,
-            end_key,
-            is_done: false,
-            _tx_phantom: std::marker::PhantomData,
-        }
+        // mark done if range is empty.
+        let is_done = match start {
+            Some(Ok((ref start_key, _))) => match &end_key {
+                Bound::Included(end_key) if start_key > end_key => true,
+                Bound::Excluded(end_key) if start_key >= end_key => true,
+                _ => false,
+            },
+            None => true,
+            _ => false,
+        };
+        Self { cursor, start, end_key, is_done, _tx_phantom: std::marker::PhantomData }
     }
 }
 

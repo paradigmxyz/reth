@@ -1621,7 +1621,7 @@ mod test {
         tx.insert_hashes(
             block1.number,
             exec_res1.transitions_count() as TransitionId,
-            exec_res2.transitions_count() as TransitionId,
+            (exec_res1.transitions_count() + exec_res2.transitions_count()) as TransitionId,
             2,
             block2.hash,
             block2.state_root,

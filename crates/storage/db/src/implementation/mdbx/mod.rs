@@ -296,12 +296,16 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
 
         // start bound greater than end bound
-        let res = cursor.walk_range(3..1);
-        assert!(matches!(res, Err(Error::Read(2))));
+        let mut res = cursor.walk_range(3..1).unwrap();
+        assert_eq!(res.next(), None);
 
         // start bound greater than end bound
-        let res = cursor.walk_range(15..=2);
-        assert!(matches!(res, Err(Error::Read(2))));
+        let mut res = cursor.walk_range(15..=2).unwrap();
+        assert_eq!(res.next(), None);
+
+        // returning nothing
+        let mut walker = cursor.walk_range(1..1).unwrap();
+        assert_eq!(walker.next(), None);
     }
 
     #[test]
