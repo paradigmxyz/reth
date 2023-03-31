@@ -191,7 +191,7 @@ where
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
         );
 
-        let mut last_highest_gas_limit = highest_gas_limit;
+        let _last_highest_gas_limit = highest_gas_limit;
 
         trace!(target: "rpc::eth::estimate", ?env, ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
 
@@ -219,16 +219,6 @@ where
                 ExecutionResult::Success { .. } => {
                     // cap the highest gas limit with succeeding gas limit
                     highest_gas_limit = mid_gas_limit;
-                    // if last two successful estimations only vary by 10%, we consider this to be
-                    // sufficiently accurate
-                    const ACCURACY: u128 = 10;
-                    if (last_highest_gas_limit - highest_gas_limit) as u128 * ACCURACY /
-                        (last_highest_gas_limit as u128) <
-                        1u128
-                    {
-                        return Ok(U256::from(highest_gas_limit))
-                    }
-                    last_highest_gas_limit = highest_gas_limit;
                 }
                 ExecutionResult::Revert { .. } => {
                     // increase the lowest gas limit
