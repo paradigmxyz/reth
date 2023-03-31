@@ -186,6 +186,19 @@ where
         self
     }
 
+    /// Disables the given stage if the given closure returns true.
+    ///
+    /// See [Self::disable]
+    pub fn disable_if<F>(self, stage_id: StageId, f: F) -> Self
+    where
+        F: FnOnce() -> bool,
+    {
+        if f() {
+            return self.disable(stage_id)
+        }
+        self
+    }
+
     /// Consumes the builder and returns the contained [`Stage`]s in the order specified.
     pub fn build(mut self) -> Vec<Box<dyn Stage<DB>>> {
         let mut stages = Vec::new();

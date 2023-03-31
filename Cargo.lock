@@ -4449,6 +4449,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-util",
  "proptest",
+ "reth-auto-seal-consensus",
  "reth-beacon-consensus",
  "reth-db",
  "reth-discv4",
@@ -4477,6 +4478,23 @@ dependencies = [
  "tokio",
  "tracing",
  "tui",
+]
+
+[[package]]
+name = "reth-auto-seal-consensus"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "reth-beacon-consensus",
+ "reth-executor",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-transaction-pool",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

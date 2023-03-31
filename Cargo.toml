@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "bin/reth",
+    "crates/consensus/auto-seal",
     "crates/consensus/beacon",
     "crates/consensus/common",
     "crates/executor",

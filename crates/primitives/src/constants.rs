@@ -38,6 +38,15 @@ pub const KECCAK_EMPTY: H256 =
 pub const EMPTY_OMMER_ROOT: H256 =
     H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
 
-/// Withdrawals root of empty withdrawals set.
-pub const EMPTY_WITHDRAWALS: H256 =
+/// hash of an empty set `keccak256(rlp([]))`
+const EMPTY_SET_HASH: H256 =
     H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
+
+/// Transactions root of empty receipts set.
+pub const EMPTY_RECEIPTS: H256 = EMPTY_SET_HASH;
+
+/// Transactions root of empty transactions set.
+pub const EMPTY_TRANSACTIONS: H256 = EMPTY_SET_HASH;
+
+/// Withdrawals root of empty withdrawals set.
+pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;

@@ -13,6 +13,7 @@ use events::NodeEvent;
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, FutureExt, Stream, StreamExt};
+use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
 use reth_db::{
     database::Database,
@@ -33,10 +34,7 @@ use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
-        headers::{
-            client::{HeadersClient, StatusUpdater},
-            downloader::HeaderDownloader,
-        },
+        headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
     sync::SyncStateUpdater,
 };
@@ -70,6 +68,9 @@ use tokio::sync::{
     oneshot, watch,
 };
 use tracing::*;
+
+use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
 
@@ -121,6 +122,10 @@ pub struct Command {
 
     #[clap(flatten)]
     debug: DebugArgs,
+
+    /// Automatically mine blocks for new transactions
+    #[arg(long)]
+    auto_mine: bool,
 }
 
 impl Command {
@@ -146,7 +151,12 @@ impl Command {
 
         init_genesis(db.clone(), self.chain.clone())?;
 
-        let consensus: Arc<dyn Consensus> = Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn Consensus> = if self.auto_mine {
+            debug!(target: "reth::cli", "Using auto seal");
+            Arc::new(AutoSealConsensus::new(Arc::clone(&self.chain)))
+        } else {
+            Arc::new(BeaconConsensus::new(Arc::clone(&self.chain)))
+        };
 
         self.init_trusted_nodes(&mut config);
 
@@ -198,20 +208,55 @@ impl Command {
             }
         };
 
-        let client = network.fetch_client().await?;
-        let (pipeline, events) = self
-            .build_networked_pipeline(
-                &mut config,
-                network.clone(),
-                client,
-                Arc::clone(&consensus),
-                db.clone(),
-                &ctx.task_executor,
+        let pipeline = if self.auto_mine {
+            let (_, client, task) = AutoSealBuilder::new(
+                Arc::clone(&self.chain),
+                shareable_db.clone(),
+                transaction_pool.clone(),
+                consensus_engine_tx.clone(),
             )
-            .await?;
+            .build();
 
-        ctx.task_executor
-            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            ctx.task_executor.spawn(Box::pin(task));
+
+            let (pipeline, events) = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client,
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            ctx.task_executor.spawn_critical(
+                "events task",
+                events::handle_events(Some(network.clone()), events),
+            );
+
+            pipeline
+        } else {
+            let client = network.fetch_client().await?;
+            let (pipeline, events) = self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client,
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            ctx.task_executor.spawn_critical(
+                "events task",
+                events::handle_events(Some(network.clone()), events),
+            );
+
+            pipeline
+        };
 
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
@@ -311,7 +356,6 @@ impl Command {
             None
         };
 
-        // TODO: remove Arc requirement from downloader builders.
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::from(config.stages.headers)
             .build(client.clone(), Arc::clone(&consensus))
@@ -581,7 +625,9 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold)),
+                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
+                .disable_if(MERKLE_UNWIND, || self.auto_mine)
+                .disable_if(MERKLE_EXECUTION, || self.auto_mine),
             )
             .build();
 
