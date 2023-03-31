@@ -8,7 +8,7 @@ use crate::{
     Error,
 };
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{bytes::Bytes, BlockHash, BlockNumber, Header, TxNumber, Withdrawal, H256};
+use reth_primitives::{BlockHash, BlockNumber, Header, TxNumber, Withdrawal, H256};
 use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.
@@ -136,12 +136,11 @@ impl Encode for BlockNumHash {
 }
 
 impl Decode for BlockNumHash {
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        let value: Bytes = value.into();
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        let value = value.as_ref();
 
-        let num =
-            u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);
-        let hash = H256::from_slice(&value.slice(8..));
+        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| Error::DecodeError)?);
+        let hash = H256::from_slice(&value[8..]);
 
         Ok(BlockNumHash((num, hash)))
     }
@@ -169,7 +168,7 @@ mod test {
         let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
-        let decoded: BlockNumHash = Decode::decode(encoded.to_vec()).unwrap();
+        let decoded: BlockNumHash = Decode::decode(encoded).unwrap();
         assert_eq!(decoded, key);
     }
 

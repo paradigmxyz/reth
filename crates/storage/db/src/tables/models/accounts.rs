@@ -6,10 +6,7 @@ use crate::{
     Error,
 };
 use reth_codecs::Compact;
-use reth_primitives::{
-    bytes::{BufMut, Bytes},
-    Account, Address, TransitionId,
-};
+use reth_primitives::{bytes::BufMut, Account, Address, TransitionId};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].
@@ -89,12 +86,10 @@ impl Encode for TransitionIdAddress {
 }
 
 impl Decode for TransitionIdAddress {
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error> {
-        let value: Bytes = value.into();
-
-        let num =
-            u64::from_be_bytes(value.as_ref()[..8].try_into().map_err(|_| Error::DecodeError)?);
-        let hash = Address::from_slice(&value.slice(8..));
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        let value = value.as_ref();
+        let num = u64::from_be_bytes(value[..8].try_into().map_err(|_| Error::DecodeError)?);
+        let hash = Address::from_slice(&value[8..]);
 
         Ok(TransitionIdAddress((num, hash)))
     }
@@ -121,7 +116,7 @@ mod test {
         let encoded = Encode::encode(key);
         assert_eq!(encoded, bytes);
 
-        let decoded: TransitionIdAddress = Decode::decode(encoded.to_vec()).unwrap();
+        let decoded: TransitionIdAddress = Decode::decode(encoded).unwrap();
         assert_eq!(decoded, key);
     }
 
