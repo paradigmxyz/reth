@@ -93,9 +93,9 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         for (tx_hash, id) in tx_list {
             if insert {
-                txhash_cursor.append(tx_hash, id)?;
-            } else {
                 txhash_cursor.insert(tx_hash, id)?;
+            } else {
+                txhash_cursor.append(tx_hash, id)?;
             }
         }
 
