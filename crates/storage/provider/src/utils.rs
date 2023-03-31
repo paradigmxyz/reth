@@ -109,7 +109,7 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     };
     tx.put::<tables::BlockMeta>(block_number, block_meta.clone())?;
 
-    if block_meta.is_empty() {
+    if !block_meta.is_empty() {
         tx.put::<tables::TransactionBlock>(block_meta.last_tx_num(), block_number)?;
     }
 
