@@ -11,8 +11,6 @@ description = "Implementation of Engine API"
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-provider = { path = "../../storage/provider" }
-reth-executor = { path = "../../executor" }
-reth-revm = { path = "../../revm" }
 reth-rpc-types = { path = "../rpc-types" }
 reth-beacon-consensus = { path = "../../consensus/beacon" }
 
@@ -20,9 +18,6 @@ reth-beacon-consensus = { path = "../../consensus/beacon" }
 futures = "0.3"
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"
-
-# tracing
-tracing = "0.1"
 
 # misc
 thiserror = "1.0.37"
