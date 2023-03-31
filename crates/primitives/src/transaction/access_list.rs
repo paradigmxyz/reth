@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Accesses outside the list are possible, but become more expensive.
 #[main_codec(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
+#[serde(rename_all = "camelCase")]
 pub struct AccessListItem {
     /// Account addresses that would be loaded at the start of execution
     pub address: Address,
