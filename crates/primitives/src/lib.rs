@@ -39,8 +39,8 @@ pub mod proofs;
 pub use account::{Account, Bytecode};
 pub use bits::H512;
 pub use block::{
-    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, SealedBlock,
-    SealedBlockWithSenders,
+    Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
+    SealedBlock, SealedBlockWithSenders,
 };
 pub use bloom::Bloom;
 pub use chain::{
