@@ -1,5 +1,6 @@
+use crate::error::{RpcError, ServerKind};
 pub use jsonrpsee::server::ServerBuilder;
-use jsonrpsee::{core::Error as RpcError, server::ServerHandle, RpcModule};
+use jsonrpsee::server::{RpcModule, ServerHandle};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
@@ -74,7 +75,11 @@ where
         tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
     // By default, both http and ws are enabled.
-    let server = ServerBuilder::new().set_middleware(middleware).build(socket_addr).await?;
+    let server = ServerBuilder::new()
+        .set_middleware(middleware)
+        .build(socket_addr)
+        .await
+        .map_err(|err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)))?;
 
-    server.start(module)
+    Ok(server.start(module)?)
 }
