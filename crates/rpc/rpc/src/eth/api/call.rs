@@ -2,7 +2,7 @@
 
 use crate::{
     eth::{
-        error::{EthResult, InvalidTransactionError, RevertError},
+        error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
         revm_utils::{
             build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
             prepare_call_env, transact,
@@ -141,8 +141,39 @@ where
         let gas_limit = std::cmp::min(U256::from(env.tx.gas_limit), highest_gas_limit);
         env.block.gas_limit = gas_limit;
 
+        trace!(target: "rpc::eth::estimate", ?env, "Starting gas estimation");
+
         // execute the call without writing to db
-        let (res, mut env) = transact(&mut db, env)?;
+        let ethres = transact(&mut db, env.clone());
+
+        // Exceptional case: init used too much gas, we need to increase the gas limit and try
+        // again
+        if let Err(EthApiError::InvalidTransaction(InvalidTransactionError::GasTooHigh)) = ethres {
+            // if price or limit was included in the request then we can execute the request
+            // again with the block's gas limit to check if revert is gas related or not
+            if request_gas.is_some() || request_gas_price.is_some() {
+                let req_gas_limit = env.tx.gas_limit;
+                env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
+                let (res, _) = transact(&mut db, env)?;
+                return match res.result {
+                    ExecutionResult::Success { .. } => {
+                        // transaction succeeded by manually increasing the gas limit to
+                        // highest, which means the caller lacks funds to pay for the tx
+                        Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit))
+                            .into())
+                    }
+                    ExecutionResult::Revert { output, .. } => {
+                        // reverted again after bumping the limit
+                        Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
+                    }
+                    ExecutionResult::Halt { reason, .. } => {
+                        Err(InvalidTransactionError::EvmHalt(reason).into())
+                    }
+                }
+            }
+        }
+
+        let (res, mut env) = ethres?;
         match res.result {
             ExecutionResult::Success { .. } => {
                 // succeeded
@@ -196,11 +227,28 @@ where
 
         let mut last_highest_gas_limit = highest_gas_limit;
 
+        trace!(target: "rpc::eth::estimate", ?env, ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
+
         // binary search
         while (highest_gas_limit - lowest_gas_limit) > 1 {
             let mut env = env.clone();
             env.tx.gas_limit = mid_gas_limit;
-            let (res, _) = transact(&mut db, env)?;
+            let ethres = transact(&mut db, env);
+
+            // Exceptional case: init used too much gas, we need to increase the gas limit and try
+            // again
+            if let Err(EthApiError::InvalidTransaction(InvalidTransactionError::GasTooHigh)) =
+                ethres
+            {
+                // increase the lowest gas limit
+                lowest_gas_limit = mid_gas_limit;
+
+                // new midpoint
+                mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
+                continue
+            }
+
+            let (res, _) = ethres?;
             match res.result {
                 ExecutionResult::Success { .. } => {
                     // cap the highest gas limit with succeeding gas limit
