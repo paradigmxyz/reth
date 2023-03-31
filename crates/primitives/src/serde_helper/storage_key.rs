@@ -1,5 +1,6 @@
 use crate::{H256, U256};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 
 /// A storage key type that can be serialized to and from a hex string up to 40 characters. Used
 /// for `eth_getStorageAt` and `eth_getProof` RPCs.
@@ -30,7 +31,7 @@ impl From<JsonStorageKey> for String {
         let mut hex = String::with_capacity(2 + bytes.len() * 2);
         hex.push_str("0x");
         for byte in bytes {
-            hex.push_str(&format!("{:02x}", byte));
+            write!(hex, "{:02x}", byte).unwrap();
         }
         hex
     }
