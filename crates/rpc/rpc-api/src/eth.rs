@@ -1,6 +1,7 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, H256, H64, U256, U64,
+    serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
+    H256, H64, U256, U64,
 };
 use reth_rpc_types::{
     state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
@@ -116,7 +117,7 @@ pub trait EthApi {
     async fn storage_at(
         &self,
         address: Address,
-        index: U256,
+        index: JsonStorageKey,
         block_number: Option<BlockId>,
     ) -> Result<H256>;
 
@@ -244,7 +245,7 @@ pub trait EthApi {
     async fn get_proof(
         &self,
         address: Address,
-        keys: Vec<H256>,
+        keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse>;
 }
