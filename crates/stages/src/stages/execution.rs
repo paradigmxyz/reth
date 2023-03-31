@@ -16,10 +16,7 @@ use reth_primitives::{Address, Block, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+use std::time::Instant;
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
