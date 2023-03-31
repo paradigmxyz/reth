@@ -5,7 +5,7 @@ use crate::{
         error::{EthApiError, EthResult, InvalidTransactionError, RevertError},
         revm_utils::{
             build_call_evm_env, cap_tx_gas_limit_with_caller_allowance, get_precompiles, inspect,
-            prepare_call_env, transact,
+            transact,
         },
         EthTransactions,
     },
@@ -18,11 +18,11 @@ use reth_revm::{
     access_list::AccessListInspector,
     database::{State, SubState},
 };
-use reth_rpc_types::{state::StateOverride, CallRequest};
+use reth_rpc_types::CallRequest;
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, ResultAndState, TransactTo},
+    primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
 };
 use tracing::trace;
 
@@ -36,22 +36,6 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: Send + Sync + 'static,
 {
-    /// Executes the call request at the given [BlockId]
-    pub(crate) async fn transact_call_at(
-        &self,
-        request: CallRequest,
-        at: BlockId,
-        state_overrides: Option<StateOverride>,
-    ) -> EthResult<(ResultAndState, Env)> {
-        let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let state = self.state_at(at)?;
-        let mut db = SubState::new(State::new(state));
-
-        let env = prepare_call_env(cfg, block_env, request, &mut db, state_overrides)?;
-        trace!(target: "rpc::eth::call", ?env, "Executing call");
-        transact(&mut db, env)
-    }
-
     /// Estimate gas needed for execution of the `request` at the [BlockId].
     pub(crate) async fn estimate_gas_at(
         &self,
