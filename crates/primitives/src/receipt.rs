@@ -26,6 +26,12 @@ impl Receipt {
     pub fn bloom_slow(&self) -> Bloom {
         logs_bloom(self.logs.iter())
     }
+
+    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloom] container
+    /// type.
+    pub fn with_bloom(self) -> ReceiptWithBloom {
+        self.into()
+    }
 }
 
 impl From<Receipt> for ReceiptWithBloom {
