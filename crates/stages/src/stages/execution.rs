@@ -190,6 +190,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     }
 }
 
+/// The size of the stack used by the executor.
+///
+/// Ensure the size is aligned to 8 as this is usually more efficient.
+///
+/// Currently 64 megabytes.
+const BIG_STACK_SIZE: usize = 64 * 1024 * 1024;
+
 #[async_trait::async_trait]
 impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     /// Return the id of the stage
@@ -203,14 +210,18 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
-        // revm can take more then default allocated stack space. For this case we are using
-        // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
-        // we can see to set more accurate stack size or even optimize revm to move more data to
-        // heap.
+        // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
+        // space than what is allocated by default.
+        //
+        // To make sure we do not panic in this case, spawn a thread with a big stack allocated.
+        //
+        // A fix in revm is pending to give more insight into the stack size, which we can use later
+        // to optimize revm or move data to the heap.
+        //
+        // See https://github.com/bluealloy/revm/issues/305
         std::thread::scope(|scope| {
             let handle = std::thread::Builder::new()
-                .stack_size(50 * 1024 * 1024)
+                .stack_size(BIG_STACK_SIZE)
                 .spawn_scoped(scope, || {
                     // execute and store output to results
                     self.execute_inner(tx, input)
