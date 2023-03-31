@@ -6,13 +6,14 @@
 ))]
 
 //! Reth executor executes transaction in block of data.
-
 pub mod eth_dao_fork;
 
 /// Execution result types.
 pub use reth_provider::post_state;
 
 pub mod blockchain_tree;
+
+pub mod cache;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out executor and executor factory

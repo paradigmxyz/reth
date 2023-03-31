@@ -21,6 +21,10 @@ reth-db = { path = "../storage/db" }
 reth-codecs = { path = "../storage/codecs" }
 reth-provider = { path = "../storage/provider" }
 reth-metrics-derive = { path = "../metrics/metrics-derive" }
+# TODO: Apparently this is not the generic executor, but revm(?), so we need to shuffle things around.
+# Either this is the generic executor, or this is revm. If this is revm, it should be in the reth-revm crate.
+# If this is the generic one, then executor abstractions should be here.
+reth-executor = { path = "../executor" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
@@ -47,7 +51,6 @@ reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
-reth-executor = { path = "../executor" }
 reth-rlp = { path = "../rlp" }
 reth-revm = { path = "../revm" }
 

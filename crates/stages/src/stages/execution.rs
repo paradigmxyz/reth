@@ -10,12 +10,17 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_executor::cache::{CachedStateProvider, ExecutionCache};
+use reth_interfaces::provider::ProviderError;
 use reth_metrics_derive::Metrics;
 use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
-use std::time::Instant;
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
@@ -27,6 +32,24 @@ pub const EXECUTION: StageId = StageId("Execution");
 pub struct ExecutionStageMetrics {
     /// The total amount of gas processed (in millions)
     mgas_processed_total: Counter,
+    /// Execution account cache hits
+    account_cache_hits: Counter,
+    /// Execution account cache misses
+    account_cache_misses: Counter,
+    /// Execution account cache evictions
+    account_cache_evictions: Counter,
+    /// Execution account cache hits
+    storage_cache_hits: Counter,
+    /// Execution account cache misses
+    storage_cache_misses: Counter,
+    /// Execution storage cache evictions
+    storage_cache_evictions: Counter,
+    /// Execution account cache hits
+    bytecode_cache_hits: Counter,
+    /// Execution account cache misses
+    bytecode_cache_misses: Counter,
+    /// Execution account cache evictions
+    bytecode_cache_evictions: Counter,
 }
 
 /// The execution stage executes all transactions and
@@ -65,23 +88,38 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     executor_factory: EF,
     /// Commit threshold
     commit_threshold: u64,
+    /// TODO
+    execution_cache: Arc<Mutex<ExecutionCache>>,
 }
+
+// TODO: Move
+// according to w-tinylfu paper, 8c samples = 4 bits overhead per entry
+static ACCOUNT_CACHE_SIZE: usize = 1024 * 512; // 524288 * (address 160 bits + nonce 64 bits + bytecode hash 256 bits + balance 256 bits + overhead
+                                               // 4 bits) = 48 megabyte max
+static STORAGE_CACHE_SIZE: usize = 1024 * 128; // 131072, assume 12 slots (512 bits) + address (160 bits) + overhead (4 bits) = 103 megabyte max
+static BYTECODE_CACHE_SIZE: usize = 1024 * 16; // 16384 (* 24 kb + 4 bits = 49 megabyte max)
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
     pub fn new(executor_factory: EF, commit_threshold: u64) -> Self {
-        Self { metrics: ExecutionStageMetrics::default(), executor_factory, commit_threshold }
+        Self {
+            metrics: ExecutionStageMetrics::default(),
+            executor_factory,
+            commit_threshold,
+            // TODO: Figure out nice size
+            execution_cache: Arc::new(Mutex::new(ExecutionCache::new(
+                ACCOUNT_CACHE_SIZE,
+                STORAGE_CACHE_SIZE,
+                BYTECODE_CACHE_SIZE,
+            ))),
+        }
     }
 
     /// Create an execution stage with the provided  executor factory.
     ///
     /// The commit threshold will be set to 10_000.
     pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self {
-            metrics: ExecutionStageMetrics::default(),
-            executor_factory,
-            commit_threshold: 10_000,
-        }
+        Self::new(executor_factory, 10_000)
     }
 
     // TODO: This should be in the block provider trait once we consolidate
@@ -116,7 +154,10 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let last_block = input.stage_progress.unwrap_or_default();
 
         // Create state provider with cached state
-        let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
+        let mut executor = self.executor_factory.with_sp(CachedStateProvider::new(
+            Arc::clone(&self.execution_cache),
+            LatestStateProviderRef::new(&**tx),
+        ));
 
         // Fetch transactions, execute them and generate results
         let mut state = PostState::default();
@@ -133,6 +174,21 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 self.metrics
                     .mgas_processed_total
                     .increment(last_receipt.cumulative_gas_used / 1_000_000);
+            }
+            {
+                trace!(target: "sync::stages::execution", "Updating cache");
+                let mut cache =
+                    self.execution_cache.lock().expect("Could not lock execution cache");
+                cache.update_cache(block_state.accounts(), block_state.storage());
+                self.metrics.account_cache_hits.absolute(cache.account_hits);
+                self.metrics.account_cache_misses.absolute(cache.account_misses);
+                self.metrics.account_cache_evictions.absolute(cache.account_evictions);
+                self.metrics.storage_cache_hits.absolute(cache.storage_hits);
+                self.metrics.storage_cache_misses.absolute(cache.storage_misses);
+                self.metrics.storage_cache_evictions.absolute(cache.storage_evictions);
+                self.metrics.bytecode_cache_hits.absolute(cache.bytecode_hits);
+                self.metrics.bytecode_cache_misses.absolute(cache.bytecode_misses);
+                self.metrics.bytecode_cache_evictions.absolute(cache.bytecode_evictions);
             }
             state.extend(block_state);
         }

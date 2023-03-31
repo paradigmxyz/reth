@@ -453,6 +453,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bloomfilter"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8129c0ab340c1b0caf6dbc587e814d04ba811e336dcf8fc268c04e047428ebb0"
+dependencies = [
+ "bit-vec",
+ "getrandom 0.2.8",
+ "siphasher",
+]
+
+[[package]]
 name = "brotli"
 version = "3.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -875,6 +886,16 @@ name = "core-foundation-sys"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5827cebf4670468b8772dd191856768aedcb1b0278a04f989f7766351917b9dc"
+
+[[package]]
+name = "count-min-sketch"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca319fe30d7b68949da20d78b612215708af87157d49665a4545dadcc20fecc7"
+dependencies = [
+ "rand 0.8.5",
+ "siphasher",
+]
 
 [[package]]
 name = "cpp_demangle"
@@ -4739,6 +4760,7 @@ dependencies = [
  "tokio",
  "tracing",
  "triehash",
+ "wtinylfu",
 ]
 
 [[package]]
@@ -6008,6 +6030,12 @@ dependencies = [
  "thiserror",
  "time",
 ]
+
+[[package]]
+name = "siphasher"
+version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bd3e3206899af3f8b12af284fafc038cc1dc2b41d1b89dd17297221c5d225de"
 
 [[package]]
 name = "sketches-ddsketch"
@@ -7401,6 +7429,17 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "wtinylfu"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a29ed0b6a3e68d442f44afd05c5d443ba131101484d08ce300609a76d122e45f"
+dependencies = [
+ "bloomfilter",
+ "count-min-sketch",
+ "lru 0.7.8",
 ]
 
 [[package]]
