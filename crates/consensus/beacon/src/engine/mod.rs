@@ -1,14 +1,13 @@
 use futures::{Future, FutureExt, StreamExt};
 use reth_db::{database::Database, tables, transaction::DbTx};
-use reth_executor::blockchain_tree::{BlockStatus, BlockchainTree};
 use reth_interfaces::{
-    consensus::{Consensus, ForkchoiceState},
+    blockchain_tree::{BlockStatus, BlockchainTreeEngine},
+    consensus::ForkchoiceState,
     executor::Error as ExecutorError,
     sync::SyncStateUpdater,
     Error,
 };
 use reth_primitives::{BlockHash, BlockNumber, SealedBlock, H256};
-use reth_provider::ExecutorFactory;
 use reth_rpc_types::engine::{
     ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadStatusEnum,
 };
@@ -40,7 +39,7 @@ pub use pipeline_state::PipelineState;
 /// The consensus engine is idle until it receives the first
 /// [BeaconEngineMessage::ForkchoiceUpdated] message from the CL which would initiate the sync. At
 /// first, the consensus engine would run the [Pipeline] until the latest known block hash.
-/// Afterwards, it would attempt to create/restore the [BlockchainTree] from the blocks
+/// Afterwards, it would attempt to create/restore the [`BlockchainTreeEngine`] from the blocks
 /// that are currently available. In case the restoration is successful, the consensus engine would
 /// run in a live sync mode, which mean it would solemnly rely on the messages from Engine API to
 /// construct the chain forward.
@@ -49,13 +48,12 @@ pub use pipeline_state::PipelineState;
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, TS, U, C, EF>
+pub struct BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database,
     TS: TaskSpawner,
     U: SyncStateUpdater,
-    C: Consensus,
-    EF: ExecutorFactory,
+    BT: BlockchainTreeEngine,
 {
     /// The database handle.
     db: Arc<DB>,
@@ -66,7 +64,7 @@ where
     /// The pipeline is used for historical sync by setting the current forkchoice head.
     pipeline_state: Option<PipelineState<DB, U>>,
     /// The blockchain tree used for live sync and reorg tracking.
-    blockchain_tree: BlockchainTree<DB, C, EF>,
+    blockchain_tree: BT,
     /// The Engine API message receiver.
     message_rx: UnboundedReceiverStream<BeaconEngineMessage>,
     /// Current forkchoice state. The engine must receive the initial state in order to start
@@ -79,13 +77,12 @@ where
     max_block: Option<BlockNumber>,
 }
 
-impl<DB, TS, U, C, EF> BeaconConsensusEngine<DB, TS, U, C, EF>
+impl<DB, TS, U, BT> BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner,
     U: SyncStateUpdater + 'static,
-    C: Consensus,
-    EF: ExecutorFactory + 'static,
+    BT: BlockchainTreeEngine + 'static,
 {
     /// Create new instance of the [BeaconConsensusEngine].
     ///
@@ -95,7 +92,7 @@ where
         db: Arc<DB>,
         task_spawner: TS,
         pipeline: Pipeline<DB, U>,
-        blockchain_tree: BlockchainTree<DB, C, EF>,
+        blockchain_tree: BT,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
         max_block: Option<BlockNumber>,
     ) -> Self {
@@ -283,8 +280,8 @@ where
     }
 
     /// Check if the engine reached max block as specified by `max_block` parameter.
-    fn has_reached_max_block(&self, progress: Option<BlockNumber>) -> bool {
-        if progress.zip(self.max_block).map_or(false, |(progress, target)| progress >= target) {
+    fn has_reached_max_block(&self, progress: BlockNumber) -> bool {
+        if self.max_block.map_or(false, |target| progress >= target) {
             trace!(
                 target: "consensus::engine",
                 ?progress,
@@ -305,13 +302,12 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, TS, U, C, EF> Future for BeaconConsensusEngine<DB, TS, U, C, EF>
+impl<DB, TS, U, BT> Future for BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner + Unpin,
     U: SyncStateUpdater + Unpin + 'static,
-    C: Consensus + Unpin,
-    EF: ExecutorFactory + Unpin + 'static,
+    BT: BlockchainTreeEngine + Unpin + 'static,
 {
     type Output = Result<(), BeaconEngineError>;
 
@@ -338,7 +334,7 @@ where
                         // Terminate the sync early if it's reached the maximum user
                         // configured block.
                         if is_valid_response {
-                            let tip_number = this.blockchain_tree.canonical_tip_number();
+                            let tip_number = this.blockchain_tree.canonical_tip().number;
                             if this.has_reached_max_block(tip_number) {
                                 return Poll::Ready(Ok(()))
                             }
@@ -373,7 +369,7 @@ where
                                         // Terminate the sync early if it's reached the maximum user
                                         // configured block.
                                         let minimum_pipeline_progress =
-                                            *pipeline.minimum_progress();
+                                            pipeline.minimum_progress().unwrap_or_default();
                                         if this.has_reached_max_block(minimum_pipeline_progress) {
                                             return Poll::Ready(Ok(()))
                                         }
@@ -443,7 +439,10 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
     use reth_executor::{
-        blockchain_tree::{config::BlockchainTreeConfig, externals::TreeExternals},
+        blockchain_tree::{
+            config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
+            ShareableBlockchainTree,
+        },
         post_state::PostState,
         test_utils::TestExecutorFactory,
     };
@@ -463,8 +462,7 @@ mod tests {
         Env<WriteMap>,
         TokioTaskExecutor,
         NoopSyncStateUpdate,
-        TestConsensus,
-        TestExecutorFactory,
+        ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
     >;
 
     struct TestEnv<DB> {
@@ -528,7 +526,9 @@ mod tests {
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
         let config = BlockchainTreeConfig::new(1, 2, 3);
-        let tree = BlockchainTree::new(externals, config).expect("failed to create tree");
+        let tree = ShareableBlockchainTree::new(
+            BlockchainTree::new(externals, config).expect("failed to create tree"),
+        );
 
         let (sync_tx, sync_rx) = unbounded_channel();
         (

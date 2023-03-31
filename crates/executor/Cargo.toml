@@ -26,15 +26,14 @@ reth-provider = { path = "../storage/provider" }
 revm = { version = "3.0.0" }
 
 # common
-async-trait = "0.1.57"
 thiserror = "1.0.37"
 auto_impl = "1.0"
 tracing = "0.1.37"
 tokio = { version = "1.21.2", features = ["sync"] }
+parking_lot = { version = "0.12"}
 
 # mics
 aquamarine = "0.3.0"
-parking_lot = { version = "0.12", optional = true }
 
 triehash = "0.8"
 # See to replace hashers to simplify libraries
@@ -54,4 +53,4 @@ reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
 parking_lot = "0.12"
 
 [features]
-test-utils = ["parking_lot"]
+test-utils = []

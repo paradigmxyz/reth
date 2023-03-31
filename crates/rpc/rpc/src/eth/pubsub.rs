@@ -5,7 +5,7 @@ use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
 use reth_interfaces::events::ChainEventSubscriptions;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{filter::FilteredParams, BlockId, TxHash};
+use reth_primitives::{filter::FilteredParams, TxHash};
 use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
@@ -18,7 +18,7 @@ use reth_rpc_types::{
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
 use tokio_stream::{
-    wrappers::{ReceiverStream, UnboundedReceiverStream},
+    wrappers::{BroadcastStream, ReceiverStream},
     Stream,
 };
 
@@ -121,7 +121,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
             subscription_task_spawner.spawn(Box::pin(async move {
                 // get new block subscription
                 let mut new_blocks =
-                    UnboundedReceiverStream::new(pubsub.chain_events.subscribe_new_blocks());
+                    BroadcastStream::new(pubsub.chain_events.subscribe_new_blocks());
                 // get current sync status
                 let mut initial_sync_status = pubsub.network.is_syncing();
                 let current_sub_res = pubsub.sync_status(initial_sync_status).await;
@@ -206,16 +206,18 @@ where
 {
     /// Returns a stream that yields all new RPC blocks.
     fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
-        UnboundedReceiverStream::new(self.chain_events.subscribe_new_blocks()).map(|new_block| {
-            Header::from_primitive_with_hash(new_block.header.as_ref().clone(), new_block.hash)
+        BroadcastStream::new(self.chain_events.subscribe_new_blocks()).map(|new_block| {
+            let new_block = new_block.expect("new block subscription never ends; qed");
+            Header::from_primitive_with_hash(new_block.as_ref().clone())
         })
     }
 
     /// Returns a stream that yields all logs that match the given filter.
     fn into_log_stream(self, filter: FilteredParams) -> impl Stream<Item = Log> {
-        UnboundedReceiverStream::new(self.chain_events.subscribe_new_blocks())
+        BroadcastStream::new(self.chain_events.subscribe_new_blocks())
             .filter_map(move |new_block| {
-                let block_id: BlockId = new_block.hash.into();
+                let Some(new_block) = new_block.ok() else { return futures::future::ready(None); };
+                let block_id = new_block.hash.into();
                 let txs = self.client.transactions_by_block(block_id).ok().flatten();
                 let receipts = self.client.receipts_by_block(block_id).ok().flatten();
                 match (txs, receipts) {

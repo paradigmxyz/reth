@@ -9,7 +9,7 @@ type EventBroadcast = UnboundedSender<TransactionEvent>;
 
 /// A type that broadcasts [`TransactionEvent`] to installed listeners.
 ///
-/// This is essentially a multi-producer, multi-consumer channel where each event is broadcasted to
+/// This is essentially a multi-producer, multi-consumer channel where each event is broadcast to
 /// all active receivers.
 #[derive(Debug, Default)]
 pub(crate) struct PoolEventBroadcast {

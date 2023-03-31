@@ -213,7 +213,7 @@ pub struct OfflineStages<EF: ExecutorFactory> {
 }
 
 impl<EF: ExecutorFactory> OfflineStages<EF> {
-    /// Create a new set of ofline stages with default values.
+    /// Create a new set of offline stages with default values.
     pub fn new(executor_factory: EF) -> Self {
         Self { executor_factory }
     }
