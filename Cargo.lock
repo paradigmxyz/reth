@@ -5114,16 +5114,13 @@ dependencies = [
  "assert_matches",
  "futures",
  "reth-beacon-consensus",
- "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-revm",
  "reth-rpc-types",
  "thiserror",
  "tokio",
  "tokio-stream",
- "tracing",
 ]
 
 [[package]]
