@@ -5,6 +5,7 @@ use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::Consensus,
     events::{ChainEventSubscriptions, NewBlockNotifications},
+    provider::ProviderError,
     Error,
 };
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
@@ -80,7 +81,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
         &self,
         block_hash: BlockHash,
     ) -> Result<Box<dyn PostStateDataProvider>, Error> {
-        let Some(post_state) = self.tree.read().post_state_data(block_hash) else { panic!("")};
+        let post_state = self
+            .tree
+            .read()
+            .post_state_data(block_hash)
+            .ok_or(ProviderError::UnknownBlockHash(block_hash))
+            .map(Box::new)?;
         Ok(Box::new(post_state))
     }
 }
