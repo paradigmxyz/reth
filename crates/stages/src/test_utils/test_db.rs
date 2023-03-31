@@ -235,11 +235,6 @@ impl TestTransaction {
             blocks.into_iter().try_for_each(|block| {
                 Self::insert_header(tx, &block.header)?;
                 // Insert into body tables.
-                println!(
-                    "block: {:?} next_tx_num:{next_tx_num} , tx_cnt:{}",
-                    block.number,
-                    block.body.len()
-                );
                 tx.put::<tables::BlockMeta>(
                     block.number,
                     StoredBlockMeta {

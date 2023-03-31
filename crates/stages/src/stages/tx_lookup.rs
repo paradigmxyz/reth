@@ -66,7 +66,6 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut tx_list = vec![];
         for block_meta_entry in bodies {
             let (_, block_meta) = block_meta_entry?;
-            //println!("block meta {block_meta:?}");
             let transactions = tx_cursor.walk_range(block_meta.tx_num_range())?;
 
             for tx_entry in transactions {
@@ -79,20 +78,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
 
         let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
-        println!("TX_LIST:{tx_list:?}");
-        // If the last inserted element in the database is smaller than the first in our set, then
-        // we can just append into the DB. This probably only ever happens during sync, on
-        // the first table insertion.
-        let append = tx_list
-            .first()
-            .zip(txhash_cursor.last()?)
-            .map(|((first, _), (last, _))| {
-                println!("last:{last}, first:{first}");
-                &last < first
-            })
-            .unwrap_or_default();
-        println!("APPEND:{append}");
-        /*
+
         // If the last inserted element in the database is equal or bigger than the first
         // in our set, then we need to insert inside the DB. If it is smaller then last
         // element in the DB, we can append to the DB.
@@ -102,13 +88,12 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             .zip(txhash_cursor.last()?)
             .map(|((first, _), (last, _))| first <= &last)
             .unwrap_or_default();
-        // if txhash_cursor.last() is None we will insert. `zip` would return none if any item is none.
-        // if it is some and
-         */
+        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is none.
+        // if it is some and if first is smaller than last, we will do append.
+        
 
         for (tx_hash, id) in tx_list {
-            println!("INSERTING {} {}", tx_hash, id);
-            if append {
+            if insert {
                 txhash_cursor.append(tx_hash, id)?;
             } else {
                 txhash_cursor.insert(tx_hash, id)?;
