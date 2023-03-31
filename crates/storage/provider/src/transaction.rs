@@ -825,8 +825,8 @@ where
     /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
     /// of blocks.
     ///
-    /// 1. Iterate over the [BlockTransitionIndex][tables::BlockTransitionIndex] table to get all
-    /// the transitions
+    /// 1. Iterate over the [BlockMeta][tables::BlockMeta] table to get all
+    /// the transition indices.
     /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
     /// and the [AccountChangeSet][tables::AccountChangeSet] tables in reverse order to reconstruct
     /// the changesets.

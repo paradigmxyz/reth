@@ -108,7 +108,7 @@ impl Command {
     }
 }
 
-/// Sets up the database and initial state on `BlockTransitionIndex`. Also returns the tip block
+/// Sets up the database and initial state on [`tables::BlockMeta`]. Also returns the tip block
 /// number.
 pub(crate) fn setup<DB: Database>(
     from: u64,

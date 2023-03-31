@@ -43,7 +43,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 
     /// Retrieve the range of transactions to iterate over by querying
-    /// [`BlockBodies`][reth_db::tables::BlockBodies],
+    /// [`BlockMeta`][reth_db::tables::BlockMeta],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
