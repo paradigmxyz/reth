@@ -21,7 +21,7 @@ use reth_revm::{
 use reth_rpc_types::{state::StateOverride, CallRequest};
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    db::DatabaseRef,
+    db::{CacheDB, DatabaseRef},
     primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, ResultAndState, TransactTo},
 };
 use tracing::trace;
@@ -152,28 +152,11 @@ where
             // if price or limit was included in the request then we can execute the request
             // again with the block's gas limit to check if revert is gas related or not
             if request_gas.is_some() || request_gas_price.is_some() {
-                let req_gas_limit = env.tx.gas_limit;
-                env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
-                let (res, _) = transact(&mut db, env)?;
-                return match res.result {
-                    ExecutionResult::Success { .. } => {
-                        // transaction succeeded by manually increasing the gas limit to
-                        // highest, which means the caller lacks funds to pay for the tx
-                        Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit))
-                            .into())
-                    }
-                    ExecutionResult::Revert { output, .. } => {
-                        // reverted again after bumping the limit
-                        Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
-                    }
-                    ExecutionResult::Halt { reason, .. } => {
-                        Err(InvalidTransactionError::EvmHalt(reason).into())
-                    }
-                }
+                return Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
             }
         }
 
-        let (res, mut env) = ethres?;
+        let (res, env) = ethres?;
         match res.result {
             ExecutionResult::Success { .. } => {
                 // succeeded
@@ -185,24 +168,7 @@ where
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if request_gas.is_some() || request_gas_price.is_some() {
-                    let req_gas_limit = env.tx.gas_limit;
-                    env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
-                    let (res, _) = transact(&mut db, env)?;
-                    match res.result {
-                        ExecutionResult::Success { .. } => {
-                            // transaction succeeded by manually increasing the gas limit to
-                            // highest, which means the caller lacks funds to pay for the tx
-                            Err(InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit))
-                                .into())
-                        }
-                        ExecutionResult::Revert { .. } => {
-                            // reverted again after bumping the limit
-                            Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
-                        }
-                        ExecutionResult::Halt { reason, .. } => {
-                            Err(InvalidTransactionError::EvmHalt(reason).into())
-                        }
-                    }
+                    Err(map_out_of_gas_err(env_gas_limit, env, &mut db))
                 } else {
                     // the transaction did revert
                     Err(InvalidTransactionError::Revert(RevertError::new(output)).into())
@@ -341,5 +307,36 @@ where
             ExecutionResult::Success { .. } => Ok(()),
         }?;
         Ok(inspector.into_access_list())
+    }
+}
+
+/// Executes the requests again after an out of gas error to check if the error is gas related or
+/// not
+#[inline]
+fn map_out_of_gas_err<S>(
+    env_gas_limit: U256,
+    mut env: Env,
+    mut db: &mut CacheDB<State<S>>,
+) -> EthApiError
+where
+    S: StateProvider,
+{
+    let req_gas_limit = env.tx.gas_limit;
+    env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
+    let (res, _) = match transact(&mut db, env) {
+        Ok(res) => res,
+        Err(err) => return err,
+    };
+    match res.result {
+        ExecutionResult::Success { .. } => {
+            // transaction succeeded by manually increasing the gas limit to
+            // highest, which means the caller lacks funds to pay for the tx
+            InvalidTransactionError::BasicOutOfGas(U256::from(req_gas_limit)).into()
+        }
+        ExecutionResult::Revert { output, .. } => {
+            // reverted again after bumping the limit
+            InvalidTransactionError::Revert(RevertError::new(output)).into()
+        }
+        ExecutionResult::Halt { reason, .. } => InvalidTransactionError::EvmHalt(reason).into(),
     }
 }
