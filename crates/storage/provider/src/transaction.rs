@@ -664,37 +664,42 @@ where
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
-        // Just read block tx id from table. as it is needed to get execution results.
+        // Get the transaction ID ranges for the blocks
         let block_bodies = self.get_or_take::<tables::BlockBodies, false>(range)?;
-
         if block_bodies.is_empty() {
             return Ok(Vec::new())
         }
 
-        // iterate over and get all transaction and signers
+        // Compute the first and last tx ID in the range
         let first_transaction =
             block_bodies.first().expect("If we have headers").1.first_tx_index();
         let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_index();
 
+        // If this is the case then all of the blocks in the range are empty
+        if last_transaction < first_transaction {
+            return Ok(Vec::new())
+        }
+
+        // Get transactions and senders
         let transactions =
             self.get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?;
         let senders =
             self.get_or_take::<tables::TxSenders, TAKE>(first_transaction..=last_transaction)?;
 
         if TAKE {
-            // rm TxHashNumber
+            // Remove TxHashNumber
             let mut tx_hash_cursor = self.cursor_write::<tables::TxHashNumber>()?;
             for (_, tx) in transactions.iter() {
                 if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
                     tx_hash_cursor.delete_current()?;
                 }
             }
-            // rm TxTransitionId
+            // Remove TxTransitionId
             self.get_or_take::<tables::TxTransitionIndex, TAKE>(
                 first_transaction..=last_transaction,
             )?;
 
-            // rm Transaction block index if there are transaction present
+            // Remove TransactionBlock index if there are transaction present
             if !transactions.is_empty() {
                 let tx_id_range = transactions.first().unwrap().0..=transactions.last().unwrap().0;
                 self.get_or_take::<tables::TransactionBlock, TAKE>(tx_id_range)?;
@@ -702,11 +707,11 @@ where
         }
 
         // Merge transaction into blocks
-        let mut block_tx = Vec::new();
+        let mut block_tx = Vec::with_capacity(block_bodies.len());
         let mut senders = senders.into_iter();
         let mut transactions = transactions.into_iter();
         for (block_number, block_body) in block_bodies {
-            let mut one_block_tx = Vec::new();
+            let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
             for _ in block_body.tx_id_range() {
                 let tx = transactions.next();
                 let sender = senders.next();
