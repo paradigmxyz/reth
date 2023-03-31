@@ -72,17 +72,21 @@ impl Command {
                     Ok::<_, eyre::Error>(())
                 })??;
             }
-            StageEnum::Hashing => tool.db.update(|tx| {
-                // Clear hashed accounts
-                tx.clear::<tables::HashedAccount>()?;
-                tx.put::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into(), buf)?;
-                tx.put::<tables::SyncStage>(ACCOUNT_HASHING.0.to_string(), 0)?;
+            StageEnum::Hashing => {
+                tool.db.update(|tx| {
+                    // Clear hashed accounts
+                    tx.clear::<tables::HashedAccount>()?;
+                    tx.put::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into(), Vec::new())?;
+                    tx.put::<tables::SyncStage>(ACCOUNT_HASHING.0.to_string(), 0)?;
 
-                // Clear hashed storages
-                tx.clear::<tables::HashedStorage>()?;
-                tx.put::<tables::SyncStageProgress>(STORAGE_HASHING.0.into(), buf)?;
-                tx.put::<tables::SyncStage>(STORAGE_HASHING.0.to_string(), 0)?;
-            }),
+                    // Clear hashed storages
+                    tx.clear::<tables::HashedStorage>()?;
+                    tx.put::<tables::SyncStageProgress>(STORAGE_HASHING.0.into(), Vec::new())?;
+                    tx.put::<tables::SyncStage>(STORAGE_HASHING.0.to_string(), 0)?;
+
+                    Ok::<_, eyre::Error>(())
+                })??;
+            }
             StageEnum::Merkle => {
                 tool.db.update(|tx| {
                     tx.clear::<tables::AccountsTrie>()?;
