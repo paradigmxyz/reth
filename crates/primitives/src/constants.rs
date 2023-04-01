@@ -18,6 +18,12 @@ pub const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
 /// Multiplier for converting gwei to wei.
 pub const GWEI_TO_WEI: u64 = 1_000_000_000;
 
+/// Multiplier for converting finney (milliether) to wei.
+pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
+
+/// Multiplier for converting ether to wei.
+pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
+
 /// The Ethereum mainnet genesis hash.
 pub const MAINNET_GENESIS: H256 =
     H256(hex!("d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"));

@@ -1,13 +1,4 @@
-use reth_primitives::{BlockNumber, ChainSpec, Hardfork, U256};
-
-/// One gwei in wei.
-pub const GWEI_TO_WEI: u128 = 1_000_000_000;
-
-/// One finney (milliether) in wei
-pub const FINNEY_TO_WEI: u128 = GWEI_TO_WEI * 1_000_000;
-
-/// One ether in wei.
-pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
+use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, ChainSpec, Hardfork, U256};
 
 /// Calculates the base block reward.
 ///
@@ -110,7 +101,7 @@ pub fn ommer_reward(
 
 #[cfg(test)]
 mod tests {
-    use crate::calc::{base_block_reward, block_reward, ommer_reward, ETH_TO_WEI};
+    use super::*;
     use reth_primitives::{MAINNET, U256};
 
     #[test]
