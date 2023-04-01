@@ -4727,6 +4727,7 @@ dependencies = [
  "hash-db",
  "parking_lot 0.12.1",
  "plain_hasher",
+ "reth-consensus-common",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
