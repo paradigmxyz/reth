@@ -25,7 +25,7 @@ use crate::{
             accounts::{AccountBeforeTx, TransitionIdAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
             storage_sharded_key::StorageShardedKey,
-            ShardedKey, StoredBlockMeta, StoredBlockWithdrawals,
+            ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
         },
     },
 };
@@ -49,7 +49,7 @@ pub const TABLES: [(TableType, &str); 25] = [
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
-    (TableType::Table, BlockMeta::const_name()),
+    (TableType::Table, BlockBodyIndices::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
     (TableType::Table, BlockWithdrawals::const_name()),
     (TableType::Table, TransactionBlock::const_name()),
@@ -144,11 +144,11 @@ table!(
 );
 
 table!(
-    /// Stores block meta intformation that contains indexes of transaction and transitions,
+    /// Stores block indices that contains indexes of transaction and transitions,
     /// number of transactions and if block has a block change (block reward or withdrawals).
     ///
-    /// More information about block meta can be found in the [`StoredBlockMeta`] struct.
-    ( BlockMeta ) BlockNumber | StoredBlockMeta
+    /// More information about stored indices can be found in the [`StoredBlockBodyIndices`] struct.
+    ( BlockBodyIndices ) BlockNumber | StoredBlockBodyIndices
 );
 
 table!(

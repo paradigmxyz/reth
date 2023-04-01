@@ -7,13 +7,13 @@ use std::ops::Range;
 /// Total number of transactions.
 pub type NumTransactions = u64;
 
-/// The storage representation of a block.
+/// The storage of the block body indices
 ///
 /// It has the pointer to the transaction Number of the first
 /// transaction in the block and the total number of transactions
 #[derive(Debug, Default, Eq, PartialEq, Clone)]
 #[main_codec]
-pub struct StoredBlockMeta {
+pub struct StoredBlockBodyIndices {
     /// The number of the first transaction in this block
     ///
     /// Note: If the block is empty, this is the number of the first transaction
@@ -21,19 +21,19 @@ pub struct StoredBlockMeta {
     pub first_tx_num: TxNumber,
     /// The id of the first transition in this block.
     ///
-    /// Note: If the block is empty, this is the id of the first transition
+    /// NOTE: If the block is empty, this is the id of the first transition
     /// in the next non-empty block.
     pub first_transition_id: TransitionId,
     /// The total number of transactions in the block
     ///
-    /// Note: Number of transitions is equal to number of transactions with
+    /// NOTE: Number of transitions is equal to number of transactions with
     /// additional transition for block change if block has block reward or withdrawal.
     pub tx_count: NumTransactions,
     /// Flags if there is additional transition changeset of the withdrawal or block reward.
     pub has_block_change: bool,
 }
 
-impl StoredBlockMeta {
+impl StoredBlockBodyIndices {
     /// Return the range of transaction ids for this block.
     pub fn tx_num_range(&self) -> Range<TxNumber> {
         self.first_tx_num..self.first_tx_num + self.tx_count
@@ -45,11 +45,26 @@ impl StoredBlockMeta {
     }
 
     /// Return transition id of the state after block executed.
+    /// This transitions is used with the history index to represent the state after this
+    /// block execution.
+    ///
+    /// Because we are storing old values of the changeset in the history index, we need
+    /// transition of one after, to fetch correct values of the past state
+    ///
+    /// NOTE: This is the same as the first transition id of the next block.
     pub fn transition_after_block(&self) -> TransitionId {
         self.first_transition_id + self.tx_count + (self.has_block_change as u64)
     }
 
     /// Return transition id of the state at the block execution.
+    /// This transitions is used with the history index to represent the state
+    /// before the block execution.
+    ///
+    /// Because we are storing old values of the changeset in the history index, we need
+    /// transition of one after, to fetch correct values of the past state
+    ///
+    /// NOTE: If block does not have transitions (empty block) then this is the same
+    /// as the first transition id of the next block.
     pub fn transition_at_block(&self) -> TransitionId {
         self.first_transition_id
     }
@@ -133,8 +148,12 @@ mod test {
         let first_transition_id = 14;
         let tx_count = 6;
         let has_block_change = true;
-        let mut block_meta =
-            StoredBlockMeta { first_tx_num, first_transition_id, tx_count, has_block_change };
+        let mut block_meta = StoredBlockBodyIndices {
+            first_tx_num,
+            first_transition_id,
+            tx_count,
+            has_block_change,
+        };
 
         assert_eq!(block_meta.first_tx_num(), first_tx_num);
         assert_eq!(block_meta.last_tx_num(), first_tx_num + tx_count - 1);

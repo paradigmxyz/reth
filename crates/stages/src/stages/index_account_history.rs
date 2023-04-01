@@ -81,7 +81,8 @@ mod tests {
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
     use reth_db::{
         models::{
-            sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey, StoredBlockMeta,
+            sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
+            StoredBlockBodyIndices,
         },
         tables,
         transaction::DbTxMut,
@@ -120,15 +121,23 @@ mod tests {
         // setup
         tx.commit(|tx| {
             // we just need first and last
-            tx.put::<tables::BlockMeta>(
+            tx.put::<tables::BlockBodyIndices>(
                 0,
-                StoredBlockMeta { first_transition_id: 0, tx_count: 3, ..Default::default() },
+                StoredBlockBodyIndices {
+                    first_transition_id: 0,
+                    tx_count: 3,
+                    ..Default::default()
+                },
             )
             .unwrap();
 
-            tx.put::<tables::BlockMeta>(
+            tx.put::<tables::BlockBodyIndices>(
                 5,
-                StoredBlockMeta { first_transition_id: 3, tx_count: 5, ..Default::default() },
+                StoredBlockBodyIndices {
+                    first_transition_id: 3,
+                    tx_count: 5,
+                    ..Default::default()
+                },
             )
             .unwrap();
 

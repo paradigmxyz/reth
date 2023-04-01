@@ -56,7 +56,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
-        let mut block_meta_cursor = tx.cursor_read::<tables::BlockMeta>()?;
+        let mut block_meta_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
 
         // Walk over block bodies within a specified range.
@@ -112,7 +112,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind tx hash to number
-        let mut body_cursor = tx.cursor_read::<tables::BlockMeta>()?;
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
         let mut rev_walker = body_cursor.walk_back(None)?;
@@ -300,7 +300,7 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockMeta>()?;
+                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {

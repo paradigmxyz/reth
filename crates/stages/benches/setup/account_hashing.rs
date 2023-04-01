@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 /// Prepares a database for [`AccountHashingStage`]
 /// If the environment variable [`constants::ACCOUNT_HASHING_DB`] is set, it will use that one and
-/// will get the stage execution range from [`tables::BlockMeta`]. Otherwise, it will
+/// will get the stage execution range from [`tables::BlockBodyIndices`]. Otherwise, it will
 /// generate its own random data.
 ///
 /// Returns the path to the database file, stage and range of stage execution if it exists.
@@ -33,7 +33,7 @@ fn find_stage_range(db: &Path) -> StageRange {
     TestTransaction::new(db)
         .tx
         .view(|tx| {
-            let mut cursor = tx.cursor_read::<tables::BlockMeta>()?;
+            let mut cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
             let from = cursor.first()?.unwrap().0;
             let to = cursor.last()?.unwrap().0;
 

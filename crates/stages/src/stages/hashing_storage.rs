@@ -226,7 +226,7 @@ mod tests {
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
-        models::{StoredBlockMeta, TransitionIdAddress},
+        models::{StoredBlockBodyIndices, TransitionIdAddress},
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
@@ -368,7 +368,7 @@ mod tests {
                         next_transition_id += 1;
                     }
 
-                    let body = StoredBlockMeta {
+                    let body = StoredBlockBodyIndices {
                         first_tx_num,
                         first_transition_id,
                         tx_count: progress.body.len() as u64,
@@ -378,7 +378,7 @@ mod tests {
                     first_transition_id = next_transition_id;
                     first_tx_num = next_tx_num;
 
-                    tx.put::<tables::BlockMeta>(progress.number, body)
+                    tx.put::<tables::BlockBodyIndices>(progress.number, body)
                 })?;
             }
 

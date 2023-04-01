@@ -64,7 +64,7 @@ pub fn init_genesis<DB: Database>(
     // Insert header
     tx.put::<tables::CanonicalHeaders>(0, hash)?;
     tx.put::<tables::HeaderNumbers>(hash, 0)?;
-    tx.put::<tables::BlockMeta>(0, Default::default())?;
+    tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
     tx.put::<tables::HeaderTD>(0, header.difficulty.into())?;
     tx.put::<tables::Headers>(0, header)?;
 

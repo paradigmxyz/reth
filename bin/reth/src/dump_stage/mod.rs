@@ -108,8 +108,8 @@ impl Command {
     }
 }
 
-/// Sets up the database and initial state on [`tables::BlockMeta`]. Also returns the tip block
-/// number.
+/// Sets up the database and initial state on [`tables::BlockBodyIndices`]. Also returns the tip
+/// block number.
 pub(crate) fn setup<DB: Database>(
     from: u64,
     to: u64,
@@ -123,7 +123,7 @@ pub(crate) fn setup<DB: Database>(
     let output_db = init_db(output_db)?;
 
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockMeta, _>(
+        tx.import_table_with_range::<tables::BlockBodyIndices, _>(
             &db_tool.db.tx()?,
             Some(from - 1),
             to + 1,
@@ -131,7 +131,7 @@ pub(crate) fn setup<DB: Database>(
     })??;
 
     let (tip_block_number, _) =
-        db_tool.db.view(|tx| tx.cursor_read::<tables::BlockMeta>()?.last())??.expect("some");
+        db_tool.db.view(|tx| tx.cursor_read::<tables::BlockBodyIndices>()?.last())??.expect("some");
 
     Ok((output_db, tip_block_number))
 }

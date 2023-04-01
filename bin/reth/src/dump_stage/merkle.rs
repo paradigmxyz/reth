@@ -29,11 +29,11 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
 
     let tx = db_tool.db.tx()?;
     let from_transition_rev = tx
-        .get::<tables::BlockMeta>(from)?
+        .get::<tables::BlockBodyIndices>(from)?
         .expect("there should be at least one.")
         .transition_at_block();
     let to_transition_rev = tx
-        .get::<tables::BlockMeta>(to)?
+        .get::<tables::BlockBodyIndices>(to)?
         .expect("there should be at least one.")
         .transition_after_block();
 

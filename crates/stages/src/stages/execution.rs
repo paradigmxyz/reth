@@ -36,7 +36,7 @@ pub struct ExecutionStageMetrics {
 /// - [tables::CanonicalHeaders] get next block to execute.
 /// - [tables::Headers] get for revm environment variables.
 /// - [tables::HeaderTD]
-/// - [tables::BlockMeta] to get tx number
+/// - [tables::BlockBodyIndices] to get tx number
 /// - [tables::Transactions] to execute
 ///
 /// For state access [LatestStateProviderRef] provides us latest state and history state
@@ -53,7 +53,7 @@ pub struct ExecutionStageMetrics {
 /// - [tables::StorageChangeSet]
 ///
 /// For unwinds we are accessing:
-/// - [tables::BlockMeta] get tx index to know what needs to be unwinded
+/// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
@@ -99,7 +99,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // Get total difficulty
         let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
         // Get bodies with canonical hashes.
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockMeta>()?;
+        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         // Get ommers with canonical hashes.
         let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
         // Get block withdrawals.
@@ -116,8 +116,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 let (_, td) = td_cursor
                     .seek_exact(number)?
                     .ok_or(ProviderError::TotalDifficulty { number })?;
-                let (_, body) =
-                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockMeta { number })?;
+                let (_, body) = bodies_cursor
+                    .seek_exact(number)?
+                    .ok_or(ProviderError::BlockBodyIndices { number })?;
                 let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
                 let withdrawals =
                     withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);

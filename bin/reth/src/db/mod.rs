@@ -164,7 +164,7 @@ impl Command {
                     HeaderTD,
                     HeaderNumbers,
                     Headers,
-                    BlockMeta,
+                    BlockBodyIndices,
                     BlockOmmers,
                     BlockWithdrawals,
                     TransactionBlock,

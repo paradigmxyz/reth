@@ -52,7 +52,7 @@ fn import_tables_with_range<DB: Database>(
         tx.import_table_with_range::<tables::Headers, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::BlockMeta, _>(&db_tool.db.tx()?, Some(from), to)
+        tx.import_table_with_range::<tables::BlockBodyIndices, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::BlockOmmers, _>(&db_tool.db.tx()?, Some(from), to)
@@ -60,7 +60,7 @@ fn import_tables_with_range<DB: Database>(
 
     // Find range of transactions that need to be copied over
     let (from_tx, to_tx) = db_tool.db.view(|read_tx| {
-        let mut read_cursor = read_tx.cursor_read::<tables::BlockMeta>()?;
+        let mut read_cursor = read_tx.cursor_read::<tables::BlockBodyIndices>()?;
         let (_, from_block) =
             read_cursor.seek(from)?.ok_or(eyre::eyre!("BlockBody {from} does not exist."))?;
         let (_, to_block) =

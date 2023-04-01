@@ -11,7 +11,7 @@ use reth_db::{
     models::{
         sharded_key,
         storage_sharded_key::{self, StorageShardedKey},
-        AccountBeforeTx, ShardedKey, StoredBlockMeta, TransitionIdAddress,
+        AccountBeforeTx, ShardedKey, StoredBlockBodyIndices, TransitionIdAddress,
     },
     table::Table,
     tables,
@@ -140,16 +140,20 @@ where
     }
 
     /// Query the block body by number.
-    pub fn get_block_meta(&self, number: BlockNumber) -> Result<StoredBlockMeta, TransactionError> {
-        let body =
-            self.get::<tables::BlockMeta>(number)?.ok_or(ProviderError::BlockMeta { number })?;
+    pub fn get_block_meta(
+        &self,
+        number: BlockNumber,
+    ) -> Result<StoredBlockBodyIndices, TransactionError> {
+        let body = self
+            .get::<tables::BlockBodyIndices>(number)?
+            .ok_or(ProviderError::BlockBodyIndices { number })?;
         Ok(body)
     }
 
     /// Query the last transition of the block by [BlockNumber] key
     pub fn get_block_transition(&self, key: BlockNumber) -> Result<TransitionId, TransactionError> {
         let last_transition_id = self
-            .get::<tables::BlockMeta>(key)?
+            .get::<tables::BlockBodyIndices>(key)?
             .ok_or(ProviderError::BlockTransition { block_number: key })?
             .transition_after_block();
         Ok(last_transition_id)
@@ -665,7 +669,7 @@ where
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>, TransactionError> {
         // Just read block tx id from table. as it is needed to get execution results.
-        let block_bodies = self.get_or_take::<tables::BlockMeta, false>(range)?;
+        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         if block_bodies.is_empty() {
             return Ok(Vec::new())
@@ -825,7 +829,7 @@ where
     /// Traverse over changesets and plain state and recreate the [`PostState`]s for the given range
     /// of blocks.
     ///
-    /// 1. Iterate over the [BlockMeta][tables::BlockMeta] table to get all
+    /// 1. Iterate over the [BlockBodyIndices][tables::BlockBodyIndices] table to get all
     /// the transition indices.
     /// 2. Iterate over the [StorageChangeSet][tables::StorageChangeSet] table
     /// and the [AccountChangeSet][tables::AccountChangeSet] tables in reverse order to reconstruct
@@ -850,7 +854,8 @@ where
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<PostState>, TransactionError> {
         // We are not removing block meta as it is used to get block transitions.
-        let block_transition = self.get_or_take::<tables::BlockMeta, false>(range.clone())?;
+        let block_transition =
+            self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
 
         if block_transition.is_empty() {
             return Ok(Vec::new())
@@ -870,7 +875,7 @@ where
 
         // NOTE: Just get block bodies dont remove them
         // it is connection point for bodies getter and execution result getter.
-        let block_bodies = self.get_or_take::<tables::BlockMeta, false>(range)?;
+        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
 
         // get transaction receipts
         let from_transaction_num =
@@ -1134,7 +1139,7 @@ where
         // that is why it is deleted afterwards.
         if TAKE {
             // rm block bodies
-            self.get_or_take::<tables::BlockMeta, TAKE>(range)?;
+            self.get_or_take::<tables::BlockBodyIndices, TAKE>(range)?;
 
             // Update pipeline progress
             if let Some(fork_number) = unwind_to {

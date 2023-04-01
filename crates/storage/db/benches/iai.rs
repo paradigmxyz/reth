@@ -68,7 +68,7 @@ impl_iai!(
     HeaderTD,
     HeaderNumbers,
     Headers,
-    BlockMeta,
+    BlockBodyIndices,
     BlockOmmers,
     TxHashNumber,
     Transactions,

@@ -26,7 +26,7 @@ pub fn db(c: &mut Criterion) {
     measure_table_db::<HeaderTD>(&mut group);
     measure_table_db::<HeaderNumbers>(&mut group);
     measure_table_db::<Headers>(&mut group);
-    measure_table_db::<BlockMeta>(&mut group);
+    measure_table_db::<BlockBodyIndices>(&mut group);
     measure_table_db::<BlockOmmers>(&mut group);
     measure_table_db::<TxHashNumber>(&mut group);
     measure_table_db::<Transactions>(&mut group);
@@ -43,7 +43,7 @@ pub fn serialization(c: &mut Criterion) {
     measure_table_serialization::<HeaderTD>(&mut group);
     measure_table_serialization::<HeaderNumbers>(&mut group);
     measure_table_serialization::<Headers>(&mut group);
-    measure_table_serialization::<BlockMeta>(&mut group);
+    measure_table_serialization::<BlockBodyIndices>(&mut group);
     measure_table_serialization::<BlockOmmers>(&mut group);
     measure_table_serialization::<TxHashNumber>(&mut group);
     measure_table_serialization::<Transactions>(&mut group);

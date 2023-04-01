@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::{StoredBlockMeta, StoredBlockOmmers, StoredBlockWithdrawals},
+    models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -42,7 +42,7 @@ pub const BODIES: StageId = StageId("Bodies");
 /// The bodies are processed and data is inserted into these tables:
 ///
 /// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
-/// - [`BlockBodies`][reth_db::tables::BlockMeta]
+/// - [`BlockBodies`][reth_db::tables::BlockBodyIndices]
 /// - [`Transactions`][reth_db::tables::Transactions]
 /// - [`TransactionBlock`][reth_db::tables::TransactionBlock]
 ///
@@ -52,7 +52,7 @@ pub const BODIES: StageId = StageId("Bodies");
 ///
 /// - The header tables (see [`HeaderStage`][crate::stages::HeaderStage])
 /// - The [`BlockOmmers`][reth_db::tables::BlockOmmers] table
-/// - The [`BlockBodies`][reth_db::tables::BlockMeta] table
+/// - The [`BlockBodies`][reth_db::tables::BlockBodyIndices] table
 /// - The [`Transactions`][reth_db::tables::Transactions] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
@@ -85,7 +85,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
 
         // Cursors used to write bodies, ommers and transactions
-        let mut block_meta_cursor = tx.cursor_write::<tables::BlockMeta>()?;
+        let mut block_meta_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
@@ -172,7 +172,12 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             // insert block meta
             block_meta_cursor.append(
                 block_number,
-                StoredBlockMeta { first_tx_num, first_transition_id, has_block_change, tx_count },
+                StoredBlockBodyIndices {
+                    first_tx_num,
+                    first_transition_id,
+                    has_block_change,
+                    tx_count,
+                },
             )?;
 
             highest_block = block_number;
@@ -194,7 +199,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind bodies, ommers
-        let mut body_cursor = tx.cursor_write::<tables::BlockMeta>()?;
+        let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
@@ -233,7 +238,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             }
 
             // Delete the current body value
-            tx.delete::<tables::BlockMeta>(number, None)?;
+            tx.delete::<tables::BlockBodyIndices>(number, None)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -422,7 +427,7 @@ mod tests {
             cursor::DbCursorRO,
             database::Database,
             mdbx::{Env, WriteMap},
-            models::{StoredBlockMeta, StoredBlockOmmers},
+            models::{StoredBlockBodyIndices, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
         };
@@ -527,7 +532,7 @@ mod tests {
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
-                        let body = StoredBlockMeta {
+                        let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
                             first_transition_id: 0,
                             tx_count: progress.body.len() as u64,
@@ -545,7 +550,7 @@ mod tests {
                             )?;
                         }
 
-                        tx.put::<tables::BlockMeta>(progress.number, body)?;
+                        tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
 
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
@@ -581,8 +586,10 @@ mod tests {
 
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.tx
-                    .ensure_no_entry_above::<tables::BlockMeta, _>(input.unwind_to, |key| key)?;
+                self.tx.ensure_no_entry_above::<tables::BlockBodyIndices, _>(
+                    input.unwind_to,
+                    |key| key,
+                )?;
                 self.tx
                     .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| key)?;
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
@@ -601,7 +608,7 @@ mod tests {
             /// Get the last available tx id if any
             pub(crate) fn get_last_tx_id(&self) -> Result<Option<TxNumber>, TestRunnerError> {
                 let last_body = self.tx.query(|tx| {
-                    let v = tx.cursor_read::<tables::BlockMeta>()?.last()?;
+                    let v = tx.cursor_read::<tables::BlockBodyIndices>()?.last()?;
                     Ok(v)
                 })?;
                 Ok(match last_body {
@@ -622,7 +629,7 @@ mod tests {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
-                    let mut bodies_cursor = tx.cursor_read::<tables::BlockMeta>()?;
+                    let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
                     let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;

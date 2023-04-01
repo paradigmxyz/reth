@@ -22,11 +22,11 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
     // Import relevant AccountChangeSets
     let tx = db_tool.db.tx()?;
     let from_transition_rev = tx
-        .get::<tables::BlockMeta>(from)?
+        .get::<tables::BlockBodyIndices>(from)?
         .expect("there should be at least one.")
         .transition_at_block();
     let to_transition_rev = tx
-        .get::<tables::BlockMeta>(to)?
+        .get::<tables::BlockBodyIndices>(to)?
         .expect("there should be at least one.")
         .transition_after_block();
     output_db.update(|tx| {

@@ -43,7 +43,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 
     /// Retrieve the range of transactions to iterate over by querying
-    /// [`BlockMeta`][reth_db::tables::BlockMeta],
+    /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
@@ -319,7 +319,7 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockMeta>()?;
+                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {

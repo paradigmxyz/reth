@@ -60,7 +60,7 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
         (HeaderTD, PER_TABLE, TABLE),
         (HeaderNumbers, PER_TABLE, TABLE),
         (Headers, PER_TABLE, TABLE),
-        (BlockMeta, PER_TABLE, TABLE),
+        (BlockBodyIndices, PER_TABLE, TABLE),
         (BlockOmmers, 100, TABLE),
         (TxHashNumber, PER_TABLE, TABLE),
         (Transactions, 100, TABLE),

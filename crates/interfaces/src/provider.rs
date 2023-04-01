@@ -18,7 +18,7 @@ pub enum ProviderError {
     BlockHash { block_hash: BlockHash },
     /// A block body is missing.
     #[error("Block meta not found for block #{number}")]
-    BlockMeta { number: BlockNumber },
+    BlockBodyIndices { number: BlockNumber },
     /// The block transition id for a certain block number is missing.
     #[error("Block transition id does not exist for block #{block_number}")]
     BlockTransition { block_number: BlockNumber },
