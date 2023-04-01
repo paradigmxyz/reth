@@ -10,12 +10,12 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::provider::ProviderError;
 use reth_metrics_derive::Metrics;
-use reth_primitives::{Address, Block, U256};
+use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
+use std::time::Instant;
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
@@ -84,6 +84,27 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
     }
 
+    // TODO: This should be in the block provider trait once we consolidate
+    // SharedDatabase/Transaction
+    fn read_block_with_senders<DB: Database>(
+        tx: &Transaction<'_, DB>,
+        block_number: BlockNumber,
+    ) -> Result<(BlockWithSenders, U256), StageError> {
+        let header = tx.get_header(block_number)?;
+        let td = tx.get_td(block_number)?;
+        let ommers = tx.get::<tables::BlockOmmers>(block_number)?.unwrap_or_default().ommers;
+        let withdrawals = tx.get::<tables::BlockWithdrawals>(block_number)?.map(|v| v.withdrawals);
+
+        let (transactions, senders): (Vec<_>, Vec<_>) = tx
+            .get_block_transaction_range(block_number..=block_number)?
+            .into_iter()
+            .flat_map(|(_, txs)| txs.into_iter())
+            .map(|tx| tx.to_components())
+            .unzip();
+
+        Ok((Block { header, body: transactions, ommers, withdrawals }.with_senders(senders), td))
+    }
+
     /// Execute the stage.
     pub fn execute_inner<DB: Database>(
         &self,
@@ -94,84 +115,19 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
-        // Get header with canonical hashes.
-        let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
-        // Get total difficulty
-        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
-        // Get bodies with canonical hashes.
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        // Get ommers with canonical hashes.
-        let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-        // Get block withdrawals.
-        let mut withdrawals_cursor = tx.cursor_read::<tables::BlockWithdrawals>()?;
-        // Get transaction of the block that we are executing.
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-        // Skip sender recovery and load signer from database.
-        let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
-        // Get block headers and bodies
-        let block_batch = headers_cursor
-            .walk_range(start_block..=end_block)?
-            .map(|entry| -> Result<_, StageError> {
-                let (number, header) = entry?;
-                let (_, td) = td_cursor
-                    .seek_exact(number)?
-                    .ok_or(ProviderError::TotalDifficulty { number })?;
-                let (_, body) = bodies_cursor
-                    .seek_exact(number)?
-                    .ok_or(ProviderError::BlockBodyIndices { number })?;
-                let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
-                let withdrawals =
-                    withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);
-                Ok((header, td.into(), body, stored_ommers.ommers, withdrawals))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
         // Create state provider with cached state
-
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Fetch transactions, execute them and generate results
         let mut state = PostState::default();
-        for (header, td, body, ommers, withdrawals) in block_batch.into_iter() {
-            let block_number = header.number;
-            tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
-
-            // iterate over all transactions
-            let mut tx_walker = tx_cursor.walk(Some(body.first_tx_num()))?;
-            let mut transactions = Vec::with_capacity(body.tx_count as usize);
-            // get next N transactions.
-            for index in body.tx_num_range() {
-                let (tx_index, tx) =
-                    tx_walker.next().ok_or(ProviderError::EndOfTransactionTable)??;
-                if tx_index != index {
-                    error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(ProviderError::TransactionsGap { missing: tx_index }.into())
-                }
-                transactions.push(tx);
-            }
-
-            // take signers
-            let mut tx_sender_walker = tx_sender.walk(Some(body.first_tx_num()))?;
-            let mut signers = Vec::with_capacity(body.tx_count as usize);
-            for index in body.tx_num_range() {
-                let (tx_index, tx) =
-                    tx_sender_walker.next().ok_or(ProviderError::EndOfTransactionSenderTable)??;
-                if tx_index != index {
-                    error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Signer gap");
-                    return Err(ProviderError::TransactionsSignerGap { missing: tx_index }.into())
-                }
-                signers.push(tx);
-            }
-
-            trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
+        for block_number in start_block..=end_block {
+            let (block, td) = Self::read_block_with_senders(tx, block_number)?;
 
             // Configure the executor to use the current state.
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
+            let (block, senders) = block.into_components();
             let block_state = executor
-                .execute_and_verify_receipt(
-                    &Block { header, body: transactions, ommers, withdrawals },
-                    td,
-                    Some(signers),
-                )
+                .execute_and_verify_receipt(&block, td, Some(senders))
                 .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
             if let Some(last_receipt) = block_state.receipts().last() {
                 self.metrics
@@ -183,7 +139,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // put execution results to database
         let first_transition_id = tx.get_block_transition(last_block)?;
+
+        let start = Instant::now();
+        trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
         state.write_to_db(&**tx, first_transition_id)?;
+        trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");

@@ -2,6 +2,7 @@
 use crate::{
     eth::{
         error::{EthApiError, EthResult, SignError},
+        revm_utils::{inspect, prepare_call_env, transact},
         utils::recover_raw_transaction,
     },
     EthApi,
@@ -15,13 +16,18 @@ use reth_primitives::{
     TxLegacy, H256, U128, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
+use reth_revm::database::{State, SubState};
 use reth_rpc_types::{
-    Index, Log, Transaction, TransactionInfo, TransactionReceipt, TransactionRequest,
-    TypedTransactionRequest,
+    state::StateOverride, CallRequest, Index, Log, Transaction, TransactionInfo,
+    TransactionReceipt, TransactionRequest, TypedTransactionRequest,
 };
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
-use revm::primitives::{BlockEnv, CfgEnv};
-use revm_primitives::utilities::create_address;
+use revm::{
+    db::CacheDB,
+    primitives::{BlockEnv, CfgEnv},
+    Inspector,
+};
+use revm_primitives::{utilities::create_address, Env, ResultAndState};
 
 /// Commonly used transaction related functions for the [EthApi] type in the `eth_` namespace
 #[async_trait::async_trait]
@@ -67,6 +73,37 @@ pub trait EthTransactions: Send + Sync {
     /// Signs transaction with a matching signer, if any and submits the transaction to the pool.
     /// Returns the hash of the signed transaction.
     async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256>;
+
+    /// Prepares the state and env for the given [CallRequest] at the given [BlockId] and executes
+    /// the closure.
+    async fn with_call_at<F, R>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send;
+
+    /// Executes the call request at the given [BlockId].
+    async fn transact_call_at(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+    ) -> EthResult<(ResultAndState, Env)>;
+
+    /// Executes the call request at the given [BlockId]
+    async fn inspect_call_at<I>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env)>
+    where
+        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send;
 }
 
 #[async_trait]
@@ -211,6 +248,46 @@ where
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
 
         Ok(hash)
+    }
+
+    async fn with_call_at<F, R>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send,
+    {
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
+        let state = self.state_at(at)?;
+        let mut db = SubState::new(State::new(state));
+
+        let env = prepare_call_env(cfg, block_env, request, &mut db, state_overrides)?;
+        f(db, env)
+    }
+
+    async fn transact_call_at(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+    ) -> EthResult<(ResultAndState, Env)> {
+        self.with_call_at(request, at, state_overrides, |mut db, env| transact(&mut db, env)).await
+    }
+
+    async fn inspect_call_at<I>(
+        &self,
+        request: CallRequest,
+        at: BlockId,
+        state_overrides: Option<StateOverride>,
+        inspector: I,
+    ) -> EthResult<(ResultAndState, Env)>
+    where
+        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
+    {
+        self.with_call_at(request, at, state_overrides, |db, env| inspect(db, env, inspector)).await
     }
 }
 

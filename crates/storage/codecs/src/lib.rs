@@ -96,8 +96,9 @@ where
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let mut list = vec![];
         let length = buf.get_u16();
+        let mut list = Vec::with_capacity(length as usize);
+
         for _ in 0..length {
             #[allow(unused_assignments)]
             let mut element = T::default();
@@ -125,8 +126,9 @@ where
 
     /// To be used by fixed sized types like `Vec<H256>`.
     fn specialized_from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let mut list = vec![];
         let length = buf.get_u16();
+        let mut list = Vec::with_capacity(length as usize);
+
         for _ in 0..length {
             #[allow(unused_assignments)]
             let mut element = T::default();

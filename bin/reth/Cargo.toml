@@ -18,6 +18,7 @@ reth-stages = { path = "../../crates/stages"}
 reth-interfaces = { path = "../../crates/interfaces", features = ["test-utils"] }
 reth-transaction-pool = { path = "../../crates/transaction-pool" }
 reth-beacon-consensus = { path = "../../crates/consensus/beacon" }
+reth-auto-seal-consensus = { path = "../../crates/consensus/auto-seal" }
 reth-executor = { path = "../../crates/executor" }
 reth-rpc-engine-api = { path = "../../crates/rpc/rpc-engine-api" }
 reth-rpc-builder = { path = "../../crates/rpc/rpc-builder" }

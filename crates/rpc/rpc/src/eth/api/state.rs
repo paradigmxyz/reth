@@ -4,7 +4,10 @@ use crate::{
     eth::error::{EthApiError, EthResult},
     EthApi,
 };
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, H256, KECCAK_EMPTY, U256};
+use reth_primitives::{
+    serde_helper::JsonStorageKey, Address, BlockId, BlockNumberOrTag, Bytes, H256, KECCAK_EMPTY,
+    U256,
+};
 use reth_provider::{
     AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
@@ -39,19 +42,18 @@ where
     pub(crate) fn storage_at(
         &self,
         address: Address,
-        index: U256,
+        index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> EthResult<H256> {
         let state = self.state_at_block_id_or_latest(block_id)?;
-        let storage_key = H256(index.to_be_bytes());
-        let value = state.storage(address, storage_key)?.unwrap_or_default();
+        let value = state.storage(address, index.0)?.unwrap_or_default();
         Ok(H256(value.to_be_bytes()))
     }
 
     pub(crate) fn get_proof(
         &self,
         address: Address,
-        keys: Vec<H256>,
+        keys: Vec<JsonStorageKey>,
         block_id: Option<BlockId>,
     ) -> EthResult<EIP1186AccountProofResponse> {
         let chain_info = self.client().chain_info()?;
@@ -74,14 +76,15 @@ where
 
         let state = self.state_at_block_id(block_id)?;
 
-        let (account_proof, storage_hash, stg_proofs) = state.proof(address, &keys)?;
+        let hash_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
+        let (account_proof, storage_hash, stg_proofs) = state.proof(address, &hash_keys)?;
 
         let storage_proof = keys
             .into_iter()
             .zip(stg_proofs)
             .map(|(key, proof)| {
-                state.storage(address, key).map(|op| StorageProof {
-                    key: U256::from_be_bytes(*key.as_fixed_bytes()),
+                state.storage(address, key.0).map(|op| StorageProof {
+                    key,
                     value: op.unwrap_or_default(),
                     proof,
                 })
@@ -97,7 +100,7 @@ where
             ..Default::default()
         };
 
-        if let Some(account) = state.basic_account(address)? {
+        if let Some(account) = state.basic_account(proof.address)? {
             proof.balance = account.balance;
             proof.nonce = account.nonce.into();
             proof.code_hash = account.get_bytecode_hash();

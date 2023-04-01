@@ -381,6 +381,10 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<(PostState, u64), Error> {
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((PostState::default(), 0))
+        }
         let senders = self.recover_senders(&block.body, senders)?;
 
         self.init_env(&block.header, total_difficulty);
@@ -447,12 +451,14 @@ where
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
         }
 
+        // Add block rewards
         let balance_increments = self.post_block_balance_increments(block, total_difficulty)?;
         let mut includes_block_transition = !balance_increments.is_empty();
         for (address, increment) in balance_increments.into_iter() {
             self.increment_account_balance(address, increment, &mut post_state)?;
         }
 
+        // Perform DAO irregular state change
         if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
             includes_block_transition = true;
             self.apply_dao_fork_changes(&mut post_state)?;
@@ -461,7 +467,6 @@ where
         if includes_block_transition {
             post_state.finish_transition();
         }
-
         Ok(post_state)
     }
 
@@ -473,6 +478,10 @@ where
     ) -> Result<PostState, Error> {
         let post_state = self.execute(block, total_difficulty, senders)?;
 
+        // TODO Before Byzantium, receipts contained state root that would mean that expensive
+        // operation as hashing that is needed for state root got calculated in every
+        // transaction This was replaced with is_success flag.
+        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             verify_receipt(
                 block.header.receipts_root,
@@ -480,11 +489,6 @@ where
                 post_state.receipts().iter(),
             )?;
         }
-
-        // TODO Before Byzantium, receipts contained state root that would mean that expensive
-        // operation as hashing that is needed for state root got calculated in every
-        // transaction This was replaced with is_success flag.
-        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
 
         Ok(post_state)
     }

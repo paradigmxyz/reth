@@ -13,7 +13,7 @@ use reth_db::{
 };
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
-use reth_stages::stages::{EXECUTION, MERKLE_EXECUTION};
+use reth_stages::stages::{ACCOUNT_HASHING, EXECUTION, MERKLE_EXECUTION, STORAGE_HASHING};
 use std::sync::Arc;
 use tracing::info;
 
@@ -69,6 +69,21 @@ impl Command {
                     tx.clear::<tables::Bytecodes>()?;
                     tx.put::<tables::SyncStage>(EXECUTION.0.to_string(), 0)?;
                     insert_genesis_state::<Env<WriteMap>>(tx, self.chain.genesis())?;
+                    Ok::<_, eyre::Error>(())
+                })??;
+            }
+            StageEnum::Hashing => {
+                tool.db.update(|tx| {
+                    // Clear hashed accounts
+                    tx.clear::<tables::HashedAccount>()?;
+                    tx.put::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into(), Vec::new())?;
+                    tx.put::<tables::SyncStage>(ACCOUNT_HASHING.0.to_string(), 0)?;
+
+                    // Clear hashed storages
+                    tx.clear::<tables::HashedStorage>()?;
+                    tx.put::<tables::SyncStageProgress>(STORAGE_HASHING.0.into(), Vec::new())?;
+                    tx.put::<tables::SyncStage>(STORAGE_HASHING.0.to_string(), 0)?;
+
                     Ok::<_, eyre::Error>(())
                 })??;
             }

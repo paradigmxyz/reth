@@ -20,7 +20,7 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     CallRequest, Index,
 };
-use revm::primitives::{Env, ExecutionResult, ResultAndState};
+use revm::primitives::{Env, ResultAndState};
 use std::collections::HashSet;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -92,11 +92,20 @@ where
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
         &self,
-        _call: CallRequest,
-        _trace_types: HashSet<TraceType>,
-        _block_id: Option<BlockId>,
+        call: CallRequest,
+        trace_types: HashSet<TraceType>,
+        block_id: Option<BlockId>,
     ) -> EthResult<TraceResults> {
-        todo!()
+        let _permit = self.acquire_trace_permit().await;
+        let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let config = tracing_config(&trace_types);
+        let mut inspector = TracingInspector::new(config);
+
+        let (res, _) = self.eth_api.inspect_call_at(call, at, None, &mut inspector).await?;
+
+        let trace_res =
+            inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+        Ok(trace_res)
     }
 
     /// Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
@@ -119,18 +128,9 @@ where
         let config = tracing_config(&trace_types);
 
         self.trace_at(env, config, at, |inspector, res| {
-            let output = match res.result {
-                ExecutionResult::Success { output, .. } => output.into_data(),
-                ExecutionResult::Revert { output, .. } => output,
-                ExecutionResult::Halt { .. } => Default::default(),
-            };
-
-            let (trace, vm_trace, state_diff) =
-                inspector.into_parity_builder().into_trace_type_traces(&trace_types);
-
-            let res = TraceResults { output: output.into(), trace, vm_trace, state_diff };
-
-            Ok(res)
+            let trace_res =
+                inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+            Ok(trace_res)
         })
     }
 

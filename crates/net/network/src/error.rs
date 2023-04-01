@@ -6,7 +6,25 @@ use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
     DisconnectReason,
 };
-use std::{fmt, io, io::ErrorKind};
+use std::{fmt, io, io::ErrorKind, net::SocketAddr};
+
+/// Service kind.
+#[derive(Debug, PartialEq)]
+pub enum ServiceKind {
+    /// Listener service.
+    Listener(SocketAddr),
+    /// Discovery service.
+    Discovery(SocketAddr),
+}
+
+impl fmt::Display for ServiceKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ServiceKind::Listener(addr) => write!(f, "{addr} (listener service)"),
+            ServiceKind::Discovery(addr) => write!(f, "{addr} (discovery service)"),
+        }
+    }
+}
 
 /// All error variants for the network
 #[derive(Debug, thiserror::Error)]
@@ -14,6 +32,14 @@ pub enum NetworkError {
     /// General IO error.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// Error when an address is already in use.
+    #[error("Address {kind} is already in use (os error 98)")]
+    AddressAlreadyInUse {
+        /// Service kind.
+        kind: ServiceKind,
+        /// IO error.
+        error: io::Error,
+    },
     /// IO error when creating the discovery service
     #[error("Failed to launch discovery service: {0}")]
     Discovery(io::Error),
@@ -22,6 +48,21 @@ pub enum NetworkError {
     /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)
     #[error("Failed to configure DNS resolver: {0}")]
     DnsResolver(#[from] ResolveError),
+}
+
+impl NetworkError {
+    /// Converts a `std::io::Error` to a more descriptive `NetworkError`.
+    pub fn from_io_error(err: io::Error, kind: ServiceKind) -> Self {
+        match err.kind() {
+            ErrorKind::AddrInUse => NetworkError::AddressAlreadyInUse { kind, error: err },
+            _ => {
+                if let ServiceKind::Discovery(_) = kind {
+                    return NetworkError::Discovery(err)
+                }
+                NetworkError::Io(err)
+            }
+        }
+    }
 }
 
 /// Abstraction over errors that can lead to a failed session
