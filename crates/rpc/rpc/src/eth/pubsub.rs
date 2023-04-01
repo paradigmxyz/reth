@@ -1,11 +1,11 @@
 //! `eth_` PubSub RPC handler implementation
 
-use crate::eth::logs_utils;
+use crate::eth::{cache::EthStateCache, logs_utils};
 use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
-use reth_interfaces::events::ChainEventSubscriptions;
+use reth_interfaces::events::{ChainEventSubscriptions, NewBlockNotification};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{filter::FilteredParams, TxHash};
+use reth_primitives::{filter::FilteredParams, Receipt, TransactionSigned, TxHash};
 use reth_provider::{BlockProvider, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
@@ -39,8 +39,21 @@ impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [tokio::task::spawn]
-    pub fn new(client: Client, pool: Pool, chain_events: Events, network: Network) -> Self {
-        Self::with_spawner(client, pool, chain_events, network, Box::<TokioTaskExecutor>::default())
+    pub fn new(
+        client: Client,
+        pool: Pool,
+        chain_events: Events,
+        network: Network,
+        eth_cache: EthStateCache,
+    ) -> Self {
+        Self::with_spawner(
+            client,
+            pool,
+            chain_events,
+            network,
+            eth_cache,
+            Box::<TokioTaskExecutor>::default(),
+        )
     }
 
     /// Creates a new, shareable instance.
@@ -49,9 +62,10 @@ impl<Client, Pool, Events, Network> EthPubSub<Client, Pool, Events, Network> {
         pool: Pool,
         chain_events: Events,
         network: Network,
+        eth_cache: EthStateCache,
         subscription_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
-        let inner = EthPubSubInner { client, pool, chain_events, network };
+        let inner = EthPubSubInner { client, pool, chain_events, network, eth_cache };
         Self { inner, subscription_task_spawner }
     }
 }
@@ -163,6 +177,8 @@ struct EthPubSubInner<Client, Pool, Events, Network> {
     chain_events: Events,
     /// The network.
     network: Network,
+    /// The async cache frontend for eth related data
+    eth_cache: EthStateCache,
 }
 
 // == impl EthPubSubInner ===
@@ -203,6 +219,7 @@ where
     Client: BlockProvider + EvmEnvProvider + 'static,
     Events: ChainEventSubscriptions + 'static,
     Network: NetworkInfo + 'static,
+    Pool: 'static,
 {
     /// Returns a stream that yields all new RPC blocks.
     fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
@@ -216,16 +233,7 @@ where
     fn into_log_stream(self, filter: FilteredParams) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.chain_events.subscribe_new_blocks())
             .filter_map(move |new_block| {
-                let Some(new_block) = new_block.ok() else { return futures::future::ready(None); };
-                let block_id = new_block.hash.into();
-                let txs = self.client.transactions_by_block(block_id).ok().flatten();
-                let receipts = self.client.receipts_by_block(block_id).ok().flatten();
-                match (txs, receipts) {
-                    (Some(txs), Some(receipts)) => {
-                        futures::future::ready(Some((new_block, txs, receipts)))
-                    }
-                    _ => futures::future::ready(None),
-                }
+                Box::pin(get_block_receipts(self.eth_cache.clone(), new_block.ok()))
             })
             .flat_map(move |(new_block, transactions, receipts)| {
                 let block_hash = new_block.hash;
@@ -238,5 +246,21 @@ where
                 );
                 futures::stream::iter(all_logs)
             })
+    }
+}
+
+/// Helper function for getting block receipts and transactions
+async fn get_block_receipts(
+    eth_cache: EthStateCache,
+    new_block: Option<NewBlockNotification>,
+) -> Option<(NewBlockNotification, Vec<TransactionSigned>, Vec<Receipt>)> {
+    let Some(new_block) = new_block else { return None; };
+    let (txs, receipts) = futures::join!(
+        eth_cache.get_block_transactions(new_block.hash),
+        eth_cache.get_receipts(new_block.hash)
+    );
+    match (txs.ok().flatten(), receipts.ok().flatten()) {
+        (Some(txs), Some(receipts)) => Some((new_block, txs, receipts)),
+        _ => None,
     }
 }

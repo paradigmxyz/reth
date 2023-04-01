@@ -183,8 +183,18 @@ where
     }
 
     /// Handler for `debug_getRawReceipts`
-    async fn raw_receipts(&self, _block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
+        let receipts = self.client.receipts_by_block(block_id).to_rpc_result()?.unwrap_or_default();
+        let mut all_receipts = Vec::with_capacity(receipts.len());
+
+        for receipt in receipts {
+            let mut buf = Vec::new();
+            let receipt = receipt.with_bloom();
+            receipt.encode(&mut buf);
+            all_receipts.push(buf.into());
+        }
+
+        Ok(all_receipts)
     }
 
     /// Handler for `debug_getBadBlocks`

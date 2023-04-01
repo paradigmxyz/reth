@@ -1015,7 +1015,7 @@ mod tests {
         let mut executor = Executor::new(chain_spec, db);
         // touch account
         executor.commit_changes(
-            hash_map::HashMap::from([(account, RevmAccount { ..default_acc.clone() })]),
+            hash_map::HashMap::from([(account, default_acc.clone())]),
             true,
             &mut PostState::default(),
         );
@@ -1039,7 +1039,7 @@ mod tests {
         );
         // touch account
         executor.commit_changes(
-            hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]),
+            hash_map::HashMap::from([(account, default_acc)]),
             true,
             &mut PostState::default(),
         );
