@@ -18,7 +18,7 @@
 use crate::{
     config::NetworkConfig,
     discovery::Discovery,
-    error::NetworkError,
+    error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
     import::{BlockImport, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
@@ -171,7 +171,9 @@ where
         let peers_manager = PeersManager::new(peers_config);
         let peers_handle = peers_manager.handle();
 
-        let incoming = ConnectionListener::bind(listener_addr).await?;
+        let incoming = ConnectionListener::bind(listener_addr).await.map_err(|err| {
+            NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
+        })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
         discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
