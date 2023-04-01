@@ -42,7 +42,7 @@ use wtinylfu::WTinyLfuCache;
 
 pub struct ExecutionCache {
     account_cache: WTinyLfuCache<Address, Option<Account>>,
-    storage_cache: WTinyLfuCache<Address, BTreeMap<U256, U256>>,
+    storage_cache: WTinyLfuCache<Address, Storage>,
     bytecode_cache: WTinyLfuCache<H256, Option<Bytecode>>,
     // TODO: Temp
     pub account_hits: u64,
@@ -128,21 +128,33 @@ impl ExecutionCache {
         let storage = self.storage_cache.get_mut(&address);
 
         if let Some(storage) = storage {
-            if let Some(value) = storage.get(&slot.into()) {
+            if let Some(value) = storage.storage.get(&slot.into()) {
                 self.storage_hits += 1;
                 Ok(*value)
+            } else if storage.wiped {
+                // TODO: Should we count this as a hit since it does not touch disk?
+                self.storage_misses += 1;
+                let value = StorageValue::ZERO;
+                let _ = storage.storage.insert(slot.into(), value.into());
+                Ok(value)
             } else {
                 self.storage_misses += 1;
                 let value = (f)()?;
-                let _ = storage.insert(slot.into(), value.into());
+                let _ = storage.storage.insert(slot.into(), value.into());
                 Ok(value)
             }
         } else {
-            self.storage_hits += 1;
+            self.storage_misses += 1;
             let value = (f)()?;
             if self
                 .storage_cache
-                .push(address, BTreeMap::from([(slot.into(), value.into())]))
+                .push(
+                    address,
+                    Storage {
+                        storage: BTreeMap::from([(slot.into(), value.into())]),
+                        wiped: false,
+                    },
+                )
                 .is_some()
             {
                 self.storage_evictions += 1;
@@ -179,7 +191,8 @@ impl ExecutionCache {
     #[deprecated]
     pub fn clear_storage(&mut self, address: Address) {
         if let Some(cached_storage) = self.storage_cache.peek_mut(&address) {
-            cached_storage.clear();
+            cached_storage.storage.clear();
+            cached_storage.wiped = true;
         }
     }
 
@@ -190,9 +203,10 @@ impl ExecutionCache {
         iter: T,
     ) {
         if let Some(cached_storage) = self.storage_cache.get_mut(&address) {
-            cached_storage.extend(iter);
+            cached_storage.storage.extend(iter);
         } else {
-            self.storage_cache.push(address, iter.into_iter().collect());
+            self.storage_cache
+                .push(address, Storage { storage: iter.into_iter().collect(), wiped: false });
         }
     }
 

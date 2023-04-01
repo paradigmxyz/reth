@@ -86,14 +86,6 @@ impl<SP: StateProvider> DatabaseCommit for SubState<SP> {
         let mut cache = self.cache.lock().expect("Could not lock execution cache");
 
         for (address, mut account) in changes {
-            let fresh = cache.get_account(address).is_none() &&
-                !self.substate.accounts.contains_key(&address);
-
-            // TODO: If we do not have the account in LRU *or* substate, then this is an entirely
-            // new account and we can mark it as fresh. If the account is fresh (in the
-            // substate or LRU) we do not need to ask the underlying state provider for storage
-            // slots.
-
             // Account was destroyed
             if account.is_destroyed {
                 cache.update_account(address, None);
@@ -199,18 +191,20 @@ impl<SP: StateProvider> Database for SubState<SP> {
     }
 
     fn storage(&mut self, address: H160, index: U256) -> Result<U256, Self::Error> {
-        // TODO: Wiped storage check
         Ok(self
             .cache
             .lock()
             .expect("Could not lock execution cache")
             .get_storage_with(address, index.into(), || {
-                if let Some(v) = self
-                    .substate
-                    .storages
-                    .get(&address)
-                    .and_then(|a| a.storage.get(&index).cloned())
-                {
+                if let Some(v) = self.substate.storages.get(&address).and_then(|storage| {
+                    if let Some(v) = storage.storage.get(&index) {
+                        Some(*v)
+                    } else if storage.wiped {
+                        Some(U256::ZERO)
+                    } else {
+                        None
+                    }
+                }) {
                     Ok(v)
                 } else {
                     self.state_provider
