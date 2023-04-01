@@ -1,4 +1,5 @@
 use crate::post_state::PostState;
+use reth_consensus_common::calc;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
@@ -216,26 +217,22 @@ where
     ) -> Result<HashMap<Address, U256>, Error> {
         let mut balance_increments = HashMap::<Address, U256>::default();
 
-        // Collect balance increments for block and uncle rewards.
-        if let Some(reward) = self.get_block_reward(block, td) {
-            // Calculate Uncle reward
-            // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
+        // Add block rewards if they are enabled.
+        if let Some(base_block_reward) =
+            calc::base_block_reward(&self.chain_spec, block.number, block.difficulty, td)
+        {
+            // Ommer rewards
             for ommer in block.ommers.iter() {
-                let ommer_reward =
-                    U256::from(((8 + ommer.number - block.number) as u128 * reward) >> 3);
-                // From yellowpaper Page 15:
-                // If there are collisions of the beneficiary addresses between ommers and the
-                // block (i.e. two ommers with the same beneficiary address
-                // or an ommer with the same beneficiary address as the
-                // present block), additions are applied cumulatively
-                *balance_increments.entry(ommer.beneficiary).or_default() += ommer_reward;
+                *balance_increments.entry(ommer.beneficiary).or_default() +=
+                    calc::ommer_reward(base_block_reward, block.number, ommer.number);
             }
 
-            // Increment balance for main block reward.
-            let block_reward = U256::from(reward + (reward >> 5) * block.ommers.len() as u128);
-            *balance_increments.entry(block.beneficiary).or_default() += block_reward;
+            // Full block reward
+            *balance_increments.entry(block.beneficiary).or_default() +=
+                calc::block_reward(base_block_reward, block.ommers.len());
         }
 
+        // Process withdrawals
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
             if let Some(withdrawals) = block.withdrawals.as_ref() {
                 for withdrawal in withdrawals {
@@ -246,29 +243,6 @@ where
         }
 
         Ok(balance_increments)
-    }
-
-    /// From yellowpapper Page 15:
-    /// 11.3. Reward Application. The application of rewards to a block involves raising the
-    /// balance of the accounts of the beneficiary address of the block and each ommer by
-    /// a certain amount. We raise the block’s beneficiary account by Rblock; for each
-    /// ommer, we raise the block’s beneficiary by an additional 1/32 of the block reward
-    /// and the beneficiary of the ommer gets rewarded depending on the blocknumber.
-    /// Formally we define the function Ω.
-    ///
-    /// NOTE: Related to Ethereum reward change, for other network this is probably going to be
-    /// moved to config.
-    fn get_block_reward(&self, header: &Header, total_difficulty: U256) -> Option<u128> {
-        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
-        {
-            None
-        } else if self.chain_spec.fork(Hardfork::Petersburg).active_at_block(header.number) {
-            Some(WEI_2ETH)
-        } else if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(header.number) {
-            Some(WEI_3ETH)
-        } else {
-            Some(WEI_5ETH)
-        }
     }
 
     /// Irregular state change at Ethereum DAO hardfork

@@ -21,6 +21,7 @@ reth-revm-inspectors = { path = "../revm/revm-inspectors" }
 reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
+reth-consensus-common = { path = "../consensus/common" }
 
 # revm
 revm = { version = "3.0.0" }
