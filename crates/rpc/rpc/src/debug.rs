@@ -76,7 +76,7 @@ where
         self.eth_api.with_state_at(at, |state| {
             let tx = tx_env_with_recovered(&tx);
             let env = Env { cfg, block, tx };
-            let db = SubState::new(State::new(state));
+            let db = SubState::new(state);
 
             let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
             if let Some(tracer) = tracer {

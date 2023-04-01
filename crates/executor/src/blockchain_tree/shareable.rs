@@ -1,4 +1,5 @@
 //! Wrapper around BlockchainTree that allows for it to be shared.
+use crate::ExecutorFactory;
 use parking_lot::RwLock;
 use reth_db::database::Database;
 use reth_interfaces::{
@@ -9,7 +10,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
-use reth_provider::{BlockchainTreePendingStateProvider, ExecutorFactory, PostStateDataProvider};
+use reth_provider::{BlockchainTreePendingStateProvider, PostStateDataProvider};
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,

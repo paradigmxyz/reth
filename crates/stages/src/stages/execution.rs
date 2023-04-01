@@ -10,13 +10,11 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_executor::cache::{CachedStateProvider, ExecutionCache};
+use reth_executor::{cache::ExecutionCache, BlockExecutor, ExecutorFactory};
 use reth_interfaces::provider::ProviderError;
 use reth_metrics_derive::Metrics;
 use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
-use reth_provider::{
-    post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
-};
+use reth_provider::{post_state::PostState, LatestStateProviderRef, Transaction};
 use std::{
     sync::{Arc, Mutex},
     time::Instant,
@@ -154,10 +152,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let last_block = input.stage_progress.unwrap_or_default();
 
         // Create state provider with cached state
-        let mut executor = self.executor_factory.with_sp(CachedStateProvider::new(
-            Arc::clone(&self.execution_cache),
+
+        let mut executor = self.executor_factory.with_sp_and_cache(
             LatestStateProviderRef::new(&**tx),
-        ));
+            Arc::clone(&self.execution_cache),
+        );
 
         // Fetch transactions, execute them and generate results
         let mut state = PostState::default();
@@ -176,10 +175,8 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                     .increment(last_receipt.cumulative_gas_used / 1_000_000);
             }
             {
-                trace!(target: "sync::stages::execution", "Updating cache");
                 let mut cache =
                     self.execution_cache.lock().expect("Could not lock execution cache");
-                cache.update_cache(block_state.accounts(), block_state.storage());
                 self.metrics.account_cache_hits.absolute(cache.account_hits);
                 self.metrics.account_cache_misses.absolute(cache.account_misses);
                 self.metrics.account_cache_evictions.absolute(cache.account_evictions);

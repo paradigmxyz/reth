@@ -6,25 +6,18 @@ use crate::{
     to_reth_acc,
 };
 use reth_consensus_common::calc;
-use reth_executor::post_state::PostState;
+use reth_executor::BlockExecutor;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
     ReceiptWithBloom, TransactionSigned, H256, U256,
 };
-use reth_provider::{BlockExecutor, StateProvider};
+use reth_provider::{post_state::StorageChangeset, PostState, StateProvider};
 use revm::{
-    db::AccountState,
-    primitives::{
-        hash_map::{self, Entry},
-        Account as RevmAccount, AccountInfo, ResultAndState,
-    },
-    EVM,
+    primitives::{hash_map, Account as RevmAccount, ResultAndState},
+    DatabaseCommit, EVM,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 /// Main block executor
 pub struct Executor<DB>
@@ -99,6 +92,7 @@ where
         );
     }
 
+    // TODO: Move
     /// Commit change to the run-time database, and update the given [PostState] with the changes
     /// made in the transaction, which can be persisted to the database.
     fn commit_changes(
@@ -110,100 +104,64 @@ where
         let db = self.db();
 
         // iterate over all changed accounts
-        for (address, account) in changes {
-            if account.is_destroyed {
-                // get old account that we are destroying.
-                let db_account = match db.accounts.entry(address) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(_entry) => {
-                        panic!("Left panic to critically jumpout if happens, as every account should be hot loaded.");
-                    }
-                };
-                // Insert into `change` a old account and None for new account
-                // and mark storage to be mapped
-                post_state.destroy_account(address, to_reth_acc(&db_account.info));
+        for (address, account) in &changes {
+            let code_is_new = !account.is_destroyed && !db.has_code(account.info.code_hash);
+            let db_account = db.substate_account(*address);
 
-                // clear cached DB and mark account as not existing
-                db_account.storage.clear();
-                db_account.account_state = AccountState::NotExisting;
-                db_account.info = AccountInfo::default();
+            if account.is_destroyed {
+                // The account was destroyed
+                if let Some(current_account) = db_account {
+                    post_state.destroy_account(*address, current_account.clone());
+                } else {
+                    // TODO: How should we handle this? Currently, it would be a changeset from an
+                    // empty account to an empty account, since https://github.com/paradigmxyz/reth/blob/ee81e4f035713465b8af62d037aa5620cfc99df6/crates/executor/src/executor.rs#L115
+                    // resolves to a default account (since it was loaded that way).
+                    tracing::trace!(
+                        target: "evm",
+                        ?address,
+                        "Account was created and selfdestructed in same transaction"
+                    );
+                }
 
                 continue
-            } else {
-                // check if account code is new or old.
-                // does it exist inside cached contracts if it doesn't it is new bytecode that
-                // we are inserting inside `change`
-                if let Some(ref code) = account.info.code {
-                    if !code.is_empty() && !db.contracts.contains_key(&account.info.code_hash) {
-                        db.contracts.insert(account.info.code_hash, code.clone());
-                        post_state.add_bytecode(account.info.code_hash, Bytecode(code.clone()));
-                    }
-                }
+            }
 
-                // get old account that is going to be overwritten or none if it does not exist
-                // and get new account that was just inserted. new account mut ref is used for
-                // inserting storage
-                let cached_account = match db.accounts.entry(address) {
-                    Entry::Vacant(entry) => {
-                        let entry = entry.insert(Default::default());
-                        entry.info = account.info.clone();
-
-                        let account = to_reth_acc(&entry.info);
-                        if !(has_state_clear_eip && account.is_empty()) {
-                            post_state.create_account(address, account);
-                        }
-                        entry
-                    }
-                    Entry::Occupied(entry) => {
-                        let entry = entry.into_mut();
-
-                        if matches!(entry.account_state, AccountState::NotExisting) {
-                            let account = to_reth_acc(&account.info);
-                            if !(has_state_clear_eip && account.is_empty()) {
-                                post_state.create_account(address, account);
-                            }
-                        } else if entry.info != account.info {
-                            post_state.change_account(
-                                address,
-                                to_reth_acc(&entry.info),
-                                to_reth_acc(&account.info),
-                            );
-                        } else if has_state_clear_eip && account.is_empty() {
-                            // The account was touched, but it is empty, so it should be deleted.
-                            post_state.destroy_account(address, to_reth_acc(&account.info));
-                        }
-
-                        entry.info = account.info.clone();
-                        entry
-                    }
-                };
-
-                cached_account.account_state = if account.storage_cleared {
-                    cached_account.storage.clear();
-                    AccountState::StorageCleared
-                } else if cached_account.account_state.is_storage_cleared() {
-                    // the account already exists and its storage was cleared, preserve its previous
-                    // state
-                    AccountState::StorageCleared
-                } else {
-                    AccountState::Touched
-                };
-
-                // Insert storage.
-                let mut storage_changeset = BTreeMap::new();
-
-                // insert storage into new db account.
-                cached_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
-                    storage_changeset.insert(key, (value.original_value(), value.present_value()));
-                    (key, value.present_value())
-                }));
-
-                // Insert into change.
-                if !storage_changeset.is_empty() {
-                    post_state.change_storage(address, storage_changeset);
+            // Check if we have new bytecode, if so, insert it into the post state
+            if let Some(ref code) = account.info.code {
+                if !code.is_empty() && code_is_new {
+                    post_state.add_bytecode(account.info.code_hash, Bytecode(code.clone()));
                 }
             }
+
+            let new_account = to_reth_acc(&account.info);
+            if let Some(current_account) = db_account {
+                if current_account != new_account {
+                    // The account was changed and is not empty
+                    post_state.change_account(*address, current_account.clone(), new_account);
+                } else if has_state_clear_eip && new_account.is_empty() {
+                    // The account was touched, but it is empty, so it should be deleted.
+                    post_state.destroy_account(*address, new_account);
+                }
+            } else if !(has_state_clear_eip && account.is_empty()) {
+                // This is a new account and it is either not empty, or it is empty and we do not
+                // have the state clear EIP
+                post_state.create_account(*address, new_account);
+            }
+
+            let storage_changeset: StorageChangeset = account
+                .storage
+                .clone()
+                .into_iter()
+                .map(|(key, value)| (key, (value.original_value(), value.present_value())))
+                .collect();
+
+            // Insert into change.
+            if !storage_changeset.is_empty() {
+                post_state.change_storage(*address, storage_changeset);
+            }
         }
+
+        db.commit(changes);
     }
 
     /// Collect all balance changes at the end of the block.
@@ -253,13 +211,14 @@ where
 
         // drain all accounts ether
         for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
-            let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
-            let old = to_reth_acc(&db_account.info);
-            // drain balance
-            drained_balance += core::mem::take(&mut db_account.info.balance);
-            let new = to_reth_acc(&db_account.info);
-            // assume it is changeset as it is irregular state change
-            post_state.change_account(address, old, new);
+            if let Some(db_account) = db.load_account(address).map_err(|_| Error::ProviderError)? {
+                let old = db_account.clone();
+                // drain balance
+                drained_balance += core::mem::take(&mut db_account.balance);
+                let new = db_account.clone();
+                // assume it is changeset as it is irregular state change
+                post_state.change_account(address, old, new);
+            }
         }
 
         // add drained ether to beneficiary.
@@ -278,33 +237,21 @@ where
     ) -> Result<(), Error> {
         let db = self.db();
         let beneficiary = db.load_account(address).map_err(|_| Error::ProviderError)?;
-        let old = to_reth_acc(&beneficiary.info);
-        // Increment beneficiary balance by mutating db entry in place.
-        beneficiary.info.balance += increment;
-        let new = to_reth_acc(&beneficiary.info);
-        match beneficiary.account_state {
-            AccountState::NotExisting => {
-                // if account was not existing that means that storage is not
-                // present.
-                beneficiary.account_state = AccountState::StorageCleared;
 
-                // if account was not present append `Created` changeset
-                post_state.create_account(
-                    address,
-                    Account { nonce: 0, balance: new.balance, bytecode_hash: None },
-                )
-            }
+        if let Some(beneficiary) = beneficiary {
+            // Account already existed
+            let old = beneficiary.clone();
+            beneficiary.balance += increment;
+            let mut new = beneficiary.clone();
 
-            AccountState::StorageCleared | AccountState::Touched | AccountState::None => {
-                // If account is None that means that EVM didn't touch it.
-                // we are changing the state to Touched as account can have
-                // storage in db.
-                if beneficiary.account_state == AccountState::None {
-                    beneficiary.account_state = AccountState::Touched;
-                }
-                // if account was present, append changed changeset.
-                post_state.change_account(address, old, new);
-            }
+            post_state.change_account(address, old, new);
+        } else {
+            // TODO: Will this cause trouble?
+            post_state.create_account(
+                address,
+                Account { nonce: 0, balance: increment, bytecode_hash: None },
+            );
+            *beneficiary = Some(Account { nonce: 0, balance: increment, bytecode_hash: None });
         }
 
         Ok(())

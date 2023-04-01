@@ -1,6 +1,7 @@
+use crate::BlockExecutor;
 use reth_interfaces::executor::Error as ExecutionError;
 use reth_primitives::{Address, Block, U256};
-use reth_provider::{post_state::PostState, BlockExecutor, StateProvider};
+use reth_provider::{post_state::PostState, StateProvider};
 
 /// Test executor with mocked result.
 pub struct TestExecutor(pub Option<PostState>);

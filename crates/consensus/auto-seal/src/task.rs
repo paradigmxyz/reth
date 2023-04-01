@@ -8,10 +8,7 @@ use reth_primitives::{
     EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::StateProviderFactory;
-use reth_revm::{
-    database::{State, SubState},
-    executor::Executor,
-};
+use reth_revm::{database::SubState, executor::Executor};
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -141,7 +138,7 @@ where
                         Block { header, body: transactions, ommers: vec![], withdrawals: None };
 
                     // execute the new block
-                    let substate = SubState::new(State::new(client.latest().unwrap()));
+                    let substate = SubState::new(client.latest().unwrap());
                     let mut executor = Executor::new(chain_spec, substate);
 
                     trace!(target: "consensus::auto", transactions=?&block.body, "executing transactions");

@@ -32,6 +32,3 @@ pub use transactions::TransactionsProvider;
 
 mod withdrawals;
 pub use withdrawals::WithdrawalsProvider;
-
-mod executor;
-pub use executor::{BlockExecutor, ExecutorFactory};

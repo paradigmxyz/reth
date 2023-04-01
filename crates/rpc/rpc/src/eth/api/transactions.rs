@@ -329,7 +329,7 @@ where
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
-        let mut db = SubState::new(State::new(state));
+        let mut db = CacheDB::new(State::new(state));
 
         let env = prepare_call_env(cfg, block_env, request, &mut db, state_overrides)?;
         f(db, env)
@@ -368,7 +368,7 @@ where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at(at, |state| {
-            let db = SubState::new(State::new(state));
+            let db = SubState::new(state);
 
             let mut inspector = TracingInspector::new(config);
             let (res, _) = inspect(db, env, &mut inspector)?;

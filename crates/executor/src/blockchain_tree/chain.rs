@@ -2,16 +2,15 @@
 //!
 //! A [`Chain`] contains the state of accounts for the chain after execution of its constituent
 //! blocks, as well as a list of the blocks the chain is composed of.
-use crate::{blockchain_tree::PostStateDataRef, post_state::PostState};
+use crate::{
+    blockchain_tree::PostStateDataRef, post_state::PostState, BlockExecutor, ExecutorFactory,
+};
 use reth_db::database::Database;
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders, SealedHeader, U256,
 };
-use reth_provider::{
-    providers::PostStateProvider, BlockExecutor, ExecutorFactory, PostStateDataProvider,
-    StateProviderFactory,
-};
+use reth_provider::{providers::PostStateProvider, PostStateDataProvider, StateProviderFactory};
 use std::collections::BTreeMap;
 
 use super::externals::TreeExternals;

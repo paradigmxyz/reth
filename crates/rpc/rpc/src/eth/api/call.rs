@@ -22,7 +22,7 @@ use reth_revm::{
 use reth_rpc_types::CallRequest;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    db::{CacheDB, DatabaseRef},
+    db::{CacheDB, Database},
     primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
 };
 use tracing::trace;
@@ -81,12 +81,12 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = SubState::new(State::new(state));
+        let mut db = SubState::new(state);
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
-                if let Ok(code) = db.db.state().account_code(to) {
+                if let Ok(code) = db.state().account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
@@ -250,7 +250,7 @@ where
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
         env.cfg.disable_base_fee = true;
 
-        let mut db = SubState::new(State::new(state));
+        let mut db = SubState::new(state);
 
         if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
             // no gas limit was provided in the request, so we need to cap the request's gas limit
@@ -288,11 +288,7 @@ where
 /// Executes the requests again after an out of gas error to check if the error is gas related or
 /// not
 #[inline]
-fn map_out_of_gas_err<S>(
-    env_gas_limit: U256,
-    mut env: Env,
-    mut db: &mut CacheDB<State<S>>,
-) -> EthApiError
+fn map_out_of_gas_err<S>(env_gas_limit: U256, mut env: Env, mut db: &mut SubState<S>) -> EthApiError
 where
     S: StateProvider,
 {

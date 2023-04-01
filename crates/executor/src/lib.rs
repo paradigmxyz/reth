@@ -15,6 +15,9 @@ pub mod blockchain_tree;
 
 pub mod cache;
 
+mod executor;
+pub use executor::{BlockExecutor, ExecutorFactory};
+
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers for mocking out executor and executor factory
 pub mod test_utils;

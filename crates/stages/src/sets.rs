@@ -47,6 +47,7 @@ use crate::{
     StageSet, StageSetBuilder,
 };
 use reth_db::database::Database;
+use reth_executor::ExecutorFactory;
 use reth_interfaces::{
     consensus::Consensus,
     p2p::{
@@ -54,7 +55,6 @@ use reth_interfaces::{
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
 };
-use reth_provider::ExecutorFactory;
 use std::sync::Arc;
 
 /// A set containing all stages to run a fully syncing instance of reth.

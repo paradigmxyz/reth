@@ -1,7 +1,8 @@
 use super::TestExecutor;
+use crate::{cache::ExecutionCache, ExecutorFactory};
 use parking_lot::Mutex;
 use reth_primitives::ChainSpec;
-use reth_provider::{post_state::PostState, ExecutorFactory, StateProvider};
+use reth_provider::{post_state::PostState, StateProvider};
 use std::sync::Arc;
 
 /// Executor factory with pre-set execution results.
@@ -29,6 +30,14 @@ impl ExecutorFactory for TestExecutorFactory {
     fn with_sp<SP: StateProvider>(&self, _sp: SP) -> Self::Executor<SP> {
         let exec_res = self.exec_results.lock().pop();
         TestExecutor(exec_res)
+    }
+
+    fn with_sp_and_cache<SP: StateProvider>(
+        &self,
+        _: SP,
+        _: Arc<std::sync::Mutex<ExecutionCache>>,
+    ) -> Self::Executor<SP> {
+        unimplemented!()
     }
 
     fn chain_spec(&self) -> &ChainSpec {

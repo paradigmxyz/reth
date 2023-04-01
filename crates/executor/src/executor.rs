@@ -1,8 +1,10 @@
 //! Executor Factory
 
-use crate::{post_state::PostState, StateProvider};
+use crate::{cache::ExecutionCache, post_state::PostState};
 use reth_interfaces::executor::Error;
 use reth_primitives::{Address, Block, ChainSpec, U256};
+use reth_provider::StateProvider;
+use std::sync::{Arc, Mutex};
 
 /// Executor factory that would create the EVM with particular state provider.
 ///
@@ -13,6 +15,13 @@ pub trait ExecutorFactory: Send + Sync + 'static {
 
     /// Executor with [`StateProvider`]
     fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::Executor<SP>;
+
+    /// Executor with [`StateProvider`] and [`ExecutionCache`]
+    fn with_sp_and_cache<SP: StateProvider>(
+        &self,
+        sp: SP,
+        cache: Arc<Mutex<ExecutionCache>>,
+    ) -> Self::Executor<SP>;
 
     /// Return internal chainspec
     fn chain_spec(&self) -> &ChainSpec;

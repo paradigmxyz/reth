@@ -1,4 +1,5 @@
 //! Implementation of [`BlockchainTree`]
+use crate::ExecutorFactory;
 use chain::{BlockChainId, Chain, ForkBlock};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
@@ -12,7 +13,7 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders,
     SealedHeader, U256,
 };
-use reth_provider::{post_state::PostState, ExecutorFactory, HeaderProvider, Transaction};
+use reth_provider::{post_state::PostState, HeaderProvider, Transaction};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,

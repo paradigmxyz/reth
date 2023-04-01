@@ -1,12 +1,14 @@
 use crate::{
-    database::{State, SubState},
+    database::SubState,
     stack::{InspectorStack, InspectorStackConfig},
 };
+use reth_executor::ExecutorFactory;
 use reth_primitives::ChainSpec;
-use reth_provider::{ExecutorFactory, StateProvider};
+use reth_provider::StateProvider;
 
 use crate::executor::Executor;
-use std::sync::Arc;
+use reth_executor::cache::ExecutionCache;
+use std::sync::{Arc, Mutex};
 
 /// Factory that spawn Executor.
 #[derive(Clone, Debug)]
@@ -39,7 +41,15 @@ impl ExecutorFactory for Factory {
 
     /// Executor with [`StateProvider`]
     fn with_sp<SP: StateProvider>(&self, sp: SP) -> Self::Executor<SP> {
-        let substate = SubState::new(State::new(sp));
+        self.with_sp_and_cache(sp, Arc::new(Mutex::new(ExecutionCache::new(0, 0, 0))))
+    }
+
+    fn with_sp_and_cache<SP: StateProvider>(
+        &self,
+        sp: SP,
+        cache: Arc<Mutex<ExecutionCache>>,
+    ) -> Self::Executor<SP> {
+        let substate = SubState::new_with_cache(sp, cache);
 
         let mut executor = Executor::new(self.chain_spec.clone(), substate);
         if let Some(ref stack) = self.stack {

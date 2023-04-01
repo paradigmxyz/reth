@@ -30,10 +30,9 @@ use reth_interfaces::{provider::ProviderError, Result};
 use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256, U256,
 };
-use reth_provider::{post_state::Storage, AccountProvider, BlockHashProvider, StateProvider};
-use revm::precompile::HashMap;
+use reth_provider::post_state::Storage;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex},
 };
 use tracing::trace;
@@ -86,23 +85,32 @@ impl ExecutionCache {
         }
     }
 
-    pub fn get_account_with<F>(&mut self, address: Address, f: F) -> Option<Account>
+    pub fn get_account_with<F>(&mut self, address: Address, f: F) -> Result<Option<Account>>
     where
-        F: FnOnce() -> Option<Account>,
+        F: FnOnce() -> Result<Option<Account>>,
     {
-        match self.account_cache.get(&address) {
+        Ok(match self.account_cache.get(&address) {
             Some(entry) => {
                 self.account_hits += 1;
                 entry.clone()
             }
             None => {
                 self.account_misses += 1;
-                let account = (f)();
+                let account = (f)()?;
                 if self.account_cache.push(address, account.clone()).is_some() {
                     self.account_evictions += 1;
                 }
                 account
             }
+        })
+    }
+
+    // TODO
+    pub fn get_account(&mut self, address: Address) -> Option<&Account> {
+        if let Some(account) = self.account_cache.get(&address).map(|a| a.as_ref()) {
+            account
+        } else {
+            None
         }
     }
 
@@ -111,25 +119,27 @@ impl ExecutionCache {
         address: Address,
         slot: StorageKey,
         f: F,
-    ) -> Option<StorageValue>
+    ) -> Result<StorageValue>
     where
-        F: FnOnce() -> Option<StorageValue>,
+        F: FnOnce() -> Result<StorageValue>,
     {
+        // TODO: If storage = wiped, don't ask DB
+        // TODO: New account should have storage = wiped
         let storage = self.storage_cache.get_mut(&address);
 
         if let Some(storage) = storage {
             if let Some(value) = storage.get(&slot.into()) {
                 self.storage_hits += 1;
-                Some(*value)
+                Ok(*value)
             } else {
                 self.storage_misses += 1;
-                let value = (f)().unwrap_or_default();
+                let value = (f)()?;
                 let _ = storage.insert(slot.into(), value.into());
-                Some(value)
+                Ok(value)
             }
         } else {
             self.storage_hits += 1;
-            let value = (f)().unwrap_or_default();
+            let value = (f)()?;
             if self
                 .storage_cache
                 .push(address, BTreeMap::from([(slot.into(), value.into())]))
@@ -137,106 +147,72 @@ impl ExecutionCache {
             {
                 self.storage_evictions += 1;
             }
-            Some(value)
+            Ok(value)
         }
     }
 
-    pub fn get_bytecode_with<F>(&mut self, code_hash: H256, f: F) -> Option<Bytecode>
+    pub fn get_bytecode_with<F>(&mut self, code_hash: H256, f: F) -> Result<Option<Bytecode>>
     where
-        F: FnOnce() -> Option<Bytecode>,
+        F: FnOnce() -> Result<Option<Bytecode>>,
     {
-        match self.bytecode_cache.get(&code_hash) {
+        Ok(match self.bytecode_cache.get(&code_hash) {
             Some(bytecode) => {
                 self.bytecode_hits += 1;
                 bytecode.clone()
             }
             None => {
                 self.bytecode_misses += 1;
-                let bytecode = (f)();
+                let bytecode = (f)()?;
                 if self.bytecode_cache.push(code_hash, bytecode.clone()).is_some() {
                     self.bytecode_evictions += 1;
                 }
                 bytecode
             }
+        })
+    }
+
+    // TODO
+    pub fn get_bytecode(&mut self, code_hash: H256) -> Option<Bytecode> {
+        self.bytecode_cache.get(&code_hash).cloned().flatten()
+    }
+
+    #[deprecated]
+    pub fn clear_storage(&mut self, address: Address) {
+        if let Some(cached_storage) = self.storage_cache.peek_mut(&address) {
+            cached_storage.clear();
         }
     }
 
-    // TODO: Note why we only update existing values
-    pub fn update_cache(
+    #[deprecated]
+    pub fn update_storage<T: IntoIterator<Item = (U256, U256)>>(
         &mut self,
-        accounts: &BTreeMap<Address, Option<Account>>,
-        storage: &BTreeMap<Address, Storage>,
+        address: Address,
+        iter: T,
     ) {
-        for (address, account) in accounts {
-            if let Some(entry) = self.account_cache.peek_mut(address) {
-                *entry = account.clone();
-            }
+        if let Some(cached_storage) = self.storage_cache.get_mut(&address) {
+            cached_storage.extend(iter);
+        } else {
+            self.storage_cache.push(address, iter.into_iter().collect());
         }
+    }
 
-        for (address, storage) in storage {
-            if let Some(cached_storage) = self.storage_cache.peek_mut(address) {
-                if storage.wiped {
-                    cached_storage.clear();
-                }
-                cached_storage.extend(storage.storage.clone());
-            }
-        }
+    #[deprecated]
+    pub fn update_account(&mut self, address: Address, account: Option<Account>) {
+        self.account_cache.push(address, account.clone());
+    }
+
+    #[deprecated]
+    pub fn update_bytecode(&mut self, code_hash: H256, code: Bytecode) {
+        self.bytecode_cache.push(code_hash, Some(code));
+    }
+
+    // TODO: Temp
+    #[deprecated]
+    pub fn drop_account(&mut self, address: Address) {
+        self.account_cache.pop(&address);
+        self.storage_cache.pop(&address);
     }
 
     // TODO: A way to commit changes
     // TODO: We need to keep a cache DB for diffing...
-}
-
-pub struct CachedStateProvider<SP> {
-    cache: Arc<Mutex<ExecutionCache>>,
-    /// The inner state provider.
-    provider: SP,
-}
-
-impl<'a, SP: StateProvider> CachedStateProvider<SP> {
-    pub fn new(cache: Arc<Mutex<ExecutionCache>>, provider: SP) -> Self {
-        Self { cache, provider }
-    }
-}
-
-impl<'a, SP: StateProvider> BlockHashProvider for CachedStateProvider<SP> {
-    fn block_hash(&self, block_number: BlockNumber) -> Result<Option<H256>> {
-        self.provider.block_hash(block_number)
-    }
-
-    fn canonical_hashes_range(&self, _start: BlockNumber, _end: BlockNumber) -> Result<Vec<H256>> {
-        unimplemented!()
-    }
-}
-
-impl<'a, SP: StateProvider> AccountProvider for CachedStateProvider<SP> {
-    fn basic_account(&self, address: Address) -> Result<Option<Account>> {
-        Ok(self
-            .cache
-            .lock()
-            .unwrap()
-            .get_account_with(address, || self.provider.basic_account(address).ok().flatten()))
-    }
-}
-
-impl<'a, SP: StateProvider> StateProvider for CachedStateProvider<SP> {
-    fn storage(&self, account: Address, storage_key: StorageKey) -> Result<Option<StorageValue>> {
-        Ok(self.cache.lock().unwrap().get_storage_with(account, storage_key, || {
-            self.provider.storage(account, storage_key).ok().flatten()
-        }))
-    }
-
-    fn bytecode_by_hash(&self, code_hash: H256) -> Result<Option<Bytecode>> {
-        Ok(self.cache.lock().unwrap().get_bytecode_with(code_hash, || {
-            self.provider.bytecode_by_hash(code_hash).ok().flatten()
-        }))
-    }
-
-    fn proof(
-        &self,
-        _address: Address,
-        _keys: &[H256],
-    ) -> Result<(Vec<Bytes>, H256, Vec<Vec<Bytes>>)> {
-        Err(ProviderError::HistoryStateRoot.into())
-    }
 }
