@@ -12,10 +12,12 @@ use reth_provider::{
     AccountProvider, BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory,
 };
 use reth_rpc_types::{EIP1186AccountProofResponse, StorageProof};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 impl<Client, Pool, Network> EthApi<Client, Pool, Network>
 where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
+    Pool: TransactionPool + Clone + 'static,
 {
     pub(crate) fn get_code(&self, address: Address, block_id: Option<BlockId>) -> EthResult<Bytes> {
         let state = self.state_at_block_id_or_latest(block_id)?;
@@ -34,9 +36,32 @@ where
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
+        if let Some(BlockId::Number(BlockNumberOrTag::Pending)) = block_id {
+            let address_txs = self.pool().get_transactions_by_sender(address);
+
+            if !address_txs.is_empty() {
+                // get max nonce
+                let highest_nonce = address_txs.into_iter().reduce(|accum, item| {
+                    let nonce = item.transaction.nonce();
+                    if nonce.gt(&accum.transaction.nonce()) {
+                        item
+                    } else {
+                        accum
+                    }
+                });
+
+                let on_chain_nonce = if let Some(highest_nonce_tx) = highest_nonce {
+                    U256::from(highest_nonce_tx.transaction.nonce())
+                } else {
+                    U256::from(0)
+                };
+
+                return EthResult::Ok(on_chain_nonce)
+            }
+        }
+
         let state = self.state_at_block_id_or_latest(block_id)?;
-        let nonce = U256::from(state.account_nonce(address)?.unwrap_or_default());
-        Ok(nonce)
+        EthResult::Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
     }
 
     pub(crate) fn storage_at(

@@ -23,6 +23,7 @@ use reth_rpc_types::{
 };
 use reth_transaction_pool::TransactionPool;
 
+use reth_network_api::NetworkInfo;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use tracing::trace;
@@ -33,7 +34,7 @@ where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {

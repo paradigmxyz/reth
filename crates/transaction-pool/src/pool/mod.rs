@@ -374,6 +374,18 @@ where
         self.pool.read().get(tx_hash)
     }
 
+    /// Returns all transactions of the address
+    pub(crate) fn get_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.pooled_transactions()
+            .iter()
+            .filter(|tx| tx.transaction.sender().eq(&sender))
+            .map(Arc::clone)
+            .collect()
+    }
+
     /// Returns all the transactions belonging to the hashes.
     ///
     /// If no transaction exists, it is skipped.

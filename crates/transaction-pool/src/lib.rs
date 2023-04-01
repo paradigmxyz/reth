@@ -96,7 +96,7 @@ use crate::{
     pool::PoolInner,
     traits::{NewTransactionEvent, PoolSize},
 };
-use reth_primitives::{TxHash, U256};
+use reth_primitives::{Address, TxHash, U256};
 use reth_provider::StateProviderFactory;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -324,6 +324,18 @@ where
 
     fn on_propagated(&self, txs: PropagatedTransactions) {
         self.inner().on_propagated(txs)
+    }
+
+    fn get_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool
+            .pooled_transactions()
+            .iter()
+            .filter(|tx| tx.transaction.sender().eq(&sender))
+            .map(Arc::clone)
+            .collect()
     }
 }
 
