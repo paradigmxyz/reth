@@ -124,8 +124,7 @@ where
 
     let ctrl_c = tokio::signal::ctrl_c();
 
-    pin_mut!(ctrl_c, fut);
-    pin_mut!(sigterm, fut);
+    pin_mut!(sigterm, ctrl_c, fut);
 
     tokio::select! {
         _ = ctrl_c => {
