@@ -44,7 +44,8 @@ pub fn base_block_reward(
 /// # Examples
 ///
 /// ```
-/// # use reth_consensus_common::calc::{base_block_reward, block_reward, ETH_TO_WEI};
+/// # use reth_consensus_common::calc::{base_block_reward, block_reward};
+/// # use reth_primitives::constants::ETH_TO_WEI;
 /// # use reth_primitives::{MAINNET, U256};
 /// #
 /// // This is block 126 on mainnet.
