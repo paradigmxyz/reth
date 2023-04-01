@@ -1,16 +1,16 @@
-use crate::post_state::PostState;
+use crate::{
+    database::SubState,
+    env::{fill_cfg_and_block_env, fill_tx_env},
+    into_reth_log, to_reth_acc,
+};
 use reth_consensus_common::calc;
+use reth_executor::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
     ReceiptWithBloom, TransactionSigned, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
-use reth_revm::{
-    database::SubState,
-    env::{fill_cfg_and_block_env, fill_tx_env},
-    into_reth_log, to_reth_acc,
-};
 use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
 use revm::{
     db::AccountState,
@@ -251,7 +251,7 @@ where
         let mut drained_balance = U256::ZERO;
 
         // drain all accounts ether
-        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
+        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
             let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
             let old = to_reth_acc(&db_account.info);
             // drain balance
@@ -262,7 +262,7 @@ where
         }
 
         // add drained ether to beneficiary.
-        let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
+        let beneficiary = reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
         self.increment_account_balance(beneficiary, drained_balance, post_state)?;
 
         Ok(())

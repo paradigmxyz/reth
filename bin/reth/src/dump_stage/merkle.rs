@@ -73,7 +73,7 @@ async fn unwind_and_copy<DB: Database>(
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage =
-        ExecutionStage::new(reth_executor::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
+        ExecutionStage::new(reth_revm::Factory::new(Arc::new(MAINNET.clone())), u64::MAX);
 
     exec_stage
         .unwind(

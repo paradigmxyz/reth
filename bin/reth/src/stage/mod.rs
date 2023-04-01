@@ -163,7 +163,7 @@ impl Command {
                 stage.execute(&mut tx, input).await?;
             }
             StageEnum::Execution => {
-                let factory = reth_executor::Factory::new(self.chain.clone());
+                let factory = reth_revm::Factory::new(self.chain.clone());
                 let mut stage = ExecutionStage::new(factory, num_blocks);
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
