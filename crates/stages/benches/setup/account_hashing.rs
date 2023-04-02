@@ -55,7 +55,7 @@ fn find_stage_range(db: &Path) -> StageRange {
 fn generate_testdata_db(num_blocks: u64) -> (PathBuf, StageRange) {
     let opts = SeedOpts {
         blocks: 0..num_blocks + 1,
-        accounts: 0..10_000,
+        accounts: 0..100_000,
         txs: 100..150,
         transitions: 10_000 + 1,
     };
