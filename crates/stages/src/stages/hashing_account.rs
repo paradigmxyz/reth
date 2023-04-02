@@ -24,7 +24,7 @@ pub struct AccountHashingStage {
     /// The threshold (in number of state transitions) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of account to process before committing.
+    /// The maximum number of accounts to process before committing.
     pub commit_threshold: u64,
 }
 
