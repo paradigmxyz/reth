@@ -182,7 +182,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         let time = std::time::Instant::now();
-        //println!("\n\n");
+        println!("\n\n");
         if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
@@ -205,7 +205,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
                 // channels used to return result of sender recovery.
                 let mut channels = Vec::new();
-
+                println!("START READING ACCOUNTS: {}ms", time.elapsed().as_millis());
                 for chunk in &accounts_cursor
                     .walk(start_address)?
                     .take(self.commit_threshold as usize)
@@ -216,7 +216,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     channels.push(rx);
 
                     let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
-
+                    println!("READ CHUNK: {}ms", time.elapsed().as_millis());
                     // Spawn the sender recovery task onto the global rayon pool
                     // This task will send the results through the channel after it recovered the
                     // senders.
@@ -226,7 +226,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         }
                     });
                 }
-                //println!("READ ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
+                println!("READ ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
                 let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
 
                 // Iterate over channels and append the hashes account in the order that they are
@@ -236,12 +236,12 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         hashed_batch.push(hashed);
                     }
                 }
-                //println!("RECEIVED ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
+                println!("RECEIVED ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
 
                 // sort it all
                 hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-                //println!("SORTED ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
+                println!("SORTED ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
 
                 let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
 
@@ -256,7 +256,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
                 }
 
-                //println!("INSERTED ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
+                println!("INSERTED ALL ACCOUNTS: {}ms", time.elapsed().as_millis());
 
                 // next key of iterator
                 accounts_cursor.next()?
