@@ -60,6 +60,9 @@ pub enum EthApiError {
     /// When tracer config does not match the tracer
     #[error("invalid tracer config")]
     InvalidTracerConfig,
+    /// Percentile array is invalid
+    #[error("invalid reward percentile")]
+    InvalidRewardPercentile(f64),
 }
 
 impl From<EthApiError> for RpcError {
@@ -83,6 +86,7 @@ impl From<EthApiError> for RpcError {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
+            EthApiError::InvalidRewardPercentile(msg) => internal_rpc_err(msg.to_string()),
         }
     }
 }

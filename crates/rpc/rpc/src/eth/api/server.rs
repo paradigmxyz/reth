@@ -17,13 +17,13 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory,
+    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, TxGasAndReward,
     FeeHistoryCacheItem, Index, RichBlock, SyncStatus, TransactionReceipt, TransactionRequest,
-    Work,
+    Work
 };
 use reth_transaction_pool::TransactionPool;
-
 use reth_network_api::NetworkInfo;
+use revm::primitives::ruint::Uint;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use tracing::trace;
@@ -276,13 +276,33 @@ where
             return Ok(FeeHistory::default())
         }
 
-        let Some(end_block) = self.inner.client.block_number_for_id(newest_block).to_rpc_result()? else { return Err(EthApiError::UnknownBlockNumber.into())};
+        let Some(previous_to_end_block) = self.inner.client.block_number_for_id(newest_block).to_rpc_result()? else { return Err(EthApiError::UnknownBlockNumber.into())};
+        let end_block = previous_to_end_block + 1;
 
         if end_block < block_count {
             return Err(EthApiError::InvalidBlockRange.into())
         }
 
-        let start_block = end_block - block_count;
+        let mut start_block = end_block - block_count;
+
+        if block_count == 1 {
+            start_block = previous_to_end_block;
+        }
+
+        let reward_percentiles_unwrapped = reward_percentiles.unwrap_or(vec![]);
+
+        // checks for rewardPercentile's sorted-ness
+        // check if any of rewardPercentile is greater than 100
+        // pre 1559 blocks, return 0 for baseFeePerGas
+        for i in 1..reward_percentiles_unwrapped.len() {
+            if reward_percentiles_unwrapped[i] <= reward_percentiles_unwrapped[i-1] {
+                return Err(EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]).into())
+            }
+
+            if reward_percentiles_unwrapped[i] < 0.0 && reward_percentiles_unwrapped[i] > 100.0 {
+                return Err(EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]).into())
+            }
+        }
 
         let mut fee_history_cache = self.fee_history_cache.0.lock().await;
 
@@ -312,30 +332,76 @@ where
             (first_non_cached_block, last_non_cached_block)
         {
             let headers: Vec<Header> =
-                self.inner.client.headers_range(start_block..=end_block).to_rpc_result()?;
+                self.inner.client.headers_range(start_block..=end_block+1).to_rpc_result()?;
+
+            let transactions = self.inner.client.transactions_by_block_range(start_block..=end_block+1).to_rpc_result()?;
 
             // We should receive exactly the amount of blocks missing from the cache
             if headers.len() != (end_block - start_block + 1) as usize {
                 return Err(EthApiError::InvalidBlockRange.into())
             }
 
-            for header in headers {
-                let base_fee_per_gas = header.base_fee_per_gas.
-                        unwrap_or_default(). // Zero for pre-EIP-1559 blocks
-                        try_into().unwrap(); // u64 -> U256 won't fail
-                let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
+            // We should receive exactly the amount of blocks missing from the cache
+            if transactions.len() != (end_block - start_block + 1) as usize {
+                return Err(EthApiError::InvalidBlockRange.into())
+            }
 
-                let fee_history_cache_item = FeeHistoryCacheItem {
-                    hash: None,
-                    base_fee_per_gas,
-                    gas_used_ratio,
-                    reward: None, // TODO: calculate rewards per transaction
-                };
+            for index in 0..(end_block - start_block + 1) as usize {
+                let option_header = headers.get(index);
+                let option_transaction = transactions.get(index);
+                
+                if let Some(header) = option_header {
+                    let base_fee_per_gas: Uint<256, 4> = header.base_fee_per_gas.
+                            unwrap_or_default(). // Zero for pre-EIP-1559 blocks
+                            try_into().unwrap(); // u64 -> U256 won't fail
+                    let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
+                    
+                    let mut reward: Vec<Uint<256, 4>> = vec![];
 
-                // Insert missing cache entries in the map for further response composition from it
-                fee_history_cache_items.insert(header.number, fee_history_cache_item.clone());
-                // And populate the cache with new entries
-                fee_history_cache.push(header.number, fee_history_cache_item);
+                    if let Some(transactions) = option_transaction {
+                        let mut sorter: Vec<TxGasAndReward> = vec![];
+                        for transaction in transactions {
+                            // let max_priority_fee_per_gas = transaction.max_priority_fee_per_gas().unwrap_or(self.gas_price().await.unwrap().try_into().unwrap()); // todo: unwrap_or => gas_price or 1??
+                            let max_priority_fee_per_gas = transaction.max_priority_fee_per_gas().unwrap_or(1);
+                            let max_fee_per_gas = transaction.max_fee_per_gas();
+                            let base_fee = header.base_fee_per_gas.unwrap_or_default();
+
+                            // if max_priority_fee_per_gas < base_fee as u128 {
+                            //     return Err(EthApiError::ConflictingFeeFieldsInRequest.into())
+                            // }
+
+                            // todo: get gas fees for tx and also gas price
+                            sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward: std::cmp::min(max_priority_fee_per_gas, max_fee_per_gas - base_fee as u128 ) })
+                        }
+
+                        sorter.sort();
+
+                        let mut sum_gas_used = sorter[0].gas_used;
+                        let mut tx_index = 0;
+
+                        for i in &reward_percentiles_unwrapped {
+                            let threshold_gas_used = (header.gas_used as f64) * i / (100 as f64);
+                            while sum_gas_used < threshold_gas_used as u128 && tx_index < transactions.len() {
+                                tx_index += 1;
+                                sum_gas_used += sorter[tx_index].reward;
+                            }
+
+                            reward.push(Uint::from(sorter[tx_index].reward));
+                        }
+                    }
+    
+                    let fee_history_cache_item = FeeHistoryCacheItem {
+                        hash: None,
+                        base_fee_per_gas,
+                        gas_used_ratio,
+                        reward: Some(reward), // TODO: calculate rewards per transaction
+                    };
+
+                    // Insert missing cache entries in the map for further response composition from it
+                    fee_history_cache_items.insert(header.number, fee_history_cache_item.clone());
+                    // And populate the cache with new entries
+                    fee_history_cache.push(header.number, fee_history_cache_item);
+                }
             }
         }
 
@@ -344,19 +410,31 @@ where
         fee_history_cache_items.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
         fee_history_cache.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
 
+        let base_fee_per_gas = fee_history_cache_items
+            .values()
+            .map(|item| item.base_fee_per_gas)
+            .collect();
+        
+        let mut gas_used_ratio: Vec<f64> = fee_history_cache_items
+            .values()
+            .map(|item| item.gas_used_ratio)
+            .collect();
+
+        let rewards: Option<Vec<Vec<Uint<256, 4>>>> = fee_history_cache_items.values().map(|item| item.reward.clone()).collect();
+
+        let mut rewards = rewards.unwrap();
+        // gasUsedRatio doesn't has data for next block in this case the last block
+        gas_used_ratio.pop();
+        rewards.pop();
+
         // `fee_history_cache_items` now contains full requested block range (populated from both
         // cache and database), so we can iterate over it in order and populate the response fields
         Ok(FeeHistory {
-            base_fee_per_gas: fee_history_cache_items
-                .values()
-                .map(|item| item.base_fee_per_gas)
-                .collect(),
-            gas_used_ratio: fee_history_cache_items
-                .values()
-                .map(|item| item.gas_used_ratio)
-                .collect(),
-            oldest_block: U256::from_be_bytes(oldest_block_hash.0),
-            reward: None,
+            base_fee_per_gas,
+            gas_used_ratio,
+            // oldest_block: U256::from_be_bytes(oldest_block_hash.0),
+            oldest_block: U256::from(start_block),
+            reward: Some(rewards),
         })
     }
 
@@ -447,7 +525,7 @@ mod tests {
     };
     use rand::random;
     use reth_network_api::test_utils::NoopNetwork;
-    use reth_primitives::{Block, BlockNumberOrTag, Header, H256, U256};
+    use reth_primitives::{Block, BlockNumberOrTag, Header, H256, U256, TransactionSigned};
     use reth_provider::test_utils::{MockEthProvider, NoopProvider};
     use reth_rpc_api::EthApiServer;
     use reth_transaction_pool::test_utils::testing_pool;
@@ -490,7 +568,34 @@ mod tests {
                 ..Default::default()
             };
 
-            mock_provider.add_block(hash, Block { header: header.clone(), ..Default::default() });
+            let mut transactions = vec![];
+            for _ in 0..100 {
+                let random_fee: u128 = random();
+
+                if let Some(base_fee_per_gas) = header.base_fee_per_gas {
+                    let transaction = TransactionSigned {
+                        transaction: reth_primitives::Transaction::Eip1559(reth_primitives::TxEip1559 {
+                            max_priority_fee_per_gas: random_fee,
+                            max_fee_per_gas: random_fee + base_fee_per_gas as u128,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    };
+                    
+                    transactions.push(transaction);
+                } else {
+                    let transaction = TransactionSigned {
+                        transaction: reth_primitives::Transaction::Legacy(reth_primitives::TxLegacy {
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    };
+                    
+                    transactions.push(transaction);
+                }
+            }
+            
+            mock_provider.add_block(hash, Block { header: header.clone(), body: transactions, ..Default::default() });
             mock_provider.add_header(hash, header);
 
             oldest_block.get_or_insert(hash);
@@ -498,6 +603,8 @@ mod tests {
             base_fees_per_gas
                 .push(base_fee_per_gas.map(|fee| U256::try_from(fee).unwrap()).unwrap_or_default());
         }
+
+        gas_used_ratios.pop();
 
         let eth_api = EthApi::new(
             mock_provider,
@@ -507,16 +614,25 @@ mod tests {
         );
 
         let response =
-            eth_api.fee_history((newest_block + 1).into(), newest_block.into(), None).await;
+            eth_api.fee_history((newest_block + 1).into(), newest_block.into(), Some(vec![10.0])).await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
 
+        // newest_block is finalized
         let fee_history =
-            eth_api.fee_history(block_count.into(), newest_block.into(), None).await.unwrap();
+            eth_api.fee_history(block_count.into(), (newest_block - 1).into(), None).await.unwrap();
 
         assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
         assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
-        assert_eq!(fee_history.oldest_block, U256::from_be_bytes(oldest_block.unwrap().0));
+        assert_eq!(fee_history.oldest_block, U256::from(newest_block - block_count));
+
+        // newest_block is pending
+        let fee_history =
+            eth_api.fee_history(block_count.into(), (newest_block - 1).into(), None).await.unwrap();
+
+        assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
+        assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
+        assert_eq!(fee_history.oldest_block, U256::from(newest_block - block_count));
     }
 }
