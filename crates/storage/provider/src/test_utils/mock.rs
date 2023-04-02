@@ -11,7 +11,11 @@ use reth_primitives::{
     TransactionSigned, TxHash, TxNumber, H256, U256,
 };
 use revm_primitives::{BlockEnv, CfgEnv};
-use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::RangeBounds,
+    sync::Arc,
+};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]
@@ -167,9 +171,17 @@ impl TransactionsProvider for MockEthProvider {
 
     fn transactions_by_block_range(
         &self,
-        _range: impl RangeBounds<reth_primitives::BlockNumber>,
+        range: impl RangeBounds<reth_primitives::BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
-        unimplemented!()
+        // init btreemap so we can return in order
+        let mut map = BTreeMap::new();
+        for (_, block) in self.blocks.lock().iter() {
+            if range.contains(&block.number) {
+                map.insert(block.number, block.body.clone());
+            }
+        }
+
+        Ok(map.into_values().collect())
     }
 }
 
