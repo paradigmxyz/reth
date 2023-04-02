@@ -97,5 +97,5 @@ impl<V: Value> Decompress for RawValue<V> {
     }
 }
 
-// TODO do it for DupSort as well. We can use RawValue with additional indices that will point to the
-// subkey part of it.
+// TODO do it for DupSort as well. We can use RawValue with additional indices that will point to
+// the subkey part of it.

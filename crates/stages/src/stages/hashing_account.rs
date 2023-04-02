@@ -59,7 +59,7 @@ impl AccountHashingStage {
             tx.get::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into())?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(AccountHashingCheckpoint::default());
+            return Ok(AccountHashingCheckpoint::default())
         }
 
         let (checkpoint, _) = AccountHashingCheckpoint::from_compact(&buf, buf.len());
@@ -260,7 +260,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             self.save_checkpoint(tx, checkpoint)?;
 
             if next_address.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false });
+                return Ok(ExecOutput { stage_progress, done: false })
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
@@ -455,7 +455,7 @@ mod tests {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
                     if start_block > end_block {
-                        return Ok(());
+                        return Ok(())
                     }
                 }
                 self.check_hashed_accounts()

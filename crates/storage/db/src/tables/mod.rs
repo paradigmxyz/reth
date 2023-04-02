@@ -14,14 +14,14 @@
 
 pub mod codecs;
 pub mod models;
-pub(crate) mod utils;
 mod raw;
+pub(crate) mod utils;
 
-pub use raw::{RawTable,RawValue,RawKey};
+pub use raw::{RawKey, RawTable, RawValue};
 
 /// Declaration of all Database tables.
 use crate::{
-    table::{DupSort},
+    table::DupSort,
     tables::{
         codecs::CompactU256,
         models::{
@@ -121,7 +121,6 @@ macro_rules! dupsort {
         }
     };
 }
-
 
 //
 //  TABLE DEFINITIONS
