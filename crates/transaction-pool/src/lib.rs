@@ -330,12 +330,7 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pool
-            .pooled_transactions()
-            .iter()
-            .filter(|tx| tx.transaction.sender().eq(&sender))
-            .map(Arc::clone)
-            .collect()
+        self.pool.get_transactions_by_sender(sender)
     }
 }
 

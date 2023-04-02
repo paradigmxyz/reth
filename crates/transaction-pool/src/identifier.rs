@@ -5,6 +5,7 @@ use std::collections::HashMap;
 /// An internal mapping of addresses.
 ///
 /// This assigns a _unique_ `SenderId` for a new `Address`.
+/// It has capacity for 2^64 unique addresses.
 #[derive(Debug, Default)]
 pub(crate) struct SenderIdentifiers {
     /// The identifier to use next.
@@ -57,7 +58,6 @@ pub struct SenderId(u64);
 
 impl SenderId {
     /// Returns a `Bound` for `TransactionId` starting with nonce `0`
-    #[cfg(test)]
     pub(crate) fn start_bound(self) -> std::ops::Bound<TransactionId> {
         std::ops::Bound::Included(TransactionId::new(self, 0))
     }
