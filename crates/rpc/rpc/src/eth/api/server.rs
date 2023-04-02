@@ -366,9 +366,9 @@ where
                             let max_fee_per_gas = transaction.max_fee_per_gas();
                             let base_fee = header.base_fee_per_gas.unwrap_or_default();
 
-                            // if max_priority_fee_per_gas < base_fee as u128 {
-                            //     return Err(EthApiError::ConflictingFeeFieldsInRequest.into())
-                            // }
+                            if max_priority_fee_per_gas < base_fee as u128 {
+                                return Err(EthApiError::ConflictingFeeFieldsInRequest.into())
+                            }
 
                             // todo: get gas fees for tx and also gas price
                             sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward: std::cmp::min(max_priority_fee_per_gas, max_fee_per_gas - base_fee as u128 ) })
