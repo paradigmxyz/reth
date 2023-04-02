@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::{
-    eth::error::{EthApiError, EthResult},
+    eth::error::{EthApiError, EthResult, InvalidTransactionError},
     EthApi,
 };
 use reth_primitives::{
@@ -31,37 +31,43 @@ where
         Ok(balance)
     }
 
+    /// Returns the number of transactions sent from an address at the given block identifier.
+    ///
+    /// If this is [BlockNumberOrTag::Pending] then this will look up the highest transaction in
+    /// pool and return the next nonce (highest + 1).
     pub(crate) fn get_transaction_count(
         &self,
         address: Address,
         block_id: Option<BlockId>,
     ) -> EthResult<U256> {
         if let Some(BlockId::Number(BlockNumberOrTag::Pending)) = block_id {
+            // lookup transactions in pool
             let address_txs = self.pool().get_transactions_by_sender(address);
 
-            if !address_txs.is_empty() {
-                // get max nonce
-                let highest_nonce = address_txs.into_iter().reduce(|accum, item| {
-                    let nonce = item.transaction.nonce();
-                    if nonce.gt(&accum.transaction.nonce()) {
-                        item
-                    } else {
-                        accum
-                    }
-                });
+            if address_txs.is_empty() {
+                // get max transaction with the highest nonce
+                let highest_nonce_tx = address_txs
+                    .into_iter()
+                    .reduce(|accum, item| {
+                        if item.transaction.nonce() > accum.transaction.nonce() {
+                            item
+                        } else {
+                            accum
+                        }
+                    })
+                    .expect("Not empty; qed");
 
-                let on_chain_nonce = if let Some(highest_nonce_tx) = highest_nonce {
-                    U256::from(highest_nonce_tx.transaction.nonce())
-                } else {
-                    U256::from(0)
-                };
-
-                return EthResult::Ok(on_chain_nonce)
+                let tx_count = highest_nonce_tx
+                    .transaction
+                    .nonce()
+                    .checked_add(1)
+                    .ok_or(InvalidTransactionError::NonceMaxValue)?;
+                return Ok(U256::from(tx_count))
             }
         }
 
         let state = self.state_at_block_id_or_latest(block_id)?;
-        EthResult::Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
+        Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
     }
 
     pub(crate) fn storage_at(

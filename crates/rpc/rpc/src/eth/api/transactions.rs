@@ -235,11 +235,11 @@ where
         if request.nonce.is_none() {
             let nonce =
                 self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
-            request.nonce = Some(nonce.checked_add(U256::from(1)).ok_or(EthApiError::MaxNonce)?);
+            request.nonce = Some(nonce);
         }
 
         let chain_id = self.chain_id();
-        // we need an oracle to fetch the gas price of the current chain
+        // TODO: we need an oracle to fetch the gas price of the current chain
         let gas_price = request.gas_price.unwrap_or_default();
         let max_fee_per_gas = request.max_fee_per_gas.unwrap_or_default();
 
