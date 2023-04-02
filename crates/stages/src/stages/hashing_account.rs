@@ -7,6 +7,7 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable,
 };
 use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
@@ -58,7 +59,7 @@ impl AccountHashingStage {
             tx.get::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into())?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(AccountHashingCheckpoint::default())
+            return Ok(AccountHashingCheckpoint::default());
         }
 
         let (checkpoint, _) = AccountHashingCheckpoint::from_compact(&buf, buf.len());
@@ -197,14 +198,15 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 self.save_checkpoint(tx, checkpoint)?;
             }
 
-            let start_address = checkpoint.address.take();
+            let start_address = checkpoint.address.take().map(RawKey::new);
             let next_address = {
-                let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
+                let mut accounts_cursor =
+                    tx.cursor_read::<RawTable<tables::PlainAccountState>>()?;
 
                 // channels used to return result of account hashing
                 let mut channels = Vec::new();
                 for chunk in &accounts_cursor
-                    .walk(start_address)?
+                    .walk(start_address.clone())?
                     .take(self.commit_threshold as usize)
                     .chunks(self.commit_threshold as usize / rayon::current_num_threads())
                 {
@@ -216,7 +218,8 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                     // Spawn the hashing task onto the global rayon pool
                     rayon::spawn(move || {
                         for (address, account) in chunk.into_iter() {
-                            let _ = tx.send((keccak256(address), account));
+                            let address = address.key().unwrap();
+                            let _ = tx.send((RawKey::new(keccak256(address)), account));
                         }
                     });
                 }
@@ -228,11 +231,11 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         hashed_batch.push(hashed);
                     }
                 }
-
                 // sort it all in parallel
                 hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-                let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
+                let mut hashed_account_cursor =
+                    tx.cursor_write::<RawTable<tables::HashedAccount>>()?;
 
                 // iterate and put presorted hashed accounts
                 if start_address.is_none() {
@@ -244,13 +247,12 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                         .into_iter()
                         .try_for_each(|(k, v)| hashed_account_cursor.insert(k, v))?;
                 }
-
                 // next key of iterator
                 accounts_cursor.next()?
             };
 
             if let Some((next_address, _)) = &next_address {
-                checkpoint.address = Some(*next_address);
+                checkpoint.address = Some(next_address.key().unwrap());
                 checkpoint.from = from_transition;
                 checkpoint.to = to_transition;
             }
@@ -258,7 +260,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
             self.save_checkpoint(tx, checkpoint)?;
 
             if next_address.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false })
+                return Ok(ExecOutput { stage_progress, done: false });
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
@@ -453,7 +455,7 @@ mod tests {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
                 }
                 self.check_hashed_accounts()

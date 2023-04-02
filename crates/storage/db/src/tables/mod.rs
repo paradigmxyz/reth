@@ -15,10 +15,13 @@
 pub mod codecs;
 pub mod models;
 pub(crate) mod utils;
+mod raw;
+
+pub use raw::{RawTable,RawValue,RawKey};
 
 /// Declaration of all Database tables.
 use crate::{
-    table::DupSort,
+    table::{DupSort},
     tables::{
         codecs::CompactU256,
         models::{
@@ -118,6 +121,7 @@ macro_rules! dupsort {
         }
     };
 }
+
 
 //
 //  TABLE DEFINITIONS
