@@ -5,9 +5,10 @@ use crate::{
         revm_utils::{inspect, prepare_call_env, transact},
         utils::recover_raw_transaction,
     },
-    EthApi,
+    EthApi, EthApiSpec,
 };
 use async_trait::async_trait;
+use reth_network_api::NetworkInfo;
 use reth_primitives::{
     Address, BlockId, BlockNumberOrTag, Bytes, FromRecoveredTransaction, IntoRecoveredTransaction,
     Receipt, Transaction as PrimitiveTransaction,
@@ -111,7 +112,7 @@ impl<Client, Pool, Network> EthTransactions for EthApi<Client, Pool, Network>
 where
     Pool: TransactionPool + Clone + 'static,
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>> {
         self.state_at_block_id(at)
@@ -224,18 +225,68 @@ where
         Ok(hash)
     }
 
-    async fn send_transaction(&self, request: TransactionRequest) -> EthResult<H256> {
+    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<H256> {
         let from = match request.from {
             Some(from) => from,
             None => return Err(SignError::NoAccount.into()),
         };
+
+        // set nonce if not already set before
+        if request.nonce.is_none() {
+            let nonce =
+                self.get_transaction_count(from, Some(BlockId::Number(BlockNumberOrTag::Pending)))?;
+            request.nonce = Some(nonce);
+        }
+
+        let chain_id = self.chain_id();
+        // TODO: we need an oracle to fetch the gas price of the current chain
+        let gas_price = request.gas_price.unwrap_or_default();
+        let max_fee_per_gas = request.max_fee_per_gas.unwrap_or_default();
+
+        let estimated_gas = self
+            .estimate_gas_at(
+                CallRequest {
+                    from: Some(from),
+                    to: request.to,
+                    gas: request.gas,
+                    gas_price: Some(U256::from(gas_price)),
+                    max_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                    value: request.value,
+                    data: request.data.clone(),
+                    nonce: request.nonce,
+                    chain_id: Some(chain_id),
+                    access_list: request.access_list.clone(),
+                    max_priority_fee_per_gas: Some(U256::from(max_fee_per_gas)),
+                },
+                BlockId::Number(BlockNumberOrTag::Pending),
+            )
+            .await?;
+        let gas_limit = estimated_gas;
+
         let transaction = match request.into_typed_request() {
-            Some(tx) => tx,
+            Some(TypedTransactionRequest::Legacy(mut m)) => {
+                m.chain_id = Some(chain_id.as_u64());
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::Legacy(m)
+            }
+            Some(TypedTransactionRequest::EIP2930(mut m)) => {
+                m.chain_id = chain_id.as_u64();
+                m.gas_limit = gas_limit;
+                m.gas_price = gas_price;
+
+                TypedTransactionRequest::EIP2930(m)
+            }
+            Some(TypedTransactionRequest::EIP1559(mut m)) => {
+                m.chain_id = chain_id.as_u64();
+                m.gas_limit = gas_limit;
+                m.max_fee_per_gas = max_fee_per_gas;
+
+                TypedTransactionRequest::EIP1559(m)
+            }
             None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
         };
-
-        // TODO we need to update additional settings in the transaction: nonce, gaslimit, chainid,
-        // gasprice
 
         let signed_tx = self.sign_request(&from, transaction)?;
 
@@ -534,6 +585,7 @@ impl From<TransactionSource> for Transaction {
 mod tests {
     use super::*;
     use crate::{eth::cache::EthStateCache, EthApi};
+    use reth_network_api::test_utils::NoopNetwork;
     use reth_primitives::{hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
@@ -541,13 +593,14 @@ mod tests {
     #[tokio::test]
     async fn send_raw_transaction() {
         let noop_provider = NoopProvider::default();
+        let noop_network_provider = NoopNetwork::default();
 
         let pool = testing_pool();
 
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
-            (),
+            noop_network_provider,
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
