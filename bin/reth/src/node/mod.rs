@@ -27,11 +27,15 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_executor::{
-    blockchain_tree::{externals::TreeExternals, BlockchainTree, ShareableBlockchainTree},
+    blockchain_tree::{
+        config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
+        ShareableBlockchainTree,
+    },
     Factory,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
+    events::NewBlockNotificationSink,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
@@ -208,56 +212,6 @@ impl Command {
             }
         };
 
-        let pipeline = if self.auto_mine {
-            let (_, client, task) = AutoSealBuilder::new(
-                Arc::clone(&self.chain),
-                shareable_db.clone(),
-                transaction_pool.clone(),
-                consensus_engine_tx.clone(),
-            )
-            .build();
-
-            debug!(target: "reth::cli", "Spawning auto mine task");
-            ctx.task_executor.spawn(Box::pin(task));
-
-            let (pipeline, events) = self
-                .build_networked_pipeline(
-                    &mut config,
-                    network.clone(),
-                    client,
-                    Arc::clone(&consensus),
-                    db.clone(),
-                    &ctx.task_executor,
-                )
-                .await?;
-
-            ctx.task_executor.spawn_critical(
-                "events task",
-                events::handle_events(Some(network.clone()), events),
-            );
-
-            pipeline
-        } else {
-            let client = network.fetch_client().await?;
-            let (pipeline, events) = self
-                .build_networked_pipeline(
-                    &mut config,
-                    network.clone(),
-                    client,
-                    Arc::clone(&consensus),
-                    db.clone(),
-                    &ctx.task_executor,
-                )
-                .await?;
-
-            ctx.task_executor.spawn_critical(
-                "events task",
-                events::handle_events(Some(network.clone()), events),
-            );
-
-            pipeline
-        };
-
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             db.clone(),
@@ -265,8 +219,16 @@ impl Command {
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
-        let blockchain_tree =
-            ShareableBlockchainTree::new(BlockchainTree::new(tree_externals, Default::default())?);
+        let tree_config = BlockchainTreeConfig::default();
+        // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
+        // depth at least N blocks must be sent at once.
+        let new_block_notification_sender =
+            NewBlockNotificationSink::new(tree_config.max_reorg_depth() as usize * 2);
+        let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
+            tree_externals,
+            new_block_notification_sender.clone(),
+            tree_config,
+        )?);
 
         let beacon_consensus_engine = BeaconConsensusEngine::new(
             Arc::clone(&db),
@@ -278,6 +240,58 @@ impl Command {
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
+
+
+        let mut pipeline = if self.auto_mine {
+            let (_, client, mut task) = AutoSealBuilder::new(
+                Arc::clone(&self.chain),
+                shareable_db.clone(),
+                transaction_pool.clone(),
+                consensus_engine_tx.clone(),
+                new_block_notification_sender.clone()
+            )
+            .build();
+
+           let mut pipeline =  self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client,
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?;
+
+            let pipeline_events = pipeline.events();
+            task.set_pipeline_events(pipeline_events);
+            debug!(target: "reth::cli", "Spawning auto mine task");
+            ctx.task_executor.spawn(Box::pin(task));
+
+            pipeline
+        } else {
+            let client = network.fetch_client().await?;
+            self
+                .build_networked_pipeline(
+                    &mut config,
+                    network.clone(),
+                    client,
+                    Arc::clone(&consensus),
+                    db.clone(),
+                    &ctx.task_executor,
+                )
+                .await?
+        };
+
+        let events = stream_select(
+            network.event_listener().map(Into::into),
+            pipeline.events().map(Into::into),
+        );
+
+        ctx.task_executor.spawn_critical(
+            "events task",
+            events::handle_events(Some(network.clone()), events),
+        );
 
         let engine_api_handle =
             self.init_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
@@ -344,7 +358,7 @@ impl Command {
         consensus: Arc<dyn Consensus>,
         db: Arc<Env<WriteMap>>,
         task_executor: &TaskExecutor,
-    ) -> eyre::Result<(Pipeline<Env<WriteMap>, NetworkHandle>, impl Stream<Item = NodeEvent>)>
+    ) -> eyre::Result<Pipeline<Env<WriteMap>, NetworkHandle>>
     where
         Client: HeadersClient + BodiesClient + Clone + 'static,
     {
@@ -377,11 +391,7 @@ impl Command {
             )
             .await?;
 
-        let events = stream_select(
-            network.event_listener().map(Into::into),
-            pipeline.events().map(Into::into),
-        );
-        Ok((pipeline, events))
+        Ok(pipeline)
     }
 
     fn load_config(&self) -> eyre::Result<Config> {
