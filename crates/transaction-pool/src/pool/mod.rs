@@ -379,11 +379,8 @@ where
         &self,
         sender: Address,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.pooled_transactions()
-            .iter()
-            .filter(|tx| tx.transaction.sender().eq(&sender))
-            .map(Arc::clone)
-            .collect()
+        let sender_id = self.get_sender_id(sender);
+        self.pool.read().get_transactions_by_sender(sender_id)
     }
 
     /// Returns all the transactions belonging to the hashes.
