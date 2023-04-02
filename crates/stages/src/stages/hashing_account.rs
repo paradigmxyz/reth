@@ -8,7 +8,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Account, AccountHashingCheckpoint, H256};
+use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
 use std::{fmt::Debug, ops::Range};
 use tokio::sync::mpsc;
@@ -109,7 +109,7 @@ impl AccountHashingStage {
         use reth_interfaces::test_utils::generators::{
             random_block_range, random_eoa_account_range,
         };
-        use reth_primitives::U256;
+        use reth_primitives::{Account, H256, U256};
         use reth_provider::insert_canonical_block;
 
         let blocks = random_block_range(opts.blocks, H256::zero(), opts.txs);
