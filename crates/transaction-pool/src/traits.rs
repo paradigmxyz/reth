@@ -145,6 +145,12 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// Consumer: P2P
     fn on_propagated(&self, txs: PropagatedTransactions);
+
+    /// Returns all transactions sent by a given user
+    fn get_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 }
 
 /// Represents a transaction that was propagated over the network.
