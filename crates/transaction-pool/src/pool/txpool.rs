@@ -161,6 +161,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         txs.into_iter().filter_map(|tx| self.get(&tx))
     }
 
+    /// Returns all transactions sent from the given sender.
+    pub(crate) fn get_transactions_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all_transactions.txs_iter(sender).map(|(_, tx)| Arc::clone(&tx.transaction)).collect()
+    }
+
     /// Updates the entire pool after a new block was mined.
     ///
     /// This removes all mined transactions, updates according to the new base fee and rechecks
@@ -688,8 +696,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
     /// nonce
-    #[cfg(test)]
-    #[allow(unused)]
     pub(crate) fn txs_iter(
         &self,
         sender: SenderId,
