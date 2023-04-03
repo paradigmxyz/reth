@@ -1,7 +1,6 @@
 use crate::{
     eth::{
-        cache::EthStateCache, error::EthResult, revm_utils::inspect,
-        utils::recover_raw_transaction, EthTransactions,
+        cache::EthStateCache, error::EthResult, utils::recover_raw_transaction, EthTransactions,
     },
     result::internal_rpc_err,
     TracingCallGuard,
@@ -11,7 +10,6 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
-    database::{State, SubState},
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -20,7 +18,7 @@ use reth_rpc_types::{
     trace::{filter::TraceFilter, parity::*},
     CallRequest, Index,
 };
-use revm::primitives::{Env, ResultAndState};
+use revm::primitives::Env;
 use std::collections::HashSet;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -68,27 +66,6 @@ where
     Client: BlockProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Eth: EthTransactions + 'static,
 {
-    /// Executes the transaction at the given [BlockId] with a tracer configured by the config.
-    fn trace_at<F, R>(
-        &self,
-        env: Env,
-        config: TracingInspectorConfig,
-        at: BlockId,
-        f: F,
-    ) -> EthResult<R>
-    where
-        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
-    {
-        self.eth_api.with_state_at(at, |state| {
-            let db = SubState::new(State::new(state));
-
-            let mut inspector = TracingInspector::new(config);
-            let (res, _) = inspect(db, env, &mut inspector)?;
-
-            f(inspector, res)
-        })
-    }
-
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
         &self,
@@ -127,7 +104,7 @@ where
 
         let config = tracing_config(&trace_types);
 
-        self.trace_at(env, config, at, |inspector, res| {
+        self.eth_api.trace_at(env, config, at, |inspector, res| {
             let trace_res =
                 inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
             Ok(trace_res)
@@ -171,7 +148,7 @@ where
         let env = Env { cfg, block, tx };
 
         // execute the trace
-        self.trace_at(env, TracingInspectorConfig::default_parity(), at, |inspector, _| {
+        self.eth_api.trace_at(env, TracingInspectorConfig::default_parity(), at, |inspector, _| {
             let traces = inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
             Ok(Some(traces))
         })
