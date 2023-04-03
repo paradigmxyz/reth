@@ -1,9 +1,9 @@
-use reth_primitives::ChainSpec;
-use reth_provider::{ExecutorFactory, StateProvider};
-use reth_revm::{
+use crate::{
     database::{State, SubState},
     stack::{InspectorStack, InspectorStackConfig},
 };
+use reth_primitives::ChainSpec;
+use reth_provider::{ExecutorFactory, StateProvider};
 
 use crate::executor::Executor;
 use std::sync::Arc;

@@ -138,7 +138,7 @@ impl ImportCommand {
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
-        let factory = reth_executor::Factory::new(self.chain.clone());
+        let factory = reth_revm::Factory::new(self.chain.clone());
 
         let mut pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)

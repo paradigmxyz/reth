@@ -26,9 +26,8 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_executor::{
-    blockchain_tree::{externals::TreeExternals, BlockchainTree, ShareableBlockchainTree},
-    Factory,
+use reth_executor::blockchain_tree::{
+    externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
@@ -42,6 +41,7 @@ use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkMan
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
+use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -587,7 +587,7 @@ impl Command {
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
         use reth_revm_inspectors::stack::InspectorStackConfig;
-        let factory = reth_executor::Factory::new(self.chain.clone());
+        let factory = reth_revm::Factory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
             use_printer_tracer: self.debug.print_inspector,

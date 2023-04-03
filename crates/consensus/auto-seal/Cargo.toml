@@ -14,7 +14,6 @@ reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
 reth-provider = { path = "../../storage/provider" }
 reth-revm = { path = "../../revm" }
-reth-executor = { path = "../../executor" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 
 # async
