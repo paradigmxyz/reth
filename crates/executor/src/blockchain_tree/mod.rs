@@ -768,12 +768,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3);
-        let mut tree = BlockchainTree::new(
-            externals,
-            NewBlockNotificationSink::new(config.max_reorg_depth() as usize),
-            config,
-        )
-        .expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, NewBlockNotificationSink::new(10), config)
+            .expect("failed to create tree");
         let mut new_block_notification = tree.subscribe_new_blocks();
 
         // genesis block 10 is already canonical
