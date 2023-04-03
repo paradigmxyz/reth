@@ -58,6 +58,20 @@ impl BlockIndices {
         &self.blocks_to_chain
     }
 
+    /// Return all pending block hashes. Pending blocks are considered blocks
+    /// that are extending that canonical tip by one block number.
+    pub fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
+        let canonical_tip = self.canonical_tip();
+        let pending_blocks = self
+            .fork_to_child
+            .get(&canonical_tip.hash)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        (canonical_tip.number + 1, pending_blocks)
+    }
+
     /// Check if block hash belongs to canonical chain.
     pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
         self.canonical_chain.range(self.last_finalized_block..).any(|(_, &h)| h == *block_hash)
