@@ -105,7 +105,11 @@ impl RpcServerArgs {
             None => {
                 let default_path = PlatformPath::<JwtSecretPath>::default();
                 let fpath = default_path.as_ref();
-                JwtSecret::try_create(fpath)
+                if fpath.exists() {
+                    JwtSecret::from_file(fpath)
+                } else {
+                    JwtSecret::try_create(fpath)
+                }
             }
         }
     }
