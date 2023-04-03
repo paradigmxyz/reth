@@ -61,7 +61,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeEngine
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn pending_blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
+    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
         self.tree.read().block_indices().index_of_number_to_pending_blocks().clone()
     }
 
@@ -70,7 +70,16 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
     }
 
     fn canonical_tip(&self) -> BlockNumHash {
-        self.tree.read().canonical_tip()
+        self.tree.read().block_indices().canonical_tip()
+    }
+
+    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
+        self.tree.read().block_indices().pending_blocks()
+    }
+
+    fn pending_block(&self) -> Option<BlockNumHash> {
+        let (number, blocks) = self.tree.read().block_indices().pending_blocks();
+        blocks.first().map(|&hash| BlockNumHash { number, hash })
     }
 }
 
