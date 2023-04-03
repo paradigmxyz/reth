@@ -4998,6 +4998,7 @@ dependencies = [
  "reth-provider",
  "reth-revm-inspectors",
  "reth-revm-primitives",
+ "reth-rlp",
  "revm",
  "tracing",
 ]
@@ -5222,6 +5223,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "thiserror",
  "tokio",
