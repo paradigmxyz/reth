@@ -49,6 +49,10 @@ impl BlockProvider for NoopProvider {
 }
 
 impl TransactionsProvider for NoopProvider {
+    fn transaction_id(&self, _tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        Ok(None)
+    }
+
     fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
         Ok(None)
     }
