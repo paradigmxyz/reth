@@ -2,11 +2,8 @@
 use chain::{BlockChainId, Chain, ForkBlock};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    blockchain_tree::BlockStatus,
-    consensus::Consensus,
-    events::{NewBlockNotifications, NewBlockNotificationsSender},
-    executor::Error as ExecError,
-    Error,
+    blockchain_tree::BlockStatus, consensus::Consensus, events::NewBlockNotifications,
+    executor::Error as ExecError, Error,
 };
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders,

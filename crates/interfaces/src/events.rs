@@ -41,14 +41,14 @@ impl NewBlockNotificationSink {
         &self,
         header: NewBlockNotification,
     ) -> Result<usize, SendError<NewBlockNotification>> {
-        let mut sender = self.inner.lock();
+        let sender = self.inner.lock();
         sender.send(header)
     }
 
     /// Creates a new Receiver handle that will receive notifications sent after this call to
     /// subscribe.
-    pub fn subscribe(&self) -> Receiver<T> {
-        let mut sender = self.inner.lock();
+    pub fn subscribe(&self) -> Receiver<NewBlockNotification> {
+        let sender = self.inner.lock();
         sender.subscribe()
     }
 }

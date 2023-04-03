@@ -9,10 +9,10 @@ use crate::{
     utils::get_single_header,
 };
 use clap::{crate_version, Parser};
-use events::NodeEvent;
+
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{pin_mut, stream::select as stream_select, FutureExt, Stream, StreamExt};
+use futures::{pin_mut, stream::select as stream_select, FutureExt, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
 use reth_db::{
@@ -215,7 +215,7 @@ impl Command {
         // configure blockchain tree
         let tree_externals = TreeExternals::new(
             db.clone(),
-            consensus,
+            Arc::clone(&consensus),
             Factory::new(self.chain.clone()),
             Arc::clone(&self.chain),
         );
@@ -230,29 +230,18 @@ impl Command {
             tree_config,
         )?);
 
-        let beacon_consensus_engine = BeaconConsensusEngine::new(
-            Arc::clone(&db),
-            ctx.task_executor.clone(),
-            pipeline,
-            blockchain_tree.clone(),
-            consensus_engine_rx,
-            self.debug.max_block,
-        );
-
-        info!(target: "reth::cli", "Consensus engine initialized");
-
-
+        // Configure the pipeline
         let mut pipeline = if self.auto_mine {
             let (_, client, mut task) = AutoSealBuilder::new(
                 Arc::clone(&self.chain),
                 shareable_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
-                new_block_notification_sender.clone()
+                new_block_notification_sender.clone(),
             )
             .build();
 
-           let mut pipeline =  self
+            let mut pipeline = self
                 .build_networked_pipeline(
                     &mut config,
                     network.clone(),
@@ -271,27 +260,33 @@ impl Command {
             pipeline
         } else {
             let client = network.fetch_client().await?;
-            self
-                .build_networked_pipeline(
-                    &mut config,
-                    network.clone(),
-                    client,
-                    Arc::clone(&consensus),
-                    db.clone(),
-                    &ctx.task_executor,
-                )
-                .await?
+            self.build_networked_pipeline(
+                &mut config,
+                network.clone(),
+                client,
+                Arc::clone(&consensus),
+                db.clone(),
+                &ctx.task_executor,
+            )
+            .await?
         };
 
         let events = stream_select(
             network.event_listener().map(Into::into),
             pipeline.events().map(Into::into),
         );
+        ctx.task_executor
+            .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
-        ctx.task_executor.spawn_critical(
-            "events task",
-            events::handle_events(Some(network.clone()), events),
+        let beacon_consensus_engine = BeaconConsensusEngine::new(
+            Arc::clone(&db),
+            ctx.task_executor.clone(),
+            pipeline,
+            blockchain_tree.clone(),
+            consensus_engine_rx,
+            self.debug.max_block,
         );
+        info!(target: "reth::cli", "Consensus engine initialized");
 
         let engine_api_handle =
             self.init_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
@@ -379,7 +374,7 @@ impl Command {
             .build(client, Arc::clone(&consensus), db.clone())
             .into_task_with(task_executor);
 
-        let mut pipeline = self
+        let pipeline = self
             .build_pipeline(
                 config,
                 header_downloader,
