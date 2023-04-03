@@ -163,6 +163,10 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
+    fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        self.db.view(|tx| tx.get::<tables::TxHashNumber>(tx_hash))?.map_err(Into::into)
+    }
+
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
         self.db.view(|tx| tx.get::<tables::Transactions>(id))?.map_err(Into::into)
     }
