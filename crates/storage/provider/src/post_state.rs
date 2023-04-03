@@ -453,16 +453,18 @@ impl PostState {
         }
     }
 
-    /// Write the post state to the database.
-    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
-        mut self,
+    /// TODO
+    pub fn write_history_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+        &mut self,
         tx: &TX,
         first_transition_id: TransitionId,
     ) -> Result<(), DbError> {
         // Collect and sort changesets by their key to improve write performance
         let mut changesets = std::mem::take(&mut self.changes);
+        tracing::trace!(target: "provider::post_state", changes = changesets.len(), "Sorting changes");
         changesets
             .sort_unstable_by_key(|changeset| (changeset.transition_id(), changeset.address()));
+        tracing::trace!(target: "provider::post_state", changes = changesets.len(), "Done sorting changes");
 
         // Partition changesets into account and storage changes
         let (account_changes, storage_changes): (Vec<Change>, Vec<Change>) =
@@ -531,7 +533,19 @@ impl PostState {
             }
         }
 
+        Ok(())
+    }
+
+    /// Write the post state to the database.
+    pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
+        mut self,
+        tx: &TX,
+        first_transition_id: TransitionId,
+    ) -> Result<(), DbError> {
+        self.write_history_to_db(tx, first_transition_id)?;
+
         // Write new storage state
+        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
         for (address, storage) in self.storage.into_iter() {
             // If the storage was wiped, remove all previous entries from the database.
             if storage.wiped {

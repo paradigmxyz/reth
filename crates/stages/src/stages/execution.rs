@@ -17,7 +17,7 @@ use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
 use reth_provider::{post_state::PostState, LatestStateProviderRef, Transaction};
 use std::{
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tracing::*;
 
@@ -147,12 +147,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let ((start_block, end_block), capped) =
-            exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
+        // TODO: if we go with gas threshold, rm block threshold
+        let (start_block, max_block) = exec_or_return!(input, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
         // Create state provider with cached state
-
         let mut executor = self.executor_factory.with_sp_and_cache(
             LatestStateProviderRef::new(&**tx),
             Arc::clone(&self.execution_cache),
@@ -160,20 +159,39 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // Fetch transactions, execute them and generate results
         let mut state = PostState::default();
-        for block_number in start_block..=end_block {
+
+        // Gas tracking
+        let mut gas_since_start = 0;
+        let mut gas_since_history_write = 0;
+        let mut gas_since_last_message = 0;
+
+        // Message tracking
+        let mut last_message_block = start_block;
+        let mut last_message = Instant::now();
+
+        // Progress tracking
+        let mut progress = start_block;
+
+        // Execute block range
+        for block_number in start_block..=max_block {
             let (block, td) = Self::read_block_with_senders(tx, block_number)?;
 
-            // Configure the executor to use the current state.
+            // Execute block
             trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
             let (block, senders) = block.into_components();
             let block_state = executor
                 .execute_and_verify_receipt(&block, td, Some(senders))
                 .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
-            if let Some(last_receipt) = block_state.receipts().last() {
-                self.metrics
-                    .mgas_processed_total
-                    .increment(last_receipt.cumulative_gas_used / 1_000_000);
-            }
+            state.extend(block_state);
+            progress = block_number;
+
+            // Gas metrics
+            gas_since_start += block.header.gas_used;
+            gas_since_last_message += block.header.gas_used;
+            gas_since_history_write += block.header.gas_used;
+            self.metrics.mgas_processed_total.increment(block.header.gas_used / 1_000_000);
+
+            // Cache metrics
             {
                 let mut cache =
                     self.execution_cache.lock().expect("Could not lock execution cache");
@@ -187,7 +205,62 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 self.metrics.bytecode_cache_misses.absolute(cache.bytecode_misses);
                 self.metrics.bytecode_cache_evictions.absolute(cache.bytecode_evictions);
             }
-            state.extend(block_state);
+
+            // TODO (100 ggas, how to make it higher?)
+            let should_write_history = gas_since_history_write >= (100u64 * 1_000_000_000u64);
+            if should_write_history {
+                // TODO: This should be trace
+                info!(target: "sync::stages::execution", ?block_number, changes = ?state.changes().len(), "Writing history.");
+                let first_transition_id = tx.get_block_transition(last_block)?;
+                state.write_history_to_db(&**tx, first_transition_id)?;
+                info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
+                gas_since_history_write = 0;
+            }
+
+            // TODO (1000 ggas, how to make it higher?)
+            let gas_processing_threshold_hit = gas_since_start >= (1000u64 * 1_000_000_000u64);
+            if gas_processing_threshold_hit {
+                trace!(target: "sync::stages::execution", ?block_number, "Hit gas processing threshold, committing.");
+                break
+            }
+
+            // Status messages
+            let now = Instant::now();
+            let elapsed = now - last_message;
+            if elapsed > Duration::from_secs(30) {
+                last_message = now;
+                let batch_progress = gas_since_start as f64 / (1000u64 * 1_000_000_000u64) as f64;
+                let mgas_sec = gas_since_last_message as f64 /
+                    (elapsed.as_secs_f64() + (elapsed.subsec_millis() as f64 / 1000f64)) /
+                    1_000_000f64;
+
+                if mgas_sec < 800. {
+                    warn!(
+                        target: "sync::stages::execution",
+                        ?gas_since_start,
+                        ?block_number,
+                        ?batch_progress,
+                        pending_changes = ?state.changes().len(),
+                        "Slow block range ({}-{}), {:.2} Mgas/sec",
+                        last_message_block,
+                        block_number,
+                        mgas_sec
+                    );
+                } else {
+                    info!(
+                        target: "sync::stages::execution",
+                        ?gas_since_start,
+                        ?block_number,
+                        ?batch_progress,
+                        pending_changes = ?state.changes().len(),
+                        "Executed block {}, {:.2} Mgas/sec",
+                        block_number,
+                        mgas_sec
+                    );
+                }
+                gas_since_last_message = 0;
+                last_message_block = block_number;
+            }
         }
 
         // put execution results to database
@@ -198,9 +271,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         state.write_to_db(&**tx, first_transition_id)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
-        let done = !capped;
-        info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: end_block, done })
+        let done = progress == max_block;
+        info!(target: "sync::stages::execution", stage_progress = progress, done, "Sync iteration finished");
+        Ok(ExecOutput { stage_progress: progress, done })
     }
 }
 

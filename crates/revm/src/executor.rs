@@ -9,8 +9,8 @@ use reth_consensus_common::calc;
 use reth_executor::BlockExecutor;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
-    ReceiptWithBloom, TransactionSigned, H256, U256,
+    constants::EMPTY_RECEIPTS, hex_literal::hex, Account, Address, Block, Bloom, Bytecode,
+    ChainSpec, Hardfork, Header, Log, Receipt, ReceiptWithBloom, TransactionSigned, H256, U256,
 };
 use reth_provider::{post_state::StorageChangeset, PostState, StateProvider};
 use revm::{
@@ -423,13 +423,21 @@ pub fn verify_receipt<'a>(
 ) -> Result<(), Error> {
     // Check receipts root.
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts_with_bloom.iter());
+    let receipts_root = if receipts_with_bloom.is_empty() {
+        EMPTY_RECEIPTS
+    } else {
+        reth_primitives::proofs::calculate_receipt_root(receipts_with_bloom.iter())
+    };
     if receipts_root != expected_receipts_root {
         return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
     }
 
     // Create header log bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+    let logs_bloom = if receipts_with_bloom.is_empty() {
+        Bloom::zero()
+    } else {
+        receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom)
+    };
     if logs_bloom != expected_logs_bloom {
         return Err(Error::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
