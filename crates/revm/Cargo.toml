@@ -13,5 +13,14 @@ reth-interfaces = { path = "../interfaces" }
 reth-provider = { path = "../storage/provider" }
 reth-revm-primitives = { path = "./revm-primitives" }
 reth-revm-inspectors = { path = "./revm-inspectors" }
+reth-executor = { path = "../executor" }
+reth-consensus-common = { path = "../consensus/common" }
 
+# revm
 revm = { version = "3.0.0" }
+
+# common
+tracing = "0.1.37"
+
+[dev-dependencies]
+reth-rlp = { path = "../rlp" }

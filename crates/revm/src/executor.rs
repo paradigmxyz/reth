@@ -1,17 +1,18 @@
-use crate::post_state::PostState;
+use crate::{
+    database::SubState,
+    env::{fill_cfg_and_block_env, fill_tx_env},
+    into_reth_log,
+    stack::{InspectorStack, InspectorStackConfig},
+    to_reth_acc,
+};
 use reth_consensus_common::calc;
+use reth_executor::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
     ReceiptWithBloom, TransactionSigned, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
-use reth_revm::{
-    database::SubState,
-    env::{fill_cfg_and_block_env, fill_tx_env},
-    into_reth_log, to_reth_acc,
-};
-use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
 use revm::{
     db::AccountState,
     primitives::{
@@ -251,7 +252,7 @@ where
         let mut drained_balance = U256::ZERO;
 
         // drain all accounts ether
-        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
+        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
             let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
             let old = to_reth_acc(&db_account.info);
             // drain balance
@@ -262,7 +263,7 @@ where
         }
 
         // add drained ether to beneficiary.
-        let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
+        let beneficiary = reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
         self.increment_account_balance(beneficiary, drained_balance, post_state)?;
 
         Ok(())
@@ -494,6 +495,7 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::State;
     use reth_consensus_common::calc;
     use reth_primitives::{
         constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
@@ -503,7 +505,6 @@ mod tests {
         post_state::{Change, Storage},
         AccountProvider, BlockHashProvider, StateProvider,
     };
-    use reth_revm::database::State;
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 
@@ -785,7 +786,9 @@ mod tests {
         let mut db = StateProviderTest::default();
 
         let mut beneficiary_balance = 0;
-        for (i, dao_address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
+        for (i, dao_address) in
+            reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate()
+        {
             db.insert_account(
                 *dao_address,
                 Account { balance: U256::from(i), nonce: 0x00, bytecode_hash: None },
@@ -822,22 +825,25 @@ mod tests {
         // beneficiary
         let db = executor.db();
         let dao_beneficiary =
-            db.accounts.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+            db.accounts.get(&reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
 
         assert_eq!(dao_beneficiary.info.balance, U256::from(beneficiary_balance));
-        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
             let account = db.accounts.get(address).unwrap();
             assert_eq!(account.info.balance, U256::ZERO);
         }
 
         // check changesets
-        let beneficiary_state =
-            out.accounts().get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap().unwrap();
+        let beneficiary_state = out
+            .accounts()
+            .get(&reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             beneficiary_state,
             Account { balance: U256::from(beneficiary_balance), ..Default::default() },
         );
-        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
             let updated_account = out.accounts().get(address).unwrap().unwrap();
             assert_eq!(updated_account, Account { balance: U256::ZERO, ..Default::default() });
         }

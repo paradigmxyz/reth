@@ -99,7 +99,7 @@ async fn unwind_and_copy<DB: Database>(
     let mut unwind_tx = Transaction::new(db_tool.db)?;
 
     let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_executor::Factory::new(Arc::new(MAINNET.clone())));
+        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
 
     exec_stage
         .unwind(
@@ -129,7 +129,7 @@ async fn dry_run(
 
     let mut tx = Transaction::new(&output_db)?;
     let mut exec_stage =
-        ExecutionStage::new_with_factory(reth_executor::Factory::new(Arc::new(MAINNET.clone())));
+        ExecutionStage::new_with_factory(reth_revm::Factory::new(Arc::new(MAINNET.clone())));
 
     exec_stage
         .execute(

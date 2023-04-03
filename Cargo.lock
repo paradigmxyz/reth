@@ -4461,6 +4461,7 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-revm-inspectors",
  "reth-rlp",
  "reth-rpc",
@@ -4486,7 +4487,6 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
- "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -4732,10 +4732,7 @@ dependencies = [
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-revm",
- "reth-revm-inspectors",
  "reth-rlp",
- "revm",
  "rlp",
  "sha3",
  "thiserror",
@@ -4994,12 +4991,16 @@ dependencies = [
 name = "reth-revm"
 version = "0.1.0"
 dependencies = [
+ "reth-consensus-common",
+ "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-revm-inspectors",
  "reth-revm-primitives",
+ "reth-rlp",
  "revm",
+ "tracing",
 ]
 
 [[package]]
@@ -5222,6 +5223,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "thiserror",
  "tokio",
