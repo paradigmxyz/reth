@@ -210,19 +210,19 @@ where
                                 debug!(target: "consensus::auto", "waiting for finish stage event...");
                                 // wait for the finish stage to
                                 loop {
-                                    if let Some(ev) = events.next().await {
-                                        if let PipelineEvent::Running { stage_id, .. } = ev {
-                                            if stage_id == FINISH {
-                                                debug!(target: "consensus::auto", "received finish stage event");
-                                                break
-                                            }
+                                    if let Some(PipelineEvent::Running { stage_id, .. }) =
+                                        events.next().await
+                                    {
+                                        if stage_id == FINISH {
+                                            debug!(target: "consensus::auto", "received finish stage event");
+                                            break
                                         }
                                     }
                                 }
                             }
 
                             let header = header.seal_slow();
-                            debug!(target: "consensus::auto",header=?header.hash(), "sending block notification");
+                            debug!(target: "consensus::auto", header=?header.hash(), "sending block notification");
 
                             // send block notification
                             let _ = new_block_notification_sender.send(Arc::new(header));
