@@ -10,10 +10,7 @@ use reth_primitives::{
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::{State, SubState};
-use reth_stages::{
-    stages::{FINISH, HEADERS},
-    PipelineEvent,
-};
+use reth_stages::{stages::FINISH, PipelineEvent};
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,
@@ -187,7 +184,6 @@ where
                             let body =
                                 BlockBody { transactions: body, ommers: vec![], withdrawals: None };
                             header.gas_used = gas_used;
-                            let is_empty_block = body.transactions.is_empty();
 
                             storage.insert_new_block(header.clone(), body);
 
@@ -197,8 +193,7 @@ where
                                 finalized_block_hash: new_hash,
                                 safe_block_hash: new_hash,
                             };
-
-                            debug!(target: "consensus::auto", ?state, "sending fork choice update");
+                            drop(storage);
 
                             // send the new update to the engine, this will trigger the pipeline to
                             // download the block, execute it and store it in the database.
@@ -208,6 +203,7 @@ where
                                 payload_attrs: None,
                                 tx,
                             });
+                            debug!(target: "consensus::auto", ?state, "sent fork choice update");
 
                             // wait for the pipeline to finish
                             if let Some(events) = events.as_mut() {
@@ -216,10 +212,6 @@ where
                                 loop {
                                     if let Some(ev) = events.next().await {
                                         if let PipelineEvent::Running { stage_id, .. } = ev {
-                                            if is_empty_block && stage_id == HEADERS {
-                                                debug!(target: "consensus::auto", "received headers stage event with new empty block");
-                                                break
-                                            }
                                             if stage_id == FINISH {
                                                 debug!(target: "consensus::auto", "received finish stage event");
                                                 break
