@@ -40,7 +40,7 @@ pub trait EthTransactions: Send + Sync {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
     /// Executes the closure with the state that corresponds to the given [BlockId].
-    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         F: FnOnce(StateProviderBox<'_>) -> EthResult<T>;
 

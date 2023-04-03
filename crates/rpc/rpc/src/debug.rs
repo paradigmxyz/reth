@@ -7,7 +7,6 @@ use crate::{
     result::{internal_rpc_err, ToRpcResult},
     EthApiSpec, TracingCallGuard,
 };
-use reth_rlp::Encodable;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256, U256};
@@ -17,6 +16,7 @@ use reth_revm::{
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
+use reth_rlp::Encodable;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
@@ -121,16 +121,30 @@ where
         })
     }
 
+    /// The debug_traceCall method lets you run an `eth_call` within the context of the given block
+    /// execution using the final state of parent block as the base.
     pub async fn debug_trace_call(
         &self,
-        request: CallRequest,
-        block_number: Option<BlockId>,
+        call: CallRequest,
+        block_id: Option<BlockId>,
         opts: GethDebugTracingOptions,
     ) -> EthResult<GethTraceFrame> {
-
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
 
-        todo!()
+        let GethDebugTracingOptions { config, .. } = opts;
+        // TODO(mattsse) support non default tracers
+
+        // default structlog tracer
+        let inspector_config = TracingInspectorConfig::from_geth_config(&config);
+
+        let mut inspector = TracingInspector::new(inspector_config);
+
+        let (res, _) = self.eth_api.inspect_call_at(call, at, None, &mut inspector).await?;
+        let gas_used = res.result.gas_used();
+
+        let frame = inspector.into_geth_builder().geth_traces(U256::from(gas_used), config);
+
+        Ok(frame.into())
     }
 }
 
@@ -262,7 +276,7 @@ where
         block_number: Option<BlockId>,
         opts: GethDebugTracingOptions,
     ) -> RpcResult<GethTraceFrame> {
-        Ok(DebugApi::debug_trace_call(self, request, block_number,  opts).await?)
+        Ok(DebugApi::debug_trace_call(self, request, block_number, opts).await?)
     }
 }
 

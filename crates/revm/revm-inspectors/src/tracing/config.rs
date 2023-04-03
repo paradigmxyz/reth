@@ -54,7 +54,6 @@ impl TracingInspectorConfig {
     /// Returns a config for geth style traces based on the given [GethDefaultTracingOptions].
     pub fn from_geth_config(config: &GethDefaultTracingOptions) -> Self {
         Self {
-            record_steps: false,
             record_memory_snapshots: config.enable_memory.unwrap_or_default(),
             record_stack_snapshots: !config.disable_stack.unwrap_or_default(),
             record_state_diff: !config.disable_storage.unwrap_or_default(),
