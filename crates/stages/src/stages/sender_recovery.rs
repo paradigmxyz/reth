@@ -8,6 +8,7 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable, RawValue,
 };
 use reth_primitives::{TransactionSigned, TxNumber, H160};
 use reth_provider::Transaction;
@@ -31,7 +32,7 @@ pub struct SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 10000 }
+        Self { commit_threshold: 500_000 }
     }
 }
 
@@ -72,9 +73,10 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
         // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+        let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
         // Walk the transactions from start to end index (inclusive)
-        let tx_walker = tx_cursor.walk_range(first_tx_num..=last_tx_num)?;
+        let tx_walker =
+            tx_cursor.walk_range(RawKey::new(first_tx_num)..=RawKey::new(last_tx_num))?;
 
         // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Recovering senders");
@@ -98,8 +100,14 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             let chunk: Vec<_> = chunk.collect();
 
             // closure that would recover signer. Used as utility to wrap result
-            let recover = |entry: Result<(TxNumber, TransactionSigned), reth_db::Error>| -> Result<(u64, H160), Box<StageError>> {
+            let recover = |entry: Result<
+                (RawKey<TxNumber>, RawValue<TransactionSigned>),
+                reth_db::Error,
+            >|
+             -> Result<(u64, H160), Box<StageError>> {
                 let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
+                let tx_id = tx_id.key().expect("key to be formated");
+                let transaction = transaction.value().expect("value to be formated");
                 let sender = transaction.recover_signer().ok_or(StageError::from(
                     SenderRecoveryStageError::SenderRecovery { tx: tx_id },
                 ))?;
@@ -115,7 +123,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 }
             });
         }
-
         // Iterate over channels and append the sender in the order that they are received.
         for mut channel in channels {
             while let Some(recovered) = channel.recv().await {
