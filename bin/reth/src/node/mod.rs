@@ -138,7 +138,7 @@ impl Command {
         raise_fd_limit();
 
         let mut config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = %self.db, "Configuration loaded");
+        info!(target: "reth::cli", path = %self.config, "Configuration loaded");
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
