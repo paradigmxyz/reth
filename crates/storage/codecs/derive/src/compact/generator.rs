@@ -34,7 +34,7 @@ pub fn generate_from_to(ident: &Ident, fields: &FieldList) -> TokenStream2 {
         }
 
         impl Compact for #ident {
-            fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+            fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
                 let mut flags = #flags::default();
                 let mut total_len = 0;
                 #(#to_compact)*

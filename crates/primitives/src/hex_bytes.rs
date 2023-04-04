@@ -208,7 +208,7 @@ where
 }
 
 impl Compact for Bytes {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
         let len = self.len();
         buf.put(self.0);
         len
