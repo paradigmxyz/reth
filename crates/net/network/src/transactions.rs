@@ -40,6 +40,9 @@ const PEER_TRANSACTION_CACHE_LIMIT: usize = 1024 * 10;
 /// Soft limit for NewPooledTransactions
 const NEW_POOLED_TRANSACTION_HASHES_SOFT_LIMIT: usize = 4096;
 
+/// The target size for the message of full transactions.
+const MAX_FULL_TRANSACTIONS_PACKET_SIZE: usize = 100 * 1024;
+
 /// The future for inserting a function into the pool
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = PoolResult<TxHash>> + Send + 'static>>;
 
@@ -230,16 +233,17 @@ where
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
             // filter all transactions unknown to the peer
             let mut hashes = PooledTransactionsHashesBuilder::new(peer.version);
-            let mut full_transactions = Vec::new();
+            let mut full_transactions = FullTransactionsBuilder::default();
+
             for tx in to_propagate.iter() {
                 if peer.transactions.insert(tx.hash()) {
                     hashes.push(tx);
-                    full_transactions.push(Arc::clone(&tx.transaction));
+                    full_transactions.push(tx);
                 }
             }
             let mut new_pooled_hashes = hashes.build();
 
-            if !full_transactions.is_empty() {
+            if !new_pooled_hashes.is_empty() {
                 // determine whether to send full tx objects or hashes.
                 if peer_idx > max_num_full {
                     // enforce tx soft limit per message for the (unlikely) event the number of
@@ -252,10 +256,8 @@ where
                     // send hashes of transactions
                     self.network.send_transactions_hashes(*peer_id, new_pooled_hashes);
                 } else {
-                    // TODO ensure max message size
-
                     // send full transactions
-                    self.network.send_transactions(*peer_id, full_transactions);
+                    self.network.send_transactions(*peer_id, full_transactions.build());
 
                     for hash in new_pooled_hashes.into_iter_hashes() {
                         propagated.0.entry(hash).or_default().push(PropagateKind::Full(*peer_id));
@@ -556,7 +558,7 @@ where
 /// A transaction that's about to be propagated to multiple peers.
 struct PropagateTransaction {
     tx_type: u8,
-    length: usize,
+    size: usize,
     transaction: Arc<TransactionSigned>,
 }
 
@@ -568,7 +570,35 @@ impl PropagateTransaction {
     }
 
     fn new(transaction: Arc<TransactionSigned>) -> Self {
-        Self { tx_type: transaction.tx_type().into(), length: transaction.length(), transaction }
+        Self { tx_type: transaction.tx_type().into(), size: transaction.length(), transaction }
+    }
+}
+
+/// Helper type for constructing the full transaction message that enforces the
+/// `MAX_FULL_TRANSACTIONS_PACKET_SIZE`
+#[derive(Default)]
+struct FullTransactionsBuilder {
+    total_size: usize,
+    transactions: Vec<Arc<TransactionSigned>>,
+}
+
+// === impl FullTransactionsBuilder ===
+
+impl FullTransactionsBuilder {
+    /// Append a transaction to the list if it doesn't exceed the maximum size.
+    fn push(&mut self, transaction: &PropagateTransaction) {
+        let new_size = self.total_size + transaction.size;
+        if new_size > MAX_FULL_TRANSACTIONS_PACKET_SIZE {
+            return
+        }
+
+        self.total_size = new_size;
+        self.transactions.push(Arc::clone(&transaction.transaction));
+    }
+
+    /// returns the list of transactions.
+    fn build(self) -> Vec<Arc<TransactionSigned>> {
+        self.transactions
     }
 }
 
@@ -599,7 +629,7 @@ impl PooledTransactionsHashesBuilder {
             PooledTransactionsHashesBuilder::Eth66(msg) => msg.0.push(tx.hash()),
             PooledTransactionsHashesBuilder::Eth68(msg) => {
                 msg.hashes.push(tx.hash());
-                msg.sizes.push(tx.length);
+                msg.sizes.push(tx.size);
                 msg.types.push(tx.tx_type);
             }
         }
