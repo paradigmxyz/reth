@@ -51,6 +51,12 @@ pub trait EthTransactions: Send + Sync {
     /// for.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnv, BlockEnv, BlockId)>;
 
+    /// Get all transactions in the block with the given hash.
+    ///
+    /// Returns `None` if block does not exist.
+    async fn transactions_by_block(&self, block: H256)
+        -> EthResult<Option<Vec<TransactionSigned>>>;
+
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
@@ -170,6 +176,13 @@ where
                 Ok((cfg, env, block_hash.into()))
             }
         }
+    }
+
+    async fn transactions_by_block(
+        &self,
+        block: H256,
+    ) -> EthResult<Option<Vec<TransactionSigned>>> {
+        Ok(self.cache().get_block_transactions(block).await?)
     }
 
     async fn transaction_by_hash(&self, hash: H256) -> EthResult<Option<TransactionSource>> {

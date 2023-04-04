@@ -19,7 +19,7 @@ mod noop;
 mod pre_state;
 
 /// Result type for geth style transaction trace
-pub type TraceResult = crate::trace::common::TraceResult<serde_json::Value, String>;
+pub type TraceResult = crate::trace::common::TraceResult<GethTraceFrame, String>;
 
 /// blockTraceResult represents the results of tracing a single block when an entire chain is being
 /// traced. ref <https://github.com/ethereum/go-ethereum/blob/ee530c0d5aa70d2c00ab5691a89ab431b73f8165/eth/tracers/api.go#L218-L222>
