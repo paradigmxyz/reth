@@ -23,7 +23,7 @@ arbitrary = [
 [dependencies]
 bytes = "1.4"
 codecs-derive = { version = "0.1.0", path = "./derive", default-features = false }
-revm-primitives = { version = "1.0.0", features = ["serde"] }
+revm-primitives = { version = "1.1.0", features = ["serde"] }
 
 # arbitrary utils
 arbitrary = { version = "1.1.7", features = ["derive"], optional = true }
@@ -31,7 +31,7 @@ proptest = { version = "1.0", optional = true }
 proptest-derive = { version = "0.3", optional = true }
 
 [dev-dependencies]
-revm-primitives = {version = "1.0.0", features = [
+revm-primitives = {version = "1.1.0", features = [
     "serde",
     "arbitrary"
 ] }
