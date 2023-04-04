@@ -22,7 +22,7 @@ fn bench_get_rand(c: &mut Criterion) {
         b.iter(|| {
             let mut i = 0usize;
             for key in &keys {
-                i += *txn.get::<ObjectLength>(&db, key.as_bytes()).unwrap().unwrap();
+                i += *txn.get::<ObjectLength>(db.dbi(), key.as_bytes()).unwrap().unwrap();
             }
             black_box(i);
         })
@@ -76,7 +76,7 @@ fn bench_put_rand(c: &mut Criterion) {
         b.iter(|| {
             let txn = env.begin_rw_txn().unwrap();
             for (key, data) in items.iter() {
-                txn.put(&db, key, data, WriteFlags::empty()).unwrap();
+                txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
             }
         })
     });

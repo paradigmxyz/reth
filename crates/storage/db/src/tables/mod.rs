@@ -43,8 +43,11 @@ pub enum TableType {
     DupSort,
 }
 
+/// Number of tables that should be present inside database.
+pub const NUM_TABLES: usize = 27;
+
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 27] = [
+pub const TABLES: [(TableType, &str); NUM_TABLES] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
