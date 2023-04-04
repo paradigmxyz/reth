@@ -15,6 +15,11 @@ pub trait Compress: Send + Sync + Sized + Debug {
     /// Compressed type.
     type Compressed: bytes::BufMut + AsMut<[u8]> + Default + AsRef<[u8]> + Send + Sync;
 
+    /// If the type cannot be compressed, return its inner reference as `Some(self.as_ref())`
+    fn uncompressable_ref(&self) -> Option<&[u8]> {
+        None
+    }
+
     /// Compresses data going into the database.
     fn compress(self) -> Self::Compressed {
         let mut buf = Self::Compressed::default();
