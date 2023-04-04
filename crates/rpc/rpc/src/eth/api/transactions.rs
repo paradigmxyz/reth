@@ -123,7 +123,7 @@ pub trait EthTransactions: Send + Sync {
     where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
 
-    /// Retrieves the transaction if it exists and
+    /// Retrieves the transaction if it exists and returns its trace
     async fn trace_transaction<F, R>(
         &self,
         hash: H256,
