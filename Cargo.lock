@@ -2492,6 +2492,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ebdb29d2ea9ed0083cd8cece49bbd968021bd99b0849edb4a9a7ee0fdf6a4e0"
 
 [[package]]
+name = "hex-literal"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bcb5b3e439c92a7191df2f9bbe733de8de55c3f86368cdb1c63f8be7e9e328e"
+
+[[package]]
 name = "hkdf"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3076,7 +3082,6 @@ dependencies = [
  "ecdsa 0.14.8",
  "elliptic-curve 0.12.3",
  "sha2 0.10.6",
- "sha3",
 ]
 
 [[package]]
@@ -4667,7 +4672,7 @@ dependencies = [
  "educe",
  "futures",
  "generic-array",
- "hex-literal",
+ "hex-literal 0.3.4",
  "hmac",
  "pin-project",
  "rand 0.8.5",
@@ -4695,7 +4700,7 @@ dependencies = [
  "ethers-core",
  "futures",
  "hex",
- "hex-literal",
+ "hex-literal 0.3.4",
  "metrics",
  "pin-project",
  "proptest",
@@ -4748,7 +4753,7 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "futures",
- "hex-literal",
+ "hex-literal 0.3.4",
  "modular-bitfield",
  "parity-scale-codec",
  "rand 0.8.5",
@@ -4936,7 +4941,7 @@ dependencies = [
  "fixed-hash",
  "hash-db",
  "hex",
- "hex-literal",
+ "hex-literal 0.3.4",
  "impl-serde",
  "modular-bitfield",
  "once_cell",
@@ -5031,7 +5036,7 @@ dependencies = [
  "criterion",
  "ethereum-types",
  "ethnum",
- "hex-literal",
+ "hex-literal 0.3.4",
  "pprof",
  "reth-rlp",
  "reth-rlp-derive",
@@ -5279,8 +5284,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "3.0.0"
-source = "git+https://github.com/bluealloy/revm#c2ee8ff5b4f0262565fa65a6a95c2a430116fa68"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02f8e1d10d4d381e657b40c7fc704373ea5985a6a77a48a048ae0b969d5072b3"
 dependencies = [
  "auto_impl",
  "revm-interpreter",
@@ -5289,8 +5295,9 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm#c2ee8ff5b4f0262565fa65a6a95c2a430116fa68"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd02c0cf375af9e4bc3d5ed645de9b28fe911793adce0c2b94f52ecff6818c23"
 dependencies = [
  "derive_more",
  "enumn",
@@ -5300,10 +5307,11 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "2.0.0"
-source = "git+https://github.com/bluealloy/revm#c2ee8ff5b4f0262565fa65a6a95c2a430116fa68"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d95e1299235ef4580feb34b68c2ff13b59bc09dbbf6ed5f1d50ec5731f17c422"
 dependencies = [
- "k256 0.11.6",
+ "k256 0.13.0",
  "num",
  "once_cell",
  "revm-primitives",
@@ -5316,8 +5324,9 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm#c2ee8ff5b4f0262565fa65a6a95c2a430116fa68"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f75dc073614bcab964c77a58f66755d5be6f99cd2ca438dc4a561b04f34894a"
 dependencies = [
  "arbitrary",
  "auto_impl",
@@ -5328,7 +5337,7 @@ dependencies = [
  "fixed-hash",
  "hashbrown 0.13.2",
  "hex",
- "hex-literal",
+ "hex-literal 0.4.0",
  "primitive-types",
  "proptest",
  "proptest-derive",
