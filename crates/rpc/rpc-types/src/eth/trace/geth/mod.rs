@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 
+use crate::{state::StateOverride, BlockOverrides};
 /// Geth tracing types
 use reth_primitives::{Bytes, JsonU256, H256, U256};
 use serde::{Deserialize, Serialize};
@@ -308,9 +309,6 @@ pub struct GethDefaultTracingOptions {
     /// maximum length of output, but zero means unlimited
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
-    /// Chain overrides, can be used to execute a trace using future fork rules
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overrides: Option<serde_json::Value>,
 }
 
 /// Bindings for additional `debug_traceCall` options
@@ -321,5 +319,10 @@ pub struct GethDefaultTracingOptions {
 pub struct GethDebugTracingCallOptions {
     #[serde(flatten)]
     pub tracing_options: GethDebugTracingOptions,
-    // TODO: Add stateoverrides and blockoverrides options
+    /// The state overrides to apply
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_overrides: Option<StateOverride>,
+    /// The block overrides to apply
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_overrides: Option<BlockOverrides>,
 }

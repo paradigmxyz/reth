@@ -2,7 +2,7 @@
 use crate::Transaction;
 use reth_primitives::{
     Address, Block as PrimitiveBlock, Bloom, Bytes, Header as PrimitiveHeader, SealedHeader,
-    Withdrawal, H256, H64, U256,
+    Withdrawal, H256, H64, U256, U64,
 };
 use reth_rlp::Encodable;
 use serde::{ser::Error, Deserialize, Serialize, Serializer};
@@ -349,6 +349,27 @@ impl<T: Serialize> Serialize for Rich<T> {
             Err(S::Error::custom("Unserializable structures: expected objects"))
         }
     }
+}
+
+/// BlockOverrides is a set of header fields to override.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct BlockOverrides {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<U256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<U256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<U64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gas_limit: Option<U64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coinbase: Option<Address>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub random: Option<H256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_fee: Option<U256>,
 }
 
 #[cfg(test)]
