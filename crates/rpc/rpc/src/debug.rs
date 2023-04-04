@@ -21,7 +21,8 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
-        GethDebugTracingOptions, GethTraceFrame, NoopFrame, TraceResult,
+        GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame, NoopFrame,
+        TraceResult,
     },
     BlockError, CallRequest, RichBlock,
 };
@@ -141,11 +142,13 @@ where
         &self,
         call: CallRequest,
         block_id: Option<BlockId>,
-        opts: GethDebugTracingOptions,
+        opts: GethDebugTracingCallOptions,
     ) -> EthResult<GethTraceFrame> {
         let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
-
-        let GethDebugTracingOptions { config, .. } = opts;
+        // TODO(mattsse) apply block overrides
+        let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides: _ } =
+            opts;
+        let GethDebugTracingOptions { config, .. } = tracing_options;
         // TODO(mattsse) support non default tracers
 
         // default structlog tracer
@@ -153,7 +156,8 @@ where
 
         let mut inspector = TracingInspector::new(inspector_config);
 
-        let (res, _) = self.eth_api.inspect_call_at(call, at, None, &mut inspector).await?;
+        let (res, _) =
+            self.eth_api.inspect_call_at(call, at, state_overrides, &mut inspector).await?;
         let gas_used = res.result.gas_used();
 
         let frame = inspector.into_geth_builder().geth_traces(U256::from(gas_used), config);
@@ -288,7 +292,7 @@ where
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
-        opts: GethDebugTracingOptions,
+        opts: GethDebugTracingCallOptions,
     ) -> RpcResult<GethTraceFrame> {
         Ok(DebugApi::debug_trace_call(self, request, block_number, opts).await?)
     }
