@@ -1,6 +1,10 @@
 use crate::{
     eth::{
-        cache::EthStateCache, error::EthResult, utils::recover_raw_transaction, EthTransactions,
+        cache::EthStateCache,
+        error::EthResult,
+        revm_utils::{inspect, prepare_call_env},
+        utils::recover_raw_transaction,
+        EthTransactions,
     },
     result::internal_rpc_err,
     TracingCallGuard,
@@ -10,6 +14,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::{
+    database::{State, SubState},
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
@@ -111,6 +116,37 @@ where
         })
     }
 
+    /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
+    /// on top of a pending block with all n-1 transactions applied (traced) first.
+    ///
+    /// Note: Allows to trace dependent transactions, hence all transactions are traced in sequence
+    pub async fn trace_call_many(
+        &self,
+        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        block_id: Option<BlockId>,
+    ) -> EthResult<Vec<TraceResults>> {
+        let at = block_id.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
+        let (cfg, block_env, at) = self.eth_api.evm_env_at(at).await?;
+
+        // execute all transactions on top of each other and record the traces
+        self.eth_api.with_state_at(at, move |state| {
+            let mut results = Vec::with_capacity(calls.len());
+            let mut db = SubState::new(State::new(state));
+
+            for (call, trace_types) in calls {
+                let env = prepare_call_env(cfg.clone(), block_env.clone(), call, &mut db, None)?;
+                let config = tracing_config(&trace_types);
+                let mut inspector = TracingInspector::new(config);
+                let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                let trace_res =
+                    inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+                results.push(trace_res);
+            }
+
+            Ok(results)
+        })
+    }
+
     /// Returns transaction trace with the given address.
     pub async fn trace_get(
         &self,
@@ -176,10 +212,10 @@ where
     /// Handler for `trace_callMany`
     async fn trace_call_many(
         &self,
-        _calls: Vec<(CallRequest, HashSet<TraceType>)>,
-        _block_id: Option<BlockId>,
+        calls: Vec<(CallRequest, HashSet<TraceType>)>,
+        block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(TraceApi::trace_call_many(self, calls, block_id).await?)
     }
 
     /// Handler for `trace_rawTransaction`
