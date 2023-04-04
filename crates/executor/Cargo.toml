@@ -19,7 +19,6 @@ reth-interfaces = { path = "../interfaces" }
 reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
-reth-consensus-common = { path = "../consensus/common" }
 
 # common
 thiserror = "1.0.37"
