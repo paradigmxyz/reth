@@ -2442,7 +2442,7 @@ dependencies = [
  "hash32",
  "rustc_version",
  "serde",
- "spin 0.9.5",
+ "spin 0.9.8",
  "stable_deref_trait",
 ]
 
@@ -4466,6 +4466,7 @@ dependencies = [
  "reth-network-api",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-revm-inspectors",
  "reth-rlp",
  "reth-rpc",
@@ -4491,7 +4492,6 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "reth-beacon-consensus",
- "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -4732,15 +4732,11 @@ dependencies = [
  "hash-db",
  "parking_lot 0.12.1",
  "plain_hasher",
- "reth-consensus-common",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
- "reth-revm",
- "reth-revm-inspectors",
  "reth-rlp",
- "revm",
  "rlp",
  "sha3",
  "thiserror",
@@ -4999,12 +4995,16 @@ dependencies = [
 name = "reth-revm"
 version = "0.1.0"
 dependencies = [
+ "reth-consensus-common",
+ "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
  "reth-revm-inspectors",
  "reth-revm-primitives",
+ "reth-rlp",
  "revm",
+ "tracing",
 ]
 
 [[package]]
@@ -5227,6 +5227,7 @@ dependencies = [
  "reth-metrics-derive",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "thiserror",
  "tokio",
@@ -6086,9 +6087,9 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "spin"
-version = "0.9.5"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dccf47db1b41fa1573ed27ccf5e08e3ca771cb994f776668c5ebda893b248fc"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 dependencies = [
  "lock_api",
 ]

@@ -27,7 +27,7 @@
 //! # use reth_interfaces::consensus::Consensus;
 //! # use reth_interfaces::sync::NoopSyncStateUpdate;
 //! # use reth_interfaces::test_utils::{TestBodiesClient, TestConsensus, TestHeadersClient, TestStatusUpdater};
-//! # use reth_executor::Factory;
+//! # use reth_revm::Factory;
 //! # use reth_primitives::{PeerId, MAINNET, H256};
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;

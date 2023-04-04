@@ -287,12 +287,12 @@ mod tests {
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
-    use reth_executor::Factory;
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
         StorageEntry, H160, H256, U256,
     };
     use reth_provider::insert_canonical_block;
+    use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::{
         ops::{Deref, DerefMut},

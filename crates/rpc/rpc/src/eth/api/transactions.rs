@@ -17,7 +17,10 @@ use reth_primitives::{
     TxLegacy, H256, U128, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
-use reth_revm::database::{State, SubState};
+use reth_revm::{
+    database::{State, SubState},
+    tracing::{TracingInspector, TracingInspectorConfig},
+};
 use reth_rpc_types::{
     state::StateOverride, CallRequest, Index, Log, Transaction, TransactionInfo,
     TransactionReceipt, TransactionRequest, TypedTransactionRequest,
@@ -37,7 +40,7 @@ pub trait EthTransactions: Send + Sync {
     fn state_at(&self, at: BlockId) -> EthResult<StateProviderBox<'_>>;
 
     /// Executes the closure with the state that corresponds to the given [BlockId].
-    fn with_state_at<F, T>(&self, _at: BlockId, _f: F) -> EthResult<T>
+    fn with_state_at<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         F: FnOnce(StateProviderBox<'_>) -> EthResult<T>;
 
@@ -105,6 +108,19 @@ pub trait EthTransactions: Send + Sync {
     ) -> EthResult<(ResultAndState, Env)>
     where
         I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send;
+
+    /// Executes the transaction at the given [BlockId] with a tracer configured by the config.
+    /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
+    /// configured [Env] was inspected.
+    fn trace_at<F, R>(
+        &self,
+        env: Env,
+        config: TracingInspectorConfig,
+        at: BlockId,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
 }
 
 #[async_trait]
@@ -339,6 +355,26 @@ where
         I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
     {
         self.with_call_at(request, at, state_overrides, |db, env| inspect(db, env, inspector)).await
+    }
+
+    fn trace_at<F, R>(
+        &self,
+        env: Env,
+        config: TracingInspectorConfig,
+        at: BlockId,
+        f: F,
+    ) -> EthResult<R>
+    where
+        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
+    {
+        self.with_state_at(at, |state| {
+            let db = SubState::new(State::new(state));
+
+            let mut inspector = TracingInspector::new(config);
+            let (res, _) = inspect(db, env, &mut inspector)?;
+
+            f(inspector, res)
+        })
     }
 }
 

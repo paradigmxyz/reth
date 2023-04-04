@@ -71,13 +71,30 @@ pub enum BlockStatus {
 }
 
 /// Allows read only functionality on the blockchain tree.
+///
+/// Tree contains all blocks that are not canonical that can potentially be included
+/// as canonical chain. For better explanation we can group blocks into four groups:
+/// * Canonical chain blocks
+/// * Side chain blocks. Side chain are block that forks from canonical chain but not its tip.
+/// * Pending blocks that extend the canonical chain but are not yet included.
+/// * Future pending blocks that extend the pending blocks.
 pub trait BlockchainTreeViewer: Send + Sync {
-    /// Get all pending block numbers and their hashes.
-    fn pending_blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
+    /// Returns both pending and sidechain block numbers and their hashes.
+    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
 
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
 
     /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
     fn canonical_tip(&self) -> BlockNumHash;
+
+    /// Return block hashes that extends the canonical chain tip by one.
+    /// This is used to fetch what is considered the pending blocks, blocks that
+    /// has best chance to become canonical.
+    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>);
+
+    /// Return block hashes that extends the canonical chain tip by one.
+    ///
+    /// If there is no such block, return `None`.
+    fn pending_block(&self) -> Option<BlockNumHash>;
 }
