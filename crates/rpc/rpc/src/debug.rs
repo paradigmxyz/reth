@@ -14,14 +14,14 @@ use reth_provider::{BlockProvider, HeaderProvider};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
-    tracing::{TracingInspector, TracingInspectorConfig},
+    tracing::{FourByteInspector, TracingInspector, TracingInspectorConfig},
 };
 use reth_rlp::Encodable;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_types::{
     trace::geth::{
-        BlockTraceResult, GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingOptions,
-        GethTraceFrame, NoopFrame, TraceResult,
+        BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
+        GethDebugTracingOptions, GethTraceFrame, NoopFrame, TraceResult,
     },
     CallRequest, RichBlock,
 };
@@ -91,7 +91,9 @@ where
                 return match tracer {
                     GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                         GethDebugBuiltInTracerType::FourByteTracer => {
-                            todo!()
+                            let mut inspector = FourByteInspector::default();
+                            let _ = inspect(db, env, &mut inspector)?;
+                            return Ok(FourByteFrame::from(inspector).into())
                         }
                         GethDebugBuiltInTracerType::CallTracer => {
                             todo!()
