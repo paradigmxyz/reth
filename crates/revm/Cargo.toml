@@ -14,4 +14,4 @@ reth-provider = { path = "../storage/provider" }
 reth-revm-primitives = { path = "./revm-primitives" }
 reth-revm-inspectors = { path = "./revm-inspectors" }
 
-revm = { version = "3.0.0" }
+revm = { version = "3.1.0" }

@@ -24,7 +24,7 @@ reth-provider = { path = "../storage/provider" }
 reth-consensus-common = { path = "../consensus/common" }
 
 # revm
-revm = { version = "3.0.0" }
+revm = { version = "3.1.0" }
 
 # common
 thiserror = "1.0.37"
