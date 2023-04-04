@@ -160,9 +160,8 @@ where
     TraceApiClient::trace_raw_transaction(client, Bytes::default(), HashSet::default(), None)
         .await
         .unwrap_err();
-    assert!(is_unimplemented(
-        TraceApiClient::trace_call_many(client, vec![], None).await.err().unwrap()
-    ));
+    TraceApiClient::trace_call_many(client, vec![], None).await.err().unwrap();
+
     assert!(is_unimplemented(
         TraceApiClient::replay_block_transactions(client, block_id, HashSet::default())
             .await
