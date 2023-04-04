@@ -55,6 +55,9 @@ pub enum BlockError {
     /// A transaction failed sender recovery
     #[error("transaction failed sender recovery")]
     InvalidSignature,
+    /// A transaction failed sender recovery
+    #[error("failed to raw block {0}")]
+    RlpDecodeRawBlock(reth_rlp::DecodeError),
 }
 
 /// Block representation
