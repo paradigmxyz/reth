@@ -19,6 +19,7 @@ use reth_primitives::{
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
+    env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -121,6 +122,16 @@ pub trait EthTransactions: Send + Sync {
     ) -> EthResult<R>
     where
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>;
+
+    /// Retrieves the transaction if it exists and returns its trace
+    async fn trace_transaction<F, R>(
+        &self,
+        hash: H256,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send;
 }
 
 #[async_trait]
@@ -375,6 +386,29 @@ where
 
             f(inspector, res)
         })
+    }
+
+    async fn trace_transaction<F, R>(
+        &self,
+        hash: H256,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<R>>
+    where
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
+    {
+        let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+
+        let (cfg, block, at) = self.evm_env_at(at).await?;
+        let (tx, tx_info) = transaction.split();
+        let tx = tx_env_with_recovered(&tx);
+        let env = Env { cfg, block, tx };
+
+        // execute the trace
+        self.trace_at(env, config, at, move |insp, res| f(tx_info, insp, res)).map(Some)
     }
 }
 
