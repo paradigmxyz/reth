@@ -106,6 +106,8 @@ pub(crate) struct PeersManager {
     backoff_durations: PeerBackoffDurations,
     /// If non-trusted peers should be connected to
     connect_trusted_nodes_only: bool,
+    /// Timestamp of the last time [Self::tick] was called.
+    last_tick: Instant,
 }
 
 impl PeersManager {
@@ -155,6 +157,7 @@ impl PeersManager {
             ban_duration,
             backoff_durations,
             connect_trusted_nodes_only,
+            last_tick: Instant::now(),
         }
     }
 
@@ -248,6 +251,9 @@ impl PeersManager {
             return
         }
 
+        // start a new tick, so the peer is not immediately rewarded for the time since last tick
+        self.tick();
+
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
@@ -286,6 +292,29 @@ impl PeersManager {
     fn unban_peer(&mut self, peer_id: PeerId) {
         self.ban_list.unban_peer(&peer_id);
         self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
+    }
+
+    /// Tick function to update reputation of all connected peers.
+    /// Peers are rewarded with reputation increases for the time they are connected since the last
+    /// tick. This is to prevent peers from being disconnected eventually due to slashed
+    /// reputation because of some bad messages (most likely transaction related)
+    fn tick(&mut self) {
+        let now = Instant::now();
+        // Determine the number of seconds since the last tick.
+        // Ensuring that now is always greater than last_tick to account for issues with system
+        // time.
+        let secs_since_last_tick =
+            if self.last_tick > now { 0 } else { (now - self.last_tick).as_secs() as i32 };
+        self.last_tick = now;
+
+        // update reputation via seconds connected
+        for peer in self.peers.iter_mut().filter(|(_, peer)| peer.state.is_connected()) {
+            // update reputation via seconds connected, but keep the target _around_ the default
+            // reputation.
+            if peer.1.reputation < DEFAULT_REPUTATION {
+                peer.1.reputation += secs_since_last_tick;
+            }
+        }
     }
 
     /// Apply the corresponding reputation change to the given peer
@@ -605,6 +634,8 @@ impl PeersManager {
     /// New connections are only initiated, if slots are available and appropriate peers are
     /// available.
     fn fill_outbound_slots(&mut self) {
+        self.tick();
+
         // as long as there a slots available try to fill them with the best peers
         while self.connection_info.has_out_capacity() {
             let action = {
@@ -1132,6 +1163,7 @@ mod test {
         error::BackoffKind,
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
+            reputation::DEFAULT_REPUTATION,
             PeerAction,
         },
         session::PendingSessionHandshakeError,
@@ -1887,5 +1919,38 @@ mod test {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_tick() {
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
+        let socket_addr = SocketAddr::new(ip, 8008);
+        let config = PeersConfig::default();
+        let mut peer_manager = PeersManager::new(config);
+        let peer_id = PeerId::random();
+        peer_manager.add_peer(peer_id, socket_addr, None);
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        peer_manager.tick();
+
+        // still unconnected
+        assert_eq!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
+
+        // mark as connected
+        peer_manager.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::Out;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        peer_manager.tick();
+
+        // still at default reputation
+        assert_eq!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
+
+        peer_manager.peers.get_mut(&peer_id).unwrap().reputation -= 1;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        peer_manager.tick();
+
+        // tick applied
+        assert!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation >= DEFAULT_REPUTATION);
     }
 }
