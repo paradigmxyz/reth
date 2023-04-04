@@ -1,7 +1,7 @@
 use crate::{
     eth::{
         cache::EthStateCache,
-        error::EthResult,
+        error::{EthApiError, EthResult},
         revm_utils::{inspect, prepare_call_env},
         utils::recover_raw_transaction,
         EthTransactions,
@@ -147,6 +147,24 @@ where
         })
     }
 
+    /// Replays a transaction, returning the traces.
+    pub async fn replay_transaction(
+        &self,
+        hash: H256,
+        trace_types: HashSet<TraceType>,
+    ) -> EthResult<TraceResults> {
+        let config = tracing_config(&trace_types);
+        self.eth_api
+            .trace_transaction(hash, config, |_, inspector, res| {
+                let trace_res =
+                    inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+                Ok(trace_res)
+            })
+            .await
+            .transpose()
+            .ok_or_else(|| EthApiError::TransactionNotFound)?
+    }
+
     /// Returns transaction trace with the given address.
     pub async fn trace_get(
         &self,
@@ -172,22 +190,17 @@ where
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
         let _permit = self.acquire_trace_permit().await;
 
-        let (transaction, at) = match self.eth_api.transaction_by_hash_at(hash).await? {
-            None => return Ok(None),
-            Some(res) => res,
-        };
-
-        let (cfg, block, at) = self.eth_api.evm_env_at(at).await?;
-
-        let (tx, tx_info) = transaction.split();
-        let tx = tx_env_with_recovered(&tx);
-        let env = Env { cfg, block, tx };
-
-        // execute the trace
-        self.eth_api.trace_at(env, TracingInspectorConfig::default_parity(), at, |inspector, _| {
-            let traces = inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-            Ok(Some(traces))
-        })
+        self.eth_api
+            .trace_transaction(
+                hash,
+                TracingInspectorConfig::default_parity(),
+                |tx_info, inspector, _| {
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    Ok(traces)
+                },
+            )
+            .await
     }
 }
 
@@ -240,10 +253,10 @@ where
     /// Handler for `trace_replayTransaction`
     async fn replay_transaction(
         &self,
-        _transaction: H256,
-        _trace_types: HashSet<TraceType>,
+        transaction: H256,
+        trace_types: HashSet<TraceType>,
     ) -> Result<TraceResults> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(TraceApi::replay_transaction(self, transaction, trace_types).await?)
     }
 
     /// Handler for `trace_block`
