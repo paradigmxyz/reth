@@ -17,7 +17,7 @@ reth-executor = { path = "../executor" }
 reth-consensus-common = { path = "../consensus/common" }
 
 # revm
-revm = { version = "3.0.0" }
+revm = { version = "3.1.0" }
 
 # common
 tracing = "0.1.37"
