@@ -12,5 +12,5 @@ pub use rpc_server_args::RpcServerArgs;
 mod debug_args;
 pub use debug_args::DebugArgs;
 
-mod multi_use_args;
-pub use multi_use_args::{get_secret_key, SecretKeyError};
+mod secret_key;
+pub use secret_key::{get_secret_key, SecretKeyError};

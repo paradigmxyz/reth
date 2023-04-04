@@ -2,14 +2,13 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::NetworkArgs,
-    dirs::{ConfigPath, DbPath, PlatformPath},
+    args::{get_secret_key, NetworkArgs},
+    dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
     prometheus_exporter, StageEnum,
 };
 use clap::Parser;
 use reth_beacon_consensus::BeaconConsensus;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
-use reth_network::config::rng_secret_key;
 use reth_primitives::ChainSpec;
 use reth_provider::{ShareableDatabase, Transaction};
 use reth_staged_sync::{
@@ -20,7 +19,6 @@ use reth_stages::{
     stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
     ExecInput, Stage, StageId, UnwindInput,
 };
-use secp256k1::SecretKey;
 use std::{net::SocketAddr, sync::Arc};
 use tracing::*;
 
@@ -61,8 +59,8 @@ pub struct Command {
     /// Secret key to use for this node.
     ///
     /// This also will deterministically set the peer ID.
-    #[arg(long, value_name = "SECRET_KEY", verbatim_doc_comment)]
-    secret_key: Option<SecretKey>,
+    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
+    p2p_secret_key: PlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -133,11 +131,11 @@ impl Command {
                     });
                 }
 
-                let secret_key = self.secret_key.unwrap_or(rng_secret_key());
+                let p2p_secret_key = get_secret_key(&self.p2p_secret_key)?;
 
                 let network = self
                     .network
-                    .network_config(&config, self.chain.clone(), secret_key)
+                    .network_config(&config, self.chain.clone(), p2p_secret_key)
                     .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
                     .start_network()
                     .await?;

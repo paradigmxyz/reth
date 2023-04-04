@@ -59,7 +59,7 @@ pub fn net_dir() -> Option<PathBuf> {
 /// Returns the path to the reth secret key directory.
 ///
 /// Refer to [dirs_next::data_dir] for cross-platform behavior.
-pub fn secret_key_dir() -> Option<PathBuf> {
+pub fn p2p_secret_key_dir() -> Option<PathBuf> {
     data_dir().map(|root| root.join("p2p"))
 }
 
@@ -137,7 +137,7 @@ pub struct SecretKeyPath;
 
 impl XdgPath for SecretKeyPath {
     fn resolve() -> Option<PathBuf> {
-        secret_key_dir().map(|p| p.join("secret"))
+        p2p_secret_key_dir().map(|p| p.join("secret"))
     }
 }
 

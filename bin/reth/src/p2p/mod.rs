@@ -45,7 +45,7 @@ pub struct Command {
     ///
     /// This also will deterministically set the peer ID.
     #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
-    secret_key: PlatformPath<SecretKeyPath>,
+    p2p_secret_key: PlatformPath<SecretKeyPath>,
 
     /// Disable the discovery service.
     #[command(flatten)]
@@ -104,10 +104,10 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
-        let secret_key = get_secret_key(&self.secret_key)?;
+        let p2p_secret_key = get_secret_key(&self.p2p_secret_key)?;
 
         let mut network_config_builder =
-            config.network_config(self.nat, None, secret_key).chain_spec(self.chain.clone());
+            config.network_config(self.nat, None, p2p_secret_key).chain_spec(self.chain.clone());
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 
