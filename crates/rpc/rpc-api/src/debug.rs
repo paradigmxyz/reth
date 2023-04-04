@@ -1,7 +1,10 @@
 use jsonrpsee::{core::RpcResult as Result, proc_macros::rpc};
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256};
 use reth_rpc_types::{
-    trace::geth::{BlockTraceResult, GethDebugTracingOptions, GethTraceFrame, TraceResult},
+    trace::geth::{
+        BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTraceFrame,
+        TraceResult,
+    },
     CallRequest, RichBlock,
 };
 
@@ -97,6 +100,6 @@ pub trait DebugApi {
         &self,
         request: CallRequest,
         block_number: Option<BlockId>,
-        opts: GethDebugTracingOptions,
+        opts: GethDebugTracingCallOptions,
     ) -> Result<GethTraceFrame>;
 }
