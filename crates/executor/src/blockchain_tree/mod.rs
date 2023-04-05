@@ -2,11 +2,8 @@
 use chain::{BlockChainId, Chain, ForkBlock};
 use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
-    blockchain_tree::BlockStatus,
-    consensus::Consensus,
-    events::{NewBlockNotifications, NewBlockNotificationsSender},
-    executor::Error as ExecError,
-    Error,
+    blockchain_tree::BlockStatus, consensus::Consensus, events::NewBlockNotifications,
+    executor::Error as ExecError, Error,
 };
 use reth_primitives::{
     BlockHash, BlockNumber, Hardfork, SealedBlock, SealedBlockWithSenders, SealedHeader, U256,
@@ -34,6 +31,7 @@ pub use shareable::ShareableBlockchainTree;
 
 pub mod post_state_data;
 pub use post_state_data::{PostStateData, PostStateDataRef};
+use reth_interfaces::events::NewBlockNotificationSink;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Tree of chains and its identifications.
@@ -88,7 +86,7 @@ pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
     /// Tree configuration
     config: BlockchainTreeConfig,
     /// Unbounded channel for sending new block notifications.
-    new_block_notication_sender: NewBlockNotificationsSender,
+    new_block_notification_sender: NewBlockNotificationSink,
 }
 
 /// A container that wraps chains and block indices to allow searching for block hashes across all
@@ -104,6 +102,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     /// Create a new blockchain tree.
     pub fn new(
         externals: TreeExternals<DB, C, EF>,
+        new_block_notification_sender: NewBlockNotificationSink,
         config: BlockchainTreeConfig,
     ) -> Result<Self, Error> {
         let max_reorg_depth = config.max_reorg_depth();
@@ -127,11 +126,6 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 last_canonical_hashes.last().cloned().unwrap_or_default()
             };
 
-        // size of the broadcast is double of max reorg depth because at max reorg depth we can have
-        // send at least N block at the time.
-        let (new_block_notication_sender, _) =
-            tokio::sync::broadcast::channel(2 * max_reorg_depth as usize);
-
         Ok(Self {
             externals,
             block_chain_id_generator: 0,
@@ -141,7 +135,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
                 BTreeMap::from_iter(last_canonical_hashes.into_iter()),
             ),
             config,
-            new_block_notication_sender,
+            new_block_notification_sender,
         })
     }
 
@@ -590,7 +584,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         // Broadcast new canonical blocks.
         headers.into_iter().for_each(|header| {
             // ignore if receiver is dropped.
-            let _ = self.new_block_notication_sender.send(header);
+            let _ = self.new_block_notification_sender.send(header);
         });
 
         Ok(())
@@ -600,7 +594,7 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
     ///
     /// Note: Only canonical blocks are send.
     pub fn subscribe_new_blocks(&self) -> NewBlockNotifications {
-        self.new_block_notication_sender.subscribe()
+        self.new_block_notification_sender.subscribe()
     }
 
     /// Canonicalize the given chain and commit it to the database.
@@ -783,7 +777,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3);
-        let mut tree = BlockchainTree::new(externals, config).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, NewBlockNotificationSink::new(10), config)
+            .expect("failed to create tree");
         let mut new_block_notification = tree.subscribe_new_blocks();
 
         // genesis block 10 is already canonical

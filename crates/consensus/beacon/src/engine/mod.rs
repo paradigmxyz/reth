@@ -469,7 +469,9 @@ mod tests {
         post_state::PostState,
         test_utils::TestExecutorFactory,
     };
-    use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
+    use reth_interfaces::{
+        events::NewBlockNotificationSink, sync::NoopSyncStateUpdate, test_utils::TestConsensus,
+    };
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
@@ -550,7 +552,8 @@ mod tests {
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
         let config = BlockchainTreeConfig::new(1, 2, 3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, config).expect("failed to create tree"),
+            BlockchainTree::new(externals, NewBlockNotificationSink::new(2), config)
+                .expect("failed to create tree"),
         );
 
         let (sync_tx, sync_rx) = unbounded_channel();
