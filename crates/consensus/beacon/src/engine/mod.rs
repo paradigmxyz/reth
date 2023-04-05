@@ -153,7 +153,6 @@ where
                     if pipeline_min_progress < head_block_number {
                         self.require_pipeline_run(PipelineTarget::Head);
                     }
-
                     PayloadStatus::from_status(PayloadStatusEnum::Valid)
                 }
                 Err(error) => {
@@ -178,8 +177,10 @@ where
                 }
             }
         } else {
+            trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
+
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         Ok(ForkchoiceUpdated::new(status))
     }
