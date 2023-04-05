@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn calc_full_block_reward() {
-        let base_reward = ETH_TO_WEI * 1;
+        let base_reward = ETH_TO_WEI;
         let one_thirty_twoth_reward = base_reward >> 5;
 
         // (num_ommers, reward)

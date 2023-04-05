@@ -6,6 +6,12 @@ use std::ops::RangeBounds;
 ///  Client trait for fetching [TransactionSigned] related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionsProvider: BlockIdProvider + Send + Sync {
+    /// Get internal transaction identifier by transaction hash.
+    ///
+    /// This is the inverse of [TransactionsProvider::transaction_by_id].
+    /// Returns None if the transaction is not found.
+    fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>>;
+
     /// Get transaction by id.
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>>;
 

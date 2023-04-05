@@ -1,7 +1,6 @@
 use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_executor::executor::Executor;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{
     constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
@@ -9,7 +8,10 @@ use reth_primitives::{
     EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::StateProviderFactory;
-use reth_revm::database::{State, SubState};
+use reth_revm::{
+    database::{State, SubState},
+    executor::Executor,
+};
 use reth_transaction_pool::{TransactionPool, ValidPoolTransaction};
 use std::{
     collections::VecDeque,

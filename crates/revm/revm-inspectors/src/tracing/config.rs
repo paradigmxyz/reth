@@ -1,3 +1,5 @@
+use reth_rpc_types::trace::geth::GethDefaultTracingOptions;
+
 /// Gives guidance to the [TracingInspector](crate::tracing::TracingInspector).
 ///
 /// Use [TracingInspectorConfig::default_parity] or [TracingInspectorConfig::default_geth] to get
@@ -46,6 +48,16 @@ impl TracingInspectorConfig {
             record_memory_snapshots: true,
             record_stack_snapshots: true,
             record_state_diff: true,
+        }
+    }
+
+    /// Returns a config for geth style traces based on the given [GethDefaultTracingOptions].
+    pub fn from_geth_config(config: &GethDefaultTracingOptions) -> Self {
+        Self {
+            record_memory_snapshots: config.enable_memory.unwrap_or_default(),
+            record_stack_snapshots: !config.disable_stack.unwrap_or_default(),
+            record_state_diff: !config.disable_storage.unwrap_or_default(),
+            ..Self::default_geth()
         }
     }
 

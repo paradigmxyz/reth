@@ -49,6 +49,7 @@ reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
 reth-executor = { path = "../executor" }
 reth-rlp = { path = "../rlp" }
+reth-revm = { path = "../revm" }
 
 itertools = "0.10.5"
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
