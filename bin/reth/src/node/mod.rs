@@ -112,7 +112,7 @@ pub struct Command {
     ///
     /// This also will deterministically set the peer ID.
     #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
-    secret_key: PlatformPath<SecretKeyPath>,
+    p2p_secret_key: PlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -164,7 +164,7 @@ impl Command {
         info!(target: "reth::cli", "Test transaction pool initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = get_secret_key(&self.secret_key)?;
+        let secret_key = get_secret_key(&self.p2p_secret_key)?;
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -488,7 +488,7 @@ impl Command {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.seal_slow())
+            return Ok(header.seal_slow());
         }
 
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
@@ -496,7 +496,7 @@ impl Command {
             match get_single_header(&client, tip).await {
                 Ok(tip_header) => {
                     info!(target: "reth::cli", ?tip, "Successfully fetched tip");
-                    return Ok(tip_header)
+                    return Ok(tip_header);
                 }
                 Err(error) => {
                     error!(target: "reth::cli", %error, "Failed to fetch the tip. Retrying...");
