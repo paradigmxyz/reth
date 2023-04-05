@@ -26,11 +26,9 @@ pub fn db(c: &mut Criterion) {
     measure_table_db::<HeaderTD>(&mut group);
     measure_table_db::<HeaderNumbers>(&mut group);
     measure_table_db::<Headers>(&mut group);
-    measure_table_db::<BlockBodies>(&mut group);
+    measure_table_db::<BlockBodyIndices>(&mut group);
     measure_table_db::<BlockOmmers>(&mut group);
     measure_table_db::<TxHashNumber>(&mut group);
-    measure_table_db::<BlockTransitionIndex>(&mut group);
-    measure_table_db::<TxTransitionIndex>(&mut group);
     measure_table_db::<Transactions>(&mut group);
     measure_dupsort_db::<PlainStorageState>(&mut group);
     measure_table_db::<PlainAccountState>(&mut group);
@@ -45,11 +43,9 @@ pub fn serialization(c: &mut Criterion) {
     measure_table_serialization::<HeaderTD>(&mut group);
     measure_table_serialization::<HeaderNumbers>(&mut group);
     measure_table_serialization::<Headers>(&mut group);
-    measure_table_serialization::<BlockBodies>(&mut group);
+    measure_table_serialization::<BlockBodyIndices>(&mut group);
     measure_table_serialization::<BlockOmmers>(&mut group);
     measure_table_serialization::<TxHashNumber>(&mut group);
-    measure_table_serialization::<BlockTransitionIndex>(&mut group);
-    measure_table_serialization::<TxTransitionIndex>(&mut group);
     measure_table_serialization::<Transactions>(&mut group);
     measure_table_serialization::<PlainStorageState>(&mut group);
     measure_table_serialization::<PlainAccountState>(&mut group);

@@ -80,7 +80,10 @@ mod tests {
     use super::*;
     use crate::test_utils::{TestTransaction, PREV_STAGE_ID};
     use reth_db::{
-        models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey},
+        models::{
+            sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey,
+            StoredBlockBodyIndices,
+        },
         tables,
         transaction::DbTxMut,
         TransitionList,
@@ -118,8 +121,25 @@ mod tests {
         // setup
         tx.commit(|tx| {
             // we just need first and last
-            tx.put::<tables::BlockTransitionIndex>(0, 3).unwrap();
-            tx.put::<tables::BlockTransitionIndex>(5, 7).unwrap();
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices {
+                    first_transition_id: 0,
+                    tx_count: 3,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+            tx.put::<tables::BlockBodyIndices>(
+                5,
+                StoredBlockBodyIndices {
+                    first_transition_id: 3,
+                    tx_count: 5,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
 
             // setup changeset that are going to be applied to history index
             tx.put::<tables::AccountChangeSet>(4, acc()).unwrap();

@@ -1,7 +1,7 @@
 //! Dummy blocks and data for tests
 
 use crate::{post_state::PostState, Transaction};
-use reth_db::{database::Database, models::StoredBlockBody, tables};
+use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
     hex_literal::hex, proofs::EMPTY_ROOT, Account, Header, SealedBlock, SealedBlockWithSenders,
     Withdrawal, H160, H256, U256,
@@ -19,7 +19,10 @@ pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlo
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
     assert_eq!(tx.table::<tables::HeaderTD>().unwrap(), vec![(n, g.difficulty.into())]);
-    assert_eq!(tx.table::<tables::BlockBodies>().unwrap(), vec![(0, StoredBlockBody::default())]);
+    assert_eq!(
+        tx.table::<tables::BlockBodyIndices>().unwrap(),
+        vec![(0, StoredBlockBodyIndices::default())]
+    );
     assert_eq!(tx.table::<tables::BlockOmmers>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::BlockWithdrawals>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::Transactions>().unwrap(), vec![]);
@@ -32,8 +35,6 @@ pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlo
     assert_eq!(tx.table::<tables::StorageHistory>().unwrap(), vec![]);
     // TODO check after this gets done: https://github.com/paradigmxyz/reth/issues/1588
     // Bytecodes are not reverted assert_eq!(tx.table::<tables::Bytecodes>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::BlockTransitionIndex>().unwrap(), vec![(n, 0)]);
-    assert_eq!(tx.table::<tables::TxTransitionIndex>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::AccountChangeSet>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StorageChangeSet>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::HashedAccount>().unwrap(), vec![]);
