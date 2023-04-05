@@ -37,7 +37,7 @@ pub trait Encode: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
     /// Decodes data coming from the database.
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error>;
+    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, Error>;
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
