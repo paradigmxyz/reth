@@ -1,4 +1,6 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use itertools::Itertools;
+use rayon::slice::ParallelSliceMut;
 use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -8,7 +10,8 @@ use reth_db::{
 };
 use reth_primitives::{keccak256, AccountHashingCheckpoint};
 use reth_provider::Transaction;
-use std::{collections::BTreeMap, fmt::Debug, ops::Range};
+use std::{fmt::Debug, ops::Range};
+use tokio::sync::mpsc;
 use tracing::*;
 
 /// The [`StageId`] of the account hashing stage.
@@ -21,7 +24,7 @@ pub struct AccountHashingStage {
     /// The threshold (in number of state transitions) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
-    /// The maximum number of blocks to process before committing.
+    /// The maximum number of accounts to process before committing.
     pub commit_threshold: u64,
 }
 
@@ -126,8 +129,12 @@ impl AccountHashingStage {
             }
 
             // seed account changeset
-            let (_, last_transition) =
-                tx.cursor_read::<tables::BlockTransitionIndex>()?.last()?.unwrap();
+            let last_transition = tx
+                .cursor_read::<tables::BlockBodyIndices>()?
+                .last()?
+                .unwrap()
+                .1
+                .transition_after_block();
 
             let first_transition = last_transition.checked_sub(transitions).unwrap_or_default();
 
@@ -192,13 +199,38 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
             let start_address = checkpoint.address.take();
             let next_address = {
-                let mut accounts = tx.cursor_read::<tables::PlainAccountState>()?;
+                let mut accounts_cursor = tx.cursor_read::<tables::PlainAccountState>()?;
 
-                let hashed_batch = accounts
+                // channels used to return result of account hashing
+                let mut channels = Vec::new();
+                for chunk in &accounts_cursor
                     .walk(start_address)?
                     .take(self.commit_threshold as usize)
-                    .map(|res| res.map(|(address, account)| (keccak256(address), account)))
-                    .collect::<Result<BTreeMap<_, _>, _>>()?;
+                    .chunks(self.commit_threshold as usize / rayon::current_num_threads())
+                {
+                    // An _unordered_ channel to receive results from a rayon job
+                    let (tx, rx) = mpsc::unbounded_channel();
+                    channels.push(rx);
+
+                    let chunk = chunk.collect::<Result<Vec<_>, _>>()?;
+                    // Spawn the hashing task onto the global rayon pool
+                    rayon::spawn(move || {
+                        for (address, account) in chunk.into_iter() {
+                            let _ = tx.send((keccak256(address), account));
+                        }
+                    });
+                }
+                let mut hashed_batch = Vec::with_capacity(self.commit_threshold as usize);
+
+                // Iterate over channels and append the hashed accounts.
+                for mut channel in channels {
+                    while let Some(hashed) = channel.recv().await {
+                        hashed_batch.push(hashed);
+                    }
+                }
+
+                // sort it all in parallel
+                hashed_batch.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
                 let mut hashed_account_cursor = tx.cursor_write::<tables::HashedAccount>()?;
 
@@ -214,7 +246,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
                 }
 
                 // next key of iterator
-                accounts.next()?
+                accounts_cursor.next()?
             };
 
             if let Some((next_address, _)) = &next_address {

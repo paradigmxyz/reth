@@ -17,8 +17,8 @@ pub enum ProviderError {
     #[error("Block hash {block_hash:?} does not exist in Headers table")]
     BlockHash { block_hash: BlockHash },
     /// A block body is missing.
-    #[error("Block body not found for block #{number}")]
-    BlockBody { number: BlockNumber },
+    #[error("Block meta not found for block #{number}")]
+    BlockBodyIndices { number: BlockNumber },
     /// The block transition id for a certain block number is missing.
     #[error("Block transition id does not exist for block #{block_number}")]
     BlockTransition { block_number: BlockNumber },
