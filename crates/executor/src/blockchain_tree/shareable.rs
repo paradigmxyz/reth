@@ -81,6 +81,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
         let (number, blocks) = self.tree.read().block_indices().pending_blocks();
         blocks.first().map(|&hash| BlockNumHash { number, hash })
     }
+
+    fn contains_block(&self, block_hash: &BlockHash) -> bool {
+        self.tree.read().contains_block(block_hash)
+    }
 }
 
 impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingStateProvider

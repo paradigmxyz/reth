@@ -72,6 +72,11 @@ impl BlockIndices {
         (canonical_tip.number + 1, pending_blocks)
     }
 
+    /// Check if the block is contained in a side chain OR the canonical chain.
+    pub fn contains_block(&self, block_hash: &BlockHash) -> bool {
+        self.is_block_hash_canonical(block_hash) || self.blocks_to_chain.contains_key(block_hash)
+    }
+
     /// Check if block hash belongs to canonical chain.
     pub fn is_block_hash_canonical(&self, block_hash: &BlockHash) -> bool {
         self.canonical_chain.range(self.last_finalized_block..).any(|(_, &h)| h == *block_hash)

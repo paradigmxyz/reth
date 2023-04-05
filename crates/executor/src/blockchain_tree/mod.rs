@@ -590,6 +590,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         Ok(())
     }
 
+    /// Check if the blockchain tree contains the hash.
+    pub fn contains_block(&self, block_hash: &BlockHash) -> bool {
+        self.block_indices.contains_block(block_hash)
+    }
+
     /// Subscribe to new blocks events.
     ///
     /// Note: Only canonical blocks are send.

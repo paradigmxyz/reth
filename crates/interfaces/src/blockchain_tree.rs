@@ -97,4 +97,7 @@ pub trait BlockchainTreeViewer: Send + Sync {
     ///
     /// If there is no such block, return `None`.
     fn pending_block(&self) -> Option<BlockNumHash>;
+
+    /// Returns whether or not the block is in the tree.
+    fn contains_block(&self, block_hash: &BlockHash) -> bool;
 }

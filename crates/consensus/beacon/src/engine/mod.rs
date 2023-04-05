@@ -141,6 +141,25 @@ where
         let is_first_forkchoice = self.forkchoice_state.is_none();
         self.forkchoice_state = Some(state);
         let status = if self.is_pipeline_idle() {
+            // 1. Client software MAY initiate a sync process if forkchoiceState.headBlockHash
+            //    references an unknown payload or a payload that can't be validated because data
+            //    that are requisite for the validation is missing. The sync process is specified
+            //    in the Sync section.
+            let head_block_number =
+                self.db.view(|tx| tx.get::<tables::HeaderNumbers>(state.head_block_hash))??;
+
+            if !self.blockchain_tree.contains_block(&state.head_block_hash) &&
+                head_block_number.is_none()
+            {
+                // head block hash is unknown, so we will start sync, running the pipeline until
+                // the forkchoiceState.headBlockHash
+                self.require_pipeline_run(PipelineTarget::Hash(state.head_block_hash));
+
+                let syncing = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
+                return Ok(ForkchoiceUpdated::new(syncing))
+            }
+
+            // The head block is in either the blockchain tree or the database
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => {
                     let head_block_number = self
@@ -150,10 +169,25 @@ where
                     let pipeline_min_progress =
                         FINISH.get_progress(&self.db.tx()?)?.unwrap_or_default();
 
+                    // run the pipeline to the head if it's behind
                     if pipeline_min_progress < head_block_number {
                         self.require_pipeline_run(PipelineTarget::Head);
                     }
 
+                    // 2. Client software MAY skip an update of the forkchoice state and MUST NOT
+                    //    begin a payload build process if forkchoiceState.headBlockHash references
+                    //    an ancestor of the head of canonical chain. In the case of such an event,
+                    //    client software MUST return:
+                    //
+                    // {
+                    //      payloadStatus: {
+                    //          status: VALID,
+                    //          latestValidHash: forkchoiceState.headBlockHash,
+                    //          validationError: null
+                    //      },
+                    //      payloadId: null
+                    // }
+                    //
                     // TODO: most recent valid block in the branch defined by payload and its
                     // ancestors, not necessarily the head <https://github.com/paradigmxyz/reth/issues/2126>
                     PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
@@ -268,6 +302,7 @@ where
         let next_action = std::mem::take(&mut self.next_action);
         if let BeaconEngineAction::RunPipeline(target) = next_action {
             let tip = match target {
+                PipelineTarget::Hash(hash) => hash,
                 PipelineTarget::Head => forkchoice_state.head_block_hash,
                 PipelineTarget::Safe => forkchoice_state.safe_block_hash,
             };
@@ -458,6 +493,8 @@ enum PipelineTarget {
     Head,
     /// Corresponds to the safe block hash.
     Safe,
+    /// A specific hash to sync to.
+    Hash(BlockHash),
 }
 
 #[cfg(test)]
