@@ -21,6 +21,8 @@ tokio-stream = "0.1"
 
 # misc
 thiserror = "1.0.37"
+jsonrpsee-types = "0.16"
+jsonrpsee-core = "0.16"
 
 [dev-dependencies]
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }

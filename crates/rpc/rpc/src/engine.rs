@@ -1,15 +1,10 @@
-use crate::result::rpc_err;
 use async_trait::async_trait;
-use jsonrpsee::{
-    core::{Error, RpcResult as Result},
-    types::error::INVALID_PARAMS_CODE,
-};
+use jsonrpsee::core::{Error, RpcResult as Result};
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{BlockHash, ChainSpec, Hardfork, H64, U64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{
     EngineApiError, EngineApiHandle, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
-    REQUEST_TOO_LARGE_CODE, UNKNOWN_PAYLOAD_CODE,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
@@ -17,18 +12,6 @@ use reth_rpc_types::engine::{
 };
 use std::sync::Arc;
 use tokio::sync::oneshot::{self, Receiver};
-
-fn to_rpc_error<E: Into<EngineApiError>>(error: E) -> Error {
-    let error = error.into();
-    let code = match error {
-        EngineApiError::InvalidParams => INVALID_PARAMS_CODE,
-        EngineApiError::PayloadUnknown => UNKNOWN_PAYLOAD_CODE,
-        EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
-        // Any other server error
-        _ => jsonrpsee::types::error::INTERNAL_ERROR_CODE,
-    };
-    rpc_err(code, error.to_string(), None)
-}
 
 /// The server implementation of Engine API
 pub struct EngineApi {
@@ -65,15 +48,19 @@ impl EngineApi {
 
         match version {
             EngineApiMessageVersion::V1 => {
-                if is_shanghai || has_withdrawals {
-                    return Err(EngineApiError::InvalidParams)
+                if has_withdrawals {
+                    return Err(EngineApiError::WithdrawalsNotSupportedInV1)
+                }
+                if is_shanghai {
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
                 }
             }
             EngineApiMessageVersion::V2 => {
-                let shanghai_with_no_withdrawals = is_shanghai && !has_withdrawals;
-                let not_shanghai_with_withdrawals = !is_shanghai && has_withdrawals;
-                if shanghai_with_no_withdrawals || not_shanghai_with_withdrawals {
-                    return Err(EngineApiError::InvalidParams)
+                if is_shanghai && !has_withdrawals {
+                    return Err(EngineApiError::NoWithdrawalsPostShanghai)
+                }
+                if !is_shanghai && has_withdrawals {
+                    return Err(EngineApiError::HasWithdrawalsPreShanghai)
                 }
             }
         };
@@ -87,13 +74,13 @@ impl EngineApi {
         rx: Receiver<std::result::Result<T, E>>,
     ) -> Result<T> {
         let _ = self.engine_tx.send(msg);
-        rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(|err| to_rpc_error(err))
+        Ok(rx.await.map_err(|err| Error::Custom(err.to_string()))?.map_err(Into::into)?)
     }
 }
 
 #[async_trait]
 impl EngineApiServer for EngineApi {
-    /// Handler for `engine_getPayloadV1`
+    /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
@@ -101,21 +88,19 @@ impl EngineApiServer for EngineApi {
             EngineApiMessageVersion::V1,
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
-        )
-        .map_err(to_rpc_error)?;
+        )?;
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::NewPayload(payload, tx), rx).await
     }
 
-    /// Handler for `engine_getPayloadV2`
+    /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
     async fn new_payload_v2(&self, payload: ExecutionPayload) -> Result<PayloadStatus> {
         self.validate_withdrawals_presence(
             EngineApiMessageVersion::V2,
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
-        )
-        .map_err(to_rpc_error)?;
+        )?;
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::NewPayload(payload, tx), rx).await
     }
@@ -134,8 +119,7 @@ impl EngineApiServer for EngineApi {
                 EngineApiMessageVersion::V1,
                 attrs.timestamp.as_u64(),
                 attrs.withdrawals.is_some(),
-            )
-            .map_err(to_rpc_error)?;
+            )?;
         }
         let (tx, rx) = oneshot::channel();
         self.delegate_request(
@@ -157,8 +141,7 @@ impl EngineApiServer for EngineApi {
                 EngineApiMessageVersion::V2,
                 attrs.timestamp.as_u64(),
                 attrs.withdrawals.is_some(),
-            )
-            .map_err(to_rpc_error)?;
+            )?;
         }
         let (tx, rx) = oneshot::channel();
         self.delegate_request(

@@ -5137,6 +5137,8 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "futures",
+ "jsonrpsee-core",
+ "jsonrpsee-types",
  "reth-beacon-consensus",
  "reth-interfaces",
  "reth-primitives",
