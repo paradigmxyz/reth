@@ -32,6 +32,7 @@ secp256k1 = { version = "0.26.0", default-features = false, features = [
     "rand",
 ], optional = true }
 modular-bitfield = "0.11.2"
+parking_lot = "0.12.1"
 
 [dev-dependencies]
 reth-db = { path = "../storage/db", features = ["test-utils"] }
