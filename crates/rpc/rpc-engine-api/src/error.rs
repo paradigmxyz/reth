@@ -1,3 +1,4 @@
+use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_beacon_consensus::BeaconEngineError;
 use reth_primitives::{H256, U256};
 use thiserror::Error;
@@ -22,9 +23,23 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
-    /// The params are invalid.
-    #[error("Invalid params")]
-    InvalidParams,
+    /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
+    #[error("invalid start or count, start: {start} count: {count}")]
+    InvalidBodiesRange {
+        /// Start of the range
+        start: u64,
+        /// requested number of items
+        count: u64,
+    },
+    /// Thrown if engine_forkchoiceUpdatedV1 contains withdrawals
+    #[error("withdrawals not supported in V1")]
+    WithdrawalsNotSupportedInV1,
+    /// Thrown if engine_forkchoiceUpdated contains no withdrawals after Shanghai
+    #[error("no withdrawals post-shanghai")]
+    NoWithdrawalsPostShanghai,
+    /// Thrown if engine_forkchoiceUpdated contains withdrawals before Shanghai
+    #[error("withdrawals pre-shanghai")]
+    HasWithdrawalsPreShanghai,
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
         "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
@@ -51,4 +66,30 @@ pub enum EngineApiError {
     /// Encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl From<EngineApiError> for jsonrpsee_types::error::CallError {
+    fn from(error: EngineApiError) -> Self {
+        let code = match error {
+            EngineApiError::InvalidBodiesRange { .. } |
+            EngineApiError::WithdrawalsNotSupportedInV1 |
+            EngineApiError::NoWithdrawalsPostShanghai |
+            EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
+            EngineApiError::PayloadUnknown => UNKNOWN_PAYLOAD_CODE,
+            EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
+            // Any other server error
+            _ => INTERNAL_ERROR_CODE,
+        };
+        jsonrpsee_types::error::CallError::Custom(jsonrpsee_types::error::ErrorObject::owned(
+            code,
+            error.to_string(),
+            None::<()>,
+        ))
+    }
+}
+
+impl From<EngineApiError> for jsonrpsee_core::error::Error {
+    fn from(error: EngineApiError) -> Self {
+        jsonrpsee_types::error::CallError::from(error).into()
+    }
 }
