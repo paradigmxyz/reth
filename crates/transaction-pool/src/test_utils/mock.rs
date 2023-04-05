@@ -2,7 +2,7 @@
 
 use crate::{
     identifier::{SenderIdentifiers, TransactionId},
-    pool::txpool::{TxPool, MIN_PROTOCOL_BASE_FEE},
+    pool::txpool::TxPool,
     traits::TransactionOrigin,
     PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
@@ -12,8 +12,9 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    Address, FromRecoveredTransaction, IntoRecoveredTransaction, Transaction, TransactionKind,
-    TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy, TxType, H256, U128, U256,
+    constants::MIN_PROTOCOL_BASE_FEE, Address, FromRecoveredTransaction, IntoRecoveredTransaction,
+    Transaction, TransactionKind, TransactionSignedEcRecovered, TxEip1559, TxHash, TxLegacy,
+    TxType, H256, U128, U256,
 };
 use std::{ops::Range, sync::Arc, time::Instant};
 
