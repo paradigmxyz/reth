@@ -153,7 +153,10 @@ where
                     if pipeline_min_progress < head_block_number {
                         self.require_pipeline_run(PipelineTarget::Head);
                     }
-                    PayloadStatus::from_status(PayloadStatusEnum::Valid)
+
+                    // TODO: most recent valid block in the branch defined by payload and its
+                    // ancestors, not necessarily the head <https://github.com/paradigmxyz/reth/issues/2126>
+                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
                     warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
@@ -785,7 +788,10 @@ mod tests {
             assert_matches!(rx_invalid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
             let rx_valid = env.send_forkchoice_updated(forkchoice);
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid);
+            let expected_result = ForkchoiceUpdated::new(PayloadStatus::new(
+                PayloadStatusEnum::Valid,
+                Some(block1.hash),
+            ));
             assert_matches!(rx_valid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
