@@ -4954,6 +4954,7 @@ dependencies = [
  "reth-rlp",
  "reth-rlp-derive",
  "revm-primitives",
+ "ruint",
  "secp256k1 0.26.0",
  "serde",
  "serde_json",
