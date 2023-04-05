@@ -18,11 +18,13 @@ mod arena;
 mod builder;
 mod config;
 mod fourbyte;
+mod opcount;
 mod types;
 mod utils;
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
 pub use config::TracingInspectorConfig;
 pub use fourbyte::FourByteInspector;
+pub use opcount::OpcodeCountInspector;
 
 /// An inspector that collects call traces.
 ///
