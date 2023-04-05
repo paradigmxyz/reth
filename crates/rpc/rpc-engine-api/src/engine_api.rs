@@ -98,7 +98,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
         }
 
         if start == 0 || count == 0 {
-            return Err(EngineApiError::InvalidParams)
+            return Err(EngineApiError::InvalidBodiesRange { start, count })
         }
 
         let mut result = Vec::with_capacity(count as usize);
@@ -295,7 +295,10 @@ mod tests {
                 handle.send_message(EngineApiMessage::GetPayloadBodiesByRange(
                     start, count, result_tx,
                 ));
-                assert_matches!(result_rx.await, Ok(Err(EngineApiError::InvalidParams)));
+                assert_matches!(
+                    result_rx.await,
+                    Ok(Err(EngineApiError::InvalidBodiesRange { .. }))
+                );
             }
         }
 
