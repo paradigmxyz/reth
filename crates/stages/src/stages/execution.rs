@@ -36,7 +36,7 @@ pub struct ExecutionStageMetrics {
 /// - [tables::CanonicalHeaders] get next block to execute.
 /// - [tables::Headers] get for revm environment variables.
 /// - [tables::HeaderTD]
-/// - [tables::BlockBodies] to get tx number
+/// - [tables::BlockBodyIndices] to get tx number
 /// - [tables::Transactions] to execute
 ///
 /// For state access [LatestStateProviderRef] provides us latest state and history state
@@ -53,7 +53,7 @@ pub struct ExecutionStageMetrics {
 /// - [tables::StorageChangeSet]
 ///
 /// For unwinds we are accessing:
-/// - [tables::BlockBodies] get tx index to know what needs to be unwinded
+/// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
@@ -287,12 +287,12 @@ mod tests {
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
-    use reth_executor::Factory;
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
         StorageEntry, H160, H256, U256,
     };
     use reth_provider::insert_canonical_block;
+    use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::{
         ops::{Deref, DerefMut},

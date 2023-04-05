@@ -9,7 +9,6 @@ use crate::{
     utils::get_single_header,
 };
 use clap::{crate_version, Parser};
-
 use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, FutureExt, StreamExt};
@@ -26,12 +25,8 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_executor::{
-    blockchain_tree::{
-        config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
-        ShareableBlockchainTree,
-    },
-    Factory,
+use reth_executor::blockchain_tree::{
+    config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
@@ -46,6 +41,7 @@ use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkMan
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
+use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
 use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_staged_sync::{
@@ -142,7 +138,7 @@ impl Command {
         raise_fd_limit();
 
         let mut config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = %self.db, "Configuration loaded");
+        info!(target: "reth::cli", path = %self.config, "Configuration loaded");
 
         info!(target: "reth::cli", path = %self.db, "Opening database");
         let db = Arc::new(init_db(&self.db)?);
@@ -592,7 +588,7 @@ impl Command {
 
         let (tip_tx, tip_rx) = watch::channel(H256::zero());
         use reth_revm_inspectors::stack::InspectorStackConfig;
-        let factory = reth_executor::Factory::new(self.chain.clone());
+        let factory = reth_revm::Factory::new(self.chain.clone());
 
         let stack_config = InspectorStackConfig {
             use_printer_tracer: self.debug.print_inspector,

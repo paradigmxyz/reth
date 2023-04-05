@@ -48,7 +48,7 @@ pub enum Error {
         block_number: BlockNumber,
         last_finalized: BlockNumber,
     },
-    #[error("Can't insert block  #{block_number} {block_hash} to far in future, as last finalized block number is {last_finalized}")]
+    #[error("Block #{block_number} ({block_hash:?}) too far into the future. Last finalized block is #{last_finalized}")]
     PendingBlockIsInFuture {
         block_hash: BlockHash,
         block_number: BlockNumber,

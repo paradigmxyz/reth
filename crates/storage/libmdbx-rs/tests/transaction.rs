@@ -233,12 +233,11 @@ fn test_concurrent_readers_single_writer() {
 
     let txn = env.begin_rw_txn().unwrap();
     let db = txn.open_db(None).unwrap();
-    println!("wait2");
+
     barrier.wait();
     txn.put(&db, key, val, WriteFlags::empty()).unwrap();
     txn.commit().unwrap();
 
-    println!("wait1");
     barrier.wait();
 
     assert!(threads.into_iter().all(|b| b.join().unwrap()))

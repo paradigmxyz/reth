@@ -10,6 +10,13 @@
 /// Contains glue code for integrating reth database into revm's [Database](revm::Database).
 pub mod database;
 
+/// revm implementation of reth block and transaction executors.
+pub mod executor;
+mod factory;
+
+/// revm executor factory.
+pub use factory::Factory;
+
 /// reexport for convenience
 pub use reth_revm_inspectors::*;
 /// reexport for convenience

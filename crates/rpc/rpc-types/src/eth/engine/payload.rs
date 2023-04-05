@@ -1,7 +1,8 @@
 use reth_primitives::{
+    constants::MIN_PROTOCOL_BASE_FEE_U256,
     proofs::{self, EMPTY_LIST_HASH},
-    Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, Withdrawal, H256, U256,
-    U64,
+    Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
+    H256, U256, U64,
 };
 use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -79,7 +80,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             return Err(PayloadError::ExtraData(payload.extra_data))
         }
 
-        if payload.base_fee_per_gas == U256::ZERO {
+        if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
             return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
         }
 
@@ -106,7 +107,12 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             gas_used: payload.gas_used.as_u64(),
             timestamp: payload.timestamp.as_u64(),
             mix_hash: payload.prev_randao,
-            base_fee_per_gas: Some(payload.base_fee_per_gas.to::<u64>()),
+            base_fee_per_gas: Some(
+                payload
+                    .base_fee_per_gas
+                    .uint_try_to()
+                    .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
+            ),
             extra_data: payload.extra_data,
             // Defaults
             ommers_hash: EMPTY_LIST_HASH,

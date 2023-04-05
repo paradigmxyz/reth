@@ -94,13 +94,17 @@ pub type StorageKey = H256;
 pub type StorageValue = U256;
 /// The ID of block/transaction transition (represents state transition)
 pub type TransitionId = u64;
+/// Solidity contract functions are addressed using the first four byte of the Keccak-256 hash of
+/// their signature
+pub type Selector = [u8; 4];
 
 pub use ethers_core::{
     types as rpc,
     types::{BigEndianHash, H128, H64, U64},
     utils as rpc_utils,
 };
-pub use revm_primitives::{ruint::aliases::U128, B160 as H160, B256 as H256, U256};
+pub use revm_primitives::{B160 as H160, B256 as H256, U256};
+pub use ruint::{aliases::U128, UintTryTo};
 
 #[doc(hidden)]
 mod __reexport {

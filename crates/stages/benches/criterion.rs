@@ -98,7 +98,7 @@ fn merkle(c: &mut Criterion) {
         &mut group,
         setup::unwind_hashes,
         stage,
-        1..DEFAULT_NUM_BLOCKS + 1,
+        1..DEFAULT_NUM_BLOCKS,
         "Merkle-incremental".to_string(),
     );
 
@@ -107,7 +107,7 @@ fn merkle(c: &mut Criterion) {
         &mut group,
         setup::unwind_hashes,
         stage,
-        1..DEFAULT_NUM_BLOCKS + 1,
+        1..DEFAULT_NUM_BLOCKS,
         "Merkle-fullhash".to_string(),
     );
 }
