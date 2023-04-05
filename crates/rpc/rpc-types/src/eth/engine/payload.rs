@@ -1,4 +1,5 @@
 use reth_primitives::{
+    constants::MIN_PROTOCOL_BASE_FEE_U256,
     proofs::{self, EMPTY_LIST_HASH},
     Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
     H256, U256, U64,
@@ -79,7 +80,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             return Err(PayloadError::ExtraData(payload.extra_data))
         }
 
-        if payload.base_fee_per_gas == U256::ZERO {
+        if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
             return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
         }
 
