@@ -165,6 +165,7 @@ where
         .await
         .err()
         .unwrap();
+    TraceApiClient::trace_block(client, block_id).await.err().unwrap();
 
     assert!(is_unimplemented(
         TraceApiClient::replay_block_transactions(client, block_id, HashSet::default())
@@ -172,7 +173,6 @@ where
             .err()
             .unwrap()
     ));
-    assert!(is_unimplemented(TraceApiClient::trace_block(client, block_id).await.err().unwrap()));
     assert!(is_unimplemented(
         TraceApiClient::trace_filter(client, trace_filter).await.err().unwrap()
     ));
