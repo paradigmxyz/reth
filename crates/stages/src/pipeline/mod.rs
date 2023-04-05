@@ -222,6 +222,8 @@ where
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
+            trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
+
             match next {
                 ControlFlow::NoProgress { stage_progress } => {
                     if let Some(progress) = stage_progress {
