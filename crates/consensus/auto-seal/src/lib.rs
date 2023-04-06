@@ -152,14 +152,11 @@ impl Storage {
     fn new(chain_spec: &ChainSpec) -> Self {
         let header = chain_spec.genesis_header();
         let best_hash = header.hash_slow();
-        let mut storage = StorageInner {
-            best_hash,
-            total_difficulty: header.difficulty,
-            ..Default::default()
-        };
+        let mut storage =
+            StorageInner { best_hash, total_difficulty: header.difficulty, ..Default::default() };
         storage.headers.insert(0, header);
         storage.bodies.insert(best_hash, BlockBody::default());
-        Self { inner: Arc::new(RwLock::new(storage )) }
+        Self { inner: Arc::new(RwLock::new(storage)) }
     }
 
     /// Returns the write lock of the storage
