@@ -2,6 +2,7 @@ use crate::{
     exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
     UnwindOutput,
 };
+use rayon::prelude::*;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -75,7 +76,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         }
 
         // Sort before inserting the reverse lookup for hash -> tx_id.
-        tx_list.sort_by(|txa, txb| txa.0.cmp(&txb.0));
+        tx_list.par_sort_unstable_by(|txa, txb| txa.0.cmp(&txb.0));
 
         let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
