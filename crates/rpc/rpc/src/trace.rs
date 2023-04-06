@@ -164,6 +164,38 @@ where
             .ok_or_else(|| EthApiError::TransactionNotFound)?
     }
 
+    /// Replays all transaction in a block
+    pub async fn replay_block_transactions(
+        &self,
+        block_id: BlockId,
+        trace_types: HashSet<TraceType>,
+    ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>> {
+        let block_hash = match self.client.block_hash_for_id(block_id) {
+            Ok(Some(hash)) => hash,
+            Ok(None) => return Ok(None),
+            Err(_) => return Err(EthApiError::UnknownBlockNumber.into()),
+        };
+
+        let transactions = self
+            .eth_api
+            .transactions_by_block(block_hash)
+            .await?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+        let mut result = Vec::new();
+
+        for tx in transactions.into_iter() {
+            let tx_hash = tx.hash();
+            let tx_trace = self.replay_transaction(tx_hash, trace_types.clone()).await?;
+            result.push(TraceResultsWithTransactionHash {
+                transaction_hash: tx_hash,
+                full_trace: tx_trace,
+            });
+        }
+
+        Ok(Some(result))
+    }
+
     /// Returns transaction trace with the given address.
     pub async fn trace_get(
         &self,
@@ -290,10 +322,10 @@ where
     /// Handler for `trace_replayBlockTransactions`
     async fn replay_block_transactions(
         &self,
-        _block_id: BlockId,
-        _trace_types: HashSet<TraceType>,
+        block_id: BlockId,
+        trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(TraceApi::replay_block_transactions(self, block_id, trace_types).await?)
     }
 
     /// Handler for `trace_replayTransaction`
