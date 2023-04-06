@@ -4844,6 +4844,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-miner"
+version = "0.1.0"
+dependencies = [
+ "parking_lot 0.12.1",
+ "reth-primitives",
+ "reth-rlp",
+ "reth-rpc-types",
+ "sha2 0.10.6",
+ "thiserror",
+]
+
+[[package]]
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
