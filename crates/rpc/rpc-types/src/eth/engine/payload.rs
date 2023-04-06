@@ -5,7 +5,7 @@ use reth_primitives::{
     H256, U256, U64,
 };
 use reth_rlp::{Decodable, Encodable};
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
 ///
@@ -199,7 +199,7 @@ pub struct PayloadAttributes {
 }
 
 /// This structure contains the result of processing a payload
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PayloadStatus {
     #[serde(flatten)]
@@ -220,6 +220,19 @@ impl PayloadStatus {
     pub fn with_latest_valid_hash(mut self, latest_valid_hash: H256) -> Self {
         self.latest_valid_hash = Some(latest_valid_hash);
         self
+    }
+}
+
+impl Serialize for PayloadStatus {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(3))?;
+        map.serialize_entry("status", self.status.as_str())?;
+        map.serialize_entry("latestValidHash", &self.latest_valid_hash)?;
+        map.serialize_entry("validationError", &self.status.validation_error())?;
+        map.end()
     }
 }
 
@@ -251,6 +264,28 @@ pub enum PayloadStatusEnum {
         #[serde(rename = "validationError")]
         validation_error: String,
     },
+}
+
+impl PayloadStatusEnum {
+    /// Returns the string representation of the payload status.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PayloadStatusEnum::Valid => "VALID",
+            PayloadStatusEnum::Invalid { .. } => "INVALID",
+            PayloadStatusEnum::Syncing => "SYNCING",
+            PayloadStatusEnum::Accepted => "ACCEPTED",
+            PayloadStatusEnum::InvalidBlockHash { .. } => "INVALID_BLOCK_HASH",
+        }
+    }
+
+    /// Returns the validation error if the payload status is invalid.
+    pub fn validation_error(&self) -> Option<&str> {
+        match self {
+            PayloadStatusEnum::InvalidBlockHash { validation_error } |
+            PayloadStatusEnum::Invalid { validation_error } => Some(validation_error),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -377,5 +412,23 @@ mod tests {
         // Valid block
         let valid_block = block;
         assert_matches!(TryInto::<SealedBlock>::try_into(valid_block), Ok(_));
+    }
+
+    #[test]
+    fn serde_payload_status() {
+        let s = r#"{"status":"SYNCING","latestValidHash":null,"validationError":null}"#;
+        let status: PayloadStatus = serde_json::from_str(s).unwrap();
+        assert_eq!(status.status, PayloadStatusEnum::Syncing);
+        assert!(status.latest_valid_hash.is_none());
+        assert!(status.status.validation_error().is_none());
+        assert_eq!(serde_json::to_string(&status).unwrap(), s);
+
+        let full = s;
+        let s = r#"{"status":"SYNCING","latestValidHash":null}"#;
+        let status: PayloadStatus = serde_json::from_str(s).unwrap();
+        assert_eq!(status.status, PayloadStatusEnum::Syncing);
+        assert!(status.latest_valid_hash.is_none());
+        assert!(status.status.validation_error().is_none());
+        assert_eq!(serde_json::to_string(&status).unwrap(), full);
     }
 }
