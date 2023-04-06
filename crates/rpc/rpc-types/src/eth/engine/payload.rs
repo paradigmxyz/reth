@@ -2,10 +2,23 @@ use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE_U256,
     proofs::{self, EMPTY_LIST_HASH},
     Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
-    H256, U256, U64,
+    H256, H64, U256, U64,
 };
 use reth_rlp::{Decodable, Encodable};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+
+/// And 8-byte identifier for an execution payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub struct PayloadId(H64);
+
+// === impl PayloadId ===
+
+impl PayloadId {
+    /// Creates a new payload id from the given identifier.
+    pub fn new(id: [u8; 8]) -> Self {
+        Self(H64::from(id))
+    }
+}
 
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
 ///
