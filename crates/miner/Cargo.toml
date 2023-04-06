@@ -1,0 +1,19 @@
+[package]
+name = "reth-miner"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "Block production"
+
+[dependencies]
+## reth
+reth-primitives = { path = "../primitives" }
+reth-rpc-types = { path = "../rpc/rpc-types" }
+reth-rlp = { path = "../rlp" }
+
+## misc
+thiserror = "1.0"
+sha2 = { version = "0.10.6", default-features = false }
+parking_lot = "0.12.1"
