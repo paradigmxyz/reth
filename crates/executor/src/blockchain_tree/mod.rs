@@ -71,7 +71,7 @@ use reth_interfaces::events::NewBlockNotificationSink;
 /// * [BlockchainTree::finalize_block]: Remove chains that join to now finalized block, as chain
 ///   becomes invalid.
 /// * [BlockchainTree::make_canonical]: Check if we have the hash of block that we want to finalize
-///   and commit it to db. If we dont have the block, pipeline syncing should start to fetch the
+///   and commit it to db. If we don't have the block, pipeline syncing should start to fetch the
 ///   blocks from p2p. Do reorg in tables if canonical chain if needed.
 #[derive(Debug)]
 pub struct BlockchainTree<DB: Database, C: Consensus, EF: ExecutorFactory> {
