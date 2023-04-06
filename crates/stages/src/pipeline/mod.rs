@@ -222,6 +222,8 @@ where
                 .instrument(info_span!("execute", stage = %stage_id))
                 .await?;
 
+            trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
+
             match next {
                 ControlFlow::NoProgress { stage_progress } => {
                     if let Some(progress) = stage_progress {
@@ -730,15 +732,15 @@ mod tests {
         let db = test_utils::create_test_db::<mdbx::WriteMap>(EnvKind::RW);
         let mut pipeline: Pipeline<_, NoopSyncStateUpdate> = Pipeline::builder()
             .add_stage(TestStage::new(StageId("Fatal")).add_exec(Err(
-                StageError::DatabaseIntegrity(ProviderError::BlockBody { number: 5 }),
+                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndices { number: 5 }),
             )))
             .build();
         let result = pipeline.run(db).await;
         assert_matches!(
             result,
-            Err(PipelineError::Stage(StageError::DatabaseIntegrity(ProviderError::BlockBody {
-                number: 5
-            })))
+            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
+                ProviderError::BlockBodyIndices { number: 5 }
+            )))
         );
     }
 }

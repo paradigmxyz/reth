@@ -226,7 +226,7 @@ mod tests {
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
-        models::{StoredBlockBody, TransitionIdAddress},
+        models::{StoredBlockBodyIndices, TransitionIdAddress},
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
@@ -321,20 +321,15 @@ mod tests {
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
             let iter = blocks.iter();
-            let (mut transition_id, mut tx_id) = (0, 0);
-
+            let (mut next_transition_id, mut next_tx_num) = (0, 0);
+            let mut first_transition_id = next_transition_id;
+            let mut first_tx_num = next_tx_num;
             for progress in iter {
                 // Insert last progress data
                 self.tx.commit(|tx| {
-                    let body = StoredBlockBody {
-                        start_tx_id: tx_id,
-                        tx_count: progress.body.len() as u64,
-                    };
-
                     progress.body.iter().try_for_each(|transaction| {
-                        tx.put::<tables::TxHashNumber>(transaction.hash(), tx_id)?;
-                        tx.put::<tables::Transactions>(tx_id, transaction.clone())?;
-                        tx.put::<tables::TxTransitionIndex>(tx_id, transition_id)?;
+                        tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
+                        tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
                         let (addr, _) = accounts
                             .get_mut(rand::random::<usize>() % n_accounts as usize)
@@ -347,14 +342,14 @@ mod tests {
                             };
                             self.insert_storage_entry(
                                 tx,
-                                (transition_id, *addr).into(),
+                                (next_transition_id, *addr).into(),
                                 new_entry,
                                 progress.header.number == stage_progress,
                             )?;
                         }
 
-                        tx_id += 1;
-                        transition_id += 1;
+                        next_tx_num += 1;
+                        next_transition_id += 1;
                         Ok(())
                     })?;
 
@@ -363,18 +358,27 @@ mod tests {
                     if has_reward {
                         self.insert_storage_entry(
                             tx,
-                            (transition_id, Address::random()).into(),
+                            (next_transition_id, Address::random()).into(),
                             StorageEntry {
                                 key: keccak256("mining"),
                                 value: U256::from(rand::random::<u32>()),
                             },
                             progress.header.number == stage_progress,
                         )?;
-                        transition_id += 1;
+                        next_transition_id += 1;
                     }
 
-                    tx.put::<tables::BlockTransitionIndex>(progress.number, transition_id)?;
-                    tx.put::<tables::BlockBodies>(progress.number, body)
+                    let body = StoredBlockBodyIndices {
+                        first_tx_num,
+                        first_transition_id,
+                        tx_count: progress.body.len() as u64,
+                        has_block_change: has_reward,
+                    };
+
+                    first_transition_id = next_transition_id;
+                    first_tx_num = next_tx_num;
+
+                    tx.put::<tables::BlockBodyIndices>(progress.number, body)
                 })?;
             }
 

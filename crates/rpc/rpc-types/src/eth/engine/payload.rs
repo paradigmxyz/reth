@@ -1,7 +1,8 @@
 use reth_primitives::{
+    constants::MIN_PROTOCOL_BASE_FEE_U256,
     proofs::{self, EMPTY_LIST_HASH},
-    Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, Withdrawal, H256, U256,
-    U64,
+    Address, Block, Bloom, Bytes, Header, SealedBlock, TransactionSigned, UintTryTo, Withdrawal,
+    H256, U256, U64,
 };
 use reth_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -79,7 +80,7 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             return Err(PayloadError::ExtraData(payload.extra_data))
         }
 
-        if payload.base_fee_per_gas == U256::ZERO {
+        if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
             return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
         }
 
@@ -106,7 +107,12 @@ impl TryFrom<ExecutionPayload> for SealedBlock {
             gas_used: payload.gas_used.as_u64(),
             timestamp: payload.timestamp.as_u64(),
             mix_hash: payload.prev_randao,
-            base_fee_per_gas: Some(payload.base_fee_per_gas.to::<u64>()),
+            base_fee_per_gas: Some(
+                payload
+                    .base_fee_per_gas
+                    .uint_try_to()
+                    .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
+            ),
             extra_data: payload.extra_data,
             // Defaults
             ommers_hash: EMPTY_LIST_HASH,
@@ -220,12 +226,26 @@ impl PayloadStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PayloadStatusEnum {
+    /// VALID is returned by the engine API in the following calls:
+    ///   - newPayloadV1:       if the payload was already known or was just validated and executed
+    ///   - forkchoiceUpdateV1: if the chain accepted the reorg (might ignore if it's stale)
     Valid,
+
+    /// INVALID is returned by the engine API in the following calls:
+    ///   - newPayloadV1:       if the payload failed to execute on top of the local chain
+    ///   - forkchoiceUpdateV1: if the new head is unknown, pre-merge, or reorg to it fails
     Invalid {
         #[serde(rename = "validationError")]
         validation_error: String,
     },
+
+    /// SYNCING is returned by the engine API in the following calls:
+    ///   - newPayloadV1:       if the payload was accepted on top of an active sync
+    ///   - forkchoiceUpdateV1: if the new head was seen before, but not part of the chain
     Syncing,
+
+    /// ACCEPTED is returned by the engine API in the following calls:
+    ///   - newPayloadV1: if the payload was accepted, but not processed (side chain)
     Accepted,
     InvalidBlockHash {
         #[serde(rename = "validationError")]

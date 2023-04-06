@@ -6,7 +6,7 @@ use futures_util::TryStreamExt;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    models::{StoredBlockBody, StoredBlockOmmers, StoredBlockWithdrawals},
+    models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -42,11 +42,9 @@ pub const BODIES: StageId = StageId("Bodies");
 /// The bodies are processed and data is inserted into these tables:
 ///
 /// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
-/// - [`BlockBodies`][reth_db::tables::BlockBodies]
+/// - [`BlockBodies`][reth_db::tables::BlockBodyIndices]
 /// - [`Transactions`][reth_db::tables::Transactions]
 /// - [`TransactionBlock`][reth_db::tables::TransactionBlock]
-/// - [`BlockTransitionIndex`][reth_db::tables::BlockTransitionIndex]
-/// - [`TxTransitionIndex`][reth_db::tables::TxTransitionIndex]
 ///
 /// # Genesis
 ///
@@ -54,10 +52,8 @@ pub const BODIES: StageId = StageId("Bodies");
 ///
 /// - The header tables (see [`HeaderStage`][crate::stages::HeaderStage])
 /// - The [`BlockOmmers`][reth_db::tables::BlockOmmers] table
-/// - The [`BlockBodies`][reth_db::tables::BlockBodies] table
+/// - The [`BlockBodies`][reth_db::tables::BlockBodyIndices] table
 /// - The [`Transactions`][reth_db::tables::Transactions] table
-/// - The [`BlockTransitionIndex`][reth_db::tables::BlockTransitionIndex] table
-/// - The [`TxTransitionIndex`][reth_db::tables::TxTransitionIndex] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
@@ -89,21 +85,17 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
 
         // Cursors used to write bodies, ommers and transactions
-        let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
+        let mut block_meta_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
 
-        // Cursors used to write state transition mapping
-        let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
-        let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
-
         // Get id for the first transaction and first transition in the block
-        let (mut current_tx_id, mut transition_id) = tx.get_next_block_ids(start_block)?;
+        let (mut next_tx_num, mut next_transition_id) = tx.get_next_block_ids(start_block)?;
 
         let mut highest_block = input.stage_progress.unwrap_or_default();
-        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = current_tx_id, transition_id, "Commencing sync");
+        debug!(target: "sync::stages::bodies", stage_progress = highest_block, target = end_block, start_tx_id = next_tx_num, next_transition_id, "Commencing sync");
 
         // Task downloader can return `None` only if the response relaying channel was closed. This
         // is a fatal error to prevent the pipeline from running forever.
@@ -116,29 +108,24 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
             let block_number = response.block_number();
             let difficulty = response.difficulty();
 
+            let first_tx_num = next_tx_num;
+            let first_transition_id = next_transition_id;
+            let mut tx_count = 0;
             let mut has_withdrawals = false;
             match response {
                 BlockResponse::Full(block) => {
-                    let body = StoredBlockBody {
-                        start_tx_id: current_tx_id,
-                        tx_count: block.body.len() as u64,
-                    };
-                    body_cursor.append(block_number, body.clone())?;
-
+                    tx_count = block.body.len() as u64;
                     // write transaction block index
-                    if !body.is_empty() {
-                        tx_block_cursor.append(body.last_tx_index(), block.number)?;
+                    if !block.body.is_empty() {
+                        tx_block_cursor.append(first_tx_num, block.number)?;
                     }
 
                     // Write transactions
                     for transaction in block.body {
                         // Append the transaction
-                        tx_cursor.append(current_tx_id, transaction)?;
-                        tx_transition_cursor.append(current_tx_id, transition_id)?;
+                        tx_cursor.append(next_tx_num, transaction)?;
                         // Increment transaction id for each transaction.
-                        current_tx_id += 1;
-                        // Increment transition id for each transaction.
-                        transition_id += 1;
+                        next_tx_num += 1;
                     }
 
                     // Write ommers if any
@@ -164,12 +151,7 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                         }
                     }
                 }
-                BlockResponse::Empty(_) => {
-                    body_cursor.append(
-                        block_number,
-                        StoredBlockBody { start_tx_id: current_tx_id, tx_count: 0 },
-                    )?;
-                }
+                BlockResponse::Empty(_) => {}
             };
 
             // The block transition marks the final state at the end of the block.
@@ -181,11 +163,22 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .ok_or(ProviderError::TotalDifficulty { number: block_number })?
                 .1;
             let has_reward = self.consensus.has_block_reward(td.into(), difficulty);
-            let has_post_block_transition = has_reward || has_withdrawals;
-            if has_post_block_transition {
-                transition_id += 1;
-            }
-            block_transition_cursor.append(block_number, transition_id)?;
+            let has_block_change = has_reward || has_withdrawals;
+
+            // Increment transition id for each transaction,
+            // and by +1 if the block has its own state change (an block reward or withdrawals).
+            next_transition_id += tx_count + has_block_change as u64;
+
+            // insert block meta
+            block_meta_cursor.append(
+                block_number,
+                StoredBlockBodyIndices {
+                    first_tx_num,
+                    first_transition_id,
+                    has_block_change,
+                    tx_count,
+                },
+            )?;
 
             highest_block = block_number;
         }
@@ -206,17 +199,15 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::bodies", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind bodies, ommers
-        let mut body_cursor = tx.cursor_write::<tables::BlockBodies>()?;
+        let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut transaction_cursor = tx.cursor_write::<tables::Transactions>()?;
         let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
         // Cursors to unwind transitions
-        let mut block_transition_cursor = tx.cursor_write::<tables::BlockTransitionIndex>()?;
-        let mut tx_transition_cursor = tx.cursor_write::<tables::TxTransitionIndex>()?;
         let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlock>()?;
 
         let mut rev_walker = body_cursor.walk_back(None)?;
-        while let Some((number, body)) = rev_walker.next().transpose()? {
+        while let Some((number, block_meta)) = rev_walker.next().transpose()? {
             if number <= input.unwind_to {
                 break
             }
@@ -231,30 +222,23 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 withdrawals_cursor.delete_current()?;
             }
 
-            // Delete the block transition if any
-            if block_transition_cursor.seek_exact(number)?.is_some() {
-                block_transition_cursor.delete_current()?;
-            }
-
             // Delete all transaction to block values.
-            if !body.is_empty() && tx_block_cursor.seek_exact(body.last_tx_index())?.is_some() {
+            if !block_meta.is_empty() &&
+                tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
+            {
                 tx_block_cursor.delete_current()?;
             }
 
             // Delete all transactions that belong to this block
-            for tx_id in body.tx_id_range() {
+            for tx_id in block_meta.tx_num_range() {
                 // First delete the transaction
                 if transaction_cursor.seek_exact(tx_id)?.is_some() {
                     transaction_cursor.delete_current()?;
                 }
-                // Delete the transaction transition if any
-                if tx_transition_cursor.seek_exact(tx_id)?.is_some() {
-                    tx_transition_cursor.delete_current()?;
-                }
             }
 
             // Delete the current body value
-            tx.delete::<tables::BlockBodies>(number, None)?;
+            tx.delete::<tables::BlockBodyIndices>(number, None)?;
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -443,7 +427,7 @@ mod tests {
             cursor::DbCursorRO,
             database::Database,
             mdbx::{Env, WriteMap},
-            models::{StoredBlockBody, StoredBlockOmmers},
+            models::{StoredBlockBodyIndices, StoredBlockOmmers},
             tables,
             transaction::{DbTx, DbTxMut},
         };
@@ -548,30 +532,26 @@ mod tests {
                 if let Some(progress) = blocks.first() {
                     // Insert last progress data
                     self.tx.commit(|tx| {
-                        let body = StoredBlockBody {
-                            start_tx_id: 0,
+                        let body = StoredBlockBodyIndices {
+                            first_tx_num: 0,
+                            first_transition_id: 0,
                             tx_count: progress.body.len() as u64,
+                            has_block_change: true,
                         };
-                        body.tx_id_range().try_for_each(|tx_id| {
+                        body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx();
-                            tx.put::<tables::Transactions>(tx_id, transaction)?;
-                            tx.put::<tables::TxTransitionIndex>(tx_id, tx_id)
+                            tx.put::<tables::Transactions>(tx_num, transaction)
                         })?;
 
-                        let last_transition_id = progress.body.len() as u64;
-                        let block_transition_id = last_transition_id + 1; // for block reward
-
-                        tx.put::<tables::BlockTransitionIndex>(
-                            progress.number,
-                            block_transition_id,
-                        )?;
                         if body.tx_count != 0 {
                             tx.put::<tables::TransactionBlock>(
-                                body.first_tx_index(),
+                                body.first_tx_num(),
                                 progress.number,
                             )?;
                         }
-                        tx.put::<tables::BlockBodies>(progress.number, body)?;
+
+                        tx.put::<tables::BlockBodyIndices>(progress.number, body)?;
+
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
@@ -606,21 +586,15 @@ mod tests {
 
         impl UnwindStageTestRunner for BodyTestRunner {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.tx
-                    .ensure_no_entry_above::<tables::BlockBodies, _>(input.unwind_to, |key| key)?;
-                self.tx
-                    .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| key)?;
-                self.tx.ensure_no_entry_above::<tables::BlockTransitionIndex, _>(
+                self.tx.ensure_no_entry_above::<tables::BlockBodyIndices, _>(
                     input.unwind_to,
                     |key| key,
                 )?;
+                self.tx
+                    .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| key)?;
                 if let Some(last_tx_id) = self.get_last_tx_id()? {
                     self.tx
                         .ensure_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
-                    self.tx.ensure_no_entry_above::<tables::TxTransitionIndex, _>(
-                        last_tx_id,
-                        |key| key,
-                    )?;
                     self.tx.ensure_no_entry_above::<tables::TransactionBlock, _>(
                         last_tx_id,
                         |key| key,
@@ -634,12 +608,12 @@ mod tests {
             /// Get the last available tx id if any
             pub(crate) fn get_last_tx_id(&self) -> Result<Option<TxNumber>, TestRunnerError> {
                 let last_body = self.tx.query(|tx| {
-                    let v = tx.cursor_read::<tables::BlockBodies>()?.last()?;
+                    let v = tx.cursor_read::<tables::BlockBodyIndices>()?.last()?;
                     Ok(v)
                 })?;
                 Ok(match last_body {
                     Some((_, body)) if body.tx_count != 0 => {
-                        Some(body.start_tx_id + body.tx_count - 1)
+                        Some(body.first_tx_num + body.tx_count - 1)
                     }
                     _ => None,
                 })
@@ -655,11 +629,9 @@ mod tests {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
                     let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
-                    let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+                    let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-                    let mut block_transition_cursor = tx.cursor_read::<tables::BlockTransitionIndex>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
-                    let mut tx_transition_cursor = tx.cursor_read::<tables::TxTransitionIndex>()?;
                     let mut tx_block_cursor = tx.cursor_read::<tables::TransactionBlock>()?;
 
                     let first_body_key = match bodies_cursor.first()? {
@@ -696,19 +668,18 @@ mod tests {
                             assert!(stored_ommers.is_some(), "Missing ommers entry");
                         }
 
-                        let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_index())?.map(|(_,b)| b);
+                        let tx_block_id = tx_block_cursor.seek_exact(body.last_tx_num())?.map(|(_,b)| b);
                         if body.tx_count == 0 {
                             assert_ne!(tx_block_id,Some(number));
                         } else {
                             assert_eq!(tx_block_id, Some(number));
                         }
 
-                        for tx_id in body.tx_id_range() {
+                        assert_eq!(body.first_transition_id, expected_transition_id);
+
+                        for tx_id in body.tx_num_range() {
                             let tx_entry = transaction_cursor.seek_exact(tx_id)?;
                             assert!(tx_entry.is_some(), "Transaction is missing.");
-                            assert_eq!(
-                                tx_transition_cursor.seek_exact(tx_id).expect("to be okay").expect("to be present").1, expected_transition_id
-                            );
                             // Increment expected id for each transaction transition.
                             expected_transition_id += 1;
                         }
@@ -721,10 +692,6 @@ mod tests {
                         if self.consensus.has_block_reward(td.into(), header.difficulty) {
                             expected_transition_id += 1;
                         }
-
-                        // Validate that block transition exists
-                        assert_eq!(block_transition_cursor.seek_exact(number).expect("To be okay").expect("Block transition to be present").1,expected_transition_id);
-
 
                         prev_number = Some(number);
                     }

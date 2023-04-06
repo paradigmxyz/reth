@@ -14,7 +14,10 @@
 
 pub mod codecs;
 pub mod models;
+mod raw;
 pub(crate) mod utils;
+
+pub use raw::{RawDubSort, RawKey, RawTable, RawValue};
 
 /// Declaration of all Database tables.
 use crate::{
@@ -25,7 +28,7 @@ use crate::{
             accounts::{AccountBeforeTx, TransitionIdAddress},
             blocks::{HeaderHash, StoredBlockOmmers},
             storage_sharded_key::StorageShardedKey,
-            ShardedKey, StoredBlockBody, StoredBlockWithdrawals,
+            ShardedKey, StoredBlockBodyIndices, StoredBlockWithdrawals,
         },
     },
 };
@@ -44,7 +47,7 @@ pub enum TableType {
 }
 
 /// Number of tables that should be present inside database.
-pub const NUM_TABLES: usize = 27;
+pub const NUM_TABLES: usize = 25;
 
 /// Default tables that should be present inside database.
 pub const TABLES: [(TableType, &str); NUM_TABLES] = [
@@ -52,7 +55,7 @@ pub const TABLES: [(TableType, &str); NUM_TABLES] = [
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
     (TableType::Table, Headers::const_name()),
-    (TableType::Table, BlockBodies::const_name()),
+    (TableType::Table, BlockBodyIndices::const_name()),
     (TableType::Table, BlockOmmers::const_name()),
     (TableType::Table, BlockWithdrawals::const_name()),
     (TableType::Table, TransactionBlock::const_name()),
@@ -62,8 +65,6 @@ pub const TABLES: [(TableType, &str); NUM_TABLES] = [
     (TableType::Table, PlainAccountState::const_name()),
     (TableType::DupSort, PlainStorageState::const_name()),
     (TableType::Table, Bytecodes::const_name()),
-    (TableType::Table, BlockTransitionIndex::const_name()),
-    (TableType::Table, TxTransitionIndex::const_name()),
     (TableType::Table, AccountHistory::const_name()),
     (TableType::Table, StorageHistory::const_name()),
     (TableType::DupSort, AccountChangeSet::const_name()),
@@ -149,8 +150,11 @@ table!(
 );
 
 table!(
-    /// Stores block bodies.
-    ( BlockBodies ) BlockNumber | StoredBlockBody
+    /// Stores block indices that contains indexes of transaction and transitions,
+    /// number of transactions and if block has a block change (block reward or withdrawals).
+    ///
+    /// More information about stored indices can be found in the [`StoredBlockBodyIndices`] struct.
+    ( BlockBodyIndices ) BlockNumber | StoredBlockBodyIndices
 );
 
 table!(
@@ -191,20 +195,6 @@ table!(
     /// So we would need to introduce reference counter.
     /// This will be small optimization on state.
     ( Bytecodes ) H256 | Bytecode
-);
-
-table!(
-    /// Stores the mapping of block number to state transition id.
-    /// The block transition marks the final state at the end of the block.
-    /// Increment the transition if the block contains an addition block reward.
-    /// If the block does not have a reward and transaction, the transition will be the same as the
-    /// transition at the last transaction of this block.
-    ( BlockTransitionIndex ) BlockNumber | TransitionId
-);
-
-table!(
-    /// Stores the mapping of transaction number to state transition id.
-    ( TxTransitionIndex ) TxNumber | TransitionId
 );
 
 table!(

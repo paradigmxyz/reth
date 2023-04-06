@@ -8,6 +8,7 @@ use reth_db::{
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable, RawValue,
 };
 use reth_primitives::{TransactionSigned, TxNumber, H160};
 use reth_provider::Transaction;
@@ -31,7 +32,7 @@ pub struct SenderRecoveryStage {
 
 impl Default for SenderRecoveryStage {
     fn default() -> Self {
-        Self { commit_threshold: 10000 }
+        Self { commit_threshold: 500_000 }
     }
 }
 
@@ -43,7 +44,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 
     /// Retrieve the range of transactions to iterate over by querying
-    /// [`BlockBodies`][reth_db::tables::BlockBodies],
+    /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range,
     /// recover signer for each transaction and store entries in
     /// the [`TxSenders`][reth_db::tables::TxSenders] table.
@@ -57,14 +58,14 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let done = !capped;
 
         // Look up the start index for the transaction range
-        let start_tx_index = tx.get_block_body(start_block)?.start_tx_id;
+        let first_tx_num = tx.get_block_meta(start_block)?.first_tx_num();
 
         // Look up the end index for transaction range (inclusive)
-        let end_tx_index = tx.get_block_body(end_block)?.last_tx_index();
+        let last_tx_num = tx.get_block_meta(end_block)?.last_tx_num();
 
         // No transactions to walk over
-        if start_tx_index > end_tx_index {
-            info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Target transaction already reached");
+        if first_tx_num > last_tx_num {
+            info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Target transaction already reached");
             return Ok(ExecOutput { stage_progress: end_block, done })
         }
 
@@ -72,12 +73,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         let mut senders_cursor = tx.cursor_write::<tables::TxSenders>()?;
 
         // Acquire the cursor over the transactions
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
+        let mut tx_cursor = tx.cursor_read::<RawTable<tables::Transactions>>()?;
         // Walk the transactions from start to end index (inclusive)
-        let tx_walker = tx_cursor.walk_range(start_tx_index..=end_tx_index)?;
+        let tx_walker =
+            tx_cursor.walk_range(RawKey::new(first_tx_num)..=RawKey::new(last_tx_num))?;
 
         // Iterate over transactions in chunks
-        info!(target: "sync::stages::sender_recovery", start_tx_index, end_tx_index, "Recovering senders");
+        info!(target: "sync::stages::sender_recovery", first_tx_num, last_tx_num, "Recovering senders");
 
         // channels used to return result of sender recovery.
         let mut channels = Vec::new();
@@ -98,8 +100,14 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             let chunk: Vec<_> = chunk.collect();
 
             // closure that would recover signer. Used as utility to wrap result
-            let recover = |entry: Result<(TxNumber, TransactionSigned), reth_db::Error>| -> Result<(u64, H160), Box<StageError>> {
+            let recover = |entry: Result<
+                (RawKey<TxNumber>, RawValue<TransactionSigned>),
+                reth_db::Error,
+            >|
+             -> Result<(u64, H160), Box<StageError>> {
                 let (tx_id, transaction) = entry.map_err(|e| Box::new(e.into()))?;
+                let tx_id = tx_id.key().expect("key to be formated");
+                let transaction = transaction.value().expect("value to be formated");
                 let sender = transaction.recover_signer().ok_or(StageError::from(
                     SenderRecoveryStageError::SenderRecovery { tx: tx_id },
                 ))?;
@@ -115,7 +123,6 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
                 }
             });
         }
-
         // Iterate over channels and append the sender in the order that they are received.
         for mut channel in channels {
             while let Some(recovered) = channel.recv().await {
@@ -136,7 +143,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::sender_recovery", to_block = input.unwind_to, "Unwinding");
         // Lookup latest tx id that we should unwind to
-        let latest_tx_id = tx.get_block_body(input.unwind_to)?.last_tx_index();
+        let latest_tx_id = tx.get_block_meta(input.unwind_to)?.last_tx_num();
         tx.unwind_table_by_num::<tables::TxSenders>(latest_tx_id)?;
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -267,13 +274,11 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxSenders] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body(block);
+            let body_result = self.tx.inner().get_block_meta(block);
             match body_result {
                 Ok(body) => self
                     .tx
-                    .ensure_no_entry_above::<tables::TxSenders, _>(body.last_tx_index(), |key| {
-                        key
-                    })?,
+                    .ensure_no_entry_above::<tables::TxSenders, _>(body.last_tx_num(), |key| key)?,
                 Err(_) => {
                     assert!(self.tx.table_is_empty::<tables::TxSenders>()?);
                 }
@@ -321,11 +326,11 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
-                        for tx_id in body.tx_id_range() {
+                        for tx_id in body.tx_num_range() {
                             let transaction = tx
                                 .get::<tables::Transactions>(tx_id)?
                                 .expect("no transaction entry");

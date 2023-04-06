@@ -132,8 +132,9 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
             if let Some(header) = self.header_by_number(number)? {
                 let id = BlockId::Number(number.into());
                 let tx = self.db.tx()?;
-                let transactions =
-                    self.transactions_by_block(id)?.ok_or(ProviderError::BlockBody { number })?;
+                let transactions = self
+                    .transactions_by_block(id)?
+                    .ok_or(ProviderError::BlockBodyIndices { number })?;
 
                 let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
                 let withdrawals = self.withdrawals_by_block(id, header.timestamp)?;
@@ -200,13 +201,13 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
                                 tx.get::<tables::CanonicalHeaders>(block_number)?
                             {
                                 if let Some(block_body) =
-                                    tx.get::<tables::BlockBodies>(block_number)?
+                                    tx.get::<tables::BlockBodyIndices>(block_number)?
                                 {
                                     // the index of the tx in the block is the offset:
                                     // len([start..tx_id])
                                     // SAFETY: `transaction_id` is always `>=` the block's first
                                     // index
-                                    let index = transaction_id - block_body.first_tx_index();
+                                    let index = transaction_id - block_body.first_tx_num();
 
                                     let meta = TransactionMeta {
                                         tx_hash,
@@ -239,8 +240,8 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
     fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
         if let Some(number) = self.block_number_for_id(id)? {
             let tx = self.db.tx()?;
-            if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
-                let tx_range = body.tx_id_range();
+            if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
+                let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
@@ -262,17 +263,17 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         let tx = self.db.tx()?;
         let mut results = Vec::default();
-        let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         for entry in body_cursor.walk_range(range)? {
             let (_, body) = entry?;
-            let tx_range = body.tx_id_range();
-            if body.tx_id_range().is_empty() {
+            let tx_num_range = body.tx_num_range();
+            if tx_num_range.is_empty() {
                 results.push(Vec::default());
             } else {
                 results.push(
                     tx_cursor
-                        .walk_range(tx_range)?
+                        .walk_range(tx_num_range)?
                         .map(|result| result.map(|(_, tx)| tx))
                         .collect::<std::result::Result<Vec<_>, _>>()?,
                 );
@@ -302,8 +303,8 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
     fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
         if let Some(number) = self.block_number_for_id(block)? {
             let tx = self.db.tx()?;
-            if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
-                let tx_range = body.tx_id_range();
+            if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
+                let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
@@ -419,8 +420,9 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
         // get transition id
         let transition = tx
-            .get::<tables::BlockTransitionIndex>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?;
+            .get::<tables::BlockBodyIndices>(block_number)?
+            .ok_or(ProviderError::BlockTransition { block_number })?
+            .transition_after_block();
 
         Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
     }
@@ -434,8 +436,9 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
         // get transition id
         let transition = tx
-            .get::<tables::BlockTransitionIndex>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?;
+            .get::<tables::BlockBodyIndices>(block_number)?
+            .ok_or(ProviderError::BlockTransition { block_number })?
+            .transition_after_block();
 
         Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
     }

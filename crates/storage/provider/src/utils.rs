@@ -1,28 +1,29 @@
 use reth_db::{
-    models::{StoredBlockBody, StoredBlockOmmers, StoredBlockWithdrawals},
+    models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{Address, SealedBlock, TransitionId};
+use reth_primitives::{Address, SealedBlock};
 
 /// Insert block data into corresponding tables. Used mainly for testing & internal tooling.
 ///
 ///
-/// Check parent dependency in [tables::HeaderNumbers] and in [tables::BlockBodies] tables.
+/// Check parent dependency in [tables::HeaderNumbers] and in [tables::BlockBodyIndices] tables.
 /// Inserts header data to [tables::CanonicalHeaders], [tables::Headers], [tables::HeaderNumbers].
 /// and transactions data to [tables::TxSenders], [tables::Transactions], [tables::TxHashNumber].
-/// and transition indexes to [tables::BlockTransitionIndex] and [tables::TxTransitionIndex].
-/// And block data [tables::BlockBodies], [tables::BlockBodies] and [tables::BlockWithdrawals].
+/// and transition/transaction meta data to [tables::BlockBodyIndices]
+/// and block data to [tables::BlockOmmers] and [tables::BlockWithdrawals].
 ///
-/// Return [TransitionId] `(from,to)`
+/// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
+/// transition in the block.
 pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     tx: &TX,
     block: SealedBlock,
     senders: Option<Vec<Address>>,
     has_block_reward: bool,
     parent_tx_num_transition_id: Option<(u64, u64)>,
-) -> Result<(TransitionId, TransitionId)> {
+) -> Result<StoredBlockBodyIndices> {
     let block_number = block.number;
     tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
     // Put header with canonical hashes.
@@ -48,35 +49,22 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         )?;
     }
 
-    let (mut current_tx_id, mut transition_id) =
-        if let Some(parent_tx_num_transition_id) = parent_tx_num_transition_id {
-            parent_tx_num_transition_id
-        } else if block.number == 0 {
-            (0, 0)
-        } else {
-            let prev_block_num = block.number - 1;
-            let prev_body = tx
-                .get::<tables::BlockBodies>(prev_block_num)?
-                .ok_or(ProviderError::BlockBody { number: prev_block_num })?;
-            let last_transition_id = tx
-                .get::<tables::BlockTransitionIndex>(prev_block_num)?
-                .ok_or(ProviderError::BlockTransition { block_number: prev_block_num })?;
-            (prev_body.start_tx_id + prev_body.tx_count, last_transition_id)
-        };
-    let from_transition = transition_id;
-    // insert body data
-    tx.put::<tables::BlockBodies>(
-        block.number,
-        StoredBlockBody { start_tx_id: current_tx_id, tx_count: block.body.len() as u64 },
-    )?;
-
-    if !block.body.is_empty() {
-        // -1 is here as current_tx_id points to the next transaction.
-        tx.put::<tables::TransactionBlock>(
-            current_tx_id + block.body.len() as u64 - 1,
-            block.number,
-        )?;
-    }
+    let parent_block_meta = if let Some(parent_tx_num_transition_id) = parent_tx_num_transition_id {
+        StoredBlockBodyIndices {
+            first_transition_id: parent_tx_num_transition_id.1,
+            first_tx_num: parent_tx_num_transition_id.0,
+            tx_count: 0,
+            has_block_change: false,
+        }
+    } else if block.number == 0 {
+        StoredBlockBodyIndices::default()
+    } else {
+        let prev_block_num = block.number - 1;
+        tx.get::<tables::BlockBodyIndices>(prev_block_num)?
+            .ok_or(ProviderError::BlockBodyIndices { number: prev_block_num })?
+    };
+    let tx_count = block.body.len() as u64;
+    let mut next_tx_num = parent_block_meta.next_tx_num();
 
     let senders_len = senders.as_ref().map(|s| s.len());
     let tx_iter = if Some(block.body.len()) == senders_len {
@@ -94,12 +82,10 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
 
     for (transaction, sender) in tx_iter {
         let hash = transaction.hash();
-        tx.put::<tables::TxSenders>(current_tx_id, sender)?;
-        tx.put::<tables::Transactions>(current_tx_id, transaction)?;
-        tx.put::<tables::TxTransitionIndex>(current_tx_id, transition_id)?;
-        tx.put::<tables::TxHashNumber>(hash, current_tx_id)?;
-        transition_id += 1;
-        current_tx_id += 1;
+        tx.put::<tables::TxSenders>(next_tx_num, sender)?;
+        tx.put::<tables::Transactions>(next_tx_num, transaction)?;
+        tx.put::<tables::TxHashNumber>(hash, next_tx_num)?;
+        next_tx_num += 1;
     }
 
     let mut has_withdrawals = false;
@@ -113,13 +99,21 @@ pub fn insert_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         }
     }
 
-    if has_block_reward || has_withdrawals {
-        transition_id += 1;
-    }
-    tx.put::<tables::BlockTransitionIndex>(block_number, transition_id)?;
+    let has_block_change = has_block_reward || has_withdrawals;
 
-    let to_transition = transition_id;
-    Ok((from_transition, to_transition))
+    let block_meta = StoredBlockBodyIndices {
+        first_transition_id: parent_block_meta.transition_after_block(),
+        first_tx_num: parent_block_meta.next_tx_num(),
+        tx_count,
+        has_block_change,
+    };
+    tx.put::<tables::BlockBodyIndices>(block_number, block_meta.clone())?;
+
+    if !block_meta.is_empty() {
+        tx.put::<tables::TransactionBlock>(block_meta.last_tx_num(), block_number)?;
+    }
+
+    Ok(block_meta)
 }
 
 /// Inserts canonical block in blockchain. Parent tx num and transition id is taken from
@@ -129,6 +123,6 @@ pub fn insert_canonical_block<'a, TX: DbTxMut<'a> + DbTx<'a>>(
     block: SealedBlock,
     senders: Option<Vec<Address>>,
     has_block_reward: bool,
-) -> Result<(TransitionId, TransitionId)> {
+) -> Result<StoredBlockBodyIndices> {
     insert_block(tx, block, senders, has_block_reward, None)
 }
