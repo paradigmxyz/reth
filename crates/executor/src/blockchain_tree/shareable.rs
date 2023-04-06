@@ -4,7 +4,6 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::Consensus,
-    events::{ChainEventSubscriptions, NewBlockNotifications},
     provider::ProviderError,
     Error,
 };
@@ -100,10 +99,11 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
     }
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> ChainEventSubscriptions
-    for ShareableBlockchainTree<DB, C, EF>
-{
-    fn subscribe_new_blocks(&self) -> NewBlockNotifications {
-        self.tree.read().subscribe_new_blocks()
-    }
-}
+// impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
+//     for ShareableBlockchainTree<DB, C, EF>
+// {
+
+//     fn subscribe_canon_state(&self) -> reth_provider::CanonStateNotifications  {
+//         todo!()
+//     }
+// }

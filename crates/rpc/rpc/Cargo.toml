@@ -42,6 +42,7 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["sync"] }
 tower = "0.4"
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = "0.7"
 pin-project = "1.0"
 
 bytes = "1.4"

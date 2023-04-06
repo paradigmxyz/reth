@@ -10,7 +10,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::PostStateProvider, BlockExecutor, ExecutorFactory, PostStateDataProvider,
-    StateProviderFactory,
+    StateProviderFactory, SubChain,
 };
 use std::collections::BTreeMap;
 
@@ -39,6 +39,16 @@ pub struct Chain {
     /// This is used to revert changes in the state until a certain block number when the chain is
     /// split.
     block_transitions: BTreeMap<BlockNumber, usize>,
+}
+
+impl SubChain for Chain {
+    fn state(&self) -> &PostState {
+        &self.state
+    }
+
+    fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
+        &self.blocks
+    }
 }
 
 /// Block number and hash of the forked block.
