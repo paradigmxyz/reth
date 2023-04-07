@@ -20,6 +20,34 @@ impl PayloadId {
     }
 }
 
+/// This structure maps for the return value of `engine_getPayloadV2` of the beacon chain spec.
+///
+/// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPayloadEnvelope {
+    /// Execution payload, which could be either V1 or V2
+    ///
+    /// V1 (_NO_ withdrawals) MUST be returned if the payload timestamp is lower than the Shanghai
+    /// timestamp
+    ///
+    /// V2 (_WITH_ withdrawals) MUST be returned if the payload timestamp is greater or equal to
+    /// the Shanghai timestamp
+    #[serde(rename = "executionPayload")]
+    pub payload: ExecutionPayload,
+    /// The expected value to be received by the feeRecipient in wei
+    #[serde(rename = "blockValue")]
+    pub block_value: U256,
+}
+
+impl ExecutionPayloadEnvelope {
+    /// Returns the [ExecutionPayload] for the `engine_getPayloadV1` endpoint
+    pub fn into_v1_payload(mut self) -> ExecutionPayload {
+        // ensure withdrawals are removed
+        self.payload.withdrawals.take();
+        self.payload
+    }
+}
+
 /// This structure maps on the ExecutionPayload structure of the beacon chain spec.
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#executionpayloadv1>

@@ -4,7 +4,7 @@ use reth_beacon_consensus::BeaconEngineMessage;
 use reth_primitives::{BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, PayloadId, TransitionConfiguration,
+    ExecutionPayloadBodies, ExecutionPayloadEnvelope, PayloadId, TransitionConfiguration,
 };
 use std::{
     future::Future,
@@ -85,7 +85,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
     ///
     /// NOTE: Will always result in `PayloadUnknown` since we don't support block
     /// building for now.
-    pub fn get_payload(&self, _payload_id: PayloadId) -> Option<ExecutionPayload> {
+    pub fn get_payload(&self, _payload_id: PayloadId) -> Option<ExecutionPayloadEnvelope> {
         None
     }
 
