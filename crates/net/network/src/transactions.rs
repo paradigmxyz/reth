@@ -84,7 +84,7 @@ impl TransactionsHandle {
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<Pool> {
     /// Access to the transaction pool.
-    pool: Pool,
+    pub pool: Pool,
     /// Network access.
     network: NetworkHandle,
     /// Subscriptions to all network related events.
@@ -97,7 +97,7 @@ pub struct TransactionsManager<Pool> {
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
+    pub transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
     /// Transactions that are currently imported into the `Pool`
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// All the connected peers.
@@ -318,8 +318,8 @@ where
         }
     }
 
-    /// Handles dedicated transaction events related tot the `eth` protocol.
-    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+    /// Handles dedicated transaction events related to the `eth` protocol.
+    pub fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 self.import_transactions(peer_id, msg.0, TransactionSource::Broadcast);
@@ -334,7 +334,7 @@ where
     }
 
     /// Handles a command received from a detached [`TransactionsHandle`]
-    fn on_command(&mut self, cmd: TransactionsCommand) {
+    pub fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => {
                 self.on_new_transactions(std::iter::once(hash))
@@ -343,7 +343,7 @@ where
     }
 
     /// Handles a received event related to common network events.
-    fn on_network_event(&mut self, event: NetworkEvent) {
+    pub fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
@@ -688,7 +688,8 @@ struct Peer {
 }
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
-enum TransactionsCommand {
+#[allow(missing_docs)]
+pub enum TransactionsCommand {
     PropagateHash(H256),
 }
 
