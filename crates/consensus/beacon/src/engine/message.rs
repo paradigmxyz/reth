@@ -1,7 +1,7 @@
 use crate::BeaconEngineResult;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadId,
 };
 use tokio::sync::oneshot;
 
@@ -26,5 +26,12 @@ pub enum BeaconEngineMessage {
         payload_attrs: Option<PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
         tx: BeaconEngineSender<ForkchoiceUpdated>,
+    },
+    /// Message with get payload parameters.
+    GetPayload {
+        /// The payload id.
+        payload_id: PayloadId,
+        /// The sender for returning payload result.
+        tx: BeaconEngineSender<ExecutionPayload>,
     },
 }
