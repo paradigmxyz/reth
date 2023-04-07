@@ -1,14 +1,14 @@
 use async_trait::async_trait;
 use jsonrpsee::core::{Error, RpcResult as Result};
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{BlockHash, ChainSpec, Hardfork, H64, U64};
+use reth_primitives::{BlockHash, ChainSpec, Hardfork, U64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{
     EngineApiError, EngineApiHandle, EngineApiMessage, EngineApiMessageVersion, EngineApiResult,
 };
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    TransitionConfiguration, CAPABILITIES,
+    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadId,
+    PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use std::sync::Arc;
 use tokio::sync::oneshot::{self, Receiver};
@@ -155,14 +155,14 @@ impl EngineApiServer for EngineApi {
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
     ///
     /// Caution: This should not return the `withdrawals` field
-    async fn get_payload_v1(&self, payload_id: H64) -> Result<ExecutionPayload> {
+    async fn get_payload_v1(&self, payload_id: PayloadId) -> Result<ExecutionPayload> {
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
     }
 
     /// Handler for `engine_getPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
-    async fn get_payload_v2(&self, payload_id: H64) -> Result<ExecutionPayload> {
+    async fn get_payload_v2(&self, payload_id: PayloadId) -> Result<ExecutionPayload> {
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
     }

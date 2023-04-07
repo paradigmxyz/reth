@@ -1,17 +1,17 @@
 use crate::EngineApiSender;
 use reth_beacon_consensus::BeaconEngineSender;
 use reth_interfaces::consensus::ForkchoiceState;
-use reth_primitives::{BlockHash, BlockNumber, H64};
+use reth_primitives::{BlockHash, BlockNumber};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadId,
+    PayloadStatus, TransitionConfiguration,
 };
 
 /// Message type for communicating with [`EngineApi`][crate::EngineApi].
 #[derive(Debug)]
 pub enum EngineApiMessage {
     /// Get payload message
-    GetPayload(H64, EngineApiSender<ExecutionPayload>),
+    GetPayload(PayloadId, EngineApiSender<ExecutionPayload>),
     /// Get payload bodies by range message
     GetPayloadBodiesByRange(BlockNumber, u64, EngineApiSender<ExecutionPayloadBodies>),
     /// Get payload bodies by hash message
