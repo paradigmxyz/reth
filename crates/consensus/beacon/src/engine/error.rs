@@ -1,4 +1,4 @@
-use reth_miner::error::PayloadError as BuilderError;
+use reth_miner::error::PayloadBuilderError;
 use reth_rpc_types::engine::PayloadError;
 use reth_stages::PipelineError;
 use thiserror::Error;
@@ -28,7 +28,7 @@ pub enum BeaconEngineError {
     Payload(#[from] PayloadError),
     /// Encountered an error during the payload building process.
     #[error(transparent)]
-    BuilderError(#[from] BuilderError),
+    PayloadBuilderError(#[from] PayloadBuilderError),
     /// Pipeline error.
     #[error(transparent)]
     Pipeline(#[from] PipelineError),

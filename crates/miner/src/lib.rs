@@ -14,7 +14,7 @@
 
 mod payload;
 
-use crate::error::PayloadError;
+use crate::error::PayloadBuilderError;
 use parking_lot::Mutex;
 pub use payload::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::H256;
@@ -42,7 +42,7 @@ pub trait PayloadStore: Send + Sync {
         &self,
         parent: H256,
         attributes: PayloadAttributes,
-    ) -> Result<PayloadId, PayloadError>;
+    ) -> Result<PayloadId, PayloadBuilderError>;
 }
 
 /// A simple in-memory payload store.
@@ -65,7 +65,7 @@ impl PayloadStore for TestPayloadStore {
         &self,
         parent: H256,
         attributes: PayloadAttributes,
-    ) -> Result<PayloadId, PayloadError> {
+    ) -> Result<PayloadId, PayloadBuilderError> {
         let attr = PayloadBuilderAttributes::new(parent, attributes);
         let payload_id = attr.payload_id();
         self.payloads.lock().insert(payload_id, BuiltPayload::new(payload_id, Default::default()));
