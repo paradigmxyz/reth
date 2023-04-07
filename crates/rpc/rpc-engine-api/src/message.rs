@@ -11,7 +11,7 @@ use reth_rpc_types::engine::{
 #[derive(Debug)]
 pub enum EngineApiMessage {
     /// Get payload message
-    GetPayload(PayloadId, EngineApiSender<ExecutionPayloadEnvelope>),
+    GetPayload(PayloadId, BeaconEngineSender<ExecutionPayloadEnvelope>),
     /// Get payload bodies by range message
     GetPayloadBodiesByRange(BlockNumber, u64, EngineApiSender<ExecutionPayloadBodies>),
     /// Get payload bodies by hash message

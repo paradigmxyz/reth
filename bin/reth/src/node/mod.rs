@@ -37,6 +37,7 @@ use reth_interfaces::{
     },
     sync::SyncStateUpdater,
 };
+use reth_miner::TestPayloadStore;
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
@@ -274,6 +275,9 @@ impl Command {
         ctx.task_executor
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
+        // TODO: change to non-test or rename this component eventually
+        let test_payload_store = TestPayloadStore::default();
+
         let beacon_consensus_engine = BeaconConsensusEngine::new(
             Arc::clone(&db),
             ctx.task_executor.clone(),
@@ -281,6 +285,7 @@ impl Command {
             blockchain_tree.clone(),
             consensus_engine_rx,
             self.debug.max_block,
+            test_payload_store,
         );
         info!(target: "reth::cli", "Consensus engine initialized");
 
