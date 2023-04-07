@@ -18,7 +18,7 @@ use crate::error::PayloadBuilderError;
 use parking_lot::Mutex;
 pub use payload::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::H256;
-use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes, PayloadId};
+use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes, PayloadId};
 use std::{collections::HashMap, sync::Arc};
 
 pub mod error;
@@ -32,7 +32,7 @@ pub trait PayloadStore: Send + Sync {
     /// Returns the current [ExecutionPayload] associated with the [PayloadId].
     ///
     /// Returns `None` if the payload is not yet built, See [PayloadStore::new_payload].
-    fn get_execution_payload(&self, payload_id: PayloadId) -> Option<ExecutionPayload>;
+    fn get_execution_payload(&self, payload_id: PayloadId) -> Option<ExecutionPayloadEnvelope>;
 
     /// Builds and stores a new payload using the given attributes.
     ///
@@ -56,7 +56,7 @@ impl PayloadStore for TestPayloadStore {
         self.payloads.lock().contains_key(&payload_id)
     }
 
-    fn get_execution_payload(&self, _payload_id: PayloadId) -> Option<ExecutionPayload> {
+    fn get_execution_payload(&self, _payload_id: PayloadId) -> Option<ExecutionPayloadEnvelope> {
         // TODO requires conversion
         None
     }

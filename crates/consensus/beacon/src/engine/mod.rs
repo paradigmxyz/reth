@@ -10,8 +10,8 @@ use reth_interfaces::{
 use reth_miner::PayloadStore;
 use reth_primitives::{BlockHash, BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus,
-    PayloadStatusEnum,
+    ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated, PayloadAttributes, PayloadId,
+    PayloadStatus, PayloadStatusEnum,
 };
 use reth_stages::{stages::FINISH, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -259,7 +259,7 @@ where
     pub fn on_get_payload(
         &self,
         payload_id: PayloadId,
-    ) -> Result<ExecutionPayload, BeaconEngineError> {
+    ) -> Result<ExecutionPayloadEnvelope, BeaconEngineError> {
         // TODO: Client software SHOULD stop the updating process when either a call to
         // engine_getPayload with the build process's payloadId is made or SECONDS_PER_SLOT (12s in
         // the Mainnet configuration) have passed since the point in time identified by the
