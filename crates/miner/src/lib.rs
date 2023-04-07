@@ -29,7 +29,7 @@ pub trait PayloadStore: Send + Sync {
     /// Returns true if the payload store contains the given payload.
     fn contains(&self, payload_id: PayloadId) -> bool;
 
-    /// Returns the current [ExecutionPayload] associated with the [PayloadId].
+    /// Returns the current [ExecutionPayloadEnvelope] associated with the [PayloadId].
     ///
     /// Returns `None` if the payload is not yet built, See [PayloadStore::new_payload].
     fn get_execution_payload(&self, payload_id: PayloadId) -> Option<ExecutionPayloadEnvelope>;
