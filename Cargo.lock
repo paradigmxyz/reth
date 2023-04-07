@@ -4496,6 +4496,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
+ "reth-stages",
  "reth-transaction-pool",
  "tokio",
  "tokio-stream",
@@ -4757,6 +4758,7 @@ dependencies = [
  "hex-literal 0.3.4",
  "modular-bitfield",
  "parity-scale-codec",
+ "parking_lot 0.12.1",
  "rand 0.8.5",
  "reth-codecs",
  "reth-db",
@@ -4840,6 +4842,18 @@ dependencies = [
  "serial_test",
  "syn 2.0.5",
  "trybuild",
+]
+
+[[package]]
+name = "reth-miner"
+version = "0.1.0"
+dependencies = [
+ "parking_lot 0.12.1",
+ "reth-primitives",
+ "reth-rlp",
+ "reth-rpc-types",
+ "sha2 0.10.6",
+ "thiserror",
 ]
 
 [[package]]

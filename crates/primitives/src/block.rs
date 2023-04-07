@@ -652,6 +652,9 @@ pub struct BlockNumHash {
     pub hash: BlockHash,
 }
 
+/// Block number and hash of the forked block.
+pub type ForkBlock = BlockNumHash;
+
 impl std::fmt::Debug for BlockNumHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("").field(&self.number).field(&self.hash).finish()

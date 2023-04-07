@@ -1,5 +1,6 @@
 use super::{PayloadStatus, PayloadStatusEnum};
-use reth_primitives::{H256, H64};
+use crate::engine::PayloadId;
+use reth_primitives::H256;
 use serde::{Deserialize, Serialize};
 
 /// This structure encapsulates the fork choice state
@@ -15,7 +16,7 @@ pub struct ForkchoiceState {
 #[serde(rename_all = "camelCase")]
 pub struct ForkchoiceUpdated {
     pub payload_status: PayloadStatus,
-    pub payload_id: Option<H64>,
+    pub payload_id: Option<PayloadId>,
 }
 
 impl ForkchoiceUpdated {
@@ -32,7 +33,7 @@ impl ForkchoiceUpdated {
         self
     }
 
-    pub fn with_payload_id(mut self, id: H64) -> Self {
+    pub fn with_payload_id(mut self, id: PayloadId) -> Self {
         self.payload_id = Some(id);
         self
     }

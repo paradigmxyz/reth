@@ -372,7 +372,7 @@ where
 
     /// Handler for: `eth_hashrate`
     async fn hashrate(&self) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(U256::ZERO)
     }
 
     /// Handler for: `eth_getWork`

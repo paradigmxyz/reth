@@ -154,7 +154,9 @@ where
                         self.require_pipeline_run(PipelineTarget::Head);
                     }
 
-                    PayloadStatus::from_status(PayloadStatusEnum::Valid)
+                    // TODO: most recent valid block in the branch defined by payload and its
+                    // ancestors, not necessarily the head <https://github.com/paradigmxyz/reth/issues/2126>
+                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash))
                 }
                 Err(error) => {
                     warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
@@ -178,8 +180,10 @@ where
                 }
             }
         } else {
+            trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
+
         trace!(target: "consensus::engine", ?state, ?status, "Returning forkchoice status");
         Ok(ForkchoiceUpdated::new(status))
     }
@@ -469,7 +473,9 @@ mod tests {
         post_state::PostState,
         test_utils::TestExecutorFactory,
     };
-    use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
+    use reth_interfaces::{
+        sync::NoopSyncStateUpdate, test_utils::TestConsensus,
+    };
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
@@ -549,8 +555,10 @@ mod tests {
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
         let config = BlockchainTreeConfig::new(1, 2, 3);
+        let (canon_state_notification_sender,_) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, config).expect("failed to create tree"),
+            BlockchainTree::new(externals, canon_state_notification_sender, config)
+                .expect("failed to create tree"),
         );
 
         let (sync_tx, sync_rx) = unbounded_channel();
@@ -781,7 +789,10 @@ mod tests {
             assert_matches!(rx_invalid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
             let rx_valid = env.send_forkchoice_updated(forkchoice);
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid);
+            let expected_result = ForkchoiceUpdated::new(PayloadStatus::new(
+                PayloadStatusEnum::Valid,
+                Some(block1.hash),
+            ));
             assert_matches!(rx_valid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));

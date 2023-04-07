@@ -1,10 +1,11 @@
 ///! Canonical chain state notification trait and types.
 use crate::PostState;
 use auto_impl::auto_impl;
+use parking_lot::Mutex;
 use core::fmt;
 use reth_primitives::{BlockNumHash, BlockNumber, Receipt, SealedBlockWithSenders, TxHash};
 use std::{collections::BTreeMap, fmt::Formatter, sync::Arc};
-use tokio::sync::broadcast::{Receiver, Sender};
+use tokio::sync::broadcast::{Receiver, Sender, error::SendError};
 
 /// Trait that holds blocks and post state of execution those blocks.
 #[auto_impl(&, Arc)]
@@ -137,4 +138,41 @@ pub type CanonStateNotificationSender = Sender<CanonStateNotification>;
 pub trait CanonStateSubscriptions: Send + Sync {
     /// Get notified when a new block was imported.
     fn subscribe_canon_state(&self) -> CanonStateNotifications;
+}
+
+
+
+/// A shareable Sender that allows to send [CanonStateNotification] to all receivers.
+#[derive(Debug, Clone)]
+pub struct CanonStateNotificationSink {
+    inner: Arc<Mutex<Sender<CanonStateNotification>>>,
+}
+
+// === impl NewBlockNotificationSink ===
+
+impl CanonStateNotificationSink {
+    /// Creates a new NewBlockNotificationSink with the given capacity.
+    // // size of the broadcast is double of max reorg depth because at max reorg depth we can have
+    //         // send at least N block at the time.
+    pub fn new(capacity: usize) -> Self {
+        let inner = tokio::sync::broadcast::channel(capacity);
+        Self { inner: Arc::new(Mutex::new(inner.0)) }
+    }
+
+    /// Attempts to send a value to all active Receiver handles, returning it back if it could not
+    /// be sent.
+    pub fn send(
+        &self,
+        canon_state_change: CanonStateNotification,
+    ) -> Result<usize, SendError<CanonStateNotification>> {
+        let sender = self.inner.lock();
+        sender.send(canon_state_change)
+    }
+
+    /// Creates a new Receiver handle that will receive notifications sent after this call to
+    /// subscribe.
+    pub fn subscribe(&self) -> CanonStateNotifications {
+        let sender = self.inner.lock();
+        sender.subscribe()
+    }
 }

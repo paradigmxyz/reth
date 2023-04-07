@@ -51,9 +51,6 @@ impl SubChain for Chain {
     }
 }
 
-/// Block number and hash of the forked block.
-pub type ForkBlock = BlockNumHash;
-
 impl Chain {
     /// Get the blocks in this chain.
     pub fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {

@@ -13,9 +13,9 @@ mod traits;
 pub use traits::{
     AccountProvider, BlockExecutor, BlockHashProvider, BlockIdProvider, BlockProvider,
     BlockchainTreePendingStateProvider, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, ExecutorFactory,
-    HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, SubChain, TransactionsProvider, WithdrawalsProvider,
+    CanonStateNotificationSink, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
+    ExecutorFactory, HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, SubChain, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.
@@ -46,3 +46,6 @@ pub mod test_utils;
 
 /// Re-export provider error.
 pub use reth_interfaces::provider::ProviderError;
+
+pub mod chain;
+pub use chain::Chain;
