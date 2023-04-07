@@ -13,7 +13,12 @@ reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../rpc/rpc-types" }
 reth-rlp = { path = "../rlp" }
 
+## async
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
+
 ## misc
 thiserror = "1.0"
 sha2 = { version = "0.10.6", default-features = false }
 parking_lot = "0.12.1"
+async-trait = "0.1"

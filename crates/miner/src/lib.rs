@@ -13,6 +13,7 @@
 //! reth miner implementation
 
 mod payload;
+mod builder;
 
 use crate::error::PayloadError;
 use parking_lot::Mutex;
@@ -22,6 +23,7 @@ use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes, PayloadId};
 use std::{collections::HashMap, sync::Arc};
 
 pub mod error;
+pub mod traits;
 
 /// A type that has access to all locally built payloads and can create new ones.
 /// This type is intended to by used by the engine API.
