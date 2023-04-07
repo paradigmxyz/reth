@@ -9,16 +9,18 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+// TODO: remove this
+#![allow(dead_code)]
 
 //! reth miner implementation
 
-mod payload;
 mod builder;
+mod payload;
+pub use payload::{BuiltPayload, PayloadBuilderAttributes};
 
 use crate::error::PayloadError;
 use parking_lot::Mutex;
-pub use payload::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::H256;
+use reth_primitives::{H256, U256};
 use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes, PayloadId};
 use std::{collections::HashMap, sync::Arc};
 
@@ -70,7 +72,9 @@ impl PayloadStore for TestPayloadStore {
     ) -> Result<PayloadId, PayloadError> {
         let attr = PayloadBuilderAttributes::new(parent, attributes);
         let payload_id = attr.payload_id();
-        self.payloads.lock().insert(payload_id, BuiltPayload::new(payload_id, Default::default()));
+        self.payloads
+            .lock()
+            .insert(payload_id, BuiltPayload::new(payload_id, Default::default(), U256::ZERO));
         Ok(payload_id)
     }
 }
