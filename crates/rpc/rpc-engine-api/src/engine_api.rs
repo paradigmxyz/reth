@@ -1,9 +1,11 @@
 use crate::{EngineApiError, EngineApiMessage, EngineApiResult};
 use futures::StreamExt;
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_primitives::{BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, H64};
+use reth_primitives::{BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
-use reth_rpc_types::engine::{ExecutionPayload, ExecutionPayloadBodies, TransitionConfiguration};
+use reth_rpc_types::engine::{
+    ExecutionPayload, ExecutionPayloadBodies, PayloadId, TransitionConfiguration,
+};
 use std::{
     future::Future,
     pin::Pin,
@@ -83,7 +85,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
     ///
     /// NOTE: Will always result in `PayloadUnknown` since we don't support block
     /// building for now.
-    pub fn get_payload(&self, _payload_id: H64) -> Option<ExecutionPayload> {
+    pub fn get_payload(&self, _payload_id: PayloadId) -> Option<ExecutionPayload> {
         None
     }
 
