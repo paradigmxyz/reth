@@ -6,6 +6,8 @@ use thiserror::Error;
 /// Beacon engine result.
 pub type BeaconEngineResult<Ok> = Result<Ok, BeaconEngineError>;
 
+// TODO: add conversions to codes for engine spec compliance
+// one notable variant would be UnknownPayload
 /// The error wrapper for the beacon consensus engine.
 #[derive(Error, Debug)]
 pub enum BeaconEngineError {
