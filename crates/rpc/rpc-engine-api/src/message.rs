@@ -3,8 +3,8 @@ use reth_beacon_consensus::BeaconEngineSender;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_primitives::{BlockHash, BlockNumber};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration,
+    ExecutionPayload, ExecutionPayloadBodies, ForkchoiceUpdated, PayloadAttributes, PayloadId,
+    PayloadStatus, TransitionConfiguration,
 };
 
 /// Message type for communicating with [`EngineApi`][crate::EngineApi].

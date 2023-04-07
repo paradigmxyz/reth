@@ -1,7 +1,7 @@
 use crate::BeaconEngineResult;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus, PayloadId,
+    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadId, PayloadStatus,
 };
 use tokio::sync::oneshot;
 

@@ -256,7 +256,10 @@ where
     }
 
     /// Called to receive the execution payload associated with a payload build process.
-    pub fn on_get_payload(&self, payload_id: PayloadId) -> Result<ExecutionPayload, BeaconEngineError> {
+    pub fn on_get_payload(
+        &self,
+        payload_id: PayloadId,
+    ) -> Result<ExecutionPayload, BeaconEngineError> {
         // TODO: Client software SHOULD stop the updating process when either a call to
         // engine_getPayload with the build process's payloadId is made or SECONDS_PER_SLOT (12s in
         // the Mainnet configuration) have passed since the point in time identified by the
