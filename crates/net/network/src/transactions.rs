@@ -84,7 +84,7 @@ impl TransactionsHandle {
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<Pool> {
     /// Access to the transaction pool.
-    pub pool: Pool,
+    pool: Pool,
     /// Network access.
     network: NetworkHandle,
     /// Subscriptions to all network related events.
@@ -97,7 +97,7 @@ pub struct TransactionsManager<Pool> {
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
     /// transaction
-    pub transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
+    transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
     /// Transactions that are currently imported into the `Pool`
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// All the connected peers.
@@ -319,7 +319,7 @@ where
     }
 
     /// Handles dedicated transaction events related to the `eth` protocol.
-    pub fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
+    fn on_network_tx_event(&mut self, event: NetworkTransactionEvent) {
         match event {
             NetworkTransactionEvent::IncomingTransactions { peer_id, msg } => {
                 self.import_transactions(peer_id, msg.0, TransactionSource::Broadcast);
@@ -334,7 +334,7 @@ where
     }
 
     /// Handles a command received from a detached [`TransactionsHandle`]
-    pub fn on_command(&mut self, cmd: TransactionsCommand) {
+    fn on_command(&mut self, cmd: TransactionsCommand) {
         match cmd {
             TransactionsCommand::PropagateHash(hash) => {
                 self.on_new_transactions(std::iter::once(hash))
@@ -343,7 +343,7 @@ where
     }
 
     /// Handles a received event related to common network events.
-    pub fn on_network_event(&mut self, event: NetworkEvent) {
+    fn on_network_event(&mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::SessionClosed { peer_id, .. } => {
                 // remove the peer
@@ -689,7 +689,7 @@ struct Peer {
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
 #[allow(missing_docs)]
-pub enum TransactionsCommand {
+enum TransactionsCommand {
     PropagateHash(H256),
 }
 
@@ -712,10 +712,12 @@ pub enum NetworkTransactionEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NetworkConfigBuilder, NetworkManager};
+    use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use reth_interfaces::sync::{SyncState, SyncStateUpdater};
+    use reth_network_api::NetworkInfo;
     use reth_provider::test_utils::NoopProvider;
-    use reth_transaction_pool::test_utils::testing_pool;
+    use reth_rlp::Decodable;
+    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use secp256k1::SecretKey;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -738,7 +740,7 @@ mod tests {
         tokio::task::spawn(network);
 
         handle.update_sync_state(SyncState::Downloading { target_block: 100 });
-        assert!(handle.is_syncing());
+        assert!(NetworkInfo::is_syncing(&handle));
 
         let peer_id = PeerId::random();
 
@@ -748,5 +750,159 @@ mod tests {
         });
 
         assert!(pool.is_empty());
+    }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_handle_incoming_transactions() {
+        reth_tracing::init_test_tracing();
+        let net = Testnet::create(3).await;
+
+        let mut handles = net.handles();
+        let handle0 = handles.next().unwrap();
+        let handle1 = handles.next().unwrap();
+
+        drop(handles);
+        let handle = net.spawn();
+
+        let listener0 = handle0.event_listener();
+
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let client = NoopProvider::default();
+        let pool = testing_pool();
+        let config = NetworkConfigBuilder::new(secret_key).build(client);
+        let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone())
+            .split_with_handle();
+        tokio::task::spawn(network);
+
+        network_handle.update_sync_state(reth_interfaces::sync::SyncState::Idle);
+
+        assert!(!NetworkInfo::is_syncing(&network_handle));
+
+        // wait for all initiator connections
+        let mut established = listener0.take(2);
+        while let Some(ev) = established.next().await {
+            match ev {
+                NetworkEvent::SessionEstablished {
+                    peer_id,
+                    capabilities,
+                    messages,
+                    status,
+                    version,
+                } => {
+                    // to insert a new peer in transactions peerset
+                    transactions.on_network_event(NetworkEvent::SessionEstablished {
+                        peer_id,
+                        capabilities,
+                        messages,
+                        status,
+                        version,
+                    })
+                }
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                _ => {
+                    panic!("unexpected event")
+                }
+            }
+        }
+        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
+        let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
+        let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
+        transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
+            peer_id: handle1.peer_id().clone(),
+            msg: Transactions(vec![signed_tx.clone()]),
+        });
+        assert_eq!(
+            *handle1.peer_id(),
+            transactions.transactions_by_peers.get(&signed_tx.hash()).unwrap()[0]
+        );
+        handle.terminate().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_on_get_pooled_transactions_network() {
+        reth_tracing::init_test_tracing();
+        let net = Testnet::create(2).await;
+
+        let mut handles = net.handles();
+        let handle0 = handles.next().unwrap();
+        let handle1 = handles.next().unwrap();
+
+        drop(handles);
+        let handle = net.spawn();
+
+        let listener0 = handle0.event_listener();
+
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+        let client = NoopProvider::default();
+        let pool = testing_pool();
+        let config = NetworkConfigBuilder::new(secret_key).build(client);
+        let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone())
+            .split_with_handle();
+        tokio::task::spawn(network);
+
+        network_handle.update_sync_state(reth_interfaces::sync::SyncState::Idle);
+
+        assert!(!NetworkInfo::is_syncing(&network_handle));
+
+        // wait for all initiator connections
+        let mut established = listener0.take(2);
+        while let Some(ev) = established.next().await {
+            match ev {
+                NetworkEvent::SessionEstablished {
+                    peer_id,
+                    capabilities,
+                    messages,
+                    status,
+                    version,
+                } => transactions.on_network_event(NetworkEvent::SessionEstablished {
+                    peer_id,
+                    capabilities,
+                    messages,
+                    status,
+                    version,
+                }),
+                NetworkEvent::PeerAdded(_peer_id) => continue,
+                _ => {
+                    panic!("unexpected event")
+                }
+            }
+        }
+        handle.terminate().await;
+
+        let tx = MockTransaction::eip1559();
+        let _ = transactions
+            .pool
+            .add_transaction(reth_transaction_pool::TransactionOrigin::External, tx.clone())
+            .await;
+
+        let request = GetPooledTransactions(vec![tx.get_hash()]);
+
+        let (send, receive) = oneshot::channel::<RequestResult<PooledTransactions>>();
+
+        transactions.on_network_tx_event(NetworkTransactionEvent::GetPooledTransactions {
+            peer_id: handle1.peer_id().clone(),
+            request,
+            response: send,
+        });
+
+        match receive.await.unwrap() {
+            Ok(PooledTransactions(transactions)) => {
+                assert_eq!(transactions.len(), 1);
+            }
+            Err(e) => {
+                panic!("error: {:?}", e);
+            }
+        }
     }
 }
