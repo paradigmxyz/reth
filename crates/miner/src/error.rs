@@ -2,5 +2,5 @@
 
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
-#[error("Payload error")]
-pub struct PayloadError;
+#[error("Payload builder error")]
+pub struct PayloadBuilderError;
