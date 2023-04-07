@@ -8,7 +8,10 @@ use reth_interfaces::{
     Error,
 };
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
-use reth_provider::{BlockchainTreePendingStateProvider, ExecutorFactory, PostStateDataProvider};
+use reth_provider::{
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
+    PostStateDataProvider,
+};
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
@@ -99,11 +102,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
     }
 }
 
-// impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
-//     for ShareableBlockchainTree<DB, C, EF>
-// {
-
-//     fn subscribe_canon_state(&self) -> reth_provider::CanonStateNotifications  {
-//         todo!()
-//     }
-// }
+impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
+    for ShareableBlockchainTree<DB, C, EF>
+{
+    fn subscribe_canon_state(&self) -> reth_provider::CanonStateNotifications {
+        self.tree.read().subscribe_canon_state()
+    }
+}

@@ -2,7 +2,7 @@
 use crate::PostState;
 use auto_impl::auto_impl;
 use core::fmt;
-use reth_primitives::{BlockNumber, SealedBlockWithSenders};
+use reth_primitives::{BlockNumHash, BlockNumber, Receipt, SealedBlockWithSenders, TxHash};
 use std::{collections::BTreeMap, fmt::Formatter, sync::Arc};
 use tokio::sync::broadcast::{Receiver, Sender};
 
@@ -14,6 +14,33 @@ pub trait SubChain: Send + Sync {
 
     /// Get chain blocks.
     fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders>;
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct BlockReceipts {
+    pub block: BlockNumHash,
+    pub tx_receipts: Vec<(TxHash, Receipt)>,
+}
+
+impl dyn SubChain {
+    /// Get all receipts with attachment.
+    ///
+    /// Attachment includes block number, block hash, transaction hash and transaction index.
+    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
+        let mut receipt_attch = Vec::new();
+        let mut receipts = self.state().receipts().iter();
+        for (block_num, block) in self.blocks().iter() {
+            let block_num_hash = BlockNumHash::new(*block_num, block.hash());
+            let mut tx_receipts = Vec::new();
+            for tx in block.body.iter() {
+                if let Some(receipt) = receipts.next() {
+                    tx_receipts.push((tx.hash(), receipt.clone()));
+                }
+            }
+            receipt_attch.push(BlockReceipts { block: block_num_hash, tx_receipts });
+        }
+        receipt_attch
+    }
 }
 
 impl fmt::Debug for dyn SubChain {
@@ -62,7 +89,7 @@ impl PartialEq for CanonStateNotification {
 
 impl CanonStateNotification {
     /// Get old chain if any.
-    pub fn old(&self) -> Option<Arc<dyn SubChain>> {
+    pub fn reverted(&self) -> Option<Arc<dyn SubChain>> {
         match self {
             Self::Reorg { old, .. } => Some(old.clone()),
             Self::Revert { old } => Some(old.clone()),
@@ -71,12 +98,31 @@ impl CanonStateNotification {
     }
 
     /// Get new chain if any.
-    pub fn new(&self) -> Option<Arc<dyn SubChain>> {
+    pub fn commited(&self) -> Option<Arc<dyn SubChain>> {
         match self {
             Self::Reorg { new, .. } => Some(new.clone()),
             Self::Revert { .. } => None,
             Self::Commit { new } => Some(new.clone()),
         }
+    }
+
+    /// Return receipt with its block number and transaction hash.
+    ///
+    /// Last boolean is true if receipt is from reverted block.
+    pub fn block_receipts(&self) -> Vec<(BlockReceipts, bool)> {
+        let mut receipts = Vec::new();
+
+        // get old receipts
+        if let Some(old) = self.reverted() {
+            receipts
+                .extend(old.receipts_with_attachment().into_iter().map(|receipt| (receipt, true)));
+        }
+        // get new receipts
+        if let Some(new) = self.commited() {
+            receipts
+                .extend(new.receipts_with_attachment().into_iter().map(|receipt| (receipt, false)));
+        }
+        receipts
     }
 }
 

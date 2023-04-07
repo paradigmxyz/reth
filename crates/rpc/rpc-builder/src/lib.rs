@@ -60,10 +60,9 @@ use jsonrpsee::{
     server::{IdProvider, Server, ServerHandle},
     RpcModule,
 };
-use reth_interfaces::events::ChainEventSubscriptions;
 use reth_ipc::server::IpcServer;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{
     eth::cache::EthStateCache, AdminApi, DebugApi, EthApi, EthFilter, EthPubSub,
     EthSubscriptionIdProvider, NetApi, TraceApi, TracingCallGuard, Web3Api,
@@ -119,7 +118,7 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: ChainEventSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
 {
     let module_config = module_config.into();
     let server_config = server_config.into();
@@ -199,7 +198,7 @@ impl<Client, Pool, Network, Tasks, Events> RpcModuleBuilder<Client, Pool, Networ
     /// Configure the event subscriber instance
     pub fn with_events<E>(self, events: E) -> RpcModuleBuilder<Client, Pool, Network, Tasks, E>
     where
-        E: ChainEventSubscriptions + 'static,
+        E: CanonStateSubscriptions + 'static,
     {
         let Self { client, pool, executor, network, .. } = self;
         RpcModuleBuilder { client, network, pool, executor, events }
@@ -212,7 +211,7 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: ChainEventSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
 {
     /// Configures all [RpcModule]s specific to the given [TransportRpcModuleConfig] which can be
     /// used to start the transport server(s).
@@ -364,7 +363,7 @@ impl RpcModuleSelection {
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
-        Events: ChainEventSubscriptions + Clone + 'static,
+        Events: CanonStateSubscriptions + Clone + 'static,
     {
         let mut registry = RethModuleRegistry::new(client, pool, network, executor, events, config);
         registry.module_for(self)
@@ -529,7 +528,7 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: ChainEventSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
 {
     /// Register Eth Namespace
     pub fn register_eth(&mut self) -> &mut Self {

@@ -3,7 +3,7 @@ use crate::eth::{cache::EthStateCache, logs_utils};
 use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{filter::FilteredParams, Receipt, TransactionSigned, TxHash};
+use reth_primitives::{filter::FilteredParams, TxHash};
 use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
@@ -216,56 +216,40 @@ where
     Pool: 'static,
 {
     /// Returns a stream that yields all new RPC blocks.
-    fn into_new_headers_stream(self) -> impl Stream<Item = impl IntoIterator<Item = Header>> {
-        BroadcastStream::new(self.chain_events.subscribe_canon_state()).map(|new_block| {
-            let new_chain = new_block.expect("new block subscription never ends; qed");
-            new_chain
-                .new()
-                .map(|c| {
-                    c.blocks()
-                        .iter()
-                        .map(|(num, block)| Header::from_primitive_with_hash(block.header.clone()))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
-        })
+    fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
+        BroadcastStream::new(self.chain_events.subscribe_canon_state())
+            .map(|new_block| {
+                let new_chain = new_block.expect("new block subscription never ends; qed");
+                new_chain
+                    .commited()
+                    .map(|c| {
+                        c.blocks()
+                            .iter()
+                            .map(|(_, block)| {
+                                Header::from_primitive_with_hash(block.header.clone())
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .flat_map(futures::stream::iter)
     }
 
     /// Returns a stream that yields all logs that match the given filter.
-    fn into_log_stream(
-        self,
-        filter: FilteredParams,
-    ) -> impl Stream<Item = impl IntoIterator<Item = Log>> {
+    fn into_log_stream(self, filter: FilteredParams) -> impl Stream<Item = Log> {
         BroadcastStream::new(self.chain_events.subscribe_canon_state())
-            .filter_map(move |new_block| {
-                Box::pin(get_block_receipts(self.eth_cache.clone(), new_block.ok()))
+            .map(move |canon_state| {
+                canon_state.expect("new block subscription never ends; qed").block_receipts()
             })
-            .flat_map(move |(new_block, transactions, receipts)| {
-                let block_hash = new_block.hash;
-                let block_number = new_block.header.number;
+            .flat_map(futures::stream::iter)
+            .flat_map(move |(block_receipts, removed)| {
                 let all_logs = logs_utils::matching_block_logs(
                     &filter,
-                    block_hash,
-                    block_number,
-                    transactions.into_iter().map(|tx| tx.hash).zip(receipts),
+                    block_receipts.block,
+                    block_receipts.tx_receipts.into_iter(),
+                    removed,
                 );
                 futures::stream::iter(all_logs)
             })
-    }
-}
-
-/// Helper function for getting block receipts and transactions
-async fn get_block_receipts(
-    eth_cache: EthStateCache,
-    new_block: Option<NewBlockNotification>,
-) -> Option<(NewBlockNotification, Vec<TransactionSigned>, Vec<Receipt>)> {
-    let Some(new_block) = new_block else { return None; };
-    let (txs, receipts) = futures::join!(
-        eth_cache.get_block_transactions(new_block.hash),
-        eth_cache.get_receipts(new_block.hash)
-    );
-    match (txs.ok().flatten(), receipts.ok().flatten()) {
-        (Some(txs), Some(receipts)) => Some((new_block, txs, receipts)),
-        _ => None,
     }
 }

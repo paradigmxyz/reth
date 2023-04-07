@@ -194,9 +194,9 @@ where
                         logs_utils::append_matching_block_logs(
                             &mut all_logs,
                             &filter,
-                            block_hash,
-                            block.number,
+                            (block_hash, block.number).into(),
                             block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                            false,
                         );
                     }
                 }
@@ -268,9 +268,9 @@ where
                         logs_utils::append_matching_block_logs(
                             &mut all_logs,
                             &filter_params,
-                            block_hash,
-                            block_number,
+                            (block_number, block_hash).into(),
                             block.body.into_iter().map(|tx| tx.hash).zip(receipts),
+                            false,
                         );
 
                         // size check

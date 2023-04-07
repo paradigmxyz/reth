@@ -659,6 +659,11 @@ impl std::fmt::Debug for BlockNumHash {
 }
 
 impl BlockNumHash {
+    /// Creates a new `BlockNumHash` from a block number and hash.
+    pub fn new(number: BlockNumber, hash: BlockHash) -> Self {
+        Self { number, hash }
+    }
+
     /// Consumes `Self` and returns [`BlockNumber`], [`BlockHash`]
     pub fn into_components(self) -> (BlockNumber, BlockHash) {
         (self.number, self.hash)
@@ -668,6 +673,12 @@ impl BlockNumHash {
 impl From<(BlockNumber, BlockHash)> for BlockNumHash {
     fn from(val: (BlockNumber, BlockHash)) -> Self {
         BlockNumHash { number: val.0, hash: val.1 }
+    }
+}
+
+impl From<(BlockHash, BlockNumber)> for BlockNumHash {
+    fn from(val: (BlockHash, BlockNumber)) -> Self {
+        BlockNumHash { hash: val.0, number: val.1 }
     }
 }
 

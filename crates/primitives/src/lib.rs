@@ -86,6 +86,8 @@ pub type Address = H160;
 pub type TxHash = H256;
 /// The sequence number of all existing transactions.
 pub type TxNumber = u64;
+/// The index of transaction in a block.
+pub type TxIndex = u64;
 /// Chain identifier type (introduced in EIP-155).
 pub type ChainId = u64;
 /// An account storage key.
