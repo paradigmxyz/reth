@@ -9,24 +9,22 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-// TODO: remove this
-#![allow(dead_code)]
 
-//! reth miner implementation
+//! reth payload builder implementation
 
-mod builder;
+pub mod error;
 mod payload;
+mod service;
+mod traits;
 pub use payload::{BuiltPayload, PayloadBuilderAttributes};
+pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore as PayloadStore2};
+pub use traits::{PayloadJob, PayloadJobGenerator};
 
 use crate::error::PayloadBuilderError;
 use parking_lot::Mutex;
-use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes, PayloadId};
 use reth_primitives::{H256, U256};
-use reth_rpc_types::engine::{ExecutionPayload};
+use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes, PayloadId};
 use std::{collections::HashMap, sync::Arc};
-
-pub mod error;
-pub mod traits;
 
 /// A type that has access to all locally built payloads and can create new ones.
 /// This type is intended to by used by the engine API.
