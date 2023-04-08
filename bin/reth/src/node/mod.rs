@@ -2,8 +2,8 @@
 //!
 //! Starts the client
 use crate::{
-    args::{DebugArgs, NetworkArgs, RpcServerArgs},
-    dirs::{ConfigPath, DbPath, PlatformPath},
+    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
+    dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -59,6 +59,7 @@ use reth_stages::{
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{EthTransactionValidator, TransactionPool};
+use secp256k1::SecretKey;
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     path::PathBuf,
@@ -108,6 +109,12 @@ pub struct Command {
         value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    /// Secret key to use for this node.
+    ///
+    /// This also will deterministically set the peer ID.
+    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
+    p2p_secret_key: PlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -168,8 +175,13 @@ impl Command {
         info!(target: "reth::cli", "Test transaction pool initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let network_config =
-            self.load_network_config(&config, Arc::clone(&db), ctx.task_executor.clone());
+        let secret_key = get_secret_key(&self.p2p_secret_key)?;
+        let network_config = self.load_network_config(
+            &config,
+            Arc::clone(&db),
+            ctx.task_executor.clone(),
+            secret_key,
+        );
         let network = self
             .start_network(network_config, &ctx.task_executor, transaction_pool.clone())
             .await?;
@@ -548,11 +560,12 @@ impl Command {
         config: &Config,
         db: Arc<Env<WriteMap>>,
         executor: TaskExecutor,
+        secret_key: SecretKey,
     ) -> NetworkConfig<ShareableDatabase<Arc<Env<WriteMap>>>> {
         let head = self.lookup_head(Arc::clone(&db)).expect("the head block is missing");
 
         self.network
-            .network_config(config, self.chain.clone())
+            .network_config(config, self.chain.clone(), secret_key)
             .with_task_executor(Box::new(executor))
             .set_head(head)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(

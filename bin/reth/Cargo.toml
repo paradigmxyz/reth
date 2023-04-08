@@ -34,6 +34,13 @@ reth-net-nat = { path = "../../crates/net/nat" }
 reth-miner = { path = "../../crates/miner" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 
+# crypto
+secp256k1 = { version = "0.26.0", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
 # tracing
 tracing = "0.1"
 
@@ -72,3 +79,5 @@ eyre = "0.6.8"
 clap = { version = "4", features = ["derive", "cargo"] }
 tempfile = { version = "3.3.0" }
 backon = "0.4"
+hex = "0.4"
+thiserror = "1.0"
