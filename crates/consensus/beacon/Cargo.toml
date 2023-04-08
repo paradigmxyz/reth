@@ -7,7 +7,7 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [dependencies]
-# reth 
+# reth
 reth-consensus-common = { path = "../common" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
@@ -15,6 +15,7 @@ reth-stages = { path = "../../stages" }
 reth-db = { path = "../../storage/db" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-tasks = { path = "../../tasks" }
+reth-miner = { path = "../../miner" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
