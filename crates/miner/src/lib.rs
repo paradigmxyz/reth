@@ -18,10 +18,11 @@ mod builder;
 mod payload;
 pub use payload::{BuiltPayload, PayloadBuilderAttributes};
 
-use crate::error::PayloadError;
+use crate::error::PayloadBuilderError;
 use parking_lot::Mutex;
+use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes, PayloadId};
 use reth_primitives::{H256, U256};
-use reth_rpc_types::engine::{ExecutionPayload, PayloadAttributes, PayloadId};
+use reth_rpc_types::engine::{ExecutionPayload};
 use std::{collections::HashMap, sync::Arc};
 
 pub mod error;
@@ -33,10 +34,10 @@ pub trait PayloadStore: Send + Sync {
     /// Returns true if the payload store contains the given payload.
     fn contains(&self, payload_id: PayloadId) -> bool;
 
-    /// Returns the current [ExecutionPayload] associated with the [PayloadId].
+    /// Returns the current [ExecutionPayloadEnvelope] associated with the [PayloadId].
     ///
     /// Returns `None` if the payload is not yet built, See [PayloadStore::new_payload].
-    fn get_execution_payload(&self, payload_id: PayloadId) -> Option<ExecutionPayload>;
+    fn get_execution_payload(&self, payload_id: PayloadId) -> Option<ExecutionPayloadEnvelope>;
 
     /// Builds and stores a new payload using the given attributes.
     ///
@@ -46,7 +47,7 @@ pub trait PayloadStore: Send + Sync {
         &self,
         parent: H256,
         attributes: PayloadAttributes,
-    ) -> Result<PayloadId, PayloadError>;
+    ) -> Result<PayloadId, PayloadBuilderError>;
 }
 
 /// A simple in-memory payload store.
@@ -60,7 +61,7 @@ impl PayloadStore for TestPayloadStore {
         self.payloads.lock().contains_key(&payload_id)
     }
 
-    fn get_execution_payload(&self, _payload_id: PayloadId) -> Option<ExecutionPayload> {
+    fn get_execution_payload(&self, _payload_id: PayloadId) -> Option<ExecutionPayloadEnvelope> {
         // TODO requires conversion
         None
     }
@@ -69,7 +70,7 @@ impl PayloadStore for TestPayloadStore {
         &self,
         parent: H256,
         attributes: PayloadAttributes,
-    ) -> Result<PayloadId, PayloadError> {
+    ) -> Result<PayloadId, PayloadBuilderError> {
         let attr = PayloadBuilderAttributes::new(parent, attributes);
         let payload_id = attr.payload_id();
         self.payloads

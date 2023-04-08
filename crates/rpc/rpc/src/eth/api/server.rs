@@ -372,7 +372,7 @@ where
 
     /// Handler for: `eth_hashrate`
     async fn hashrate(&self) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(U256::ZERO)
     }
 
     /// Handler for: `eth_getWork`
@@ -382,7 +382,7 @@ where
 
     /// Handler for: `eth_submitHashrate`
     async fn submit_hashrate(&self, _hashrate: U256, _id: H256) -> Result<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(false)
     }
 
     /// Handler for: `eth_submitWork`
