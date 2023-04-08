@@ -2,8 +2,8 @@
 //!
 //! Stage debugging tool
 use crate::{
-    args::NetworkArgs,
-    dirs::{ConfigPath, DbPath, PlatformPath},
+    args::{get_secret_key, NetworkArgs},
+    dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
     prometheus_exporter, StageEnum,
 };
 use clap::Parser;
@@ -55,6 +55,12 @@ pub struct Command {
         value_parser = chain_spec_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    /// Secret key to use for this node.
+    ///
+    /// This also will deterministically set the peer ID.
+    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
+    p2p_secret_key: PlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -125,9 +131,11 @@ impl Command {
                     });
                 }
 
+                let p2p_secret_key = get_secret_key(&self.p2p_secret_key)?;
+
                 let network = self
                     .network
-                    .network_config(&config, self.chain.clone())
+                    .network_config(&config, self.chain.clone(), p2p_secret_key)
                     .build(Arc::new(ShareableDatabase::new(db.clone(), self.chain.clone())))
                     .start_network()
                     .await?;
