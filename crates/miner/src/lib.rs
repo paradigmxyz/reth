@@ -22,13 +22,14 @@ mod payload;
 mod service;
 mod traits;
 pub use payload::{BuiltPayload, PayloadBuilderAttributes};
+pub use reth_rpc_types::engine::PayloadId;
 pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore as PayloadStore2};
 pub use traits::{PayloadJob, PayloadJobGenerator};
 
 use crate::error::PayloadBuilderError;
 use parking_lot::Mutex;
 use reth_primitives::{H256, U256};
-use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes, PayloadId};
+use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes};
 use std::{collections::HashMap, sync::Arc};
 
 /// A type that has access to all locally built payloads and can create new ones.

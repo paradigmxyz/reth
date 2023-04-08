@@ -46,6 +46,7 @@ impl BuiltPayload {
 /// Container type for all components required to build a payload.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PayloadBuilderAttributes {
+    // TODO include id here
     /// Parent block to build the payload on top
     pub(crate) parent: H256,
     /// Timestamp for the generated payload
@@ -75,7 +76,7 @@ impl PayloadBuilderAttributes {
     /// Generates the payload id for the configured payload
     ///
     /// Returns an 8-byte identifier by hashing the payload components.
-    pub fn payload_id(&self) -> PayloadId {
+    pub(crate) fn payload_id(&self) -> PayloadId {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
         hasher.update(self.parent.as_bytes());
