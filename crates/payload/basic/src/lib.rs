@@ -135,8 +135,14 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // check if the deadline is reached
+        let deadline_reached = this.deadline.as_mut().poll(cx).is_ready();
+
         // check if the interval is reached
-        if this.interval.poll_tick(cx).is_ready() {
+        if this.interval.poll_tick(cx).is_ready() &&
+            this.pending_block.is_none() &&
+            !deadline_reached
+        {
             trace!("spawn new payload build task");
             let (tx, rx) = oneshot::channel();
             let client = this.client.clone();
@@ -168,8 +174,7 @@ where
             }
         }
 
-        // check if the deadline is reached
-        if this.deadline.as_mut().poll(cx).is_ready() {
+        if deadline_reached {
             trace!("Payload building deadline reached");
             return Poll::Ready(None)
         }
