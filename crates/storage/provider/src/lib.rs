@@ -13,9 +13,9 @@ mod traits;
 pub use traits::{
     AccountProvider, BlockExecutor, BlockHashProvider, BlockIdProvider, BlockProvider,
     BlockchainTreePendingStateProvider, CanonStateNotification, CanonStateNotificationSender,
-    CanonStateNotificationSink, CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider,
-    ExecutorFactory, HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProvider,
-    StateProviderBox, StateProviderFactory, SubChain, TransactionsProvider, WithdrawalsProvider,
+    CanonStateNotifications, CanonStateSubscriptions, EvmEnvProvider, ExecutorFactory,
+    HeaderProvider, PostStateDataProvider, ReceiptProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Provider trait implementations.

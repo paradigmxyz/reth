@@ -294,7 +294,7 @@ impl PostState {
     pub fn revert_to(&mut self, transition_id: TransitionId) -> Vec<Change> {
         let mut changes_to_revert = Vec::new();
         self.changes.retain(|change| {
-            if change.transition_id() >= transition_id as u64 {
+            if change.transition_id() >= transition_id {
                 changes_to_revert.push(change.clone());
                 false
             } else {

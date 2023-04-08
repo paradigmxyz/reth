@@ -473,9 +473,7 @@ mod tests {
         post_state::PostState,
         test_utils::TestExecutorFactory,
     };
-    use reth_interfaces::{
-        sync::NoopSyncStateUpdate, test_utils::TestConsensus,
-    };
+    use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
@@ -555,7 +553,7 @@ mod tests {
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
         let config = BlockchainTreeConfig::new(1, 2, 3);
-        let (canon_state_notification_sender,_) = tokio::sync::broadcast::channel(3);
+        let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
             BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),

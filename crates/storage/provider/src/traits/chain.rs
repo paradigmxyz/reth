@@ -1,62 +1,20 @@
 ///! Canonical chain state notification trait and types.
-use crate::PostState;
+use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
-use parking_lot::Mutex;
-use core::fmt;
-use reth_primitives::{BlockNumHash, BlockNumber, Receipt, SealedBlockWithSenders, TxHash};
-use std::{collections::BTreeMap, fmt::Formatter, sync::Arc};
-use tokio::sync::broadcast::{Receiver, Sender, error::SendError};
+use std::sync::Arc;
+use tokio::sync::broadcast::{Receiver, Sender};
 
-/// Trait that holds blocks and post state of execution those blocks.
+/// Type alias for a receiver that receives [NewBlockNotification]
+pub type CanonStateNotifications = Receiver<CanonStateNotification>;
+
+/// Type alias for a sender that sends [CanonChainStateNotification]
+pub type CanonStateNotificationSender = Sender<CanonStateNotification>;
+
+/// A type that allows to register chain related event subscriptions.
 #[auto_impl(&, Arc)]
-pub trait SubChain: Send + Sync {
-    /// Get chain post state.
-    fn state(&self) -> &PostState;
-
-    /// Get chain blocks.
-    fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders>;
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct BlockReceipts {
-    pub block: BlockNumHash,
-    pub tx_receipts: Vec<(TxHash, Receipt)>,
-}
-
-impl dyn SubChain {
-    /// Get all receipts with attachment.
-    ///
-    /// Attachment includes block number, block hash, transaction hash and transaction index.
-    pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
-        let mut receipt_attch = Vec::new();
-        let mut receipts = self.state().receipts().iter();
-        for (block_num, block) in self.blocks().iter() {
-            let block_num_hash = BlockNumHash::new(*block_num, block.hash());
-            let mut tx_receipts = Vec::new();
-            for tx in block.body.iter() {
-                if let Some(receipt) = receipts.next() {
-                    tx_receipts.push((tx.hash(), receipt.clone()));
-                }
-            }
-            receipt_attch.push(BlockReceipts { block: block_num_hash, tx_receipts });
-        }
-        receipt_attch
-    }
-}
-
-impl fmt::Debug for dyn SubChain {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SubChain")
-            .field("state", &self.state())
-            .field("blocks", &self.blocks())
-            .finish()
-    }
-}
-
-impl PartialEq for dyn SubChain {
-    fn eq(&self, other: &Self) -> bool {
-        self.state() == other.state() && self.blocks() == other.blocks()
-    }
+pub trait CanonStateSubscriptions: Send + Sync {
+    /// Get notified when a new block was imported.
+    fn subscribe_canon_state(&self) -> CanonStateNotifications;
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
@@ -66,11 +24,11 @@ impl PartialEq for dyn SubChain {
 #[allow(missing_docs)]
 pub enum CanonStateNotification {
     /// Chain reorgs and both old and new chain are returned.
-    Reorg { old: Arc<dyn SubChain>, new: Arc<dyn SubChain> },
+    Reorg { old: Arc<Chain>, new: Arc<Chain> },
     /// Chain got reverted without reorg and only old chain is returned.
-    Revert { old: Arc<dyn SubChain> },
+    Revert { old: Arc<Chain> },
     /// Chain got extended without reorg and only new chain is returned.
-    Commit { new: Arc<dyn SubChain> },
+    Commit { new: Arc<Chain> },
 }
 
 // For one reason or another, the compiler can't derive PartialEq for CanonStateNotification.
@@ -90,7 +48,7 @@ impl PartialEq for CanonStateNotification {
 
 impl CanonStateNotification {
     /// Get old chain if any.
-    pub fn reverted(&self) -> Option<Arc<dyn SubChain>> {
+    pub fn reverted(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Reorg { old, .. } => Some(old.clone()),
             Self::Revert { old } => Some(old.clone()),
@@ -99,7 +57,7 @@ impl CanonStateNotification {
     }
 
     /// Get new chain if any.
-    pub fn commited(&self) -> Option<Arc<dyn SubChain>> {
+    pub fn commited(&self) -> Option<Arc<Chain>> {
         match self {
             Self::Reorg { new, .. } => Some(new.clone()),
             Self::Revert { .. } => None,
@@ -124,55 +82,5 @@ impl CanonStateNotification {
                 .extend(new.receipts_with_attachment().into_iter().map(|receipt| (receipt, false)));
         }
         receipts
-    }
-}
-
-/// Type alias for a receiver that receives [NewBlockNotification]
-pub type CanonStateNotifications = Receiver<CanonStateNotification>;
-
-/// Type alias for a sender that sends [CanonChainStateNotification]
-pub type CanonStateNotificationSender = Sender<CanonStateNotification>;
-
-/// A type that allows to register chain related event subscriptions.
-#[auto_impl(&, Arc)]
-pub trait CanonStateSubscriptions: Send + Sync {
-    /// Get notified when a new block was imported.
-    fn subscribe_canon_state(&self) -> CanonStateNotifications;
-}
-
-
-
-/// A shareable Sender that allows to send [CanonStateNotification] to all receivers.
-#[derive(Debug, Clone)]
-pub struct CanonStateNotificationSink {
-    inner: Arc<Mutex<Sender<CanonStateNotification>>>,
-}
-
-// === impl NewBlockNotificationSink ===
-
-impl CanonStateNotificationSink {
-    /// Creates a new NewBlockNotificationSink with the given capacity.
-    // // size of the broadcast is double of max reorg depth because at max reorg depth we can have
-    //         // send at least N block at the time.
-    pub fn new(capacity: usize) -> Self {
-        let inner = tokio::sync::broadcast::channel(capacity);
-        Self { inner: Arc::new(Mutex::new(inner.0)) }
-    }
-
-    /// Attempts to send a value to all active Receiver handles, returning it back if it could not
-    /// be sent.
-    pub fn send(
-        &self,
-        canon_state_change: CanonStateNotification,
-    ) -> Result<usize, SendError<CanonStateNotification>> {
-        let sender = self.inner.lock();
-        sender.send(canon_state_change)
-    }
-
-    /// Creates a new Receiver handle that will receive notifications sent after this call to
-    /// subscribe.
-    pub fn subscribe(&self) -> CanonStateNotifications {
-        let sender = self.inner.lock();
-        sender.subscribe()
     }
 }

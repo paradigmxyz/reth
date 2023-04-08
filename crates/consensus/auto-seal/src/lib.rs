@@ -20,7 +20,7 @@ use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Header, SealedBlock,
     SealedHeader, H256, U256,
 };
-use reth_provider::{CanonStateNotification, CanonStateNotificationSender};
+use reth_provider::CanonStateNotificationSender;
 use reth_transaction_pool::TransactionPool;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{mpsc::UnboundedSender, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -117,15 +117,8 @@ impl<Client, Pool: TransactionPool> AutoSealBuilder<Client, Pool> {
 
     /// Consumes the type and returns all components
     pub fn build(self) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool>) {
-        let Self {
-            client,
-            consensus,
-            pool,
-            mode,
-            storage,
-            to_engine,
-            canon_state_notification,
-        } = self;
+        let Self { client, consensus, pool, mode, storage, to_engine, canon_state_notification } =
+            self;
         let auto_client = AutoSealClient::new(storage.clone());
         let task = MiningTask::new(
             Arc::clone(&consensus.chain_spec),
