@@ -10,7 +10,12 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! reth payload builder implementation
+//! This trait implements the [PayloadBuilderService] responsible for managing payload jobs.
+//!
+//! It Defines the abstractions to create and update payloads:
+//!   - [PayloadJobGenerator]: a type that knows how to create new jobs for creating payloads based
+//!     on [PayloadAttributes].
+//!   - [PayloadJob]: a type that can yields (better) payloads over time.
 
 pub mod error;
 mod payload;

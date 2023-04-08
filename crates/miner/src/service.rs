@@ -53,7 +53,9 @@ impl PayloadBuilderHandle {
 
     /// Starts building a new payload for the given payload attributes.
     ///
-    /// Returns the identifier of the new payload.
+    /// Returns the identifier of the payload.
+    ///
+    /// Note: if there's already payload in progress with same identifier, it will be returned.
     pub async fn new_payload(
         &self,
         attr: PayloadBuilderAttributes,
