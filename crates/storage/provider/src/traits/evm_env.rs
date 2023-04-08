@@ -3,7 +3,7 @@ use reth_primitives::{BlockId, Header};
 use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 
 /// A provider type that knows chain specific information required to configure an
-/// [Env](revm_primitives::Env)
+/// [Env](reth_revm_primitives::primitives::Env)
 ///
 /// This type is mainly used to provide required data to configure the EVM environment.
 #[auto_impl::auto_impl(&, Arc)]

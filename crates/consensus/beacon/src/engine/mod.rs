@@ -708,7 +708,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -746,7 +746,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -781,7 +781,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 

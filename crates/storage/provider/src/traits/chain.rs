@@ -4,10 +4,10 @@ use auto_impl::auto_impl;
 use std::sync::Arc;
 use tokio::sync::broadcast::{Receiver, Sender};
 
-/// Type alias for a receiver that receives [NewBlockNotification]
+/// Type alias for a receiver that receives [CanonStateNotification]
 pub type CanonStateNotifications = Receiver<CanonStateNotification>;
 
-/// Type alias for a sender that sends [CanonChainStateNotification]
+/// Type alias for a sender that sends [CanonStateNotification]
 pub type CanonStateNotificationSender = Sender<CanonStateNotification>;
 
 /// A type that allows to register chain related event subscriptions.
@@ -18,8 +18,8 @@ pub trait CanonStateSubscriptions: Send + Sync {
 }
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
-/// and will return all [`PostState`] and [`SealedBlockWithSenders`] of both reverted and commited
-/// blocks.
+/// and will return all [`crate::PostState`] and [`reth_primitives::SealedBlockWithSenders`] of both
+/// reverted and commited blocks.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub enum CanonStateNotification {
