@@ -3,11 +3,10 @@
 //! The payload builder is responsible for building payloads.
 //! Once a new payload is created, it is continuously updated.
 
-use crate::{traits::PayloadJobGenerator, BuiltPayload, PayloadBuilderAttributes};
+use crate::{traits::PayloadJobGenerator, BuiltPayload, PayloadBuilderAttributes, PayloadJob};
 use futures_util::stream::{StreamExt, TryStreamExt};
 use reth_rpc_types::engine::PayloadId;
 use std::{
-    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -79,11 +78,6 @@ pub struct PayloadBuilderService<Gen>
 where
     Gen: PayloadJobGenerator,
 {
-    /// All payloads we're currently tracking.
-    ///
-    /// These are payload jobs that were initiated by the engine API.
-    // TODO this could be merged with the `payload_jobs` list.
-    local_payloads: HashMap<PayloadId, Arc<BuiltPayload>>,
     /// The type that knows how to create new payloads.
     generator: Gen,
     /// All active payload jobs.
@@ -104,7 +98,6 @@ where
     pub fn new(generator: Gen) -> (Self, PayloadBuilderHandle) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let service = Self {
-            local_payloads: HashMap::new(),
             generator,
             payload_jobs: Vec::new(),
             _service_tx: service_tx.clone(),
@@ -114,10 +107,14 @@ where
         (service, handle)
     }
 
-    /// Invoked when a payload job is finished.
-    fn on_job_finished(&mut self, id: PayloadId) {
-        trace!(?id, "payload job finished");
-        self.local_payloads.remove(&id);
+    /// Returns true if the given payload is currently being built.
+    fn contains_payload(&self, id: PayloadId) -> bool {
+        self.payload_jobs.iter().any(|(_, job_id)| *job_id == id)
+    }
+
+    /// Returns the best payload for the given identifier.
+    fn get_payload(&self, id: PayloadId) -> Option<Arc<BuiltPayload>> {
+        self.payload_jobs.iter().find(|(_, job_id)| *job_id == id).map(|(j, _)| j.best_payload())
     }
 }
 
@@ -142,19 +139,19 @@ where
                 loop {
                     match job.try_poll_next_unpin(cx) {
                         Poll::Ready(Some(Ok(payload))) => {
-                            this.local_payloads.insert(id, payload);
+                            trace!(?payload, %id, "new payload");
                         }
                         Poll::Ready(Some(Err(err))) => {
                             warn!(?err, %id, "payload job failed; resolving payload");
-                            this.on_job_finished(id);
                             continue 'jobs
                         }
                         Poll::Ready(None) => {
                             // job is done
-                            this.on_job_finished(id);
+                            trace!(?id, "payload job finished");
                             continue 'jobs
                         }
                         Poll::Pending => {
+                            // still pending, put it back
                             this.payload_jobs.push((job, id));
                             continue 'jobs
                         }
@@ -171,13 +168,10 @@ where
                 match cmd {
                     PayloadServiceCommand::BuildNewPayload(attr, tx) => {
                         let id = attr.payload_id();
-                        if let std::collections::hash_map::Entry::Vacant(e) =
-                            this.local_payloads.entry(id)
-                        {
+                        if !this.contains_payload(id) {
                             // no job for this payload yet, create one
                             new_job = true;
-                            let (block, job) = this.generator.new_payload_job(attr);
-                            e.insert(block);
+                            let job = this.generator.new_payload_job(attr);
                             this.payload_jobs.push((job, id));
                         }
 
@@ -185,7 +179,7 @@ where
                         let _ = tx.send(id);
                     }
                     PayloadServiceCommand::GetPayload(id, tx) => {
-                        let _ = tx.send(this.local_payloads.get(&id).cloned());
+                        let _ = tx.send(this.get_payload(id));
                     }
                 }
             }

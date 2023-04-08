@@ -8,9 +8,18 @@ use std::sync::Arc;
 /// A type that can build a payload.
 ///
 /// This type is a Stream that yields better payloads.
+///
+/// Note: PaylodJob need to be cancel safe.
+///
+/// TODO convert this into a future?
 pub trait PayloadJob:
     TryStream<Ok = Arc<BuiltPayload>, Error = PayloadBuilderError> + Send + Sync
 {
+    /// Returns the best payload that has been built so far.
+    ///
+    /// Note: this is expected to be an empty block without transaction if nothing has been built
+    /// yet.
+    fn best_payload(&self) -> Arc<BuiltPayload>;
 }
 
 /// A type that knows how to create new jobs for creating payloads.
@@ -24,5 +33,5 @@ pub trait PayloadJobGenerator: Send + Sync {
     ///
     /// Note: this is expected to build a new (empty) payload without transactions, so it can be
     /// returned directly. when asked for
-    fn new_payload_job(&self, attr: PayloadBuilderAttributes) -> (Arc<BuiltPayload>, Self::Job);
+    fn new_payload_job(&self, attr: PayloadBuilderAttributes) -> Self::Job;
 }
