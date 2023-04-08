@@ -121,7 +121,7 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     /// The best payload so far.
     best_payload: Arc<BuiltPayload>,
     /// Receiver for the block that is currently being built.
-    pending_block: Option<PendingBlock>,
+    pending_block: Option<PendingPayload>,
 }
 
 impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
@@ -151,7 +151,7 @@ where
             let _cancel = cancel.clone();
             this.executor
                 .spawn_blocking(Box::pin(async move { build_payload(client, pool, cancel, tx) }));
-            this.pending_block = Some(PendingBlock { _cancel, block: rx });
+            this.pending_block = Some(PendingPayload { _cancel, payload: rx });
         }
 
         // poll the pending block
@@ -195,18 +195,18 @@ where
 }
 
 /// A future that resolves to the result of the block building job.
-struct PendingBlock {
+struct PendingPayload {
     /// The marker to cancel the job on drop
     _cancel: Cancelled,
     /// The channel to send the result to.
-    block: oneshot::Receiver<Result<BuiltPayload, PayloadBuilderError>>,
+    payload: oneshot::Receiver<Result<BuiltPayload, PayloadBuilderError>>,
 }
 
-impl Future for PendingBlock {
+impl Future for PendingPayload {
     type Output = Result<BuiltPayload, PayloadBuilderError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let res = ready!(self.block.poll_unpin(cx));
+        let res = ready!(self.payload.poll_unpin(cx));
         Poll::Ready(res.map_err(Into::into).and_then(|res| res))
     }
 }
