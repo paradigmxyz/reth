@@ -4508,6 +4508,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-basic-payload-builder"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "reth-miner",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rlp",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-beacon-consensus"
 version = "0.1.0"
 dependencies = [
