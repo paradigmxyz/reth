@@ -428,12 +428,12 @@ impl IntoRecoveredTransaction for MockTransaction {
         });
 
         let signed_tx = TransactionSigned {
-            hash: self.hash().clone(),
+            hash: *self.hash(),
             signature: Signature::default(),
             transaction: tx,
         };
 
-        TransactionSignedEcRecovered::from_signed_transaction(signed_tx.clone(), self.sender())
+        TransactionSignedEcRecovered::from_signed_transaction(signed_tx, self.sender())
     }
 }
 
