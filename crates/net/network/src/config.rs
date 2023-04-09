@@ -241,9 +241,21 @@ impl NetworkConfigBuilder {
         self.listener_addr(addr).discovery_addr(addr)
     }
 
-    /// Sets the socket address the network will listen on
+    /// Sets the socket address the network will listen on.
+    ///
+    /// By default, this is [Ipv4Addr::UNSPECIFIED] on [DEFAULT_DISCOVERY_PORT]
     pub fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = Some(listener_addr);
+        self
+    }
+
+    /// Sets the port of the address the network will listen on.
+    ///
+    /// By default, this is [DEFAULT_DISCOVERY_PORT]
+    pub fn listener_port(mut self, port: u16) -> Self {
+        self.listener_addr
+            .get_or_insert(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, DEFAULT_DISCOVERY_PORT).into())
+            .set_port(port);
         self
     }
 
@@ -275,6 +287,11 @@ impl NetworkConfigBuilder {
     pub fn no_dns_discovery(mut self) -> Self {
         self.dns_discovery_config = None;
         self
+    }
+
+    /// Disables all discovery.
+    pub fn no_discovery(self) -> Self {
+        self.no_discv4_discovery().no_dns_discovery()
     }
 
     /// Sets the boot nodes.
