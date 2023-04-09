@@ -271,27 +271,10 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Disables Discv4 discovery.
-    pub fn no_discv4_discovery(mut self) -> Self {
-        self.discovery_v4_builder = None;
-        self
-    }
-
     /// Sets the dns discovery config to use.
     pub fn dns_discovery(mut self, config: DnsDiscoveryConfig) -> Self {
         self.dns_discovery_config = Some(config);
         self
-    }
-
-    /// Disables DNS discovery
-    pub fn no_dns_discovery(mut self) -> Self {
-        self.dns_discovery_config = None;
-        self
-    }
-
-    /// Disables all discovery.
-    pub fn no_discovery(self) -> Self {
-        self.no_discv4_discovery().no_dns_discovery()
     }
 
     /// Sets the boot nodes.
@@ -306,10 +289,42 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Disables all discovery.
+    pub fn disable_discovery(self) -> Self {
+        self.disable_discv4_discovery().disable_dns_discovery()
+    }
+
+    /// Disables all discovery if the given condition is true.
+    pub fn disable_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_discovery()
+        } else {
+            self
+        }
+    }
+
     /// Disable the Discv4 discovery.
     pub fn disable_discv4_discovery(mut self) -> Self {
         self.discovery_v4_builder = None;
         self
+    }
+
+    /// Disable the DNS discovery if the given condition is true.
+    pub fn disable_dns_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_dns_discovery()
+        } else {
+            self
+        }
+    }
+
+    /// Disable the Discv4 discovery if the given condition is true.
+    pub fn disable_discv4_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_discv4_discovery()
+        } else {
+            self
+        }
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
