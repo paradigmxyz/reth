@@ -688,7 +688,6 @@ struct Peer {
 }
 
 /// Commands to send to the [`TransactionsManager`](crate::transactions::TransactionsManager)
-#[allow(missing_docs)]
 enum TransactionsCommand {
     PropagateHash(H256),
 }
@@ -729,7 +728,8 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key).build(client);
+        let config =
+            NetworkConfigBuilder::new(secret_key).no_discovery().listener_port(0).build(client);
         let (handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
@@ -751,6 +751,7 @@ mod tests {
 
         assert!(pool.is_empty());
     }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_handle_incoming_transactions() {
         reth_tracing::init_test_tracing();
@@ -770,7 +771,8 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key).build(client);
+        let config =
+            NetworkConfigBuilder::new(secret_key).no_discovery().listener_port(0).build(client);
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
@@ -779,7 +781,7 @@ mod tests {
             .split_with_handle();
         tokio::task::spawn(network);
 
-        network_handle.update_sync_state(reth_interfaces::sync::SyncState::Idle);
+        network_handle.update_sync_state(SyncState::Idle);
 
         assert!(!NetworkInfo::is_syncing(&network_handle));
 
@@ -804,8 +806,8 @@ mod tests {
                     })
                 }
                 NetworkEvent::PeerAdded(_peer_id) => continue,
-                _ => {
-                    panic!("unexpected event")
+                ev => {
+                    panic!("unexpected event {ev:?}")
                 }
             }
         }
@@ -813,7 +815,7 @@ mod tests {
         let input = hex::decode("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76").unwrap();
         let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
         transactions.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
-            peer_id: handle1.peer_id().clone(),
+            peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
         assert_eq!(
@@ -842,7 +844,8 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key).build(client);
+        let config =
+            NetworkConfigBuilder::new(secret_key).no_discovery().listener_port(0).build(client);
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
@@ -851,7 +854,7 @@ mod tests {
             .split_with_handle();
         tokio::task::spawn(network);
 
-        network_handle.update_sync_state(reth_interfaces::sync::SyncState::Idle);
+        network_handle.update_sync_state(SyncState::Idle);
 
         assert!(!NetworkInfo::is_syncing(&network_handle));
 
@@ -873,8 +876,8 @@ mod tests {
                     version,
                 }),
                 NetworkEvent::PeerAdded(_peer_id) => continue,
-                _ => {
-                    panic!("unexpected event")
+                ev => {
+                    panic!("unexpected event {ev:?}")
                 }
             }
         }
@@ -891,7 +894,7 @@ mod tests {
         let (send, receive) = oneshot::channel::<RequestResult<PooledTransactions>>();
 
         transactions.on_network_tx_event(NetworkTransactionEvent::GetPooledTransactions {
-            peer_id: handle1.peer_id().clone(),
+            peer_id: *handle1.peer_id(),
             request,
             response: send,
         });
