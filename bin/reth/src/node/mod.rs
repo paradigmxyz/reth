@@ -2,7 +2,7 @@
 //!
 //! Starts the client
 use crate::{
-    args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
+    args::{get_secret_key, DebugArgs, MinerArgs, NetworkArgs, RpcServerArgs},
     dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
     prometheus_exporter,
     runner::CliContext,
@@ -130,6 +130,9 @@ pub struct Command {
 
     #[clap(flatten)]
     debug: DebugArgs,
+
+    #[clap(flatten)]
+    miner: MinerArgs,
 
     /// Automatically mine blocks for new transactions
     #[arg(long)]

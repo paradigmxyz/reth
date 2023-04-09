@@ -14,3 +14,7 @@ pub use debug_args::DebugArgs;
 
 mod secret_key;
 pub use secret_key::{get_secret_key, SecretKeyError};
+
+/// MinerArgs struct for configuring the miner
+mod miner_args;
+pub use miner_args::MinerArgs;
