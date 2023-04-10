@@ -10,18 +10,27 @@
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
 
-//! reth miner implementation
+//! This trait implements the [PayloadBuilderService] responsible for managing payload jobs.
+//!
+//! It Defines the abstractions to create and update payloads:
+//!   - [PayloadJobGenerator]: a type that knows how to create new jobs for creating payloads based
+//!     on [PayloadAttributes].
+//!   - [PayloadJob]: a type that can yields (better) payloads over time.
 
+pub mod error;
 mod payload;
+mod service;
+mod traits;
+pub use payload::{BuiltPayload, PayloadBuilderAttributes};
+pub use reth_rpc_types::engine::PayloadId;
+pub use service::{PayloadBuilderHandle, PayloadBuilderService, PayloadStore as PayloadStore2};
+pub use traits::{PayloadJob, PayloadJobGenerator};
 
 use crate::error::PayloadBuilderError;
 use parking_lot::Mutex;
-pub use payload::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::H256;
-use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes, PayloadId};
+use reth_primitives::{H256, U256};
+use reth_rpc_types::engine::{ExecutionPayloadEnvelope, PayloadAttributes};
 use std::{collections::HashMap, sync::Arc};
-
-pub mod error;
 
 /// A type that has access to all locally built payloads and can create new ones.
 /// This type is intended to by used by the engine API.
@@ -68,7 +77,9 @@ impl PayloadStore for TestPayloadStore {
     ) -> Result<PayloadId, PayloadBuilderError> {
         let attr = PayloadBuilderAttributes::new(parent, attributes);
         let payload_id = attr.payload_id();
-        self.payloads.lock().insert(payload_id, BuiltPayload::new(payload_id, Default::default()));
+        self.payloads
+            .lock()
+            .insert(payload_id, BuiltPayload::new(payload_id, Default::default(), U256::ZERO));
         Ok(payload_id)
     }
 }
