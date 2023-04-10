@@ -77,7 +77,7 @@ pub enum Commands {
     /// Generate Test Vectors
     #[command(name = "test-vectors")]
     TestVectors(test_vectors::Command),
-    /// Write default config to stdout
+    /// Write config to stdout
     #[command(name = "config")]
     Config(config::Command),
 }
