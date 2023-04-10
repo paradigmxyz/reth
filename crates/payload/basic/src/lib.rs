@@ -13,10 +13,11 @@ use reth_miner::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_primitives::bytes::Bytes;
+use reth_primitives::{bytes::Bytes, Block, ChainSpec, Header};
 use reth_provider::StateProviderFactory;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
+use revm::primitives::{BlockEnv, CfgEnv};
 use std::{
     future::Future,
     pin::Pin,
@@ -56,6 +57,8 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     block_config: BlockConfig,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
+    /// The configured chain-spec
+    chain_spec: Arc<ChainSpec>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -66,6 +69,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         client: Client,
         pool: Pool,
         executor: Tasks,
+        chain_spec: Arc<ChainSpec>,
         config: BasicPayloadJobGeneratorConfig,
         block_config: BlockConfig,
     ) -> Self {
@@ -76,6 +80,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             block_config,
+            chain_spec,
         }
     }
 }
@@ -88,7 +93,10 @@ where
 {
     type Job = BasicPayloadJob<Client, Pool, Tasks>;
 
-    fn new_payload_job(&self, _attr: PayloadBuilderAttributes) -> Self::Job {
+    fn new_payload_job(
+        &self,
+        _attr: PayloadBuilderAttributes,
+    ) -> Result<Self::Job, PayloadBuilderError> {
         todo!()
     }
 }
@@ -204,10 +212,12 @@ where
             let cancel = Cancelled::default();
             let _cancel = cancel.clone();
             let guard = this.payload_task_guard.clone();
+            let attributes = this.attributes.clone();
+            let block_config = this.block_config.clone();
             this.executor.spawn_blocking(Box::pin(async move {
                 // acquire the permit for executing the task
                 let _permit = guard.0.acquire().await;
-                build_payload(client, pool, cancel, tx)
+                build_payload(client, pool, attributes, block_config, cancel, tx)
             }));
             this.pending_block = Some(PendingPayload { _cancel, payload: rx });
         }
@@ -269,6 +279,13 @@ impl Future for PendingPayload {
     }
 }
 
+/// Tracks static information about the parent block.
+struct ParentBlock {
+    block_env: BlockEnv,
+    cfg_env: CfgEnv,
+    header: Arc<Block>,
+}
+
 /// A marker that can be used to cancel a job.
 #[derive(Default, Clone)]
 struct Cancelled(Arc<AtomicBool>);
@@ -290,9 +307,11 @@ impl Drop for Cancelled {
 
 /// Builds the payload and sends the result to the given channel.
 fn build_payload<Pool, Client>(
-    _client: Client,
-    _pool: Pool,
-    _cancel: Cancelled,
+    client: Client,
+    pool: Pool,
+    payload_attributes: PayloadBuilderAttributes,
+    block_config: BlockConfig,
+    cancel: Cancelled,
     to_job: oneshot::Sender<Result<BuiltPayload, PayloadBuilderError>>,
 ) where
     Client: StateProviderFactory,
@@ -300,15 +319,22 @@ fn build_payload<Pool, Client>(
 {
     #[inline(always)]
     fn try_build<Pool, Client>(
-        _client: Client,
-        _pool: Pool,
-        _cancel: Cancelled,
+        client: Client,
+        pool: Pool,
+        payload_attributes: PayloadBuilderAttributes,
+        block_config: BlockConfig,
+        cancel: Cancelled,
     ) -> Result<BuiltPayload, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
+        // TODO this needs to access the state of the parent block
+        let state = client.latest()?;
+
+        // Configure the environment for the block.
+
         todo!()
     }
-    let _ = to_job.send(try_build(_client, _pool, _cancel));
+    let _ = to_job.send(try_build(client, pool, payload_attributes, block_config, cancel));
 }

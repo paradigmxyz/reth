@@ -4520,6 +4520,7 @@ dependencies = [
  "reth-rlp",
  "reth-tasks",
  "reth-transaction-pool",
+ "revm",
  "tokio",
  "tracing",
 ]
@@ -4872,6 +4873,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "parking_lot 0.12.1",
+ "reth-interfaces",
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",

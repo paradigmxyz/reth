@@ -12,6 +12,7 @@ description = "Block production"
 reth-primitives = { path = "../primitives" }
 reth-rpc-types = { path = "../rpc/rpc-types" }
 reth-rlp = { path = "../rlp" }
+reth-interfaces = { path = "../interfaces" }
 
 ## async
 tokio = { version = "1", features = ["sync"] }

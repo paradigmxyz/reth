@@ -17,10 +17,13 @@ reth-provider = { path = "../../storage/provider" }
 reth-miner = { path = "../../miner" }
 reth-tasks = { path = "../../tasks" }
 
+## ethereum
+revm = { version = "3" }
+
 ## async
 tokio = { version = "1", features = ["sync", "time"] }
 futures-core = "0.3"
 futures-util = "0.3"
 
 ## misc
-tracing = "0.1.37"
+tracing = "0.1"
