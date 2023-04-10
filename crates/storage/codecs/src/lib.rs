@@ -21,7 +21,9 @@ use revm_primitives::{B160 as H160, B256 as H256, U256};
 /// size array like `Vec<H256>`.
 pub trait Compact {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
-    fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize;
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>;
     /// Takes a buffer which can be read from. Returns the object and `buf` with its internal cursor
     /// advanced (eg.`.advance(len)`).
     ///
@@ -53,7 +55,7 @@ macro_rules! impl_uint_compact {
     ($($name:tt),+) => {
         $(
             impl Compact for $name {
-                fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+                fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     let leading = self.leading_zeros() as usize / 8;
                     buf.put_slice(&self.to_be_bytes()[leading..]);
                     std::mem::size_of::<$name>() - leading
@@ -82,7 +84,10 @@ where
     T: Compact + Default,
 {
     /// Returns 0 since we won't include it in the `StructFlags`.
-    fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         // TODO: can it be smaller?
         buf.put_u16(self.len() as u16);
 
@@ -150,7 +155,10 @@ where
     T: Compact + Default,
 {
     /// Returns 0 for `None` and 1 for `Some(_)`.
-    fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         if let Some(element) = self {
             let length_index = buf.as_mut().len();
             buf.put_slice(&[0, 0]);
@@ -199,7 +207,10 @@ where
 }
 
 impl Compact for U256 {
-    fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         let inner: [u8; 32] = self.to_be_bytes();
         let size = 32 - (self.leading_zeros() / 8);
         buf.put_slice(&inner[32 - size..]);
@@ -219,7 +230,10 @@ impl Compact for U256 {
 }
 
 impl Compact for Bytes {
-    fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         let len = self.len();
         buf.put(self);
         len
@@ -235,7 +249,7 @@ macro_rules! impl_hash_compact {
     ($($name:tt),+) => {
         $(
             impl Compact for $name {
-                fn to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+                fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     buf.put_slice(&self.0);
                     std::mem::size_of::<$name>()
                 }
@@ -268,7 +282,10 @@ impl_hash_compact!(H256, H160);
 
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.
-    fn to_compact(self, _: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, _: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         self as usize
     }
 
