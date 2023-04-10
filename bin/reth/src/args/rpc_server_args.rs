@@ -2,13 +2,16 @@
 
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
-use jsonrpsee::{core::Error as RpcError, server::ServerHandle};
+use jsonrpsee::server::ServerHandle;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_primitives::ChainSpec;
+use reth_provider::{
+    BlockProvider, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
+};
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
-    constants, IpcServerBuilder, RethRpcModule, RpcModuleSelection, RpcServerConfig,
-    RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
+    constants, error::RpcError, IpcServerBuilder, RethRpcModule, RpcModuleSelection,
+    RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::EngineApiHandle;
 use reth_tasks::TaskSpawner;
@@ -16,6 +19,7 @@ use reth_transaction_pool::TransactionPool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::Path,
+    sync::Arc,
 };
 
 /// Parameters for configuring the rpc more granularity via CLI
@@ -53,6 +57,10 @@ pub struct RpcServerArgs {
     /// Ws server port to listen on
     #[arg(long = "ws.port")]
     pub ws_port: Option<u16>,
+
+    /// Origins from which to accept WebSocket requests
+    #[arg(long = "ws.origins", name = "ws.origins")]
+    pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for Ws server
     #[arg(long = "ws.api")]
@@ -98,18 +106,23 @@ impl RpcServerArgs {
             None => {
                 let default_path = PlatformPath::<JwtSecretPath>::default();
                 let fpath = default_path.as_ref();
-                JwtSecret::try_create(fpath)
+                if fpath.exists() {
+                    JwtSecret::from_file(fpath)
+                } else {
+                    JwtSecret::try_create(fpath)
+                }
             }
         }
     }
 
     /// Convenience function for starting a rpc server with configs which extracted from cli args.
-    pub(crate) async fn start_rpc_server<Client, Pool, Network, Tasks>(
+    pub(crate) async fn start_rpc_server<Client, Pool, Network, Tasks, Events>(
         &self,
         client: Client,
         pool: Pool,
         network: Network,
         executor: Tasks,
+        events: Events,
     ) -> Result<RpcServerHandle, RpcError>
     where
         Client: BlockProvider
@@ -122,6 +135,7 @@ impl RpcServerArgs {
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
+        Events: CanonStateSubscriptions + Clone + 'static,
     {
         reth_rpc_builder::launch(
             client,
@@ -130,6 +144,7 @@ impl RpcServerArgs {
             self.transport_rpc_module_config(),
             self.rpc_server_config(),
             executor,
+            events,
         )
         .await
     }
@@ -141,6 +156,7 @@ impl RpcServerArgs {
         pool: Pool,
         network: Network,
         executor: Tasks,
+        chain_spec: Arc<ChainSpec>,
         handle: EngineApiHandle,
     ) -> Result<ServerHandle, RpcError>
     where
@@ -165,6 +181,7 @@ impl RpcServerArgs {
             pool,
             network,
             executor,
+            chain_spec,
             handle,
             socket_address,
             secret,
@@ -200,7 +217,8 @@ impl RpcServerArgs {
             config = config
                 .with_http_address(socket_address)
                 .with_http(ServerBuilder::new())
-                .with_cors(self.http_corsdomain.clone().unwrap_or_default());
+                .with_http_cors(self.http_corsdomain.clone())
+                .with_ws_cors(self.ws_allowed_origins.clone());
         }
 
         if self.ws {
@@ -208,7 +226,7 @@ impl RpcServerArgs {
                 self.ws_addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
                 self.ws_port.unwrap_or(constants::DEFAULT_WS_RPC_PORT),
             );
-            config = config.with_ws_address(socket_address).with_http(ServerBuilder::new());
+            config = config.with_ws_address(socket_address).with_ws(ServerBuilder::new());
         }
 
         if !self.ipcdisable {

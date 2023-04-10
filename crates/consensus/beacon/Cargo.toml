@@ -7,13 +7,32 @@ repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
 
 [dependencies]
-# reth 
+# reth
 reth-consensus-common = { path = "../common" }
 reth-primitives = { path = "../../primitives" }
 reth-interfaces = { path = "../../interfaces" }
+reth-stages = { path = "../../stages" }
+reth-db = { path = "../../storage/db" }
+reth-rpc-types = { path = "../../rpc/rpc-types" }
+reth-tasks = { path = "../../tasks" }
+reth-miner = { path = "../../miner" }
 
 # async
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1.21.2", features = ["sync"] }
+tokio-stream = "0.1.10"
+futures = "0.3"
+
+# misc
+tracing = "0.1"
+thiserror = "1.0"
 
 [dev-dependencies]
+# reth
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-stages = { path = "../../stages", features = ["test-utils"] }
+reth-executor = { path = "../../executor", features = ["test-utils"] }
+reth-db = { path = "../../storage/db", features = ["test-utils"] }
+reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
+reth-tracing = { path = "../../tracing" }
+
+assert_matches = "1.5"

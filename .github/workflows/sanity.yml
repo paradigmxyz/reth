@@ -15,15 +15,16 @@ env:
 name: sanity
 jobs:
   dep-version-constraints:
-    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
-    # See also <https://github.com/foundry-rs/foundry/issues/3827>
-    runs-on: ubuntu-20.04
-    name: dep version constraints
+    runs-on: ubuntu-latest
+    name: dep version constraints test (partition ${{ matrix.partition }}/${{ strategy.job-total }})
+    strategy:
+      matrix:
+        partition: [1, 2, 3]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v3
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
@@ -48,7 +49,10 @@ jobs:
         run: cargo update
 
       - name: Run tests
-        run: cargo nextest run --locked --workspace --all-features
+        run: |
+          cargo nextest run --locked --workspace --all-features \
+            --partition hash:${{ matrix.partition }}/${{ strategy.job-total }} \
+            -E 'kind(lib)' -E 'kind(bin)' -E 'kind(proc-macro)'
 
       - uses: JasonEtco/create-an-issue@v2
         if: ${{ failure() }}
@@ -60,9 +64,7 @@ jobs:
           filename: .github/SANITY_DEPS_ISSUE_TEMPLATE.md
 
   unused-deps:
-    # Pin to `20.04` instead of `ubuntu-latest`, until ubuntu-latest migration is complete
-    # See also <https://github.com/foundry-rs/foundry/issues/3827>
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: unused dependencies
     steps:
       - name: Checkout sources

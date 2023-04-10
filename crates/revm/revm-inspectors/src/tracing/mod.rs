@@ -1,9 +1,6 @@
-use crate::{
-    stack::MaybeOwnedInspector,
-    tracing::{
-        types::{CallKind, LogCallOrder, RawLog},
-        utils::{gas_used, get_create_address},
-    },
+use crate::tracing::{
+    types::{CallKind, LogCallOrder, RawLog},
+    utils::{gas_used, get_create_address},
 };
 pub use arena::CallTraceArena;
 use reth_primitives::{bytes::Bytes, Address, H256, U256};
@@ -20,10 +17,14 @@ use types::{CallTrace, CallTraceStep};
 mod arena;
 mod builder;
 mod config;
+mod fourbyte;
+mod opcount;
 mod types;
 mod utils;
 pub use builder::{geth::GethTraceBuilder, parity::ParityTraceBuilder};
-pub use config::TraceInspectorConfig;
+pub use config::TracingInspectorConfig;
+pub use fourbyte::FourByteInspector;
+pub use opcount::OpcodeCountInspector;
 
 /// An inspector that collects call traces.
 ///
@@ -36,28 +37,30 @@ pub use config::TraceInspectorConfig;
 #[derive(Debug, Clone)]
 pub struct TracingInspector {
     /// Configures what and how the inspector records traces.
-    config: TraceInspectorConfig,
+    config: TracingInspectorConfig,
     /// Records all call traces
     traces: CallTraceArena,
+    /// Tracks active calls
     trace_stack: Vec<usize>,
+    /// Tracks active steps
     step_stack: Vec<StackStep>,
+    /// Tracks the return value of the last call
+    last_call_return_data: Option<Bytes>,
     /// The gas inspector used to track remaining gas.
-    ///
-    /// This is either owned by this inspector directly or part of a stack of inspectors, in which
-    /// case all delegated functions are no-ops.
-    gas_inspector: MaybeOwnedInspector<GasInspector>,
+    gas_inspector: GasInspector,
 }
 
 // === impl TracingInspector ===
 
 impl TracingInspector {
     /// Returns a new instance for the given config
-    pub fn new(config: TraceInspectorConfig) -> Self {
+    pub fn new(config: TracingInspectorConfig) -> Self {
         Self {
             config,
             traces: Default::default(),
             trace_stack: vec![],
             step_stack: vec![],
+            last_call_return_data: None,
             gas_inspector: Default::default(),
         }
     }
@@ -70,20 +73,6 @@ impl TracingInspector {
     /// Consumes the Inspector and returns a [GethTraceBuilder].
     pub fn into_geth_builder(self) -> GethTraceBuilder {
         GethTraceBuilder::new(self.traces.arena, self.config)
-    }
-
-    /// Configures a [GasInspector]
-    ///
-    /// If this [TracingInspector] is part of a stack [InspectorStack](crate::stack::InspectorStack)
-    /// which already uses a [GasInspector], it can be reused as [MaybeOwnedInspector::Stacked] in
-    /// which case the `gas_inspector`'s usage will be a no-op within the context of this
-    /// [TracingInspector].
-    pub fn with_stacked_gas_inspector(
-        mut self,
-        gas_inspector: MaybeOwnedInspector<GasInspector>,
-    ) -> Self {
-        self.gas_inspector = gas_inspector;
-        self
     }
 
     /// Returns the last trace [CallTrace] index from the stack.
@@ -130,6 +119,7 @@ impl TracingInspector {
                 value,
                 status: InstructionResult::Continue,
                 caller,
+                last_call_return_value: self.last_call_return_data.clone(),
                 ..Default::default()
             },
         ));
@@ -156,7 +146,8 @@ impl TracingInspector {
         trace.status = status;
         trace.success = success;
         trace.gas_used = gas_used;
-        trace.output = output;
+        trace.output = output.clone();
+        self.last_call_return_data = Some(output);
 
         if let Some(address) = created_address {
             // A new contract was created via CREATE
@@ -193,7 +184,8 @@ impl TracingInspector {
             contract: interp.contract.address,
             stack,
             memory,
-            gas: self.gas_inspector.as_ref().gas_remaining(),
+            memory_size: interp.memory.len(),
+            gas: self.gas_inspector.gas_remaining(),
             gas_refund_counter: interp.gas.refunded() as u64,
 
             // fields will be populated end of call
@@ -243,7 +235,7 @@ impl TracingInspector {
                 };
             }
 
-            step.gas_cost = step.gas - self.gas_inspector.as_ref().gas_remaining();
+            step.gas_cost = step.gas - self.gas_inspector.gas_remaining();
         }
 
         // set the status

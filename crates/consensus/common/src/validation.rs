@@ -346,7 +346,7 @@ pub fn validate_header_regarding_parent(
 /// Checks:
 ///  If we already know the block.
 ///  If parent is known
-///  If withdarwals are valid
+///  If withdrawals are valid
 ///
 /// Returns parent block header
 pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider>(

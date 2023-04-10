@@ -3,11 +3,11 @@
 use crate::peers::PeersHandle;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockBody, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetReceipts, NodeData, Receipts,
+    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
+    Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
 use reth_provider::{BlockProvider, HeaderProvider};
 use std::{
     borrow::Borrow,
@@ -73,7 +73,7 @@ impl<C> EthRequestHandler<C>
 where
     C: BlockProvider + HeaderProvider,
 {
-    /// Returns the list of requested heders
+    /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<Header> {
         let GetBlockHeaders { start_block, limit, skip, direction } = request;
 

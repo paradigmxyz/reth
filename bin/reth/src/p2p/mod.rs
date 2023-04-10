@@ -1,7 +1,7 @@
 //! P2P Debugging tool
 use crate::{
-    args::DiscoveryArgs,
-    dirs::{ConfigPath, PlatformPath},
+    args::{get_secret_key, DiscoveryArgs},
+    dirs::{ConfigPath, PlatformPath, SecretKeyPath},
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
@@ -40,6 +40,12 @@ pub struct Command {
         value_parser = chain_spec_value_parser
     )]
     chain: Arc<ChainSpec>,
+
+    /// Secret key to use for this node.
+    ///
+    /// This also will deterministically set the peer ID.
+    #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
+    p2p_secret_key: PlatformPath<SecretKeyPath>,
 
     /// Disable the discovery service.
     #[command(flatten)]
@@ -98,8 +104,10 @@ impl Command {
 
         config.peers.connect_trusted_nodes_only = self.trusted_only;
 
+        let p2p_secret_key = get_secret_key(&self.p2p_secret_key)?;
+
         let mut network_config_builder =
-            config.network_config(self.nat, None).chain_spec(self.chain.clone());
+            config.network_config(self.nat, None, p2p_secret_key).chain_spec(self.chain.clone());
 
         network_config_builder = self.discovery.apply_to_builder(network_config_builder);
 

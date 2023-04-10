@@ -1,17 +1,18 @@
-use crate::post_state::PostState;
-use reth_interfaces::executor::Error;
-use reth_primitives::{
-    bloom::logs_bloom, Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log,
-    Receipt, TransactionSigned, H256, U256,
-};
-use reth_provider::{BlockExecutor, StateProvider};
-use reth_revm::{
-    config::{WEI_2ETH, WEI_3ETH, WEI_5ETH},
+use crate::{
     database::SubState,
     env::{fill_cfg_and_block_env, fill_tx_env},
-    into_reth_log, to_reth_acc,
+    into_reth_log,
+    stack::{InspectorStack, InspectorStackConfig},
+    to_reth_acc,
 };
-use reth_revm_inspectors::stack::{InspectorStack, InspectorStackConfig};
+use reth_consensus_common::calc;
+use reth_executor::post_state::PostState;
+use reth_interfaces::executor::Error;
+use reth_primitives::{
+    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
+    ReceiptWithBloom, TransactionSigned, H256, U256,
+};
+use reth_provider::{BlockExecutor, StateProvider};
 use revm::{
     db::AccountState,
     primitives::{
@@ -216,26 +217,22 @@ where
     ) -> Result<HashMap<Address, U256>, Error> {
         let mut balance_increments = HashMap::<Address, U256>::default();
 
-        // Collect balance increments for block and uncle rewards.
-        if let Some(reward) = self.get_block_reward(block, td) {
-            // Calculate Uncle reward
-            // OpenEthereum code: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
+        // Add block rewards if they are enabled.
+        if let Some(base_block_reward) =
+            calc::base_block_reward(&self.chain_spec, block.number, block.difficulty, td)
+        {
+            // Ommer rewards
             for ommer in block.ommers.iter() {
-                let ommer_reward =
-                    U256::from(((8 + ommer.number - block.number) as u128 * reward) >> 3);
-                // From yellowpaper Page 15:
-                // If there are collisions of the beneficiary addresses between ommers and the
-                // block (i.e. two ommers with the same beneficiary address
-                // or an ommer with the same beneficiary address as the
-                // present block), additions are applied cumulatively
-                *balance_increments.entry(ommer.beneficiary).or_default() += ommer_reward;
+                *balance_increments.entry(ommer.beneficiary).or_default() +=
+                    calc::ommer_reward(base_block_reward, block.number, ommer.number);
             }
 
-            // Increment balance for main block reward.
-            let block_reward = U256::from(reward + (reward >> 5) * block.ommers.len() as u128);
-            *balance_increments.entry(block.beneficiary).or_default() += block_reward;
+            // Full block reward
+            *balance_increments.entry(block.beneficiary).or_default() +=
+                calc::block_reward(base_block_reward, block.ommers.len());
         }
 
+        // Process withdrawals
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
             if let Some(withdrawals) = block.withdrawals.as_ref() {
                 for withdrawal in withdrawals {
@@ -248,29 +245,6 @@ where
         Ok(balance_increments)
     }
 
-    /// From yellowpapper Page 15:
-    /// 11.3. Reward Application. The application of rewards to a block involves raising the
-    /// balance of the accounts of the beneficiary address of the block and each ommer by
-    /// a certain amount. We raise the block’s beneficiary account by Rblock; for each
-    /// ommer, we raise the block’s beneficiary by an additional 1/32 of the block reward
-    /// and the beneficiary of the ommer gets rewarded depending on the blocknumber.
-    /// Formally we define the function Ω.
-    ///
-    /// NOTE: Related to Ethereum reward change, for other network this is probably going to be
-    /// moved to config.
-    fn get_block_reward(&self, header: &Header, total_difficulty: U256) -> Option<u128> {
-        if self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, header.difficulty)
-        {
-            None
-        } else if self.chain_spec.fork(Hardfork::Petersburg).active_at_block(header.number) {
-            Some(WEI_2ETH)
-        } else if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(header.number) {
-            Some(WEI_3ETH)
-        } else {
-            Some(WEI_5ETH)
-        }
-    }
-
     /// Irregular state change at Ethereum DAO hardfork
     fn apply_dao_fork_changes(&mut self, post_state: &mut PostState) -> Result<(), Error> {
         let db = self.db();
@@ -278,7 +252,7 @@ where
         let mut drained_balance = U256::ZERO;
 
         // drain all accounts ether
-        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
+        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
             let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
             let old = to_reth_acc(&db_account.info);
             // drain balance
@@ -289,7 +263,7 @@ where
         }
 
         // add drained ether to beneficiary.
-        let beneficiary = crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
+        let beneficiary = reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
         self.increment_account_balance(beneficiary, drained_balance, post_state)?;
 
         Ok(())
@@ -381,6 +355,10 @@ where
         total_difficulty: U256,
         senders: Option<Vec<Address>>,
     ) -> Result<(PostState, u64), Error> {
+        // perf: do not execute empty blocks
+        if block.body.is_empty() {
+            return Ok((PostState::default(), 0))
+        }
         let senders = self.recover_senders(&block.body, senders)?;
 
         self.init_env(&block.header, total_difficulty);
@@ -420,7 +398,6 @@ where
                 // receipts`.
                 success: result.is_success(),
                 cumulative_gas_used,
-                bloom: logs_bloom(logs.iter()),
                 logs,
             });
             post_state.finish_transition();
@@ -448,12 +425,14 @@ where
             return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
         }
 
+        // Add block rewards
         let balance_increments = self.post_block_balance_increments(block, total_difficulty)?;
         let mut includes_block_transition = !balance_increments.is_empty();
         for (address, increment) in balance_increments.into_iter() {
             self.increment_account_balance(address, increment, &mut post_state)?;
         }
 
+        // Perform DAO irregular state change
         if self.chain_spec.fork(Hardfork::Dao).transitions_at_block(block.number) {
             includes_block_transition = true;
             self.apply_dao_fork_changes(&mut post_state)?;
@@ -462,7 +441,6 @@ where
         if includes_block_transition {
             post_state.finish_transition();
         }
-
         Ok(post_state)
     }
 
@@ -474,6 +452,10 @@ where
     ) -> Result<PostState, Error> {
         let post_state = self.execute(block, total_difficulty, senders)?;
 
+        // TODO Before Byzantium, receipts contained state root that would mean that expensive
+        // operation as hashing that is needed for state root got calculated in every
+        // transaction This was replaced with is_success flag.
+        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
         if self.chain_spec.fork(Hardfork::Byzantium).active_at_block(block.header.number) {
             verify_receipt(
                 block.header.receipts_root,
@@ -481,11 +463,6 @@ where
                 post_state.receipts().iter(),
             )?;
         }
-
-        // TODO Before Byzantium, receipts contained state root that would mean that expensive
-        // operation as hashing that is needed for state root got calculated in every
-        // transaction This was replaced with is_success flag.
-        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
 
         Ok(post_state)
     }
@@ -498,13 +475,14 @@ pub fn verify_receipt<'a>(
     receipts: impl Iterator<Item = &'a Receipt> + Clone,
 ) -> Result<(), Error> {
     // Check receipts root.
-    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts.clone());
+    let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
+    let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts_with_bloom.iter());
     if receipts_root != expected_receipts_root {
         return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
     }
 
     // Create header log bloom.
-    let logs_bloom = receipts.fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::zero(), |bloom, r| bloom | r.bloom);
     if logs_bloom != expected_logs_bloom {
         return Err(Error::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
@@ -517,15 +495,16 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::State;
+    use reth_consensus_common::calc;
     use reth_primitives::{
-        hex_literal::hex, keccak256, Account, Address, BlockNumber, Bytecode, Bytes,
-        ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
+        constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
+        Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
     use reth_provider::{
         post_state::{Change, Storage},
         AccountProvider, BlockHashProvider, StateProvider,
     };
-    use reth_revm::database::State;
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 
@@ -665,7 +644,8 @@ mod tests {
             "Should executed two transitions (1 tx and 1 block reward)"
         );
 
-        let block_reward = U256::from(WEI_2ETH + (WEI_2ETH >> 5));
+        let base_block_reward = ETH_TO_WEI * 2;
+        let block_reward = calc::block_reward(base_block_reward, 1);
 
         let account1_info = Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: None };
         let account2_info = Account {
@@ -684,8 +664,11 @@ mod tests {
             nonce: 0x01,
             bytecode_hash: None,
         };
-        let ommer_beneficiary_info =
-            Account { nonce: 0, balance: U256::from((8 * WEI_2ETH) >> 3), bytecode_hash: None };
+        let ommer_beneficiary_info = Account {
+            nonce: 0,
+            balance: calc::ommer_reward(base_block_reward, block.number, block.ommers[0].number),
+            bytecode_hash: None,
+        };
 
         // Check if cache is set
         // account1
@@ -803,7 +786,9 @@ mod tests {
         let mut db = StateProviderTest::default();
 
         let mut beneficiary_balance = 0;
-        for (i, dao_address) in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate() {
+        for (i, dao_address) in
+            reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate()
+        {
             db.insert_account(
                 *dao_address,
                 Account { balance: U256::from(i), nonce: 0x00, bytecode_hash: None },
@@ -840,22 +825,25 @@ mod tests {
         // beneficiary
         let db = executor.db();
         let dao_beneficiary =
-            db.accounts.get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+            db.accounts.get(&reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
 
         assert_eq!(dao_beneficiary.info.balance, U256::from(beneficiary_balance));
-        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
             let account = db.accounts.get(address).unwrap();
             assert_eq!(account.info.balance, U256::ZERO);
         }
 
         // check changesets
-        let beneficiary_state =
-            out.accounts().get(&crate::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap().unwrap();
+        let beneficiary_state = out
+            .accounts()
+            .get(&reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             beneficiary_state,
             Account { balance: U256::from(beneficiary_balance), ..Default::default() },
         );
-        for address in crate::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
             let updated_account = out.accounts().get(address).unwrap().unwrap();
             assert_eq!(updated_account, Account { balance: U256::ZERO, ..Default::default() });
         }
@@ -1015,7 +1003,7 @@ mod tests {
         let mut executor = Executor::new(chain_spec, db);
         // touch account
         executor.commit_changes(
-            hash_map::HashMap::from([(account, RevmAccount { ..default_acc.clone() })]),
+            hash_map::HashMap::from([(account, default_acc.clone())]),
             true,
             &mut PostState::default(),
         );
@@ -1039,7 +1027,7 @@ mod tests {
         );
         // touch account
         executor.commit_changes(
-            hash_map::HashMap::from([(account, RevmAccount { ..default_acc })]),
+            hash_map::HashMap::from([(account, default_acc)]),
             true,
             &mut PostState::default(),
         );

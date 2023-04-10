@@ -1,6 +1,6 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 use reth_codecs::derive_arbitrary;
-use reth_primitives::{Receipt, H256};
+use reth_primitives::{ReceiptWithBloom, H256};
 use reth_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 
 #[cfg(feature = "serde")]
@@ -22,24 +22,29 @@ pub struct GetReceipts(
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.
-    pub Vec<Vec<Receipt>>,
+    pub Vec<Vec<ReceiptWithBloom>>,
 );
 
 #[cfg(test)]
 mod test {
-    use crate::types::{message::RequestPair, GetReceipts, Receipts};
+    use crate::{
+        types::{message::RequestPair, GetReceipts},
+        Receipts,
+    };
     use hex_literal::hex;
-    use reth_primitives::{Log, Receipt, TxType};
+    use reth_primitives::{Log, Receipt, ReceiptWithBloom, TxType};
     use reth_rlp::{Decodable, Encodable};
 
     #[test]
     fn roundtrip_eip1559() {
-        let receipts = Receipts(vec![vec![Receipt {
-            tx_type: TxType::EIP1559,
-            success: false,
-            cumulative_gas_used: 0,
+        let receipts = Receipts(vec![vec![ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::EIP1559,
+                success: false,
+                cumulative_gas_used: 0,
+                logs: vec![],
+            },
             bloom: Default::default(),
-            logs: vec![],
         }]]);
 
         let mut out = vec![];
@@ -93,9 +98,8 @@ mod test {
             request_id: 1111,
             message: Receipts(vec![
                 vec![
-                    Receipt {
-                        tx_type: TxType::Legacy,
-                        bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                    ReceiptWithBloom {
+                        receipt: Receipt {tx_type: TxType::Legacy,
                         cumulative_gas_used: 0x1u64,
                         logs: vec![
                             Log {
@@ -108,7 +112,8 @@ mod test {
                             },
                         ],
                         success: false,
-                    },
+                    },bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
+                }
                 ],
             ]),
         };
@@ -127,21 +132,23 @@ mod test {
                 request_id: 1111,
                 message: Receipts(vec![
                     vec![
-                        Receipt {
-                            tx_type: TxType::Legacy,
+                        ReceiptWithBloom {
+                            receipt: Receipt {
+                                tx_type: TxType::Legacy,
+                                cumulative_gas_used: 0x1u64,
+                                logs: vec![
+                                    Log {
+                                        address: hex!("0000000000000000000000000000000000000011").into(),
+                                        topics: vec![
+                                            hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
+                                            hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
+                                        ],
+                                        data: hex!("0100ff")[..].into(),
+                                    },
+                                ],
+                                success: false,
+                            },
                             bloom: hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into(),
-                            cumulative_gas_used: 0x1u64,
-                            logs: vec![
-                                Log {
-                                    address: hex!("0000000000000000000000000000000000000011").into(),
-                                    topics: vec![
-                                        hex!("000000000000000000000000000000000000000000000000000000000000dead").into(),
-                                        hex!("000000000000000000000000000000000000000000000000000000000000beef").into(),
-                                    ],
-                                    data: hex!("0100ff")[..].into(),
-                                },
-                            ],
-                            success: false,
                         },
                     ],
                 ]),

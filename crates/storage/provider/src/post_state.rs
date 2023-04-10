@@ -15,8 +15,11 @@ use std::collections::BTreeMap;
 ///
 /// # Wiped Storage
 ///
-/// The field `wiped` denotes whether any of the values contained in storage are valid or not; if
-/// `wiped` is `true`, the storage should be considered empty.
+/// The field `wiped` denotes whether the pre-existing storage in the database should be cleared or
+/// not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct Storage {
     /// Whether the storage was wiped or not.
@@ -132,9 +135,11 @@ impl Change {
 ///
 /// # Wiped Storage
 ///
-/// The [Storage] type has a field, `wiped`, which denotes whether any of the values contained
-/// in storage are valid or not; if `wiped` is `true`, the storage for the account should be
-/// considered empty.
+/// The [Storage] type has a field, `wiped` which denotes whether the pre-existing storage in the
+/// database should be cleared or not.
+///
+/// If `wiped` is true, then the account was selfdestructed at some point, and the values contained
+/// in `storage` should be the only values written to the database.
 ///
 /// # Transitions
 ///
@@ -163,7 +168,7 @@ impl Change {
 /// Since most [PostState]s in reth are for multiple blocks it is better to pre-allocate capacity
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
     current_transition_id: TransitionId,
@@ -199,7 +204,7 @@ const PREALLOC_CHANGES_SIZE: usize = 256 * BEST_GUESS_CHANGES_PER_TX;
 impl PostState {
     /// Create an empty [PostState].
     pub fn new() -> Self {
-        Self { changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE), ..Default::default() }
+        Self::default()
     }
 
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
@@ -258,12 +263,16 @@ impl PostState {
     }
 
     /// Get the number of transitions causing this [PostState]
-    pub fn transitions_count(&self) -> usize {
-        self.current_transition_id as usize
+    pub fn transitions_count(&self) -> TransitionId {
+        self.current_transition_id
     }
 
     /// Extend this [PostState] with the changes in another [PostState].
     pub fn extend(&mut self, other: PostState) {
+        if other.changes.is_empty() {
+            return
+        }
+
         self.changes.reserve(other.changes.len());
 
         let mut next_transition_id = self.current_transition_id;
@@ -282,10 +291,10 @@ impl PostState {
     /// The reverted changes are removed from this post-state, and their effects are reverted.
     ///
     /// The reverted changes are returned.
-    pub fn revert_to(&mut self, transition_id: usize) -> Vec<Change> {
+    pub fn revert_to(&mut self, transition_id: TransitionId) -> Vec<Change> {
         let mut changes_to_revert = Vec::new();
         self.changes.retain(|change| {
-            if change.transition_id() >= transition_id as u64 {
+            if change.transition_id() >= transition_id {
                 changes_to_revert.push(change.clone());
                 false
             } else {
@@ -313,7 +322,7 @@ impl PostState {
     /// 1. This post-state has the changes reverted
     /// 2. The returned post-state does *not* have the changes reverted, but only contains the
     /// descriptions of the changes that were reverted in the first post-state.
-    pub fn split_at(&mut self, transition_id: usize) -> Self {
+    pub fn split_at(&mut self, transition_id: TransitionId) -> Self {
         // Clone ourselves
         let mut non_reverted_state = self.clone();
 
@@ -405,7 +414,6 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (_, current_value)) in changeset {
                     storage.storage.insert(*slot, *current_value);
                 }
@@ -413,6 +421,7 @@ impl PostState {
             Change::StorageWiped { address, .. } => {
                 let storage = self.storage.entry(*address).or_default();
                 storage.wiped = true;
+                storage.storage.clear();
             }
         }
 
@@ -433,7 +442,6 @@ impl PostState {
             }
             Change::StorageChanged { address, changeset, .. } => {
                 let storage = self.storage.entry(*address).or_default();
-                storage.wiped = false;
                 for (slot, (old_value, _)) in changeset {
                     storage.storage.insert(*slot, *old_value);
                 }
@@ -475,18 +483,16 @@ impl PostState {
                 Change::AccountDestroyed { id, address, old } |
                 Change::AccountChanged { id, address, old, .. } => {
                     let destroyed = matches!(changeset, Change::AccountDestroyed { .. });
-                    tracing::trace!(target: "provider::post_state", id, ?address, ?old, destroyed, "Account changed");
-                    account_changeset_cursor.append_dup(
-                        first_transition_id + id,
-                        AccountBeforeTx { address, info: Some(old) },
-                    )?;
+                    let transition_id = first_transition_id + id;
+                    tracing::trace!(target: "provider::post_state", transition_id, ?address, ?old, destroyed, "Account changed");
+                    account_changeset_cursor
+                        .append_dup(transition_id, AccountBeforeTx { address, info: Some(old) })?;
                 }
                 Change::AccountCreated { id, address, .. } => {
-                    tracing::trace!(target: "provider::post_state", id, ?address, "Account created");
-                    account_changeset_cursor.append_dup(
-                        first_transition_id + id,
-                        AccountBeforeTx { address, info: None },
-                    )?;
+                    let transition_id = first_transition_id + id;
+                    tracing::trace!(target: "provider::post_state", transition_id, ?address, "Account created");
+                    account_changeset_cursor
+                        .append_dup(transition_id, AccountBeforeTx { address, info: None })?;
                 }
                 _ => unreachable!(),
             }
@@ -527,16 +533,12 @@ impl PostState {
 
         // Write new storage state
         for (address, storage) in self.storage.into_iter() {
+            // If the storage was wiped, remove all previous entries from the database.
             if storage.wiped {
                 tracing::trace!(target: "provider::post_state", ?address, "Wiping storage from plain state");
                 if storages_cursor.seek_exact(address)?.is_some() {
                     storages_cursor.delete_current_duplicates()?;
                 }
-
-                // If the storage is marked as wiped, it might still contain values. This is to
-                // avoid deallocating where possible, but these values should not be written to the
-                // database.
-                continue
             }
 
             for (key, value) in storage.storage {
@@ -574,7 +576,35 @@ impl PostState {
             bytecodes_cursor.upsert(hash, bytecode)?;
         }
 
+        // write the receipts of the transactions
+        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+
+        let mut next_tx_num =
+            if let Some(last_tx) = receipts_cursor.last()?.map(|(tx_num, _)| tx_num) {
+                last_tx + 1
+            } else {
+                // the very first tx
+                0
+            };
+        for receipt in self.receipts.into_iter() {
+            receipts_cursor.append(next_tx_num, receipt)?;
+            next_tx_num += 1;
+        }
+
         Ok(())
+    }
+}
+
+impl Default for PostState {
+    fn default() -> Self {
+        Self {
+            current_transition_id: 0,
+            accounts: Default::default(),
+            storage: Default::default(),
+            changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE),
+            bytecode: Default::default(),
+            receipts: vec![],
+        }
     }
 }
 
@@ -587,6 +617,25 @@ mod tests {
         transaction::DbTx,
     };
     use std::sync::Arc;
+
+    // Ensure that the transition id is not incremented if postate is extended by another empty
+    // poststate.
+    #[test]
+    fn extend_empty() {
+        let mut a = PostState::new();
+        assert_eq!(a.current_transition_id, 0);
+
+        // Extend empty poststate with another empty poststate
+        a.extend(PostState::new());
+        assert_eq!(a.current_transition_id, 0);
+
+        // Add single transition and extend with empty poststate
+        a.create_account(Address::zero(), Account::default());
+        a.finish_transition();
+        let transition_id = a.current_transition_id;
+        a.extend(PostState::new());
+        assert_eq!(a.current_transition_id, transition_id);
+    }
 
     #[test]
     fn extend() {
@@ -816,6 +865,50 @@ mod tests {
     }
 
     #[test]
+    fn reuse_selfdestructed_account() {
+        let address_a = Address::zero();
+
+        // 0x00 => 0 => 1
+        // 0x01 => 0 => 2
+        // 0x03 => 0 => 3
+        let storage_changeset_one = BTreeMap::from([
+            (U256::from(0), (U256::from(0), U256::from(1))),
+            (U256::from(1), (U256::from(0), U256::from(2))),
+            (U256::from(3), (U256::from(0), U256::from(3))),
+        ]);
+        // 0x00 => 0 => 3
+        // 0x01 => 0 => 4
+        let storage_changeset_two = BTreeMap::from([
+            (U256::from(0), (U256::from(0), U256::from(3))),
+            (U256::from(2), (U256::from(0), U256::from(4))),
+        ]);
+
+        let mut state = PostState::new();
+
+        // Create some storage for account A (simulates a contract deployment)
+        state.change_storage(address_a, storage_changeset_one);
+        state.finish_transition();
+        // Next transition destroys the account (selfdestruct)
+        state.destroy_account(address_a, Account::default());
+        state.finish_transition();
+        // Next transition recreates account A with some storage (simulates a contract deployment)
+        state.change_storage(address_a, storage_changeset_two);
+        state.finish_transition();
+
+        // All the storage of account A has to be deleted in the database (wiped)
+        assert!(
+            state.account_storage(&address_a).expect("Account A should have some storage").wiped,
+            "The wiped flag should be set to discard all pre-existing storage from the database"
+        );
+        // Then, we must ensure that *only* the storage from the last transition will be written
+        assert_eq!(
+            state.account_storage(&address_a).expect("Account A should have some storage").storage,
+            BTreeMap::from([(U256::from(0), U256::from(3)), (U256::from(2), U256::from(4))]),
+            "Account A's storage should only have slots 0 and 2, and they should have values 3 and 4, respectively."
+        );
+    }
+
+    #[test]
     fn revert_to() {
         let mut state = PostState::new();
         state.create_account(
@@ -833,7 +926,7 @@ mod tests {
         assert_eq!(state.transitions_count(), 2);
         assert_eq!(state.accounts().len(), 2);
 
-        let reverted_changes = state.revert_to(revert_to as usize);
+        let reverted_changes = state.revert_to(revert_to);
         assert_eq!(state.accounts().len(), 1);
         assert_eq!(state.transitions_count(), 1);
         assert_eq!(reverted_changes.len(), 1);

@@ -119,7 +119,7 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
             } else {
                 let should_compact = is_flag_type(&ftype) ||
                     field.attrs.iter().any(|attr| {
-                        attr.path.segments.iter().any(|path| path.ident == "maybe_zero")
+                        attr.path().segments.iter().any(|path| path.ident == "maybe_zero")
                     });
 
                 fields.push(FieldTypes::StructField((
@@ -162,7 +162,7 @@ pub fn get_bit_size(ftype: &str) -> u8 {
     match ftype {
         "bool" | "Option" => 1,
         "TxType" => 2,
-        "u64" | "BlockNumber" | "TxNumber" | "ChainId" => 4,
+        "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "TransitionId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" | "TxHash" => 6,
         _ => 0,

@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-use reth_primitives::{Address, Bytes, H256, H512, U256, U64};
+use reth_primitives::{serde_helper::JsonStorageKey, Address, Bytes, H256, H512, U256, U64};
 use serde::{Deserialize, Serialize};
 
 /// Account information.
@@ -14,7 +14,7 @@ pub struct AccountInfo {
 #[serde(rename_all = "camelCase")]
 pub struct StorageProof {
     /// Storage key.
-    pub key: U256,
+    pub key: JsonStorageKey,
     /// Value that the key holds
     pub value: U256,
     /// proof for the pair

@@ -11,7 +11,8 @@ use crate::{
 };
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{
-    AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes, Header, H256, H64, U256, U64,
+    serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
+    Header, H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
@@ -21,8 +22,11 @@ use reth_rpc_types::{
     Work,
 };
 use reth_transaction_pool::TransactionPool;
+
+use reth_network_api::NetworkInfo;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use tracing::trace;
 
 #[async_trait::async_trait]
 impl<Client, Pool, Network> EthApiServer for EthApi<Client, Pool, Network>
@@ -30,16 +34,18 @@ where
     Self: EthApiSpec + EthTransactions,
     Pool: TransactionPool + 'static,
     Client: BlockProvider + HeaderProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Network: Send + Sync + 'static,
+    Network: NetworkInfo + Send + Sync + 'static,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
+        trace!(target: "rpc::eth", "Serving eth_protocolVersion");
         EthApiSpec::protocol_version(self).await.to_rpc_result()
     }
 
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
-        Err(internal_rpc_err("unimplemented"))
+        trace!(target: "rpc::eth", "Serving eth_syncing");
+        EthApiSpec::sync_status(self).to_rpc_result()
     }
 
     /// Handler for: `eth_coinbase`
@@ -49,11 +55,13 @@ where
 
     /// Handler for: `eth_accounts`
     async fn accounts(&self) -> Result<Vec<Address>> {
+        trace!(target: "rpc::eth", "Serving eth_accounts");
         Ok(EthApiSpec::accounts(self))
     }
 
     /// Handler for: `eth_blockNumber`
     fn block_number(&self) -> Result<U256> {
+        trace!(target: "rpc::eth", "Serving eth_blockNumber");
         Ok(U256::from(
             EthApiSpec::chain_info(self).with_message("failed to read chain info")?.best_number,
         ))
@@ -61,11 +69,13 @@ where
 
     /// Handler for: `eth_chainId`
     async fn chain_id(&self) -> Result<Option<U64>> {
+        trace!(target: "rpc::eth", "Serving eth_chainId");
         Ok(Some(EthApiSpec::chain_id(self)))
     }
 
     /// Handler for: `eth_getBlockByHash`
     async fn block_by_hash(&self, hash: H256, full: bool) -> Result<Option<RichBlock>> {
+        trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
         Ok(EthApi::block(self, hash, full).await?)
     }
 
@@ -75,11 +85,13 @@ where
         number: BlockNumberOrTag,
         full: bool,
     ) -> Result<Option<RichBlock>> {
+        trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
         Ok(EthApi::block(self, number, full).await?)
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
     async fn block_transaction_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockTransactionCountByHash");
         Ok(EthApi::block_transaction_count(self, hash).await?.map(U256::from))
     }
 
@@ -88,16 +100,19 @@ where
         &self,
         number: BlockNumberOrTag,
     ) -> Result<Option<U256>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getBlockTransactionCountByNumber");
         Ok(EthApi::block_transaction_count(self, number).await?.map(U256::from))
     }
 
     /// Handler for: `eth_getUncleCountByBlockHash`
     async fn block_uncles_count_by_hash(&self, hash: H256) -> Result<Option<U256>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
         Ok(EthApi::ommers(self, hash)?.map(|ommers| U256::from(ommers.len())))
     }
 
     /// Handler for: `eth_getUncleCountByBlockNumber`
     async fn block_uncles_count_by_number(&self, number: BlockNumberOrTag) -> Result<Option<U256>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
         Ok(EthApi::ommers(self, number)?.map(|ommers| U256::from(ommers.len())))
     }
 
@@ -107,6 +122,7 @@ where
         hash: H256,
         index: Index,
     ) -> Result<Option<RichBlock>> {
+        trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
         Ok(EthApi::ommer_by_block_and_index(self, hash, index).await?)
     }
 
@@ -116,11 +132,13 @@ where
         number: BlockNumberOrTag,
         index: Index,
     ) -> Result<Option<RichBlock>> {
+        trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
         Ok(EthApi::ommer_by_block_and_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: H256) -> Result<Option<reth_rpc_types::Transaction>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
 
@@ -130,6 +148,7 @@ where
         hash: H256,
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
+        trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
         Ok(EthApi::transaction_by_block_and_tx_index(self, hash, index).await?)
     }
 
@@ -139,16 +158,19 @@ where
         number: BlockNumberOrTag,
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
+        trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
         Ok(EthApi::transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, _hash: H256) -> Result<Option<TransactionReceipt>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn transaction_receipt(&self, hash: H256) -> Result<Option<TransactionReceipt>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
+        Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
 
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> Result<U256> {
+        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
         Ok(EthApi::balance(self, address, block_number)?)
     }
 
@@ -156,9 +178,10 @@ where
     async fn storage_at(
         &self,
         address: Address,
-        index: U256,
+        index: JsonStorageKey,
         block_number: Option<BlockId>,
     ) -> Result<H256> {
+        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
         Ok(EthApi::storage_at(self, address, index, block_number)?)
     }
 
@@ -168,11 +191,13 @@ where
         address: Address,
         block_number: Option<BlockId>,
     ) -> Result<U256> {
+        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
         Ok(EthApi::get_transaction_count(self, address, block_number)?)
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> Result<Bytes> {
+        trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
         Ok(EthApi::get_code(self, address, block_number)?)
     }
 
@@ -183,10 +208,11 @@ where
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
     ) -> Result<Bytes> {
+        trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, "Serving eth_call");
         let (res, _env) = self
-            .execute_call_at(
+            .transact_call_at(
                 request,
-                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)),
+                block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
                 state_overrides,
             )
             .await?;
@@ -200,7 +226,8 @@ where
         mut request: CallRequest,
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
-        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
+        trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
+        let block_id = block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let access_list = self.create_access_list_at(request.clone(), block_number).await?;
         request.access_list = Some(access_list.clone());
         let gas_used = self.estimate_gas_at(request, block_id).await?;
@@ -213,10 +240,11 @@ where
         request: CallRequest,
         block_number: Option<BlockId>,
     ) -> Result<U256> {
+        trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         Ok(EthApi::estimate_gas_at(
             self,
             request,
-            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending)),
+            block_number.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest)),
         )
         .await?)
     }
@@ -239,8 +267,9 @@ where
         &self,
         block_count: U64,
         newest_block: BlockId,
-        _reward_percentiles: Option<Vec<f64>>,
+        reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
+        trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         let block_count = block_count.as_u64();
 
         if block_count == 0 {
@@ -343,7 +372,7 @@ where
 
     /// Handler for: `eth_hashrate`
     async fn hashrate(&self) -> Result<U256> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(U256::ZERO)
     }
 
     /// Handler for: `eth_getWork`
@@ -353,7 +382,7 @@ where
 
     /// Handler for: `eth_submitHashrate`
     async fn submit_hashrate(&self, _hashrate: U256, _id: H256) -> Result<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(false)
     }
 
     /// Handler for: `eth_submitWork`
@@ -362,17 +391,20 @@ where
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, _request: TransactionRequest) -> Result<H256> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn send_transaction(&self, request: TransactionRequest) -> Result<H256> {
+        trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
+        Ok(EthTransactions::send_transaction(self, request).await?)
     }
 
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<H256> {
-        Ok(EthApi::send_raw_transaction(self, tx).await?)
+        trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
+        Ok(EthTransactions::send_raw_transaction(self, tx).await?)
     }
 
     /// Handler for: `eth_sign`
     async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes> {
+        trace!(target: "rpc::eth", ?address, ?message, "Serving eth_sign");
         Ok(EthApi::sign(self, address, message).await?)
     }
 
@@ -383,6 +415,7 @@ where
 
     /// Handler for: `eth_signTypedData`
     async fn sign_typed_data(&self, address: Address, data: Value) -> Result<Bytes> {
+        trace!(target: "rpc::eth", ?address, ?data, "Serving eth_signTypedData");
         Ok(EthApi::sign_typed_data(self, data, address).await?)
     }
 
@@ -390,9 +423,10 @@ where
     async fn get_proof(
         &self,
         address: Address,
-        keys: Vec<H256>,
+        keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> Result<EIP1186AccountProofResponse> {
+        trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
         let res = EthApi::get_proof(self, address, keys, block_number);
 
         Ok(res.map_err(|e| match e {
@@ -446,7 +480,7 @@ mod tests {
             let hash = H256::random();
             let gas_limit: u64 = random();
             let gas_used: u64 = random();
-            let base_fee_per_gas: Option<u64> = random::<bool>().then(|| random());
+            let base_fee_per_gas: Option<u64> = random::<bool>().then(random);
 
             let header = Header {
                 number: newest_block - i,

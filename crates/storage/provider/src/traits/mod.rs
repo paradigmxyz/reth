@@ -22,7 +22,10 @@ mod receipts;
 pub use receipts::ReceiptProvider;
 
 mod state;
-pub use state::{StateProvider, StateProviderFactory};
+pub use state::{
+    BlockchainTreePendingStateProvider, PostStateDataProvider, StateProvider, StateProviderBox,
+    StateProviderFactory,
+};
 
 mod transactions;
 pub use transactions::TransactionsProvider;
@@ -32,3 +35,9 @@ pub use withdrawals::WithdrawalsProvider;
 
 mod executor;
 pub use executor::{BlockExecutor, ExecutorFactory};
+
+mod chain;
+pub use chain::{
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
+    CanonStateSubscriptions,
+};

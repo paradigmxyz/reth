@@ -106,6 +106,8 @@ pub(crate) struct PeersManager {
     backoff_durations: PeerBackoffDurations,
     /// If non-trusted peers should be connected to
     connect_trusted_nodes_only: bool,
+    /// Timestamp of the last time [Self::tick] was called.
+    last_tick: Instant,
 }
 
 impl PeersManager {
@@ -155,6 +157,7 @@ impl PeersManager {
             ban_duration,
             backoff_durations,
             connect_trusted_nodes_only,
+            last_tick: Instant::now(),
         }
     }
 
@@ -248,6 +251,9 @@ impl PeersManager {
             return
         }
 
+        // start a new tick, so the peer is not immediately rewarded for the time since last tick
+        self.tick();
+
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
@@ -286,6 +292,29 @@ impl PeersManager {
     fn unban_peer(&mut self, peer_id: PeerId) {
         self.ban_list.unban_peer(&peer_id);
         self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
+    }
+
+    /// Tick function to update reputation of all connected peers.
+    /// Peers are rewarded with reputation increases for the time they are connected since the last
+    /// tick. This is to prevent peers from being disconnected eventually due to slashed
+    /// reputation because of some bad messages (most likely transaction related)
+    fn tick(&mut self) {
+        let now = Instant::now();
+        // Determine the number of seconds since the last tick.
+        // Ensuring that now is always greater than last_tick to account for issues with system
+        // time.
+        let secs_since_last_tick =
+            if self.last_tick > now { 0 } else { (now - self.last_tick).as_secs() as i32 };
+        self.last_tick = now;
+
+        // update reputation via seconds connected
+        for peer in self.peers.iter_mut().filter(|(_, peer)| peer.state.is_connected()) {
+            // update reputation via seconds connected, but keep the target _around_ the default
+            // reputation.
+            if peer.1.reputation < DEFAULT_REPUTATION {
+                peer.1.reputation += secs_since_last_tick;
+            }
+        }
     }
 
     /// Apply the corresponding reputation change to the given peer
@@ -345,9 +374,9 @@ impl PeersManager {
                     self.queued_actions.push_back(PeerAction::PeerRemoved(peer_id));
                 } else {
                     // reset the peer's state
-                    // we reset the backoff counter since we're able to establish a succesful
+                    // we reset the backoff counter since we're able to establish a successful
                     // session to that peer
-                    entry.get_mut().backoff_counter = 0;
+                    entry.get_mut().severe_backoff_counter = 0;
                     entry.get_mut().state = PeerConnectionState::Idle;
                     return
                 }
@@ -415,10 +444,12 @@ impl PeersManager {
             if let Some(mut peer) = self.peers.get_mut(peer_id) {
                 let reputation_change = if let Some(kind) = err.should_backoff() {
                     // Increment peer.backoff_counter
-                    peer.backoff_counter += 1;
+                    if kind.is_severe() {
+                        peer.severe_backoff_counter += 1;
+                    }
 
                     let backoff_time =
-                        self.backoff_durations.backoff_until(kind, peer.backoff_counter);
+                        self.backoff_durations.backoff_until(kind, peer.severe_backoff_counter);
 
                     backoff_until = Some(backoff_time);
 
@@ -603,6 +634,8 @@ impl PeersManager {
     /// New connections are only initiated, if slots are available and appropriate peers are
     /// available.
     fn fill_outbound_slots(&mut self) {
+        self.tick();
+
         // as long as there a slots available try to fill them with the best peers
         while self.connection_info.has_out_capacity() {
             let action = {
@@ -766,8 +799,8 @@ pub struct Peer {
     remove_after_disconnect: bool,
     /// The kind of peer
     kind: PeerKind,
-    /// Counts number of times the peer was backed off   
-    backoff_counter: u32,
+    /// Counts number of times the peer was backed off due to a severe [BackoffKind].
+    severe_backoff_counter: u32,
 }
 
 // === impl Peer ===
@@ -789,7 +822,7 @@ impl Peer {
             fork_id: None,
             remove_after_disconnect: false,
             kind: Default::default(),
-            backoff_counter: 0,
+            severe_backoff_counter: 0,
         }
     }
 
@@ -1071,6 +1104,9 @@ pub struct PeerBackoffDurations {
     /// Intended for spammers, or bad peers in general.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub high: Duration,
+    /// Maximum total backoff duration.
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    pub max: Duration,
 }
 
 impl PeerBackoffDurations {
@@ -1083,11 +1119,14 @@ impl PeerBackoffDurations {
         }
     }
 
-    /// Returns the timestamp until which we should backoff
+    /// Returns the timestamp until which we should backoff.
+    ///
+    /// The Backoff duration is capped by the configured maximum backoff duration.
     pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u32) -> std::time::Instant {
-        let backoff_time = self.backoff(kind) * backoff_counter;
+        let backoff_time = self.backoff(kind);
+        let backoff_time = backoff_time + backoff_time * backoff_counter;
         let now = std::time::Instant::now();
-        now + backoff_time
+        now + backoff_time.min(self.max)
     }
 }
 
@@ -1099,6 +1138,8 @@ impl Default for PeerBackoffDurations {
             medium: Duration::from_secs(60 * 3),
             // 15min
             high: Duration::from_secs(60 * 15),
+            // 1h
+            max: Duration::from_secs(60 * 60),
         }
     }
 }
@@ -1122,6 +1163,7 @@ mod test {
         error::BackoffKind,
         peers::{
             manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
+            reputation::DEFAULT_REPUTATION,
             PeerAction,
         },
         session::PendingSessionHandshakeError,
@@ -1376,6 +1418,23 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_low_backoff() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let config = PeersConfig::default();
+        let mut peers = PeersManager::new(config);
+        peers.add_peer(peer, socket_addr, None);
+        let peer_struct = peers.peers.get_mut(&peer).unwrap();
+
+        let backoff_timestamp = peers
+            .backoff_durations
+            .backoff_until(BackoffKind::Low, peer_struct.severe_backoff_counter);
+
+        let expected = std::time::Instant::now() + peers.backoff_durations.low;
+        assert!(backoff_timestamp <= expected);
+    }
+
+    #[tokio::test]
     async fn test_multiple_backoff_calculations() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
@@ -1385,15 +1444,16 @@ mod test {
         let peer_struct = peers.peers.get_mut(&peer).unwrap();
 
         // Simulate a peer that was already backed off once
-        peer_struct.backoff_counter = 1;
+        peer_struct.severe_backoff_counter = 1;
 
         let now = std::time::Instant::now();
 
         // Simulate the increment that happens in on_connection_failure
-        peer_struct.backoff_counter += 1;
+        peer_struct.severe_backoff_counter += 1;
         // Get official backoff time
-        let backoff_time =
-            peers.backoff_durations.backoff_until(BackoffKind::High, peer_struct.backoff_counter);
+        let backoff_time = peers
+            .backoff_durations
+            .backoff_until(BackoffKind::High, peer_struct.severe_backoff_counter);
 
         // Duration of the backoff should be 2 * 15 minutes = 30 minutes
         let backoff_duration = std::time::Duration::new(30 * 60, 0);
@@ -1859,5 +1919,38 @@ mod test {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_tick() {
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
+        let socket_addr = SocketAddr::new(ip, 8008);
+        let config = PeersConfig::default();
+        let mut peer_manager = PeersManager::new(config);
+        let peer_id = PeerId::random();
+        peer_manager.add_peer(peer_id, socket_addr, None);
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        peer_manager.tick();
+
+        // still unconnected
+        assert_eq!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
+
+        // mark as connected
+        peer_manager.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::Out;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        peer_manager.tick();
+
+        // still at default reputation
+        assert_eq!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation, DEFAULT_REPUTATION);
+
+        peer_manager.peers.get_mut(&peer_id).unwrap().reputation -= 1;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        peer_manager.tick();
+
+        // tick applied
+        assert!(peer_manager.peers.get_mut(&peer_id).unwrap().reputation >= DEFAULT_REPUTATION);
     }
 }

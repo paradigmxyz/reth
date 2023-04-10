@@ -9,7 +9,7 @@ pub struct TransactionInfo {
     /// Hash of the transaction.
     pub hash: Option<TxHash>,
     /// Index of the transaction in the block
-    pub index: Option<usize>,
+    pub index: Option<u64>,
     /// Hash of the block.
     pub block_hash: Option<H256>,
     /// Number of the block.

@@ -1,7 +1,7 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
-use crate::result::{internal_rpc_err, rpc_err};
-use jsonrpsee::{core::Error as RpcError, types::error::INVALID_PARAMS_CODE};
+use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
+use jsonrpsee::core::Error as RpcError;
 use reth_primitives::{constants::SELECTOR_LEN, Address, Bytes, U256};
 use reth_rpc_types::{error::EthRpcErrorCode, BlockError};
 use reth_transaction_pool::error::{InvalidPoolTransactionError, PoolError};
@@ -25,21 +25,17 @@ pub enum EthApiError {
     PoolError(RpcPoolError),
     #[error("Unknown block number")]
     UnknownBlockNumber,
+    #[error("Unknown block or tx index")]
+    UnknownBlockOrTxIndex,
     #[error("Invalid block range")]
     InvalidBlockRange,
     /// An internal error where prevrandao is not set in the evm's environment
     #[error("Prevrandao not in th EVM's environment after merge")]
     PrevrandaoNotSet,
-    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} and maxFeePerGas {max_fee_per_gas} set")]
-    ConflictingRequestGasPrice { gas_price: U256, max_fee_per_gas: U256 },
-    #[error("Conflicting fee values in request. Both legacy gasPrice {gas_price} maxFeePerGas {max_fee_per_gas} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
-    ConflictingRequestGasPriceAndTipSet {
-        gas_price: U256,
-        max_fee_per_gas: U256,
-        max_priority_fee_per_gas: U256,
-    },
-    #[error("Conflicting fee values in request. Legacy gasPrice {gas_price} and maxPriorityFeePerGas {max_priority_fee_per_gas} set")]
-    RequestLegacyGasPriceAndTipSet { gas_price: U256, max_priority_fee_per_gas: U256 },
+    /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
+    /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
+    #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
+    ConflictingFeeFieldsInRequest,
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
     /// Thrown when constructing an RPC block from a primitive block data failed.
@@ -55,6 +51,15 @@ pub enum EthApiError {
     /// Error related to signing
     #[error(transparent)]
     Signing(#[from] SignError),
+    /// Thrown when a transaction was requested but not matching transaction exists
+    #[error("transaction not found")]
+    TransactionNotFound,
+    /// Some feature is unsupported
+    #[error("unsupported")]
+    Unsupported(&'static str),
+    /// When tracer config does not match the tracer
+    #[error("invalid tracer config")]
+    InvalidTracerConfig,
 }
 
 impl From<EthApiError> for RpcError {
@@ -63,20 +68,21 @@ impl From<EthApiError> for RpcError {
             EthApiError::FailedToDecodeSignedTransaction |
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
-            EthApiError::UnknownBlockNumber |
             EthApiError::InvalidBlockRange |
-            EthApiError::ConflictingRequestGasPrice { .. } |
-            EthApiError::ConflictingRequestGasPriceAndTipSet { .. } |
-            EthApiError::RequestLegacyGasPriceAndTipSet { .. } |
+            EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
-            EthApiError::BothStateAndStateDiffInOverride(_) => {
-                rpc_err(INVALID_PARAMS_CODE, error.to_string(), None)
-            }
+            EthApiError::BothStateAndStateDiffInOverride(_) |
+            EthApiError::InvalidTracerConfig => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(_) |
             EthApiError::PrevrandaoNotSet |
             EthApiError::InvalidBlockData(_) |
-            EthApiError::Internal(_) => internal_rpc_err(error.to_string()),
+            EthApiError::Internal(_) |
+            EthApiError::TransactionNotFound => internal_rpc_err(error.to_string()),
+            EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
+                rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
+            }
+            EthApiError::Unsupported(msg) => internal_rpc_err(msg),
         }
     }
 }
@@ -335,11 +341,12 @@ impl From<PoolError> for RpcPoolError {
     fn from(err: PoolError) -> RpcPoolError {
         match err {
             PoolError::ReplacementUnderpriced(_) => RpcPoolError::ReplaceUnderpriced,
-            PoolError::ProtocolFeeCapTooLow(_, _) => RpcPoolError::Underpriced,
+            PoolError::FeeCapBelowMinimumProtocolFeeCap(_, _) => RpcPoolError::Underpriced,
             PoolError::SpammerExceededCapacity(_, _) => RpcPoolError::TxPoolOverflow,
             PoolError::DiscardedOnInsert(_) => RpcPoolError::TxPoolOverflow,
             PoolError::InvalidTransaction(_, err) => err.into(),
             PoolError::Other(_, err) => RpcPoolError::Other(err),
+            PoolError::AlreadyImported(_) => RpcPoolError::AlreadyKnown,
         }
     }
 }
@@ -362,6 +369,9 @@ pub enum SignError {
     /// TypedData has invalid format.
     #[error("Given typed data is not valid")]
     TypedData,
+    /// No chainid
+    #[error("No chainid")]
+    NoChainId,
 }
 
 /// Converts the evm [ExecutionResult] into a result where `Ok` variant is the output bytes if it is

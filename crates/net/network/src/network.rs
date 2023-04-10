@@ -229,6 +229,10 @@ impl NetworkInfo for NetworkHandle {
     fn chain_id(&self) -> u64 {
         self.inner.chain_id.load(Ordering::Relaxed)
     }
+
+    fn is_syncing(&self) -> bool {
+        SyncStateProvider::is_syncing(self)
+    }
 }
 
 impl StatusUpdater for NetworkHandle {
@@ -303,7 +307,7 @@ pub(crate) enum NetworkHandleMessage {
     FetchClient(oneshot::Sender<FetchClient>),
     /// Apply a status update.
     StatusUpdate { head: Head },
-    /// Get the currenet status
+    /// Get the current status
     GetStatus(oneshot::Sender<NetworkStatus>),
     /// Get PeerInfo from all the peers
     GetPeerInfo(oneshot::Sender<Vec<PeerInfo>>),

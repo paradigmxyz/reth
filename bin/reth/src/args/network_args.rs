@@ -6,6 +6,7 @@ use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
+use secp256k1::SecretKey;
 use std::{path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
@@ -44,6 +45,10 @@ pub struct NetworkArgs {
     /// NAT resolution method.
     #[arg(long, default_value = "any")]
     pub nat: NatResolver,
+
+    /// Network listening port. default: 30303
+    #[arg(long = "port", value_name = "PORT")]
+    pub port: Option<u16>,
 }
 
 impl NetworkArgs {
@@ -53,11 +58,12 @@ impl NetworkArgs {
         &self,
         config: &Config,
         chain_spec: Arc<ChainSpec>,
+        secret_key: SecretKey,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
 
         let network_config_builder = config
-            .network_config(self.nat, self.persistent_peers_file())
+            .network_config(self.nat, self.persistent_peers_file(), secret_key)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec);
 
@@ -82,18 +88,18 @@ impl NetworkArgs {
 pub struct DiscoveryArgs {
     /// Disable the discovery service.
     #[arg(short, long)]
-    disable_discovery: bool,
+    pub disable_discovery: bool,
 
     /// Disable the DNS discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
-    disable_dns_discovery: bool,
+    pub disable_dns_discovery: bool,
 
     /// Disable Discv4 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
-    disable_discv4_discovery: bool,
+    pub disable_discv4_discovery: bool,
 
-    /// The UDP port to use for P2P discovery/networking.
-    #[arg(long = "discovery.port")]
+    /// The UDP port to use for P2P discovery/networking. default: 30303
+    #[arg(long = "discovery.port", name = "discovery.port", value_name = "DISCOVERY_PORT")]
     pub port: Option<u16>,
 }
 

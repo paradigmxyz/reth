@@ -11,7 +11,6 @@ description = "Implementations of various block downloaders"
 # reth
 reth-interfaces = { path = "../../interfaces" }
 reth-primitives = { path = "../../primitives" }
-reth-eth-wire = { path = "../eth-wire" }
 reth-db = { path = "../../storage/db" }
 reth-tasks = { path = "../../tasks" }
 reth-metrics-derive = { path = "../../metrics/metrics-derive" }

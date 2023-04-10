@@ -17,7 +17,7 @@ use crate::{
     ValidPoolTransaction, U256,
 };
 use fnv::FnvHashMap;
-use reth_primitives::{TxHash, H256};
+use reth_primitives::{constants::MIN_PROTOCOL_BASE_FEE, TxHash, H256};
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap, HashMap},
@@ -25,13 +25,6 @@ use std::{
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
 };
-
-/// The minimal value the basefee can decrease to.
-///
-/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
-/// Once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less
-/// than 1.
-pub(crate) const MIN_PROTOCOL_BASE_FEE: u128 = 7;
 
 /// A pool that manages transactions.
 ///
@@ -161,6 +154,14 @@ impl<T: TransactionOrdering> TxPool<T> {
         txs.into_iter().filter_map(|tx| self.get(&tx))
     }
 
+    /// Returns all transactions sent from the given sender.
+    pub(crate) fn get_transactions_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        self.all_transactions.txs_iter(sender).map(|(_, tx)| Arc::clone(&tx.transaction)).collect()
+    }
+
     /// Updates the entire pool after a new block was mined.
     ///
     /// This removes all mined transactions, updates according to the new base fee and rechecks
@@ -214,6 +215,10 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_balance: U256,
         on_chain_nonce: u64,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
+        if self.contains(tx.hash()) {
+            return Err(PoolError::AlreadyImported(*tx.hash()))
+        }
+
         // Update sender info with balance and nonce
         self.sender_info
             .entry(tx.sender_id())
@@ -247,9 +252,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                     InsertErr::Underpriced { existing, .. } => {
                         Err(PoolError::ReplacementUnderpriced(existing))
                     }
-                    InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap } => {
-                        Err(PoolError::ProtocolFeeCapTooLow(*transaction.hash(), fee_cap))
-                    }
+                    InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap } => Err(
+                        PoolError::FeeCapBelowMinimumProtocolFeeCap(*transaction.hash(), fee_cap),
+                    ),
                     InsertErr::ExceededSenderTransactionsCapacity { transaction } => {
                         Err(PoolError::SpammerExceededCapacity(
                             transaction.sender(),
@@ -303,7 +308,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Removes and returns all matching transactions from the pool.
-    pub(crate) fn remove_invalid(
+    pub(crate) fn remove_transactions(
         &mut self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
@@ -684,8 +689,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns an iterator over all transactions for the given sender, starting with the lowest
     /// nonce
-    #[cfg(test)]
-    #[allow(unused)]
     pub(crate) fn txs_iter(
         &self,
         sender: SenderId,
@@ -846,7 +849,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // Check dynamic fee
         if let Some(fee_cap) = transaction.max_fee_per_gas() {
             if fee_cap < self.minimal_protocol_basefee {
-                return Err(InsertErr::ProtocolFeeCapTooLow { transaction, fee_cap })
+                return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
             }
             if fee_cap >= self.pending_basefee {
                 state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
@@ -865,7 +868,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
         let pool_tx = PoolInternalTransaction {
             transaction: transaction.clone(),
-            subpool: SubPool::Queued,
+            subpool: state.into(),
             state,
             cumulative_cost,
         };
@@ -953,11 +956,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 }
                 has_parked_ancestor = !tx.state.is_pending();
 
+                // update the pool based on the state
+                tx.subpool = tx.state.into();
+
                 if tx_id.eq(id) {
                     // if it is the new transaction, track the state
                     state = tx.state;
                 } else {
-                    tx.subpool = tx.state.into();
+                    // check if anything changed
                     if current_pool != tx.subpool {
                         updates.push(PoolUpdate {
                             id: *id,
@@ -1025,7 +1031,7 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     /// The transactions feeCap is lower than the chain's minimum fee requirement.
     ///
     /// See also [`MIN_PROTOCOL_BASE_FEE`]
-    ProtocolFeeCapTooLow { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: u128 },
+    FeeCapBelowMinimumProtocolFeeCap { transaction: Arc<ValidPoolTransaction<T>>, fee_cap: u128 },
     /// Sender currently exceeds the configured limit for max account slots.
     ///
     /// The sender can be considered a spammer at this point.
@@ -1143,9 +1149,29 @@ impl SenderInfo {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{MockTransaction, MockTransactionFactory},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };
+
+    #[test]
+    fn test_insert_pending() {
+        let on_chain_balance = U256::MAX;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions::default();
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let valid_tx = f.validated(tx);
+        let InsertOk { updates, replaced_tx, move_to, state, .. } =
+            pool.insert_tx(valid_tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        assert!(updates.is_empty());
+        assert!(replaced_tx.is_none());
+        assert!(state.contains(TxState::NO_NONCE_GAPS));
+        assert!(state.contains(TxState::ENOUGH_BALANCE));
+        assert_eq!(move_to, SubPool::Pending);
+
+        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        assert_eq!(inserted.subpool, SubPool::Pending);
+    }
 
     #[test]
     fn test_simple_insert() {
@@ -1188,6 +1214,21 @@ mod tests {
         assert_eq!(pool.len(), 2);
         let inserted = pool.get(valid_tx.id()).unwrap();
         assert!(inserted.state.intersects(expected_state));
+    }
+
+    #[test]
+    fn insert_already_imported() {
+        let on_chain_balance = U256::ZERO;
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+        let tx = MockTransaction::eip1559().inc_price().inc_limit();
+        let tx = f.validated(tx);
+        pool.add_transaction(tx.clone(), on_chain_balance, on_chain_nonce).unwrap();
+        match pool.add_transaction(tx, on_chain_balance, on_chain_nonce).unwrap_err() {
+            PoolError::AlreadyImported(_) => {}
+            _ => unreachable!(),
+        }
     }
 
     #[test]

@@ -1,5 +1,7 @@
-use crate::tracing::{types::CallTraceNode, TraceInspectorConfig};
+use crate::tracing::{types::CallTraceNode, TracingInspectorConfig};
 use reth_rpc_types::{trace::parity::*, TransactionInfo};
+use revm::primitives::ExecutionResult;
+use std::collections::HashSet;
 
 /// A type for creating parity style traces
 #[derive(Clone, Debug)]
@@ -7,12 +9,12 @@ pub struct ParityTraceBuilder {
     /// Recorded trace nodes
     nodes: Vec<CallTraceNode>,
     /// How the traces were recorded
-    _config: TraceInspectorConfig,
+    _config: TracingInspectorConfig,
 }
 
 impl ParityTraceBuilder {
     /// Returns a new instance of the builder
-    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TraceInspectorConfig) -> Self {
+    pub(crate) fn new(nodes: Vec<CallTraceNode>, _config: TracingInspectorConfig) -> Self {
         Self { nodes, _config }
     }
 
@@ -79,6 +81,33 @@ impl ParityTraceBuilder {
         info: TransactionInfo,
     ) -> Vec<LocalizedTransactionTrace> {
         self.into_localized_transaction_traces_iter(info).collect()
+    }
+
+    /// Consumes the inspector and returns the trace results according to the configured trace
+    /// types.
+    pub fn into_trace_results(
+        self,
+        res: ExecutionResult,
+        trace_types: &HashSet<TraceType>,
+    ) -> TraceResults {
+        let output = match res {
+            ExecutionResult::Success { output, .. } => output.into_data(),
+            ExecutionResult::Revert { output, .. } => output,
+            ExecutionResult::Halt { .. } => Default::default(),
+        };
+
+        let (trace, vm_trace, state_diff) = self.into_trace_type_traces(trace_types);
+
+        TraceResults { output: output.into(), trace, vm_trace, state_diff }
+    }
+
+    /// Returns the tracing types that are configured in the set
+    pub fn into_trace_type_traces(
+        self,
+        _trace_types: &HashSet<TraceType>,
+    ) -> (Option<Vec<TransactionTrace>>, Option<VmTrace>, Option<StateDiff>) {
+        // TODO(mattsse): impl conversion
+        (None, None, None)
     }
 
     /// Returns an iterator over all recorded traces  for `trace_transaction`

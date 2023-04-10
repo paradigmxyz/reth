@@ -153,7 +153,7 @@ mod tests {
         AccountChangeSet, Error,
     };
     use reth_libmdbx::{NoWriteMap, WriteMap};
-    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H256, U256};
+    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, H160, H256, U256};
     use std::{str::FromStr, sync::Arc};
     use tempfile::TempDir;
 
@@ -296,12 +296,16 @@ mod tests {
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
 
         // start bound greater than end bound
-        let res = cursor.walk_range(3..1);
-        assert!(matches!(res, Err(Error::Read(2))));
+        let mut res = cursor.walk_range(3..1).unwrap();
+        assert_eq!(res.next(), None);
 
         // start bound greater than end bound
-        let res = cursor.walk_range(15..=2);
-        assert!(matches!(res, Err(Error::Read(2))));
+        let mut res = cursor.walk_range(15..=2).unwrap();
+        assert_eq!(res.next(), None);
+
+        // returning nothing
+        let mut walker = cursor.walk_range(1..1).unwrap();
+        assert_eq!(walker.next(), None);
     }
 
     #[test]
@@ -722,8 +726,8 @@ mod tests {
     #[test]
     fn dup_value_with_same_subkey() {
         let env = test_utils::create_test_db::<NoWriteMap>(EnvKind::RW);
-        let key1 = Address::from_str("0x1111111111111111111111111111111111111111")
-            .expect(ERROR_ETH_ADDRESS);
+        let key1 = H160([0x11; 20]);
+        let key2 = H160([0x22; 20]);
 
         // PUT key1 (0,1)
         let value01 = StorageEntry { key: H256::from_low_u64_be(0), value: U256::from(1) };
@@ -732,6 +736,10 @@ mod tests {
         // PUT key1 (0,0)
         let value00 = StorageEntry::default();
         env.update(|tx| tx.put::<PlainStorageState>(key1, value00).expect(ERROR_PUT)).unwrap();
+
+        // PUT key2 (2,2)
+        let value22 = StorageEntry { key: H256::from_low_u64_be(2), value: U256::from(2) };
+        env.update(|tx| tx.put::<PlainStorageState>(key2, value22).expect(ERROR_PUT)).unwrap();
 
         // Iterate with walk
         {
@@ -743,7 +751,7 @@ mod tests {
             // NOTE: Both values are present
             assert_eq!(Some(Ok((key1, value00))), walker.next());
             assert_eq!(Some(Ok((key1, value01))), walker.next());
-            assert_eq!(None, walker.next());
+            assert_eq!(Some(Ok((key2, value22))), walker.next());
         }
 
         // seek_by_key_subkey
@@ -753,6 +761,8 @@ mod tests {
 
             // NOTE: There are two values with same SubKey but only first one is shown
             assert_eq!(Ok(Some(value00)), cursor.seek_by_key_subkey(key1, value00.key));
+            // key1 but value is greater than the one in the DB
+            assert_eq!(Ok(None), cursor.seek_by_key_subkey(key1, value22.key));
         }
     }
 

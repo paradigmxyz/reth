@@ -10,4 +10,4 @@ description = "core reth specific revm utilities"
 # reth 
 reth-primitives = { path = "../../primitives" }
 
-revm = { version = "3.0.0" }
+revm = { version = "3.1.0" }

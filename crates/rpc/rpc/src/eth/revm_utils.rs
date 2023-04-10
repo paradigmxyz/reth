@@ -2,12 +2,18 @@
 
 use crate::eth::error::{EthApiError, EthResult, InvalidTransactionError};
 use reth_primitives::{AccessList, Address, U256};
-use reth_rpc_types::CallRequest;
+use reth_rpc_types::{
+    state::{AccountOverride, StateOverride},
+    CallRequest,
+};
 use revm::{
+    db::CacheDB,
     precompile::{Precompiles, SpecId as PrecompilesSpecId},
     primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId, TransactTo, TxEnv},
     Database, Inspector,
 };
+use revm_primitives::{db::DatabaseRef, Bytecode};
+use tracing::trace;
 
 /// Returns the addresses of the precompiles corresponding to the SpecId.
 pub(crate) fn get_precompiles(spec_id: &SpecId) -> Vec<reth_primitives::H160> {
@@ -57,7 +63,54 @@ where
     Ok((res, evm.env))
 }
 
-/// Creates a new [Env] to be used for executing the [CallRequest] in `eth_call`
+/// Prepares the [Env] for execution.
+///
+/// Does not commit any changes to the underlying database.
+pub(crate) fn prepare_call_env<DB>(
+    mut cfg: CfgEnv,
+    block: BlockEnv,
+    request: CallRequest,
+    db: &mut CacheDB<DB>,
+    state_overrides: Option<StateOverride>,
+) -> EthResult<Env>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+{
+    // we want to disable this in eth_call, since this is common practice used by other node
+    // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+    cfg.disable_block_gas_limit = true;
+
+    // Disabled because eth_call is sometimes used with eoa senders
+    // See <https://github.com/paradigmxyz/reth/issues/1959>
+    cfg.disable_eip3607 = true;
+
+    // The basefee should be ignored for eth_call
+    // See:
+    // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
+    cfg.disable_base_fee = true;
+
+    let request_gas = request.gas;
+
+    let mut env = build_call_evm_env(cfg, block, request)?;
+
+    // apply state overrides
+    if let Some(state_overrides) = state_overrides {
+        apply_state_overrides(state_overrides, db)?;
+    }
+
+    if request_gas.is_none() && env.tx.gas_price > U256::ZERO {
+        trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap");
+        // no gas limit was provided in the request, so we need to cap the request's gas limit
+        cap_tx_gas_limit_with_caller_allowance(db, &mut env.tx)?;
+    }
+
+    Ok(env)
+}
+
+/// Creates a new [Env] to be used for executing the [CallRequest] in `eth_call`.
+///
+/// Note: this does _not_ access the Database to check the sender.
 pub(crate) fn build_call_evm_env(
     cfg: CfgEnv,
     block: BlockEnv,
@@ -68,6 +121,9 @@ pub(crate) fn build_call_evm_env(
 }
 
 /// Configures a new [TxEnv]  for the [CallRequest]
+///
+/// All [TxEnv] fields are derived from the given [CallRequest], if fields are `None`, they fall
+/// back to the [BlockEnv]'s settings.
 pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthResult<TxEnv> {
     let CallRequest {
         from,
@@ -110,6 +166,32 @@ pub(crate) fn create_txn_env(block_env: &BlockEnv, request: CallRequest) -> EthR
     Ok(env)
 }
 
+/// Caps the configured [TxEnv] `gas_limit` with the allowance of the caller.
+///
+/// Returns an error if the caller has insufficient funds
+pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
+    mut db: DB,
+    env: &mut TxEnv,
+) -> EthResult<()>
+where
+    DB: Database,
+    EthApiError: From<<DB as Database>::Error>,
+{
+    let mut allowance = db.basic(env.caller)?.map(|acc| acc.balance).unwrap_or_default();
+
+    // subtract transferred value
+    allowance = allowance
+        .checked_sub(env.value)
+        .ok_or_else(|| InvalidTransactionError::InsufficientFunds)?;
+
+    // cap the gas limit
+    if let Ok(gas_limit) = allowance.checked_div(env.gas_price).unwrap_or_default().try_into() {
+        env.gas_limit = gas_limit;
+    }
+
+    Ok(())
+}
+
 /// Helper type for representing the fees of a [CallRequest]
 pub(crate) struct CallFees {
     /// EIP-1559 priority fee
@@ -137,6 +219,10 @@ impl CallFees {
         base_fee: U256,
     ) -> EthResult<CallFees> {
         match (call_gas_price, call_max_fee, call_priority_fee) {
+            (None, None, None) => {
+                // when none are specified, they are all set to zero
+                Ok(CallFees { gas_price: U256::ZERO, max_priority_fee_per_gas: None })
+            }
             (gas_price, None, None) => {
                 // request for a legacy transaction
                 // set everything to zero
@@ -158,22 +244,76 @@ impl CallFees {
                 }
                 Ok(CallFees { gas_price: max_fee, max_priority_fee_per_gas })
             }
-            (Some(gas_price), Some(max_fee_per_gas), Some(max_priority_fee_per_gas)) => {
-                Err(EthApiError::ConflictingRequestGasPriceAndTipSet {
-                    gas_price,
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                })
-            }
-            (Some(gas_price), Some(max_fee_per_gas), None) => {
-                Err(EthApiError::ConflictingRequestGasPrice { gas_price, max_fee_per_gas })
-            }
-            (Some(gas_price), None, Some(max_priority_fee_per_gas)) => {
-                Err(EthApiError::RequestLegacyGasPriceAndTipSet {
-                    gas_price,
-                    max_priority_fee_per_gas,
-                })
-            }
+            _ => Err(EthApiError::ConflictingFeeFieldsInRequest),
         }
     }
+}
+
+/// Applies the given state overrides (a set of [AccountOverride]) to the [CacheDB].
+fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+{
+    for (account, account_overrides) in overrides {
+        apply_account_override(account, account_overrides, db)?;
+    }
+    Ok(())
+}
+
+/// Applies a single [AccountOverride] to the [CacheDB].
+fn apply_account_override<DB>(
+    account: Address,
+    account_override: AccountOverride,
+    db: &mut CacheDB<DB>,
+) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+{
+    let mut account_info = db.basic(account)?.unwrap_or_default();
+
+    if let Some(nonce) = account_override.nonce {
+        account_info.nonce = nonce.as_u64();
+    }
+    if let Some(code) = account_override.code {
+        account_info.code = Some(Bytecode::new_raw(code.0));
+    }
+    if let Some(balance) = account_override.balance {
+        account_info.balance = balance;
+    }
+
+    db.insert_account_info(account, account_info);
+
+    // We ensure that not both state and state_diff are set.
+    // If state is set, we must mark the account as "NewlyCreated", so that the old storage
+    // isn't read from
+    match (account_override.state, account_override.state_diff) {
+        (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
+        (None, None) => {
+            // nothing to do
+        }
+        (Some(new_account_state), None) => {
+            db.replace_account_storage(
+                account,
+                new_account_state
+                    .into_iter()
+                    .map(|(slot, value)| {
+                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
+                    })
+                    .collect(),
+            )?;
+        }
+        (None, Some(account_state_diff)) => {
+            for (slot, value) in account_state_diff {
+                db.insert_account_storage(
+                    account,
+                    U256::from_be_bytes(slot.0),
+                    U256::from_be_bytes(value.0),
+                )?;
+            }
+        }
+    };
+
+    Ok(())
 }

@@ -1,10 +1,20 @@
 //! Ethereum protocol-related constants
 
-use crate::H256;
+use crate::{H256, U256};
 use hex_literal::hex;
 
 /// The first four bytes of the call data for a function call specifies the function to be called.
 pub const SELECTOR_LEN: usize = 4;
+
+/// The minimal value the basefee can decrease to.
+///
+/// The `BASE_FEE_MAX_CHANGE_DENOMINATOR` <https://eips.ethereum.org/EIPS/eip-1559> is `8`, or 12.5%.
+/// Once the base fee has dropped to `7` WEI it cannot decrease further because 12.5% of 7 is less
+/// than 1.
+pub const MIN_PROTOCOL_BASE_FEE: u128 = 7;
+
+/// Same as [MIN_PROTOCOL_BASE_FEE] but as a U256.
+pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
 
 /// Initial base fee as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
 pub const EIP1559_INITIAL_BASE_FEE: u64 = 1_000_000_000;
@@ -17,6 +27,12 @@ pub const EIP1559_ELASTICITY_MULTIPLIER: u64 = 2;
 
 /// Multiplier for converting gwei to wei.
 pub const GWEI_TO_WEI: u64 = 1_000_000_000;
+
+/// Multiplier for converting finney (milliether) to wei.
+pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
+
+/// Multiplier for converting ether to wei.
+pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
 
 /// The Ethereum mainnet genesis hash.
 pub const MAINNET_GENESIS: H256 =
@@ -38,6 +54,25 @@ pub const KECCAK_EMPTY: H256 =
 pub const EMPTY_OMMER_ROOT: H256 =
     H256(hex!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"));
 
-/// Withdrawals root of empty withdrawals set.
-pub const EMPTY_WITHDRAWALS: H256 =
+/// hash of an empty set `keccak256(rlp([]))`
+const EMPTY_SET_HASH: H256 =
     H256(hex!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"));
+
+/// Transactions root of empty receipts set.
+pub const EMPTY_RECEIPTS: H256 = EMPTY_SET_HASH;
+
+/// Transactions root of empty transactions set.
+pub const EMPTY_TRANSACTIONS: H256 = EMPTY_SET_HASH;
+
+/// Withdrawals root of empty withdrawals set.
+pub const EMPTY_WITHDRAWALS: H256 = EMPTY_SET_HASH;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn min_protocol_sanity() {
+        assert_eq!(MIN_PROTOCOL_BASE_FEE_U256.to::<u128>(), MIN_PROTOCOL_BASE_FEE);
+    }
+}

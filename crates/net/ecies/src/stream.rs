@@ -161,7 +161,7 @@ mod tests {
             let (incoming, _) = listener.accept().await.unwrap();
             let mut stream = ECIESStream::incoming(incoming, server_key).await.unwrap();
 
-            // use the stream to get the next messagse
+            // use the stream to get the next message
             let message = stream.next().await.unwrap().unwrap();
             assert_eq!(message, Bytes::from("hello"));
         });

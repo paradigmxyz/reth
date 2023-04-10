@@ -54,7 +54,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: to_block, done: true })
+        Ok(ExecOutput { stage_progress: to_block, done: to_block == previous_stage_progress })
     }
 
     /// Unwind the stage.
@@ -86,7 +86,7 @@ mod tests {
     use reth_db::{
         models::{
             storage_sharded_key::{StorageShardedKey, NUM_OF_INDICES_IN_SHARD},
-            ShardedKey, TransitionIdAddress,
+            ShardedKey, StoredBlockBodyIndices, TransitionIdAddress,
         },
         tables,
         transaction::DbTxMut,
@@ -135,8 +135,25 @@ mod tests {
         // setup
         tx.commit(|tx| {
             // we just need first and last
-            tx.put::<tables::BlockTransitionIndex>(0, 3).unwrap();
-            tx.put::<tables::BlockTransitionIndex>(5, 7).unwrap();
+            tx.put::<tables::BlockBodyIndices>(
+                0,
+                StoredBlockBodyIndices {
+                    first_transition_id: 0,
+                    tx_count: 3,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+            tx.put::<tables::BlockBodyIndices>(
+                5,
+                StoredBlockBodyIndices {
+                    first_transition_id: 3,
+                    tx_count: 5,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
 
             // setup changeset that are going to be applied to history index
             tx.put::<tables::StorageChangeSet>(trns(4), storage(STORAGE_KEY)).unwrap();

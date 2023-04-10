@@ -347,11 +347,11 @@ where
     }
 
     /// Removes and returns all matching transactions from the pool.
-    pub(crate) fn remove_invalid(
+    pub(crate) fn remove_transactions(
         &self,
         hashes: impl IntoIterator<Item = TxHash>,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let removed = self.pool.write().remove_invalid(hashes);
+        let removed = self.pool.write().remove_transactions(hashes);
 
         let mut listener = self.event_listener.write();
 
@@ -372,6 +372,15 @@ where
         tx_hash: &TxHash,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         self.pool.read().get(tx_hash)
+    }
+
+    /// Returns all transactions of the address
+    pub(crate) fn get_transactions_by_sender(
+        &self,
+        sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let sender_id = self.get_sender_id(sender);
+        self.pool.read().get_transactions_by_sender(sender_id)
     }
 
     /// Returns all the transactions belonging to the hashes.

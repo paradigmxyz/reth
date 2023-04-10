@@ -1,32 +1,30 @@
 use crate::{
     BlockHashProvider, BlockIdProvider, BlockProvider, EvmEnvProvider, HeaderProvider,
-    ProviderError, StateProviderFactory, TransactionsProvider, WithdrawalsProvider,
+    PostStateDataProvider, ProviderError, StateProviderBox, StateProviderFactory,
+    TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{
-    cursor::DbCursorRO,
-    database::{Database, DatabaseGAT},
-    tables,
-    transaction::DbTx,
-};
+use reth_db::{cursor::DbCursorRO, database::Database, tables, transaction::DbTx};
 use reth_interfaces::Result;
 use reth_primitives::{
     Block, BlockHash, BlockId, BlockNumber, ChainInfo, ChainSpec, Hardfork, Head, Header, Receipt,
-    TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
+    TransactionMeta, TransactionSigned, TxHash, TxNumber, Withdrawal, H256, U256,
 };
 use reth_revm_primitives::{
     config::revm_spec,
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
+    primitives::{BlockEnv, CfgEnv, SpecId},
 };
-use revm_primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{ops::RangeBounds, sync::Arc};
 
 mod state;
 use crate::traits::ReceiptProvider;
 pub use state::{
-    chain::ChainState,
     historical::{HistoricalStateProvider, HistoricalStateProviderRef},
     latest::{LatestStateProvider, LatestStateProviderRef},
 };
+
+mod post_state_provider;
+pub use post_state_provider::PostStateProvider;
 
 /// A common provider that fetches data from a database.
 ///
@@ -134,8 +132,9 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
             if let Some(header) = self.header_by_number(number)? {
                 let id = BlockId::Number(number.into());
                 let tx = self.db.tx()?;
-                let transactions =
-                    self.transactions_by_block(id)?.ok_or(ProviderError::BlockBody { number })?;
+                let transactions = self
+                    .transactions_by_block(id)?
+                    .ok_or(ProviderError::BlockBodyIndices { number })?;
 
                 let ommers = tx.get::<tables::BlockOmmers>(header.number)?.map(|o| o.ommers);
                 let withdrawals = self.withdrawals_by_block(id, header.timestamp)?;
@@ -165,6 +164,10 @@ impl<DB: Database> BlockProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
+    fn transaction_id(&self, tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        self.db.view(|tx| tx.get::<tables::TxHashNumber>(tx_hash))?.map_err(Into::into)
+    }
+
     fn transaction_by_id(&self, id: TxNumber) -> Result<Option<TransactionSigned>> {
         self.db.view(|tx| tx.get::<tables::Transactions>(id))?.map_err(Into::into)
     }
@@ -181,11 +184,64 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
             .map_err(Into::into)
     }
 
+    fn transaction_by_hash_with_meta(
+        &self,
+        tx_hash: TxHash,
+    ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
+        self.db
+            .view(|tx| -> Result<_> {
+                if let Some(transaction_id) = tx.get::<tables::TxHashNumber>(tx_hash)? {
+                    if let Some(transaction) = tx.get::<tables::Transactions>(transaction_id)? {
+                        let mut transaction_cursor =
+                            tx.cursor_read::<tables::TransactionBlock>()?;
+                        if let Some(block_number) =
+                            transaction_cursor.seek(transaction_id).map(|b| b.map(|(_, bn)| bn))?
+                        {
+                            if let Some(block_hash) =
+                                tx.get::<tables::CanonicalHeaders>(block_number)?
+                            {
+                                if let Some(block_body) =
+                                    tx.get::<tables::BlockBodyIndices>(block_number)?
+                                {
+                                    // the index of the tx in the block is the offset:
+                                    // len([start..tx_id])
+                                    // SAFETY: `transaction_id` is always `>=` the block's first
+                                    // index
+                                    let index = transaction_id - block_body.first_tx_num();
+
+                                    let meta = TransactionMeta {
+                                        tx_hash,
+                                        index,
+                                        block_hash,
+                                        block_number,
+                                    };
+
+                                    return Ok(Some((transaction, meta)))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Ok(None)
+            })?
+            .map_err(Into::into)
+    }
+
+    fn transaction_block(&self, id: TxNumber) -> Result<Option<BlockNumber>> {
+        self.db
+            .view(|tx| {
+                let mut cursor = tx.cursor_read::<tables::TransactionBlock>()?;
+                cursor.seek(id).map(|b| b.map(|(_, bn)| bn))
+            })?
+            .map_err(Into::into)
+    }
+
     fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
         if let Some(number) = self.block_number_for_id(id)? {
             let tx = self.db.tx()?;
-            if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
-                let tx_range = body.tx_id_range();
+            if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
+                let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
@@ -207,17 +263,17 @@ impl<DB: Database> TransactionsProvider for ShareableDatabase<DB> {
     ) -> Result<Vec<Vec<TransactionSigned>>> {
         let tx = self.db.tx()?;
         let mut results = Vec::default();
-        let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
         for entry in body_cursor.walk_range(range)? {
             let (_, body) = entry?;
-            let tx_range = body.tx_id_range();
-            if body.tx_id_range().is_empty() {
+            let tx_num_range = body.tx_num_range();
+            if tx_num_range.is_empty() {
                 results.push(Vec::default());
             } else {
                 results.push(
                     tx_cursor
-                        .walk_range(tx_range)?
+                        .walk_range(tx_num_range)?
                         .map(|result| result.map(|(_, tx)| tx))
                         .collect::<std::result::Result<Vec<_>, _>>()?,
                 );
@@ -247,8 +303,8 @@ impl<DB: Database> ReceiptProvider for ShareableDatabase<DB> {
     fn receipts_by_block(&self, block: BlockId) -> Result<Option<Vec<Receipt>>> {
         if let Some(number) = self.block_number_for_id(block)? {
             let tx = self.db.tx()?;
-            if let Some(body) = tx.get::<tables::BlockBodies>(number)? {
-                let tx_range = body.tx_id_range();
+            if let Some(body) = tx.get::<tables::BlockBodyIndices>(number)? {
+                let tx_range = body.tx_num_range();
                 return if tx_range.is_empty() {
                     Ok(Some(Vec::new()))
                 } else {
@@ -269,10 +325,14 @@ impl<DB: Database> WithdrawalsProvider for ShareableDatabase<DB> {
     fn withdrawals_by_block(&self, id: BlockId, timestamp: u64) -> Result<Option<Vec<Withdrawal>>> {
         if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(timestamp) {
             if let Some(number) = self.block_number_for_id(id)? {
-                return Ok(self
-                    .db
-                    .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
-                    .map(|w| w.withdrawals))
+                // If we are past shanghai, then all blocks should have a withdrawal list, even if
+                // empty
+                return Ok(Some(
+                    self.db
+                        .view(|tx| tx.get::<tables::BlockWithdrawals>(number))??
+                        .map(|w| w.withdrawals)
+                        .unwrap_or_default(),
+                ))
             }
         }
         Ok(None)
@@ -350,26 +410,24 @@ impl<DB: Database> EvmEnvProvider for ShareableDatabase<DB> {
 }
 
 impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
-    type HistorySP<'a> = HistoricalStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
-    type LatestSP<'a> = LatestStateProvider<'a,<DB as DatabaseGAT<'a>>::TX> where Self: 'a;
-
     /// Storage provider for latest block
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(LatestStateProvider::new(self.db.tx()?))
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
 
-    fn history_by_block_number(&self, block_number: BlockNumber) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_number(&self, block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
         let tx = self.db.tx()?;
 
         // get transition id
         let transition = tx
-            .get::<tables::BlockTransitionIndex>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?;
+            .get::<tables::BlockBodyIndices>(block_number)?
+            .ok_or(ProviderError::BlockTransition { block_number })?
+            .transition_after_block();
 
-        Ok(HistoricalStateProvider::new(tx, transition))
+        Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
     }
 
-    fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash(&self, block_hash: BlockHash) -> Result<StateProviderBox<'_>> {
         let tx = self.db.tx()?;
         // get block number
         let block_number = tx
@@ -378,10 +436,22 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
 
         // get transition id
         let transition = tx
-            .get::<tables::BlockTransitionIndex>(block_number)?
-            .ok_or(ProviderError::BlockTransition { block_number })?;
+            .get::<tables::BlockBodyIndices>(block_number)?
+            .ok_or(ProviderError::BlockTransition { block_number })?
+            .transition_after_block();
 
-        Ok(HistoricalStateProvider::new(tx, transition))
+        Ok(Box::new(HistoricalStateProvider::new(tx, transition)))
+    }
+
+    fn pending(
+        &self,
+        post_state_data: Box<dyn PostStateDataProvider>,
+    ) -> Result<StateProviderBox<'_>> {
+        let canonical_fork = post_state_data.canonical_fork();
+        let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
+        let post_state_provider =
+            PostStateProvider { state_provider, post_state_data_provider: post_state_data };
+        Ok(Box::new(post_state_provider))
     }
 }
 

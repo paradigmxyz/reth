@@ -16,21 +16,16 @@ normal = [
 # reth 
 reth-primitives = { path = "../primitives" }
 reth-interfaces = { path = "../interfaces" }
-reth-revm = { path = "../revm" }
-reth-revm-inspectors = { path = "../revm/revm-inspectors" }
 reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 
-# revm
-revm = { version = "3.0.0" }
-
 # common
-async-trait = "0.1.57"
 thiserror = "1.0.37"
 auto_impl = "1.0"
 tracing = "0.1.37"
 tokio = { version = "1.21.2", features = ["sync"] }
+parking_lot = { version = "0.12"}
 
 # mics
 aquamarine = "0.3.0"
@@ -51,3 +46,7 @@ reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-primitives = { path = "../primitives", features = ["test-utils"] }
 reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
 parking_lot = "0.12"
+assert_matches = "1.5"
+
+[features]
+test-utils = []

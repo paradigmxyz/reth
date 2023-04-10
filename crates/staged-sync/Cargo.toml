@@ -30,6 +30,11 @@ tracing = "0.1.37"
 
 # crypto
 rand = { version = "0.8", optional = true }
+secp256k1 = { version = "0.26.0", features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
 
 # errors
 thiserror = "1"
@@ -51,6 +56,10 @@ tokio = { version = "1", features = ["io-util", "net", "macros", "rt-multi-threa
 hex = { version = "0.4", optional = true }
 
 [dev-dependencies]
+# HACK(onbjerg): Workaround to enable test-utils when running tests
+# Source: https://github.com/rust-lang/cargo/issues/2911#issuecomment-749580481
+reth-staged-sync = { path = ".", features = ["test-utils"] }
+
 # reth crates
 reth-tracing = { path = "../tracing" }
 reth-downloaders = { path = "../net/downloaders" }
@@ -85,3 +94,4 @@ test-utils = [
     "dep:ethers-middleware",
     "dep:async-trait"
 ]
+geth-tests = []

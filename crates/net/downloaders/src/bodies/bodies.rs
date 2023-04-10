@@ -280,28 +280,34 @@ where
     /// downloaded or are not in progress, they will be re-requested.
     fn set_download_range(&mut self, range: Range<BlockNumber>) -> DownloadResult<()> {
         // Check if the range is valid.
-        let is_valid = !range.is_empty();
-        if is_valid {
-            // Check if the provided range is the subset of the existing range.
-            let is_current_range_subset =
-                self.download_range.contains(&range.start) && range.end == self.download_range.end;
-            if is_current_range_subset {
-                tracing::trace!(target: "downloaders::bodies", ?range, "Download range already in progress");
-                // The current range already includes requested.
-                return Ok(())
-            }
-
-            // Check if the provided range is the next expected range.
-            let is_next_range = range.start >= self.download_range.end;
-            if is_next_range {
-                // New range received.
-                tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
-                self.download_range = range;
-                return Ok(())
-            }
+        if range.is_empty() {
+            tracing::error!(target: "downloaders::bodies", ?range, "Range is invalid");
+            return Err(DownloadError::InvalidBodyRange { range })
         }
 
-        Err(DownloadError::InvalidBodyRange { range })
+        // Check if the provided range is the subset of the existing range.
+        let is_current_range_subset =
+            self.download_range.contains(&range.start) && range.end == self.download_range.end;
+        if is_current_range_subset {
+            tracing::trace!(target: "downloaders::bodies", ?range, "Download range already in progress");
+            // The current range already includes requested.
+            return Ok(())
+        }
+
+        // Check if the provided range is the next expected range.
+        let is_next_range = range.start >= self.download_range.end;
+        if is_next_range {
+            // New range received.
+            tracing::trace!(target: "downloaders::bodies", ?range, "New download range set");
+            self.download_range = range;
+            return Ok(())
+        }
+
+        // The block range reset after unwind.
+        tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
+        self.clear();
+        self.download_range = range;
+        Ok(())
     }
 }
 
@@ -492,7 +498,7 @@ impl BodiesDownloaderBuilder {
     /// Consume self and return the concurrent donwloader.
     pub fn build<B, DB>(
         self,
-        client: Arc<B>,
+        client: B,
         consensus: Arc<dyn Consensus>,
         db: Arc<DB>,
     ) -> BodiesDownloader<B, DB>
@@ -509,7 +515,7 @@ impl BodiesDownloaderBuilder {
         let metrics = DownloaderMetrics::new(BODIES_DOWNLOADER_SCOPE);
         let in_progress_queue = BodiesRequestQueue::new(metrics.clone());
         BodiesDownloader {
-            client,
+            client: Arc::new(client),
             consensus,
             db,
             request_limit,
@@ -536,9 +542,8 @@ mod tests {
     use assert_matches::assert_matches;
     use futures_util::stream::StreamExt;
     use reth_db::mdbx::{test_utils::create_test_db, EnvKind, WriteMap};
-    use reth_eth_wire::BlockBody;
     use reth_interfaces::test_utils::{generators::random_block_range, TestConsensus};
-    use reth_primitives::H256;
+    use reth_primitives::{BlockBody, H256};
     use std::{collections::HashMap, sync::Arc};
 
     // Check that the blocks are emitted in order of block number, not in order of

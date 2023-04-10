@@ -704,6 +704,7 @@ where
             match req.poll_unpin(cx) {
                 Poll::Ready(outcome) => {
                     if let Err(err) = this.on_sync_target_outcome(outcome) {
+                        trace!(target: "downloaders::headers", ?err, "invalid sync target response");
                         if err.is_channel_closed() {
                             // download channel closed which means the network was dropped
                             return Poll::Ready(None)
@@ -1010,8 +1011,8 @@ impl Default for ReverseHeadersDownloaderBuilder {
 impl ReverseHeadersDownloaderBuilder {
     /// Set the request batch size.
     ///
-    /// This determines the `limit` for a [GetHeaders](reth_eth_wire::GetBlockHeaders) requests, the
-    /// number of headers we ask for.
+    /// This determines the `limit` for a `GetBlockHeaders` requests, the number of headers we ask
+    /// for.
     pub fn request_limit(mut self, limit: u64) -> Self {
         self.request_limit = limit;
         self
@@ -1057,11 +1058,7 @@ impl ReverseHeadersDownloaderBuilder {
 
     /// Build [ReverseHeadersDownloader] with provided consensus
     /// and header client implementations
-    pub fn build<H>(
-        self,
-        client: Arc<H>,
-        consensus: Arc<dyn Consensus>,
-    ) -> ReverseHeadersDownloader<H>
+    pub fn build<H>(self, client: H, consensus: Arc<dyn Consensus>) -> ReverseHeadersDownloader<H>
     where
         H: HeadersClient + 'static,
     {
@@ -1074,7 +1071,7 @@ impl ReverseHeadersDownloaderBuilder {
         } = self;
         ReverseHeadersDownloader {
             consensus,
-            client,
+            client: Arc::new(client),
             local_head: None,
             sync_target: None,
             // Note: we set these to `0` first, they'll be updated once the sync target response is

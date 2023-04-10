@@ -56,19 +56,17 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         debug!(target: "sync::stages::transaction_lookup", start_block, end_block, "Commencing sync");
 
-        let mut cursor_bodies = tx.cursor_read::<tables::BlockBodies>()?;
-        let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
+        let mut block_meta_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
 
         // Walk over block bodies within a specified range.
-        let bodies = cursor_bodies.walk(Some(start_block))?.take_while(|entry| {
-            entry.as_ref().map(|(num, _)| *num <= end_block).unwrap_or_default()
-        });
+        let bodies = block_meta_cursor.walk_range(start_block..=end_block)?;
 
         // Collect transactions for each body
         let mut tx_list = vec![];
-        for body_entry in bodies {
-            let (_, body) = body_entry?;
-            let transactions = tx_cursor.walk(Some(body.start_tx_id))?.take(body.tx_count as usize);
+        for block_meta_entry in bodies {
+            let (_, block_meta) = block_meta_entry?;
+            let transactions = tx_cursor.walk_range(block_meta.tx_num_range())?;
 
             for tx_entry in transactions {
                 let (id, transaction) = tx_entry?;
@@ -81,20 +79,23 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
 
         let mut txhash_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
 
-        // If the last inserted element in the database is smaller than the first in our set, then
-        // we can just append into the DB. This probably only ever happens during sync, on
-        // the first table insertion.
-        let append = tx_list
+        // If the last inserted element in the database is equal or bigger than the first
+        // in our set, then we need to insert inside the DB. If it is smaller then last
+        // element in the DB, we can append to the DB.
+        // Append probably only ever happens during sync, on the first table insertion.
+        let insert = tx_list
             .first()
             .zip(txhash_cursor.last()?)
-            .map(|((first, _), (last, _))| &last < first)
+            .map(|((first, _), (last, _))| first <= &last)
             .unwrap_or_default();
+        // if txhash_cursor.last() is None we will do insert. `zip` would return none if any item is
+        // none. if it is some and if first is smaller than last, we will do append.
 
         for (tx_hash, id) in tx_list {
-            if append {
-                txhash_cursor.append(tx_hash, id)?;
-            } else {
+            if insert {
                 txhash_cursor.insert(tx_hash, id)?;
+            } else {
+                txhash_cursor.append(tx_hash, id)?;
             }
         }
 
@@ -111,7 +112,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::transaction_lookup", to_block = input.unwind_to, "Unwinding");
         // Cursors to unwind tx hash to number
-        let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+        let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TxHashNumber>()?;
         let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
         let mut rev_walker = body_cursor.walk_back(None)?;
@@ -121,7 +122,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
 
             // Delete all transactions that belong to this block
-            for tx_id in body.tx_id_range() {
+            for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
                 if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
                     if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
@@ -162,7 +163,7 @@ mod tests {
 
         // Insert blocks with a single transaction at block `stage_progress + 10`
         let non_empty_block_number = stage_progress + 10;
-        let blocks = (stage_progress..input.previous_stage_progress() + 1)
+        let blocks = (stage_progress..=input.previous_stage_progress())
             .map(|number| {
                 random_block(number, None, Some((number == non_empty_block_number) as u8), None)
             })
@@ -246,10 +247,10 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxHashNumber] is not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_body(number);
+            let body_result = self.tx.inner().get_block_meta(number);
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
-                    body.last_tx_index(),
+                    body.last_tx_num(),
                     |key| key,
                 )?,
                 Err(_) => {
@@ -299,11 +300,11 @@ mod tests {
                         return Ok(())
                     }
 
-                    let mut body_cursor = tx.cursor_read::<tables::BlockBodies>()?;
+                    let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     body_cursor.seek_exact(start_block)?;
 
                     while let Some((_, body)) = body_cursor.next()? {
-                        for tx_id in body.tx_id_range() {
+                        for tx_id in body.tx_num_range() {
                             let transaction = tx
                                 .get::<tables::Transactions>(tx_id)?
                                 .expect("no transaction entry");

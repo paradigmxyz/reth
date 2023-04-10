@@ -1,7 +1,7 @@
 use crate::{
-    db::DbTool,
     dirs::{DbPath, PlatformPath},
     dump_stage::setup,
+    utils::DbTool,
 };
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
@@ -21,10 +21,14 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
 
     // Import relevant AccountChangeSets
     let tx = db_tool.db.tx()?;
-    let from_transition_rev =
-        tx.get::<tables::BlockTransitionIndex>(from)?.expect("there should be at least one.");
-    let to_transition_rev =
-        tx.get::<tables::BlockTransitionIndex>(to)?.expect("there should be at least one.");
+    let from_transition_rev = tx
+        .get::<tables::BlockBodyIndices>(from)?
+        .expect("there should be at least one.")
+        .transition_at_block();
+    let to_transition_rev = tx
+        .get::<tables::BlockBodyIndices>(to)?
+        .expect("there should be at least one.")
+        .transition_after_block();
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::AccountChangeSet, _>(
             &db_tool.db.tx()?,

@@ -10,8 +10,10 @@
 pub mod args;
 pub mod chain;
 pub mod cli;
+pub mod config;
 pub mod db;
 pub mod dirs;
+pub mod drop_stage;
 pub mod dump_stage;
 pub mod node;
 pub mod p2p;
@@ -21,3 +23,13 @@ pub mod stage;
 pub mod test_eth_chain;
 pub mod test_vectors;
 pub mod utils;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, clap::ValueEnum)]
+enum StageEnum {
+    Headers,
+    Bodies,
+    Senders,
+    Execution,
+    Hashing,
+    Merkle,
+}

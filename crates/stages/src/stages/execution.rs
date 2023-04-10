@@ -2,6 +2,7 @@ use crate::{
     exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
     UnwindOutput,
 };
+use metrics_core::Counter;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -9,15 +10,24 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::provider::ProviderError;
-use reth_primitives::{Address, Block, U256};
+use reth_metrics_derive::Metrics;
+use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
+use std::time::Instant;
 use tracing::*;
 
 /// The [`StageId`] of the execution stage.
 pub const EXECUTION: StageId = StageId("Execution");
+
+/// Execution stage metrics.
+#[derive(Metrics)]
+#[metrics(scope = "sync.execution")]
+pub struct ExecutionStageMetrics {
+    /// The total amount of gas processed (in millions)
+    mgas_processed_total: Counter,
+}
 
 /// The execution stage executes all transactions and
 /// update history indexes.
@@ -26,7 +36,7 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// - [tables::CanonicalHeaders] get next block to execute.
 /// - [tables::Headers] get for revm environment variables.
 /// - [tables::HeaderTD]
-/// - [tables::BlockBodies] to get tx number
+/// - [tables::BlockBodyIndices] to get tx number
 /// - [tables::Transactions] to execute
 ///
 /// For state access [LatestStateProviderRef] provides us latest state and history state
@@ -43,29 +53,56 @@ pub const EXECUTION: StageId = StageId("Execution");
 /// - [tables::StorageChangeSet]
 ///
 /// For unwinds we are accessing:
-/// - [tables::BlockBodies] get tx index to know what needs to be unwinded
+/// - [tables::BlockBodyIndices] get tx index to know what needs to be unwinded
 /// - [tables::AccountHistory] to remove change set and apply old values to
 /// - [tables::PlainAccountState] [tables::StorageHistory] to remove change set and apply old values
 /// to [tables::PlainStorageState]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
 pub struct ExecutionStage<EF: ExecutorFactory> {
+    metrics: ExecutionStageMetrics,
     /// The stage's internal executor
-    pub executor_factory: EF,
+    executor_factory: EF,
     /// Commit threshold
-    pub commit_threshold: u64,
+    commit_threshold: u64,
 }
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
     /// Create new execution stage with specified config.
     pub fn new(executor_factory: EF, commit_threshold: u64) -> Self {
-        Self { executor_factory, commit_threshold }
+        Self { metrics: ExecutionStageMetrics::default(), executor_factory, commit_threshold }
     }
 
-    /// Create execution stage with executor factory and default commit threshold set to 10_000
-    /// blocks
-    pub fn new_default_threshold(executor_factory: EF) -> Self {
-        Self { executor_factory, commit_threshold: 10_000 }
+    /// Create an execution stage with the provided  executor factory.
+    ///
+    /// The commit threshold will be set to 10_000.
+    pub fn new_with_factory(executor_factory: EF) -> Self {
+        Self {
+            metrics: ExecutionStageMetrics::default(),
+            executor_factory,
+            commit_threshold: 10_000,
+        }
+    }
+
+    // TODO: This should be in the block provider trait once we consolidate
+    // SharedDatabase/Transaction
+    fn read_block_with_senders<DB: Database>(
+        tx: &Transaction<'_, DB>,
+        block_number: BlockNumber,
+    ) -> Result<(BlockWithSenders, U256), StageError> {
+        let header = tx.get_header(block_number)?;
+        let td = tx.get_td(block_number)?;
+        let ommers = tx.get::<tables::BlockOmmers>(block_number)?.unwrap_or_default().ommers;
+        let withdrawals = tx.get::<tables::BlockWithdrawals>(block_number)?.map(|v| v.withdrawals);
+
+        let (transactions, senders): (Vec<_>, Vec<_>) = tx
+            .get_block_transaction_range(block_number..=block_number)?
+            .into_iter()
+            .flat_map(|(_, txs)| txs.into_iter())
+            .map(|tx| tx.to_components())
+            .unzip();
+
+        Ok((Block { header, body: transactions, ommers, withdrawals }.with_senders(senders), td))
     }
 
     /// Execute the stage.
@@ -78,96 +115,48 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
 
-        // Get header with canonical hashes.
-        let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
-        // Get total difficulty
-        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
-        // Get bodies with canonical hashes.
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodies>()?;
-        // Get ommers with canonical hashes.
-        let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
-        // Get block withdrawals.
-        let mut withdrawals_cursor = tx.cursor_read::<tables::BlockWithdrawals>()?;
-        // Get transaction of the block that we are executing.
-        let mut tx_cursor = tx.cursor_read::<tables::Transactions>()?;
-        // Skip sender recovery and load signer from database.
-        let mut tx_sender = tx.cursor_read::<tables::TxSenders>()?;
-        // Get block headers and bodies
-        let block_batch = headers_cursor
-            .walk_range(start_block..=end_block)?
-            .map(|entry| -> Result<_, StageError> {
-                let (number, header) = entry?;
-                let (_, td) = td_cursor
-                    .seek_exact(number)?
-                    .ok_or(ProviderError::TotalDifficulty { number })?;
-                let (_, body) =
-                    bodies_cursor.seek_exact(number)?.ok_or(ProviderError::BlockBody { number })?;
-                let (_, stored_ommers) = ommers_cursor.seek_exact(number)?.unwrap_or_default();
-                let withdrawals =
-                    withdrawals_cursor.seek_exact(number)?.map(|(_, w)| w.withdrawals);
-                Ok((header, td.into(), body, stored_ommers.ommers, withdrawals))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
         // Create state provider with cached state
-
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));
 
         // Fetch transactions, execute them and generate results
-        let mut changesets = PostState::default();
-        for (header, td, body, ommers, withdrawals) in block_batch.into_iter() {
-            let block_number = header.number;
-            tracing::trace!(target: "sync::stages::execution", ?block_number, "Execute block.");
-
-            // iterate over all transactions
-            let mut tx_walker = tx_cursor.walk(Some(body.start_tx_id))?;
-            let mut transactions = Vec::with_capacity(body.tx_count as usize);
-            // get next N transactions.
-            for index in body.tx_id_range() {
-                let (tx_index, tx) =
-                    tx_walker.next().ok_or(ProviderError::EndOfTransactionTable)??;
-                if tx_index != index {
-                    error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Transaction gap");
-                    return Err(ProviderError::TransactionsGap { missing: tx_index }.into())
-                }
-                transactions.push(tx);
-            }
-
-            // take signers
-            let mut tx_sender_walker = tx_sender.walk(Some(body.start_tx_id))?;
-            let mut signers = Vec::with_capacity(body.tx_count as usize);
-            for index in body.tx_id_range() {
-                let (tx_index, tx) =
-                    tx_sender_walker.next().ok_or(ProviderError::EndOfTransactionSenderTable)??;
-                if tx_index != index {
-                    error!(target: "sync::stages::execution", block = block_number, expected = index, found = tx_index, ?body, "Signer gap");
-                    return Err(ProviderError::TransactionsSignerGap { missing: tx_index }.into())
-                }
-                signers.push(tx);
-            }
-
-            trace!(target: "sync::stages::execution", number = block_number, txs = transactions.len(), "Executing block");
+        let mut state = PostState::default();
+        for block_number in start_block..=end_block {
+            let (block, td) = Self::read_block_with_senders(tx, block_number)?;
 
             // Configure the executor to use the current state.
-            let changeset = executor
-                .execute_and_verify_receipt(
-                    &Block { header, body: transactions, ommers, withdrawals },
-                    td,
-                    Some(signers),
-                )
+            trace!(target: "sync::stages::execution", number = block_number, txs = block.body.len(), "Executing block");
+            let (block, senders) = block.into_components();
+            let block_state = executor
+                .execute_and_verify_receipt(&block, td, Some(senders))
                 .map_err(|error| StageError::ExecutionError { block: block_number, error })?;
-            changesets.extend(changeset);
+            if let Some(last_receipt) = block_state.receipts().last() {
+                self.metrics
+                    .mgas_processed_total
+                    .increment(last_receipt.cumulative_gas_used / 1_000_000);
+            }
+            state.extend(block_state);
         }
 
         // put execution results to database
         let first_transition_id = tx.get_block_transition(last_block)?;
-        changesets.write_to_db(&**tx, first_transition_id)?;
+
+        let start = Instant::now();
+        trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
+        state.write_to_db(&**tx, first_transition_id)?;
+        trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
         let done = !capped;
         info!(target: "sync::stages::execution", stage_progress = end_block, done, "Sync iteration finished");
         Ok(ExecOutput { stage_progress: end_block, done })
     }
 }
+
+/// The size of the stack used by the executor.
+///
+/// Ensure the size is aligned to 8 as this is usually more efficient.
+///
+/// Currently 64 megabytes.
+const BIG_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 #[async_trait::async_trait]
 impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
@@ -182,14 +171,18 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // For ethereum tests that has MAX gas that calls contract until max depth (1024 calls)
-        // revm can take more then default allocated stack space. For this case we are using
-        // local thread with increased stack size. After this task is done https://github.com/bluealloy/revm/issues/305
-        // we can see to set more accurate stack size or even optimize revm to move more data to
-        // heap.
+        // For Ethereum transactions that reaches the max call depth (1024) revm can use more stack
+        // space than what is allocated by default.
+        //
+        // To make sure we do not panic in this case, spawn a thread with a big stack allocated.
+        //
+        // A fix in revm is pending to give more insight into the stack size, which we can use later
+        // to optimize revm or move data to the heap.
+        //
+        // See https://github.com/bluealloy/revm/issues/305
         std::thread::scope(|scope| {
             let handle = std::thread::Builder::new()
-                .stack_size(50 * 1024 * 1024)
+                .stack_size(BIG_STACK_SIZE)
                 .spawn_scoped(scope, || {
                     // execute and store output to results
                     self.execute_inner(tx, input)
@@ -294,12 +287,12 @@ mod tests {
         mdbx::{test_utils::create_test_db, EnvKind, WriteMap},
         models::AccountBeforeTx,
     };
-    use reth_executor::Factory;
     use reth_primitives::{
         hex_literal::hex, keccak256, Account, Bytecode, ChainSpecBuilder, SealedBlock,
         StorageEntry, H160, H256, U256,
     };
     use reth_provider::insert_canonical_block;
+    use reth_revm::Factory;
     use reth_rlp::Decodable;
     use std::{
         ops::{Deref, DerefMut},

@@ -1,4 +1,6 @@
-use reth_primitives::{Bytes, H256, U256};
+use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
+use reth_beacon_consensus::BeaconEngineError;
+use reth_primitives::{H256, U256};
 use thiserror::Error;
 
 /// The Engine API result type
@@ -10,39 +12,8 @@ pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
 pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
-#[derive(Error, PartialEq, Debug)]
+#[derive(Error, Debug)]
 pub enum EngineApiError {
-    /// Invalid payload extra data.
-    #[error("Invalid payload extra data: {0}")]
-    PayloadExtraData(Bytes),
-    /// Invalid payload base fee.
-    #[error("Invalid payload base fee: {0}")]
-    PayloadBaseFee(U256),
-    /// Invalid payload block hash.
-    #[error("Invalid payload block hash. Execution: {execution}. Consensus: {consensus}")]
-    PayloadBlockHash {
-        /// The block hash computed from the payload.
-        execution: H256,
-        /// The block hash provided with the payload.
-        consensus: H256,
-    },
-    /// Invalid payload block hash.
-    #[error("Invalid payload timestamp: {invalid}. Latest: {latest}")]
-    PayloadTimestamp {
-        /// The payload timestamp.
-        invalid: u64,
-        /// Latest available timestamp.
-        latest: u64,
-    },
-    /// Failed to recover transaction signer.
-    #[error("Failed to recover signer for payload transaction: {hash:?}")]
-    PayloadSignerRecovery {
-        /// The hash of the failed transaction
-        hash: H256,
-    },
-    /// Received pre-merge payload.
-    #[error("Received pre-merge payload.")]
-    PayloadPreMerge,
     /// Unknown payload requested.
     #[error("Unknown payload")]
     PayloadUnknown,
@@ -52,9 +23,23 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
-    /// The params are invalid.
-    #[error("Invalid params")]
-    InvalidParams,
+    /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
+    #[error("invalid start or count, start: {start} count: {count}")]
+    InvalidBodiesRange {
+        /// Start of the range
+        start: u64,
+        /// requested number of items
+        count: u64,
+    },
+    /// Thrown if engine_forkchoiceUpdatedV1 contains withdrawals
+    #[error("withdrawals not supported in V1")]
+    WithdrawalsNotSupportedInV1,
+    /// Thrown if engine_forkchoiceUpdated contains no withdrawals after Shanghai
+    #[error("no withdrawals post-shanghai")]
+    NoWithdrawalsPostShanghai,
+    /// Thrown if engine_forkchoiceUpdated contains withdrawals before Shanghai
+    #[error("withdrawals pre-shanghai")]
+    HasWithdrawalsPreShanghai,
     /// Terminal total difficulty mismatch during transition configuration exchange.
     #[error(
         "Invalid transition terminal total difficulty. Execution: {execution}. Consensus: {consensus}"
@@ -75,16 +60,36 @@ pub enum EngineApiError {
         /// Consensus terminal block hash.
         consensus: H256,
     },
-    /// Forkchoice zero hash head received.
-    #[error("Received zero hash as forkchoice head")]
-    ForkchoiceEmptyHead,
-    /// Chain spec merge terminal total difficulty is not set
-    #[error("The merge terminal total difficulty is not known")]
-    UnknownMergeTerminalTotalDifficulty,
-    /// Encountered decoding error.
+    /// Beacon consensus engine error.
     #[error(transparent)]
-    Decode(#[from] reth_rlp::DecodeError),
-    /// API encountered an internal error.
+    ConsensusEngine(#[from] BeaconEngineError),
+    /// Encountered an internal error.
     #[error(transparent)]
-    Internal(#[from] reth_interfaces::Error),
+    Internal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl From<EngineApiError> for jsonrpsee_types::error::CallError {
+    fn from(error: EngineApiError) -> Self {
+        let code = match error {
+            EngineApiError::InvalidBodiesRange { .. } |
+            EngineApiError::WithdrawalsNotSupportedInV1 |
+            EngineApiError::NoWithdrawalsPostShanghai |
+            EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
+            EngineApiError::PayloadUnknown => UNKNOWN_PAYLOAD_CODE,
+            EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
+            // Any other server error
+            _ => INTERNAL_ERROR_CODE,
+        };
+        jsonrpsee_types::error::CallError::Custom(jsonrpsee_types::error::ErrorObject::owned(
+            code,
+            error.to_string(),
+            None::<()>,
+        ))
+    }
+}
+
+impl From<EngineApiError> for jsonrpsee_core::error::Error {
+    fn from(error: EngineApiError) -> Self {
+        jsonrpsee_types::error::CallError::from(error).into()
+    }
 }

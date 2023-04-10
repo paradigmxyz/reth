@@ -3,7 +3,7 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     Error,
 };
-use reth_primitives::bytes::Bytes;
+
 use serde::Serialize;
 use std::{
     fmt::Debug,
@@ -22,7 +22,7 @@ pub trait Compress: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decompress: Send + Sync + Sized + Debug {
     /// Decompresses data coming from the database.
-    fn decompress<B: Into<Bytes>>(value: B) -> Result<Self, Error>;
+    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, Error>;
 }
 
 /// Trait that will transform the data to be saved in the DB.
@@ -37,7 +37,7 @@ pub trait Encode: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
     /// Decodes data coming from the database.
-    fn decode<B: Into<Bytes>>(value: B) -> Result<Self, Error>;
+    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, Error>;
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
@@ -56,7 +56,7 @@ impl<T> Value for T where T: Compress + Decompress + Serialize {}
 /// [`Decode`] when appropriate. These traits define how the data is stored and read from the
 /// database.
 ///
-/// It allows for the use of codecs. See [`crate::models::BlockNumHash`] for a custom
+/// It allows for the use of codecs. See [`crate::models::ShardedKey`] for a custom
 /// implementation.
 pub trait Table: Send + Sync + Debug + 'static {
     /// Return table name as it is present inside the MDBX.

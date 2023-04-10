@@ -1,6 +1,5 @@
 use crate::metrics::DownloaderMetrics;
 use futures::{Future, FutureExt};
-use reth_eth_wire::BlockBody;
 use reth_interfaces::{
     consensus::{Consensus as ConsensusTrait, Consensus},
     p2p::{
@@ -9,7 +8,7 @@ use reth_interfaces::{
         priority::Priority,
     },
 };
-use reth_primitives::{PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
+use reth_primitives::{BlockBody, PeerId, SealedBlock, SealedHeader, WithPeerId, H256};
 use std::{
     collections::VecDeque,
     pin::Pin,
@@ -19,7 +18,7 @@ use std::{
 
 /// Body request implemented as a [Future].
 ///
-/// The future will poll the underlying request until fullfilled.
+/// The future will poll the underlying request until fulfilled.
 /// If the response arrived with insufficient number of bodies, the future
 /// will issue another request until all bodies are collected.
 ///
@@ -41,7 +40,7 @@ pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
     consensus: Arc<dyn Consensus>,
     metrics: DownloaderMetrics,
     priority: Priority,
-    // Headers to download. The collection is shrinked as responses are buffered.
+    // Headers to download. The collection is shrunk as responses are buffered.
     headers: VecDeque<SealedHeader>,
     buffer: Vec<BlockResponse>,
     fut: Option<B::Output>,
@@ -265,7 +264,7 @@ mod tests {
 
     /// Check that the request future
     #[tokio::test]
-    async fn request_submits_until_fullfilled() {
+    async fn request_submits_until_fulfilled() {
         // Generate some random blocks
         let (headers, mut bodies) = generate_bodies(0..20);
 

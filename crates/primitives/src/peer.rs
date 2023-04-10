@@ -10,13 +10,18 @@ pub type PeerId = H512;
 #[derive(Debug)]
 pub struct WithPeerId<T>(PeerId, pub T);
 
-impl<T> From<(H512, T)> for WithPeerId<T> {
-    fn from(value: (H512, T)) -> Self {
+impl<T> From<(PeerId, T)> for WithPeerId<T> {
+    fn from(value: (PeerId, T)) -> Self {
         Self(value.0, value.1)
     }
 }
 
 impl<T> WithPeerId<T> {
+    /// Wraps the value with the peerid.
+    pub fn new(peer: PeerId, value: T) -> Self {
+        Self(peer, value)
+    }
+
     /// Get the peer id
     pub fn peer_id(&self) -> PeerId {
         self.0

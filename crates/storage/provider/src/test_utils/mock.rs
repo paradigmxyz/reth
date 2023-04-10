@@ -1,16 +1,21 @@
 use crate::{
     traits::ReceiptProvider, AccountProvider, BlockHashProvider, BlockIdProvider, BlockProvider,
-    EvmEnvProvider, HeaderProvider, StateProvider, StateProviderFactory, TransactionsProvider,
+    EvmEnvProvider, HeaderProvider, PostStateDataProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, TransactionsProvider,
 };
 use parking_lot::Mutex;
 use reth_interfaces::Result;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockId, BlockNumber, BlockNumberOrTag,
-    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionSigned,
-    TxHash, TxNumber, H256, U256,
+    Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionMeta,
+    TransactionSigned, TxHash, TxNumber, H256, U256,
 };
-use revm_primitives::{BlockEnv, CfgEnv};
-use std::{collections::HashMap, ops::RangeBounds, sync::Arc};
+use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::RangeBounds,
+    sync::Arc,
+};
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone, Default)]
@@ -134,11 +139,12 @@ impl HeaderProvider for MockEthProvider {
 }
 
 impl TransactionsProvider for MockEthProvider {
-    fn transaction_by_id(
-        &self,
-        _id: reth_primitives::TxNumber,
-    ) -> Result<Option<TransactionSigned>> {
-        unimplemented!()
+    fn transaction_id(&self, _tx_hash: TxHash) -> Result<Option<TxNumber>> {
+        todo!()
+    }
+
+    fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<TransactionSigned>> {
+        Ok(None)
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> Result<Option<TransactionSigned>> {
@@ -149,15 +155,34 @@ impl TransactionsProvider for MockEthProvider {
             .find_map(|(_, block)| block.body.iter().find(|tx| tx.hash == hash).cloned()))
     }
 
+    fn transaction_by_hash_with_meta(
+        &self,
+        _hash: TxHash,
+    ) -> Result<Option<(TransactionSigned, TransactionMeta)>> {
+        Ok(None)
+    }
+
+    fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>> {
+        unimplemented!()
+    }
+
     fn transactions_by_block(&self, id: BlockId) -> Result<Option<Vec<TransactionSigned>>> {
         Ok(self.block(id)?.map(|b| b.body))
     }
 
     fn transactions_by_block_range(
         &self,
-        _range: impl RangeBounds<reth_primitives::BlockNumber>,
+        range: impl RangeBounds<reth_primitives::BlockNumber>,
     ) -> Result<Vec<Vec<TransactionSigned>>> {
-        unimplemented!()
+        // init btreemap so we can return in order
+        let mut map = BTreeMap::new();
+        for (_, block) in self.blocks.lock().iter() {
+            if range.contains(&block.number) {
+                map.insert(block.number, block.body.clone());
+            }
+        }
+
+        Ok(map.into_values().collect())
     }
 }
 
@@ -310,41 +335,49 @@ impl EvmEnvProvider for MockEthProvider {
 }
 
 impl StateProviderFactory for MockEthProvider {
-    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
-    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(self)
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Self::HistorySP<'_>> {
+    ) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending<'a>(
+        &'a self,
+        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<StateProviderBox<'a>> {
         todo!()
     }
 }
 
 impl StateProviderFactory for Arc<MockEthProvider> {
-    type HistorySP<'a> = &'a MockEthProvider where Self: 'a;
-    type LatestSP<'a> = &'a MockEthProvider where Self: 'a;
-
-    fn latest(&self) -> Result<Self::LatestSP<'_>> {
-        Ok(self)
+    fn latest(&self) -> Result<StateProviderBox<'_>> {
+        Ok(Box::new(self.clone()))
     }
 
     fn history_by_block_number(
         &self,
         _block: reth_primitives::BlockNumber,
-    ) -> Result<Self::HistorySP<'_>> {
+    ) -> Result<StateProviderBox<'_>> {
         todo!()
     }
 
-    fn history_by_block_hash(&self, _block: BlockHash) -> Result<Self::HistorySP<'_>> {
+    fn history_by_block_hash(&self, _block: BlockHash) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
+    fn pending<'a>(
+        &'a self,
+        _post_state_data: Box<dyn PostStateDataProvider + 'a>,
+    ) -> Result<StateProviderBox<'a>> {
         todo!()
     }
 }

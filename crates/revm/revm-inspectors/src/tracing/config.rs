@@ -1,9 +1,11 @@
+use reth_rpc_types::trace::geth::GethDefaultTracingOptions;
+
 /// Gives guidance to the [TracingInspector](crate::tracing::TracingInspector).
 ///
-/// Use [TraceInspectorConfig::default_parity] or [TraceInspectorConfig::default_geth] to get the
-/// default configs for specific styles of traces.
+/// Use [TracingInspectorConfig::default_parity] or [TracingInspectorConfig::default_geth] to get
+/// the default configs for specific styles of traces.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct TraceInspectorConfig {
+pub struct TracingInspectorConfig {
     /// Whether to record every individual opcode level step.
     pub record_steps: bool,
     /// Whether to record individual memory snapshots.
@@ -14,7 +16,7 @@ pub struct TraceInspectorConfig {
     pub record_state_diff: bool,
 }
 
-impl TraceInspectorConfig {
+impl TracingInspectorConfig {
     /// Returns a config with everything enabled.
     pub const fn all() -> Self {
         Self {
@@ -46,6 +48,16 @@ impl TraceInspectorConfig {
             record_memory_snapshots: true,
             record_stack_snapshots: true,
             record_state_diff: true,
+        }
+    }
+
+    /// Returns a config for geth style traces based on the given [GethDefaultTracingOptions].
+    pub fn from_geth_config(config: &GethDefaultTracingOptions) -> Self {
+        Self {
+            record_memory_snapshots: config.enable_memory.unwrap_or_default(),
+            record_stack_snapshots: !config.disable_stack.unwrap_or_default(),
+            record_state_diff: !config.disable_storage.unwrap_or_default(),
+            ..Self::default_geth()
         }
     }
 
