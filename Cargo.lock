@@ -4516,6 +4516,7 @@ dependencies = [
  "reth-miner",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-rlp",
  "reth-tasks",
  "reth-transaction-pool",

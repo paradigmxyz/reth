@@ -13,6 +13,7 @@ use reth_miner::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
+use reth_primitives::bytes::Bytes;
 use reth_provider::StateProviderFactory;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -24,10 +25,21 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::oneshot,
+    sync::{oneshot, Semaphore},
     time::{Interval, Sleep},
 };
 use tracing::trace;
+
+// TODO move to common since commonly used
+
+/// Settings for how to generate a block
+#[derive(Debug, Clone)]
+pub struct BlockConfig {
+    /// Data to include in the block's extra data field.
+    extradata: Bytes,
+    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
+    max_gas_limit: u64,
+}
 
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
 #[derive(Debug)]
@@ -40,6 +52,10 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
+    /// The configuration for how to create a block.
+    block_config: BlockConfig,
+    /// Restricts how many generator tasks can be executed at once.
+    payload_task_guard: PayloadTaskGuard,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -51,8 +67,16 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
+        block_config: BlockConfig,
     ) -> Self {
-        Self { client, pool, executor, config }
+        Self {
+            client,
+            pool,
+            executor,
+            payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
+            config,
+            block_config,
+        }
     }
 }
 
@@ -69,6 +93,18 @@ where
     }
 }
 
+/// Restricts how many generator tasks can be executed at once.
+#[derive(Clone)]
+struct PayloadTaskGuard(Arc<Semaphore>);
+
+// === impl PayloadTaskGuard ===
+
+impl PayloadTaskGuard {
+    fn new(max_payload_tasks: usize) -> Self {
+        Self(Arc::new(Semaphore::new(max_payload_tasks)))
+    }
+}
+
 /// Settings for the [BasicPayloadJobGenerator].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
@@ -76,6 +112,8 @@ pub struct BasicPayloadJobGeneratorConfig {
     interval: Duration,
     /// The deadline when this job should resolve.
     deadline: Duration,
+    /// Maximum number of tasks to spawn for building a payload.
+    max_payload_tasks: usize,
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -92,6 +130,17 @@ impl BasicPayloadJobGeneratorConfig {
         self.deadline = deadline;
         self
     }
+
+    /// Sets the maximum number of tasks to spawn for building a payload(s).
+    ///
+    /// # Panics
+    ///
+    /// If `max_payload_tasks` is 0.
+    pub fn max_payload_tasks(mut self, max_payload_tasks: usize) -> Self {
+        assert!(max_payload_tasks > 0, "max_payload_tasks must be greater than 0");
+        self.max_payload_tasks = max_payload_tasks;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -100,6 +149,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: Duration::from_secs(12),
+            max_payload_tasks: 3,
         }
     }
 }
@@ -122,6 +172,10 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     best_payload: Arc<BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload>,
+    /// Restricts how many generator tasks can be executed at once.
+    payload_task_guard: PayloadTaskGuard,
+    /// Settings for how to generate a block.
+    block_config: BlockConfig,
 }
 
 impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
@@ -149,8 +203,12 @@ where
             let pool = this.pool.clone();
             let cancel = Cancelled::default();
             let _cancel = cancel.clone();
-            this.executor
-                .spawn_blocking(Box::pin(async move { build_payload(client, pool, cancel, tx) }));
+            let guard = this.payload_task_guard.clone();
+            this.executor.spawn_blocking(Box::pin(async move {
+                // acquire the permit for executing the task
+                let _permit = guard.0.acquire().await;
+                build_payload(client, pool, cancel, tx)
+            }));
             this.pending_block = Some(PendingPayload { _cancel, payload: rx });
         }
 
@@ -215,6 +273,15 @@ impl Future for PendingPayload {
 #[derive(Default, Clone)]
 struct Cancelled(Arc<AtomicBool>);
 
+// === impl Cancelled ===
+
+impl Cancelled {
+    /// Returns true if the job was cancelled.
+    fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 impl Drop for Cancelled {
     fn drop(&mut self) {
         self.0.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -225,11 +292,23 @@ impl Drop for Cancelled {
 fn build_payload<Pool, Client>(
     _client: Client,
     _pool: Pool,
-    _is_cancelled: Cancelled,
-    _to_job: oneshot::Sender<Result<BuiltPayload, PayloadBuilderError>>,
+    _cancel: Cancelled,
+    to_job: oneshot::Sender<Result<BuiltPayload, PayloadBuilderError>>,
 ) where
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
-    // TODO build the payload
+    #[inline(always)]
+    fn try_build<Pool, Client>(
+        _client: Client,
+        _pool: Pool,
+        _cancel: Cancelled,
+    ) -> Result<BuiltPayload, PayloadBuilderError>
+    where
+        Client: StateProviderFactory,
+        Pool: TransactionPool,
+    {
+        todo!()
+    }
+    let _ = to_job.send(try_build(_client, _pool, _cancel));
 }
