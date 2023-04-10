@@ -168,7 +168,7 @@ impl Change {
 /// Since most [PostState]s in reth are for multiple blocks it is better to pre-allocate capacity
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
     current_transition_id: TransitionId,
@@ -204,7 +204,7 @@ const PREALLOC_CHANGES_SIZE: usize = 256 * BEST_GUESS_CHANGES_PER_TX;
 impl PostState {
     /// Create an empty [PostState].
     pub fn new() -> Self {
-        Self { changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE), ..Default::default() }
+        Self::default()
     }
 
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
@@ -592,6 +592,19 @@ impl PostState {
         }
 
         Ok(())
+    }
+}
+
+impl Default for PostState {
+    fn default() -> Self {
+        Self {
+            current_transition_id: 0,
+            accounts: Default::default(),
+            storage: Default::default(),
+            changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE),
+            bytecode: Default::default(),
+            receipts: vec![],
+        }
     }
 }
 
