@@ -54,12 +54,12 @@ BlockTransitionIdIndex {
 }
 AccountHistory {
     H256 Account "PK"
-    TransitionList TransitionIdList "List of transitions where account was changed"
+    BlockNumberList TransitionIdList "List of transitions where account was changed"
 }
 StorageHistory {
     H256 Account "PK"
     H256 StorageKey "PK"
-    TransitionList TransitionIdList "List of transitions where account storage entry was changed"
+    BlockNumberList TransitionIdList "List of transitions where account storage entry was changed"
 }
 AccountChangeSet {
     u64 TransitionId "PK"

@@ -36,24 +36,19 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
+        let target = input.previous_stage_progress();
+        let Some(range) = input.next_block_range_with_threshold(self.commit_threshold) else { return Ok(ExecOutput::done(target))};
 
-        // read account changeset, merge it into one changeset and calculate account hashes.
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        // NOTE: can probably done more probabilistic take of bundles with transition but it is
-        // guess game for later. Transitions better reflect amount of work.
-        let to_block =
-            std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
-        let to_transition = tx.get_block_transition(to_block)?;
+        if range.is_empty() {
+            return Ok(ExecOutput::done(target));
+        }
 
-        let indices =
-            tx.get_account_transition_ids_from_changeset(from_transition, to_transition)?;
+        let indices = tx.get_account_transition_ids_from_changeset(range.clone())?;
         // Insert changeset to history index
         tx.insert_account_history_index(indices)?;
 
         info!(target: "sync::stages::index_account_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: to_block, done: to_block == previous_stage_progress })
+        Ok(ExecOutput { stage_progress: *range.end(), done: *range.end() == target })
     }
 
     /// Unwind the stage.
@@ -63,10 +58,10 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        let from = input.unwind_to + 1;
+        let to = input.stage_progress;
 
-        tx.unwind_account_history_indices(from_transition_rev..to_transition_rev)?;
+        tx.unwind_account_history_indices(from..=to)?;
 
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -86,7 +81,7 @@ mod tests {
         },
         tables,
         transaction::DbTxMut,
-        TransitionList,
+        BlockNumberList,
     };
     use reth_primitives::{hex_literal::hex, H160};
 
@@ -98,15 +93,15 @@ mod tests {
 
     /// Shard for account
     fn shard(shard_index: u64) -> ShardedKey<H160> {
-        ShardedKey { key: ADDRESS, highest_transition_id: shard_index }
+        ShardedKey { key: ADDRESS, highest_block_number: shard_index }
     }
 
-    fn list(list: &[usize]) -> TransitionList {
-        TransitionList::new(list).unwrap()
+    fn list(list: &[usize]) -> BlockNumberList {
+        BlockNumberList::new(list).unwrap()
     }
 
     fn cast(
-        table: Vec<(ShardedKey<H160>, TransitionList)>,
+        table: Vec<(ShardedKey<H160>, BlockNumberList)>,
     ) -> BTreeMap<ShardedKey<H160>, Vec<usize>> {
         table
             .into_iter()
@@ -124,7 +119,7 @@ mod tests {
             tx.put::<tables::BlockBodyIndices>(
                 0,
                 StoredBlockBodyIndices {
-                    first_transition_id: 0,
+                    //first_transition_id: 0,
                     tx_count: 3,
                     ..Default::default()
                 },
@@ -134,7 +129,7 @@ mod tests {
             tx.put::<tables::BlockBodyIndices>(
                 5,
                 StoredBlockBodyIndices {
-                    first_transition_id: 3,
+                    //first_transition_id: 3,
                     tx_count: 5,
                     ..Default::default()
                 },

@@ -5,6 +5,7 @@ use crate::{
 };
 use eyre::Result;
 use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
+use reth_primitives::BlockNumber;
 use reth_provider::Transaction;
 use reth_stages::{stages::AccountHashingStage, Stage, StageId, UnwindInput};
 use std::ops::DerefMut;
@@ -12,8 +13,8 @@ use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(
     db_tool: &mut DbTool<'_, DB>,
-    from: u64,
-    to: u64,
+    from: BlockNumber,
+    to: BlockNumber,
     output_db: &PlatformPath<DbPath>,
     should_run: bool,
 ) -> Result<()> {
@@ -21,20 +22,8 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
 
     // Import relevant AccountChangeSets
     let tx = db_tool.db.tx()?;
-    let from_transition_rev = tx
-        .get::<tables::BlockBodyIndices>(from)?
-        .expect("there should be at least one.")
-        .transition_at_block();
-    let to_transition_rev = tx
-        .get::<tables::BlockBodyIndices>(to)?
-        .expect("there should be at least one.")
-        .transition_after_block();
     output_db.update(|tx| {
-        tx.import_table_with_range::<tables::AccountChangeSet, _>(
-            &db_tool.db.tx()?,
-            Some(from_transition_rev),
-            to_transition_rev,
-        )
+        tx.import_table_with_range::<tables::AccountChangeSet, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
 
     unwind_and_copy::<DB>(db_tool, from, tip_block_number, &output_db).await?;

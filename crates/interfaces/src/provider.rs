@@ -1,4 +1,4 @@
-use reth_primitives::{Address, BlockHash, BlockNumber, TransitionId, TxNumber, H256};
+use reth_primitives::{Address, BlockHash, BlockNumber, TxNumber, H256};
 
 /// Bundled errors variants thrown by various providers.
 #[allow(missing_docs)]
@@ -24,20 +24,20 @@ pub enum ProviderError {
     BlockTransition { block_number: BlockNumber },
     /// The transition id was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("Storage ChangeSet address: ({address:?} key: {storage_key:?}) for transition:#{transition_id} does not exist")]
+    #[error("Storage ChangeSet address: ({address:?} key: {storage_key:?}) for block:#{block_number} does not exist")]
     StorageChangeset {
-        /// The transition id found for the address and storage key
-        transition_id: TransitionId,
+        /// The block number found for the address and storage key
+        block_number: BlockNumber,
         /// The account address
         address: Address,
         /// The storage key
         storage_key: H256,
     },
-    /// The transition id was found for the given address, but the changeset was not found.
-    #[error("Account {address:?} ChangeSet for transition #{transition_id} does not exist")]
+    /// The block number was found for the given address, but the changeset was not found.
+    #[error("Account {address:?} ChangeSet for block #{block_number} does not exist")]
     AccountChangeset {
-        /// Transition id found for the address
-        transition_id: TransitionId,
+        /// Block number found for the address
+        block_number: BlockNumber,
         /// The account address
         address: Address,
     },

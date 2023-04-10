@@ -74,7 +74,7 @@ impl<'a, DB: Database> DbTool<'a, DB> {
 
         self.db.update(|tx| {
             chain.into_iter().try_for_each(|block| {
-                insert_canonical_block(tx, block, None, true)?;
+                insert_canonical_block(tx, block, None)?;
                 Ok::<_, eyre::Error>(())
             })
         })??;

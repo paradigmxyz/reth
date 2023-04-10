@@ -4,7 +4,7 @@ use reth_codecs::Compact;
 use reth_db::{
     cursor::DbDupCursorRO,
     database::Database,
-    models::TransitionIdAddress,
+    models::BlockNumberAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -57,7 +57,7 @@ impl StorageHashingStage {
             tx.get::<tables::SyncStageProgress>(STORAGE_HASHING.0.into())?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(StorageHashingCheckpoint::default())
+            return Ok(StorageHashingCheckpoint::default());
         }
 
         let (checkpoint, _) = StorageHashingCheckpoint::from_compact(&buf, buf.len());
@@ -87,21 +87,21 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         let previous_stage_progress = input.previous_stage_progress();
 
         // read storage changeset, merge it into one changeset and calculate storage hashes.
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+        let from_block = input.stage_progress.unwrap_or_default() + 1;
+        let to_block = input.previous_stage_progress();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
-        if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
+        if to_block - from_block > self.clean_threshold || stage_progress == 0 {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
                 // Checkpoint is no longer valid if the range of transitions changed. 
                 // An already hashed storage may have been changed with the new range, and therefore should be hashed again. 
-                checkpoint.to != to_transition ||
-                checkpoint.from != from_transition
+                checkpoint.to != to_block ||
+                checkpoint.from != from_block
             {
                 tx.clear::<tables::HashedStorage>()?;
 
@@ -159,7 +159,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                             keccak_address = Some(keccak256(address));
                         } else {
                             // We have reached the end of table
-                            break
+                            break;
                         }
                     }
                 }
@@ -173,20 +173,19 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             if let Some(address) = &current_key {
                 checkpoint.address = Some(*address);
                 checkpoint.storage = current_subkey;
-                checkpoint.from = from_transition;
-                checkpoint.to = to_transition;
+                checkpoint.from = from_block;
+                checkpoint.to = to_block;
             }
 
             self.save_checkpoint(tx, checkpoint)?;
 
             if current_key.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false })
+                return Ok(ExecOutput { stage_progress, done: false });
             }
         } else {
             // Aggregate all transition changesets and and make list of storages that have been
             // changed.
-            let lists =
-                tx.get_addresses_and_keys_of_changed_storages(from_transition, to_transition)?;
+            let lists = tx.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
             // Assumption we are okay with is that plain state represent
             // `previous_stage_progress` state.
@@ -204,12 +203,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
-
         tx.unwind_storage_hashing(
-            TransitionIdAddress((from_transition_rev, Address::zero()))..
-                TransitionIdAddress((to_transition_rev, Address::zero())),
+            BlockNumberAddress((input.unwind_to, Address::zero()))
+                ..=BlockNumberAddress((input.stage_progress, Address::zero())),
         )?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -226,7 +222,7 @@ mod tests {
     use reth_db::{
         cursor::{DbCursorRO, DbCursorRW},
         mdbx::{tx::Tx, WriteMap, RW},
-        models::{StoredBlockBodyIndices, TransitionIdAddress},
+        models::{BlockNumberAddress, StoredBlockBodyIndices},
     };
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
@@ -261,7 +257,7 @@ mod tests {
             if let Ok(result) = runner.execute(input).await.unwrap() {
                 if !result.done {
                     // Continue from checkpoint
-                    continue
+                    continue;
                 } else {
                     assert!(result.stage_progress == previous_stage);
 
@@ -271,7 +267,7 @@ mod tests {
                         "execution validation"
                     );
 
-                    break
+                    break;
                 }
             }
             panic!("Failed execution");
@@ -370,9 +366,7 @@ mod tests {
 
                     let body = StoredBlockBodyIndices {
                         first_tx_num,
-                        first_transition_id,
                         tx_count: progress.body.len() as u64,
-                        has_block_change: has_reward,
                     };
 
                     first_transition_id = next_transition_id;
@@ -394,7 +388,7 @@ mod tests {
                 let start_block = input.stage_progress.unwrap_or_default() + 1;
                 let end_block = output.stage_progress;
                 if start_block > end_block {
-                    return Ok(())
+                    return Ok(());
                 }
             }
             self.check_hashed_storage()
@@ -448,7 +442,7 @@ mod tests {
         fn insert_storage_entry(
             &self,
             tx: &Tx<'_, RW, WriteMap>,
-            tid_address: TransitionIdAddress,
+            tid_address: BlockNumberAddress,
             entry: StorageEntry,
             hash: bool,
         ) -> Result<(), reth_db::Error> {
@@ -486,25 +480,20 @@ mod tests {
 
         fn unwind_storage(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             tracing::debug!("unwinding storage...");
-            let target_transition = self
-                .tx
-                .inner()
-                .get_block_transition(input.unwind_to)
-                .map_err(|e| TestRunnerError::Internal(Box::new(e)))?;
-
+            let target_transition = input.unwind_to;
             self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
                 let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
 
-                while let Some((tid_address, entry)) = rev_changeset_walker.next().transpose()? {
-                    if tid_address.transition_id() < target_transition {
-                        break
+                while let Some((bn_address, entry)) = rev_changeset_walker.next().transpose()? {
+                    if bn_address.block_number() < target_transition {
+                        break;
                     }
 
                     if storage_cursor
-                        .seek_by_key_subkey(tid_address.address(), entry.key)?
+                        .seek_by_key_subkey(bn_address.address(), entry.key)?
                         .filter(|e| e.key == entry.key)
                         .is_some()
                     {
@@ -512,7 +501,7 @@ mod tests {
                     }
 
                     if entry.value != U256::ZERO {
-                        storage_cursor.upsert(tid_address.address(), entry)?;
+                        storage_cursor.upsert(bn_address.address(), entry)?;
                     }
                 }
                 Ok(())

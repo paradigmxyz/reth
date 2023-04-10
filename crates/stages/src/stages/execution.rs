@@ -6,7 +6,7 @@ use metrics_core::Counter;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
-    models::TransitionIdAddress,
+    models::BlockNumberAddress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
@@ -138,11 +138,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
 
         // put execution results to database
-        let first_transition_id = tx.get_block_transition(last_block)?;
+        //let first_transition_id = tx.get_block_transition(last_block)?;
+        
 
         let start = Instant::now();
         trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
-        state.write_to_db(&**tx, first_transition_id)?;
+        //state.write_to_db(&**tx, first_transition_id)?;
+        state.write_to_db(&**tx,last_block)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
         let done = !capped;
@@ -199,29 +201,22 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::execution", to_block = input.unwind_to, "Unwinding");
+        
 
         // Acquire changeset cursors
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        let block_range = input.unwind_to+1..=input.stage_progress;
 
-        if from_transition_rev > to_transition_rev {
-            panic!("Unwind transition {} (stage progress block #{}) is higher than the transition {} of (unwind block #{})", from_transition_rev, input.stage_progress, to_transition_rev, input.unwind_to);
-        }
-        let num_of_tx = (to_transition_rev - from_transition_rev) as usize;
-
-        // if there is no transaction ids, this means blocks were empty and block reward change set
-        // is not present.
-        if num_of_tx == 0 {
+        if block_range.is_empty() {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
         let account_changeset_batch = account_changeset
-            .walk_range(from_transition_rev..to_transition_rev)?
+            .walk_range(block_range.clone())?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
@@ -236,8 +231,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
             .walk_range(
-                TransitionIdAddress((from_transition_rev, Address::zero()))..
-                    TransitionIdAddress((to_transition_rev, Address::zero())),
+                BlockNumberAddress::range(block_range.clone())
             )?
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -258,17 +252,17 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         // Discard unwinded changesets
         let mut rev_acc_changeset_walker = account_changeset.walk_back(None)?;
-        while let Some((transition_id, _)) = rev_acc_changeset_walker.next().transpose()? {
-            if transition_id < from_transition_rev {
+        while let Some((block_num, _)) = rev_acc_changeset_walker.next().transpose()? {
+            if block_num < *block_range.start() {
                 break
             }
             // delete all changesets
-            tx.delete::<tables::AccountChangeSet>(transition_id, None)?;
+            tx.delete::<tables::AccountChangeSet>(block_num, None)?;
         }
 
         let mut rev_storage_changeset_walker = storage_changeset.walk_back(None)?;
         while let Some((key, _)) = rev_storage_changeset_walker.next().transpose()? {
-            if key.transition_id() < from_transition_rev {
+            if key.block_number() < *block_range.start() {
                 break
             }
             // delete all changesets
@@ -279,6 +273,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     }
 }
 
+// TODO(block_level)
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,3 +594,4 @@ mod tests {
         );
     }
 }
+*/

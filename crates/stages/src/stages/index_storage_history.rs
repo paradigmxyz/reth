@@ -1,5 +1,5 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use reth_db::{database::Database, models::TransitionIdAddress};
+use reth_db::{database::Database, models::BlockNumberAddress};
 use reth_primitives::Address;
 use reth_provider::Transaction;
 use std::fmt::Debug;
@@ -37,24 +37,18 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
+        let target = input.previous_stage_progress();
+        let Some(range) = input.next_block_range_with_threshold(self.commit_threshold)  else { return Ok(ExecOutput::done(target))};
 
-        // read storge changeset, merge it into one changeset and calculate account hashes.
-        let from_transition = tx.get_block_transition(stage_progress)?;
+        if range.is_empty() {
+            return Ok(ExecOutput::done(target));
+        }
 
-        // NOTE: can probably done more probabilistic take of bundles with transition but it is
-        // guess game for later. Transitions better reflect amount of work.
-        let to_block =
-            std::cmp::min(stage_progress + self.commit_threshold, previous_stage_progress);
-        let to_transition = tx.get_block_transition(to_block)?;
-
-        let indices =
-            tx.get_storage_transition_ids_from_changeset(from_transition, to_transition)?;
+        let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;
         tx.insert_storage_history_index(indices)?;
 
         info!(target: "sync::stages::index_storage_history", "Stage finished");
-        Ok(ExecOutput { stage_progress: to_block, done: to_block == previous_stage_progress })
+        Ok(ExecOutput { stage_progress: *range.end(), done: *range.end() == target })
     }
 
     /// Unwind the stage.
@@ -64,13 +58,9 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::index_account_history", to_block = input.unwind_to, "Unwinding");
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        let range = input.unwind_to + 1..=input.stage_progress;
 
-        tx.unwind_storage_history_indices(
-            TransitionIdAddress((from_transition_rev, Address::zero()))..
-                TransitionIdAddress((to_transition_rev, Address::zero())),
-        )?;
+        tx.unwind_storage_history_indices(BlockNumberAddress::range(range))?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -86,11 +76,11 @@ mod tests {
     use reth_db::{
         models::{
             storage_sharded_key::{StorageShardedKey, NUM_OF_INDICES_IN_SHARD},
-            ShardedKey, StoredBlockBodyIndices, TransitionIdAddress,
+            BlockNumberAddress, ShardedKey, StoredBlockBodyIndices,
         },
         tables,
         transaction::DbTxMut,
-        TransitionList,
+        BlockNumberList,
     };
     use reth_primitives::{hex_literal::hex, StorageEntry, H160, H256, U256};
 
@@ -103,24 +93,24 @@ mod tests {
         StorageEntry { key, value: U256::ZERO }
     }
 
-    fn trns(transition_id: u64) -> TransitionIdAddress {
-        TransitionIdAddress((transition_id, ADDRESS))
+    fn trns(transition_id: u64) -> BlockNumberAddress {
+        BlockNumberAddress((transition_id, ADDRESS))
     }
 
     /// Shard for account
     fn shard(shard_index: u64) -> StorageShardedKey {
         StorageShardedKey {
             address: ADDRESS,
-            sharded_key: ShardedKey { key: STORAGE_KEY, highest_transition_id: shard_index },
+            sharded_key: ShardedKey { key: STORAGE_KEY, highest_block_number: shard_index },
         }
     }
 
-    fn list(list: &[usize]) -> TransitionList {
-        TransitionList::new(list).unwrap()
+    fn list(list: &[usize]) -> BlockNumberList {
+        BlockNumberList::new(list).unwrap()
     }
 
     fn cast(
-        table: Vec<(StorageShardedKey, TransitionList)>,
+        table: Vec<(StorageShardedKey, BlockNumberList)>,
     ) -> BTreeMap<StorageShardedKey, Vec<usize>> {
         table
             .into_iter()
@@ -138,7 +128,7 @@ mod tests {
             tx.put::<tables::BlockBodyIndices>(
                 0,
                 StoredBlockBodyIndices {
-                    first_transition_id: 0,
+                    //first_transition_id: 0,
                     tx_count: 3,
                     ..Default::default()
                 },
@@ -148,7 +138,7 @@ mod tests {
             tx.put::<tables::BlockBodyIndices>(
                 5,
                 StoredBlockBodyIndices {
-                    first_transition_id: 3,
+                    //first_transition_id: 3,
                     tx_count: 5,
                     ..Default::default()
                 },

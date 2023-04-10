@@ -1,13 +1,13 @@
 //! Output of execution.
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    models::{AccountBeforeTx, TransitionIdAddress},
+    models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
 use reth_primitives::{
-    Account, Address, Bytecode, Receipt, StorageEntry, TransitionId, H256, U256,
+    Account, Address, Bytecode, Receipt, StorageEntry, H256, U256, BlockNumber,
 };
 use std::collections::BTreeMap;
 
@@ -39,7 +39,7 @@ pub enum Change {
     /// A new account was created.
     AccountCreated {
         /// The ID of the transition this change is a part of.
-        id: TransitionId,
+        id: BlockNumber,
         /// The address of the account that was created.
         address: Address,
         /// The account.
@@ -48,7 +48,7 @@ pub enum Change {
     /// An existing account was changed.
     AccountChanged {
         /// The ID of the transition this change is a part of.
-        id: TransitionId,
+        id: BlockNumber,
         /// The address of the account that was changed.
         address: Address,
         /// The account before the change.
@@ -59,7 +59,7 @@ pub enum Change {
     /// Storage slots for an account were changed.
     StorageChanged {
         /// The ID of the transition this change is a part of.
-        id: TransitionId,
+        id: BlockNumber,
         /// The address of the account associated with the storage slots.
         address: Address,
         /// The storage changeset.
@@ -68,7 +68,7 @@ pub enum Change {
     /// Storage was wiped
     StorageWiped {
         /// The ID of the transition this change is a part of.
-        id: TransitionId,
+        id: BlockNumber,
         /// The address of the account whose storage was wiped.
         address: Address,
     },
@@ -81,7 +81,7 @@ pub enum Change {
     /// applied instead of the change that would otherwise have happened.
     AccountDestroyed {
         /// The ID of the transition this change is a part of.
-        id: TransitionId,
+        id: BlockNumber,
         /// The address of the destroyed account.
         address: Address,
         /// The account before it was destroyed.
@@ -91,7 +91,7 @@ pub enum Change {
 
 impl Change {
     /// Get the transition ID for the change
-    pub fn transition_id(&self) -> TransitionId {
+    pub fn transition_id(&self) -> BlockNumber {
         match self {
             Change::AccountChanged { id, .. } |
             Change::AccountCreated { id, .. } |
@@ -113,7 +113,7 @@ impl Change {
     }
 
     /// Set the transition ID of this change.
-    pub fn set_transition_id(&mut self, new_id: TransitionId) {
+    pub fn set_transition_id(&mut self, new_id: BlockNumber) {
         match self {
             Change::AccountChanged { ref mut id, .. } |
             Change::AccountCreated { ref mut id, .. } |
@@ -171,7 +171,7 @@ impl Change {
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
-    current_transition_id: TransitionId,
+    current_transition_id: BlockNumber,
     /// The state of all modified accounts after execution.
     ///
     /// If the value contained is `None`, then the account should be deleted.
@@ -303,10 +303,10 @@ impl PostState {
         });
 
         for change in changes_to_revert.iter_mut().rev() {
-            change.set_transition_id(change.transition_id() - transition_id as TransitionId);
+            change.set_transition_id(change.transition_id() - transition_id as BlockNumber);
             self.revert(change.clone());
         }
-        self.current_transition_id = transition_id as TransitionId;
+        self.current_transition_id = transition_id as BlockNumber;
         changes_to_revert
     }
 
@@ -457,7 +457,7 @@ impl PostState {
     pub fn write_to_db<'a, TX: DbTxMut<'a> + DbTx<'a>>(
         mut self,
         tx: &TX,
-        first_transition_id: TransitionId,
+        first_transition_id: BlockNumber,
     ) -> Result<(), DbError> {
         // Collect and sort changesets by their key to improve write performance
         let mut changesets = std::mem::take(&mut self.changes);
@@ -505,7 +505,7 @@ impl PostState {
         for changeset in storage_changes.into_iter() {
             match changeset {
                 Change::StorageChanged { id, address, changeset } => {
-                    let storage_id = TransitionIdAddress((first_transition_id + id, address));
+                    let storage_id = BlockNumberAddress((first_transition_id + id, address));
 
                     for (key, (old_value, _)) in changeset {
                         tracing::trace!(target: "provider::post_state", ?storage_id, ?key, ?old_value, "Storage changed");
@@ -516,7 +516,7 @@ impl PostState {
                     }
                 }
                 Change::StorageWiped { id, address } => {
-                    let storage_id = TransitionIdAddress((first_transition_id + id, address));
+                    let storage_id = BlockNumberAddress((first_transition_id + id, address));
 
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
@@ -782,9 +782,9 @@ mod tests {
             .cursor_dup_read::<tables::StorageChangeSet>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((0, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((0, address_a))).unwrap(),
             Some((
-                TransitionIdAddress((0, address_a)),
+                BlockNumberAddress((0, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(0) }
             )),
             "Slot 0 for account A should have changed from 0"
@@ -792,7 +792,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                TransitionIdAddress((0, address_a)),
+                BlockNumberAddress((0, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
             )),
             "Slot 1 for account A should have changed from 0"
@@ -804,9 +804,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((0, address_b))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((0, address_b))).unwrap(),
             Some((
-                TransitionIdAddress((0, address_b)),
+                BlockNumberAddress((0, address_b)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
             )),
             "Slot 1 for account B should have changed from 1"
@@ -829,9 +829,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(TransitionIdAddress((1, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
             Some((
-                TransitionIdAddress((1, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(1) }
             )),
             "Slot 0 for account A should have changed from 1 on deletion"
@@ -839,7 +839,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                TransitionIdAddress((1, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should have changed from 2 on deletion"

@@ -4,13 +4,13 @@ use parking_lot::Mutex;
 use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-    models::{AccountBeforeTx, TransitionIdAddress},
+    models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::{DbTx, DbTxMut, DbTxMutGAT},
 };
 use reth_primitives::{
-    keccak256, proofs::EMPTY_ROOT, Account, Address, ProofCheckpoint, StorageEntry,
-    StorageTrieEntry, TransitionId, H256, KECCAK_EMPTY, U256,
+    keccak256, proofs::EMPTY_ROOT, Account, Address, BlockNumber, ProofCheckpoint, StorageEntry,
+    StorageTrieEntry, H256, KECCAK_EMPTY, U256,
 };
 use reth_rlp::{
     encode_fixed_size, Decodable, DecodeError, Encodable, RlpDecodable, RlpEncodable,
@@ -20,7 +20,7 @@ use reth_tracing::tracing::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
-    ops::Range,
+    ops::{Range, RangeInclusive},
     sync::Arc,
 };
 
@@ -121,7 +121,7 @@ where
         let mut accounts_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
 
         if root == EMPTY_ROOT {
-            return Self::new(tx)
+            return Self::new(tx);
         }
         accounts_trie_cursor.seek_exact(root)?.ok_or(TrieError::MissingAccountRoot(root))?;
 
@@ -224,7 +224,7 @@ where
         root: H256,
     ) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
-            return Self::new(storages_trie_cursor, key)
+            return Self::new(storages_trie_cursor, key);
         }
         storages_trie_cursor
             .lock()
@@ -469,7 +469,7 @@ where
                             ProofCheckpoint::default(),
                             self.replace_account_root(&mut trie, previous_root)?,
                             hashed_address,
-                        )
+                        );
                     }
                 }
                 TrieProgress::InProgress(checkpoint) => {
@@ -540,7 +540,7 @@ where
                         )?),
                         storage_key: Some(current_entry.key),
                         ..Default::default()
-                    }))
+                    }));
                 }
             }
         }
@@ -552,7 +552,7 @@ where
     pub fn update_root(
         &mut self,
         mut previous_root: H256,
-        tid_range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<TrieProgress, TrieError> {
         let mut checkpoint = self.get_checkpoint()?;
 
@@ -562,7 +562,7 @@ where
 
         let next_acc = checkpoint.hashed_address.take();
         let changed_accounts = self
-            .gather_changes(tid_range)?
+            .gather_changes(range)?
             .into_iter()
             .skip_while(|(addr, _)| next_acc.is_some() && next_acc.expect("is some") != *addr);
 
@@ -621,7 +621,7 @@ where
                         ProofCheckpoint::default(),
                         self.replace_account_root(&mut trie, previous_root)?,
                         hashed_address,
-                    )
+                    );
                 }
             }
         }
@@ -666,7 +666,7 @@ where
                         )?),
                         storage_key: Some(key),
                         ..Default::default()
-                    }))
+                    }));
                 }
             } else {
                 trie.remove(key.as_bytes())?;
@@ -678,13 +678,13 @@ where
 
     fn gather_changes(
         &self,
-        tid_range: Range<TransitionId>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<H256, BTreeSet<H256>>, TrieError> {
         let mut account_cursor = self.tx.cursor_read::<tables::AccountChangeSet>()?;
 
         let mut account_changes: BTreeMap<Address, BTreeSet<H256>> = BTreeMap::new();
 
-        let mut walker = account_cursor.walk_range(tid_range.clone())?;
+        let mut walker = account_cursor.walk_range(range.clone())?;
 
         while let Some((_, AccountBeforeTx { address, .. })) = walker.next().transpose()? {
             account_changes.insert(address, Default::default());
@@ -692,11 +692,10 @@ where
 
         let mut storage_cursor = self.tx.cursor_dup_read::<tables::StorageChangeSet>()?;
 
-        let start = TransitionIdAddress((tid_range.start, Address::zero()));
-        let end = TransitionIdAddress((tid_range.end, Address::zero()));
-        let mut walker = storage_cursor.walk_range(start..end)?;
+        let storage_range = BlockNumberAddress::range(range);
+        let mut walker = storage_cursor.walk_range(storage_range)?;
 
-        while let Some((TransitionIdAddress((_, address)), StorageEntry { key, .. })) =
+        while let Some((BlockNumberAddress((_, address)), StorageEntry { key, .. })) =
             walker.next().transpose()?
         {
             account_changes.entry(address).or_default().insert(key);
@@ -750,7 +749,7 @@ where
             self.tx.get::<tables::SyncStageProgress>("TrieLoader".into())?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(ProofCheckpoint::default())
+            return Ok(ProofCheckpoint::default());
         }
 
         let (checkpoint, _) = ProofCheckpoint::from_compact(&buf, buf.len());
@@ -1098,7 +1097,7 @@ mod tests {
             BTreeSet::from([keccak256(H256::zero()), keccak256(H256::from_low_u64_be(2))]),
         )]);
         assert_matches!(
-            create_test_loader(&tx).gather_changes(32..33),
+            create_test_loader(&tx).gather_changes(32..=32),
             Ok(got) if got == expected
         );
     }

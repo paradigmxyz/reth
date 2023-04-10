@@ -101,15 +101,15 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let stage_progress = input.stage_progress.unwrap_or_default();
         let previous_stage_progress = input.previous_stage_progress();
 
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+        let from_block = stage_progress;
+        let to_block = previous_stage_progress;
 
         let block_root = tx.get_header(previous_stage_progress)?.state_root;
 
-        let trie_root = if from_transition == to_transition {
+        let trie_root = if from_block == to_block {
             block_root
         } else {
-            let res = if to_transition - from_transition > threshold || stage_progress == 0 {
+            let res = if to_block - from_block > threshold || stage_progress == 0 {
                 debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
                 // if there are more blocks than threshold it is faster to rebuild the trie
                 let mut loader = DBTrieLoader::new(tx.deref_mut());
@@ -120,7 +120,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 let current_root = tx.get_header(stage_progress)?.state_root;
                 let mut loader = DBTrieLoader::new(tx.deref_mut());
                 loader
-                    .update_root(current_root, from_transition..to_transition)
+                    .update_root(current_root, from_block..=to_block)
                     .map_err(|e| StageError::Fatal(Box::new(e)))?
             };
 
@@ -168,13 +168,13 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         let current_root = tx.get_header(input.stage_progress)?.state_root;
-        let from_transition = tx.get_block_transition(input.unwind_to)?;
-        let to_transition = tx.get_block_transition(input.stage_progress)?;
+        let from_block = input.unwind_to+1;
+        let to_block = input.stage_progress;
 
         let mut loader = DBTrieLoader::new(tx.deref_mut());
         let block_root = loop {
             match loader
-                .update_root(current_root, from_transition..to_transition)
+                .update_root(current_root, from_block..=to_block)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
             {
                 TrieProgress::Complete(root) => break root,
@@ -385,12 +385,7 @@ mod tests {
 
     impl UnwindStageTestRunner for MerkleTestRunner {
         fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            let target_transition = self
-                .tx
-                .inner()
-                .get_block_transition(input.unwind_to)
-                .map_err(|e| TestRunnerError::Internal(Box::new(e)))
-                .unwrap();
+            let target_block = input.unwind_to+1;
 
             self.tx
                 .commit(|tx| {
@@ -405,7 +400,7 @@ mod tests {
                     while let Some((tid_address, entry)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if tid_address.transition_id() < target_transition {
+                        if tid_address.block_number() < target_block {
                             break
                         }
 
@@ -433,7 +428,7 @@ mod tests {
                     while let Some((transition_id, account_before_tx)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
-                        if transition_id < target_transition {
+                        if transition_id < target_block {
                             break
                         }
 

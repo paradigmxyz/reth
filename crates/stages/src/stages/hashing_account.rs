@@ -59,7 +59,7 @@ impl AccountHashingStage {
             tx.get::<tables::SyncStageProgress>(ACCOUNT_HASHING.0.into())?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(AccountHashingCheckpoint::default())
+            return Ok(AccountHashingCheckpoint::default());
         }
 
         let (checkpoint, _) = AccountHashingCheckpoint::from_compact(&buf, buf.len());
@@ -106,11 +106,10 @@ impl AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
-        use reth_db::models::AccountBeforeTx;
         use reth_interfaces::test_utils::generators::{
             random_block_range, random_eoa_account_range,
         };
-        use reth_primitives::{Account, H256, U256};
+        use reth_primitives::H256;
         use reth_provider::insert_canonical_block;
 
         let blocks = random_block_range(opts.blocks, H256::zero(), opts.txs);
@@ -118,7 +117,7 @@ impl AccountHashingStage {
         let transitions = std::cmp::min(opts.transitions, num_transitions);
 
         for block in blocks {
-            insert_canonical_block(&**tx, block, None, true).unwrap();
+            insert_canonical_block(&**tx, block, None).unwrap();
         }
         let mut accounts = random_eoa_account_range(opts.accounts);
         {
@@ -128,7 +127,8 @@ impl AccountHashingStage {
             for (addr, acc) in accounts.iter() {
                 account_cursor.append(*addr, *acc)?;
             }
-
+            // TODO(block_level)
+            /*
             // seed account changeset
             let last_transition = tx
                 .cursor_read::<tables::BlockBodyIndices>()?
@@ -150,6 +150,7 @@ impl AccountHashingStage {
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                 acc_changeset_cursor.append(t, acc_before_tx)?;
             }
+             */
         }
 
         tx.commit()?;
@@ -171,25 +172,21 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
-
-        // read account changeset, merge it into one changeset and calculate account hashes.
-        let from_transition = tx.get_block_transition(stage_progress)?;
-        let to_transition = tx.get_block_transition(previous_stage_progress)?;
+        let from_block = input.stage_progress.unwrap_or_default() + 1;
+        let to_block = input.previous_stage_progress();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
-        if to_transition - from_transition > self.clean_threshold || stage_progress == 0 {
+        if to_block - from_block > self.clean_threshold || from_block == 0 {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
                 // Checkpoint is no longer valid if the range of transitions changed. 
                 // An already hashed account may have been changed with the new range, and therefore should be hashed again. 
-                checkpoint.to != to_transition ||
-                checkpoint.from != from_transition
+                checkpoint.to != from_block ||
+                checkpoint.from != to_block
             {
                 // clear table, load all accounts and hash it
                 tx.clear::<tables::HashedAccount>()?;
@@ -253,19 +250,19 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
 
             if let Some((next_address, _)) = &next_address {
                 checkpoint.address = Some(next_address.key().unwrap());
-                checkpoint.from = from_transition;
-                checkpoint.to = to_transition;
+                checkpoint.from = from_block;
+                checkpoint.to = to_block;
             }
 
             self.save_checkpoint(tx, checkpoint)?;
 
             if next_address.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false })
+                return Ok(ExecOutput { stage_progress: to_block, done: false });
             }
         } else {
             // Aggregate all transition changesets and and make list of account that have been
             // changed.
-            let lists = tx.get_addresses_of_changed_accounts(from_transition, to_transition)?;
+            let lists = tx.get_addresses_of_changed_accounts(from_block..=to_block)?;
             // iterate over plain state and get newest value.
             // Assumption we are okay to make is that plainstate represent
             // `previous_stage_progress` state.
@@ -287,11 +284,12 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         // There is no threshold on account unwind, we will always take changesets and
         // apply past values to HashedAccount table.
 
-        let from_transition_rev = tx.get_block_transition(input.unwind_to)?;
-        let to_transition_rev = tx.get_block_transition(input.stage_progress)?;
+        // dont incluse `unwind_to` block
+        let from_block = input.unwind_to+1;
+        let to_block = input.stage_progress;
 
         // Aggregate all transition changesets and and make list of account that have been changed.
-        tx.unwind_account_hashing(from_transition_rev..to_transition_rev)?;
+        tx.unwind_account_hashing(from_block..=to_block)?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -455,7 +453,7 @@ mod tests {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
                     if start_block > end_block {
-                        return Ok(())
+                        return Ok(());
                     }
                 }
                 self.check_hashed_accounts()

@@ -247,7 +247,7 @@ mod tests {
         /// 2. If the is no requested block entry in the bodies table,
         ///    but [tables::TxHashNumber] is not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
-            let body_result = self.tx.inner().get_block_meta(number);
+            let body_result = self.tx.inner().block_body_indices(number);
             match body_result {
                 Ok(body) => self.tx.ensure_no_entry_above_by_value::<tables::TxHashNumber, _>(
                     body.last_tx_num(),

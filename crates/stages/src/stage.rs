@@ -1,4 +1,4 @@
-use std::ops::RangeInclusive;
+use std::{cmp::min, ops::RangeInclusive};
 
 use crate::{error::StageError, id::StageId};
 use async_trait::async_trait;
@@ -15,10 +15,34 @@ pub struct ExecInput {
     pub stage_progress: Option<BlockNumber>,
 }
 
+
 impl ExecInput {
     /// Return the progress of the previous stage or default.
     pub fn previous_stage_progress(&self) -> BlockNumber {
         self.previous_stage.as_ref().map(|(_, num)| *num).unwrap_or_default()
+    }
+
+    /// Return next block range that needs to be executed.
+    pub fn next_block_range(&self) -> Option<RangeInclusive<BlockNumber>> {
+        self.next_block_range_with_threshold(u64::MAX)
+    }
+
+    /// Return the next block range to execute.
+    pub fn next_block_range_with_threshold(
+        &self,
+        threshold: u64,
+    ) -> Option<RangeInclusive<BlockNumber>> {
+        // plus +1 is to skip present block.
+        let start = self.stage_progress.map(|i| i + 1).unwrap_or_default();
+        let mut end = self.previous_stage_progress();
+
+        if end < start {
+            return None;
+        }
+
+        end = min(end, start + threshold);
+
+        Some(start..=end)
     }
 
     /// Return next execution action.
@@ -63,6 +87,12 @@ pub struct ExecOutput {
     pub stage_progress: BlockNumber,
     /// Whether or not the stage is done.
     pub done: bool,
+}
+
+impl ExecOutput {
+    pub fn done(stage_progress: BlockNumber) -> Self {
+        Self { stage_progress, done: true }
+    }
 }
 
 /// The output of a stage unwinding.
@@ -135,7 +165,7 @@ macro_rules! exec_or_return {
             ExecAction::Run { range, capped: _capped } => range.into_inner(),
             ExecAction::Done { stage_progress, target } => {
                 info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
+                return Ok(ExecOutput { stage_progress, done: true });
             }
         }
     };
@@ -144,7 +174,7 @@ macro_rules! exec_or_return {
             ExecAction::Run { range, capped } => (range.into_inner(), capped),
             ExecAction::Done { stage_progress, target } => {
                 info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true })
+                return Ok(ExecOutput { stage_progress, done: true });
             }
         }
     };

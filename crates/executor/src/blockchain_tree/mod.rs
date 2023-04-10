@@ -693,7 +693,7 @@ mod tests {
         genesis.header.header.state_root = EMPTY_ROOT;
         let tx_mut = db.tx_mut().unwrap();
 
-        insert_block(&tx_mut, genesis, None, false, Some((0, 0))).unwrap();
+        insert_block(&tx_mut, genesis, None).unwrap();
 
         // insert first 10 blocks
         for i in 0..10 {
