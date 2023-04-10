@@ -5,3 +5,6 @@ pub use nibbles::Nibbles;
 
 mod branch_node;
 pub use branch_node::BranchNode;
+
+mod mask;
+pub use mask::TrieMask;
