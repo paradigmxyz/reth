@@ -91,9 +91,13 @@ pub trait StateProviderFactory: Send + Sync {
     ) -> Result<StateProviderBox<'_>>;
 }
 
-/// Blockchain trait provider
+/// Blockchain trait provider that gives access to the blockchain state that is not yet committed
+/// (pending).
 pub trait BlockchainTreePendingStateProvider: Send + Sync {
-    /// Return state provider over pending state.
+    /// Returns a state provider that includes all state changes of the given (pending) block hash.
+    ///
+    /// In other words, the state provider will return the state after all transactions of the given
+    /// hash have been executed.
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,

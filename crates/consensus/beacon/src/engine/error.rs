@@ -1,28 +1,23 @@
 use reth_miner::error::PayloadBuilderError;
-use reth_rpc_types::engine::PayloadError;
+use reth_rpc_types::engine::{EngineRpcError, PayloadError};
 use reth_stages::PipelineError;
 use thiserror::Error;
 
 /// Beacon engine result.
 pub type BeaconEngineResult<Ok> = Result<Ok, BeaconEngineError>;
 
-// TODO: add conversions to codes for engine spec compliance
-// one notable variant would be UnknownPayload
 /// The error wrapper for the beacon consensus engine.
 #[derive(Error, Debug)]
 pub enum BeaconEngineError {
     /// Forkchoice zero hash head received.
     #[error("Received zero hash as forkchoice head")]
     ForkchoiceEmptyHead,
-    /// Invalid payload attributes.
-    #[error("Invalid payload attributes")]
-    InvalidPayloadAttributes,
     /// Pipeline channel closed.
     #[error("Pipeline channel closed")]
     PipelineChannelClosed,
-    /// Unknown payload
-    #[error("Unknown payload")]
-    UnknownPayload,
+    /// An error covered by the engine API standard error codes.
+    #[error(transparent)]
+    EngineApi(#[from] EngineRpcError),
     /// Encountered a payload error.
     #[error(transparent)]
     Payload(#[from] PayloadError),

@@ -51,6 +51,7 @@ serde_json = "1.0"
 shellexpand = "3.0.0"
 dirs-next = "2.0.0"
 confy = "0.5"
+toml = {version = "0.7", features = ["display"]}
 
 # metrics
 metrics = "0.20.1"
