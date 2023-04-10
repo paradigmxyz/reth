@@ -75,46 +75,6 @@ impl Nibbles {
         }
     }
 
-    /// Encodes the nibble sequence in the `hex_data` field into a compact byte representation
-    /// with a header byte, following the Ethereum Merkle Patricia Trie compact encoding format.
-    ///
-    /// The method creates a header byte based on the following rules:
-    ///
-    ///
-    /// After the header byte is determined, the method merges the nibble pairs back into bytes,
-    /// similar to the `encode_raw` method, and appends them to the compact byte sequence.
-    ///
-    /// # Returns
-    ///
-    /// A `Vec<u8>` containing the compact byte representation of the nibble sequence, including the
-    /// header byte.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use reth_primitives::trie::Nibbles;
-    ///
-    /// // Extension node with an even path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
-    /// assert_eq!(nibbles.encode_path(), vec![0x00, 0xAB, 0xCD]);
-    ///
-    /// // Extension node with an odd path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C]);
-    /// assert_eq!(nibbles.encode_path(), vec![0x1A, 0xBC]);
-    ///
-    /// // Leaf node with an even path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D, 0x10]);
-    /// assert_eq!(nibbles.encode_path(), vec![0x20, 0xAB, 0xCD]);
-    ///
-    /// // Leaf node with an odd path length:
-    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x10]);
-    /// assert_eq!(nibbles.encode_path(), vec![0x3A, 0xBC]);
-    /// ```
-    pub fn encode_path(&self) -> Vec<u8> {
-        let is_leaf = self.is_leaf();
-        self.encode_path_leaf(is_leaf)
-    }
-
     /// Encodes a given path leaf as a compact array of bytes, where each byte represents two
     /// "nibbles" (half-bytes or 4 bits) of the original hex data, along with additional information
     /// about the leaf itself.
@@ -131,6 +91,33 @@ impl Nibbles {
     ///
     /// If there is an odd number of nibbles, store the first nibble in the lower 4 bits of the
     /// first byte of encoded.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<u8>` containing the compact byte representation of the nibble sequence, including the
+    /// header byte.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use reth_primitives::trie::Nibbles;
+    ///
+    /// // Extension node with an even path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
+    /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x00, 0xAB, 0xCD]);
+    ///
+    /// // Extension node with an odd path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C]);
+    /// assert_eq!(nibbles.encode_path_leaf(false), vec![0x1A, 0xBC]);
+    ///
+    /// // Leaf node with an even path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
+    /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x20, 0xAB, 0xCD]);
+    ///
+    /// // Leaf node with an odd path length:
+    /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C]);
+    /// assert_eq!(nibbles.encode_path_leaf(true), vec![0x3A, 0xBC]);
+    /// ```
     pub fn encode_path_leaf(&self, is_leaf: bool) -> Vec<u8> {
         let mut encoded = vec![0u8; self.len() / 2 + 1];
         let odd_nibbles = self.len() % 2 != 0;
@@ -150,73 +137,6 @@ impl Nibbles {
         }
 
         encoded
-    }
-
-    /// The compact encoding is a space-efficient way to represent a nibble sequence.
-    ///
-    /// In this format, the first byte (flag) encodes two pieces of information:
-    /// 1. Whether the represented key corresponds to a leaf or an extension node in the trie.
-    /// 2. Whether the nibble sequence has an odd or even number of nibbles.
-    ///
-    /// The flag is a single byte (u8), and the code checks the upper 4 bits of this byte to
-    /// determine the type of node (leaf or extension) and the parity of the nibble count (odd
-    /// or even).
-    ///
-    /// Here's a breakdown of the flags and their meanings:
-    /// - 0x00: The key has an even number of nibbles and corresponds to an extension node.
-    /// - 0x10: The key has an odd number of nibbles and corresponds to an extension node.
-    /// - 0x20: The key has an even number of nibbles and corresponds to a leaf node.
-    /// - 0x30: The key has an odd number of nibbles and corresponds to a leaf node.
-    ///
-    /// The code uses a match statement to handle each of these cases accordingly, updating the
-    /// hex vector's prefix for 0x1 and 0x3, to declare it's an odd extension or leaf node.
-    ///
-    /// Finally, if it's a leaf node, it'll also push 0x0F (16) to the end of the hex vector.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use reth_primitives::trie::Nibbles;
-    ///
-    /// // Extension node with an even path length:
-    /// let compact = vec![0x00, 0xAB, 0xCD];
-    /// assert_eq!(Nibbles::decode_path(compact).hex_data, vec![0x0A, 0x0B, 0x0C, 0x0D]);
-    ///
-    /// // Extension node with an odd path length:
-    /// let compact = vec![0x1A, 0xBC];
-    /// assert_eq!(Nibbles::decode_path(compact).hex_data, vec![0x0A, 0x0B, 0x0C]);
-    ///
-    /// // Leaf node with an even path length:
-    /// let compact = vec![0x20, 0xAB, 0xCD];
-    /// assert_eq!(Nibbles::decode_path(compact).hex_data, vec![0x0A, 0x0B, 0x0C, 0x0D, 0x10]);
-    ///
-    /// // Leaf node with an odd path length:
-    /// let compact = vec![0x3A, 0xBC];
-    /// assert_eq!(Nibbles::decode_path(compact).hex_data, vec![0x0A, 0x0B, 0x0C, 0x10]);
-    /// ```
-    pub fn decode_path<T: AsRef<[u8]>>(compact: T) -> Self {
-        let compact = compact.as_ref();
-        let flag = compact[0];
-        let is_leaf = (flag & 0x20) != 0;
-        let has_odd_length = (flag & 0x10) != 0;
-
-        let mut hex = Vec::with_capacity(compact.len() * 2 + 1);
-        if has_odd_length {
-            hex.push(flag & 0x0F);
-        }
-
-        // The code is using `/ 16` and `% 16` operations to extract the upper and lower nibbles
-        // from each byte in the compact encoding after the flag. Since a byte can store two
-        // nibbles (each nibble is 4 bits), dividing a byte by 16 (which is equivalent to 2^4) will
-        // give you the upper nibble, and taking the modulo of the byte with 16 will give you the
-        // lower nibble.
-        hex.extend(compact[1..].iter().flat_map(|item| [item / 16, item % 16]));
-
-        if is_leaf {
-            hex.push(16);
-        }
-
-        Nibbles { hex_data: hex }
     }
 
     /// Increments the nibble sequence by one.
@@ -338,20 +258,29 @@ mod tests {
         }
 
         #[test]
-        fn encode_path_roundtrip(input in any::<Vec<u8>>()) {
+        fn encode_path_first_byte(input in any::<Vec<u8>>()) {
             prop_assume!(!input.is_empty());
             let input = Nibbles::unpack(input);
-            let compact = input.encode_path();
-            let decoded = Nibbles::decode_path(compact);
-            prop_assert_eq!(decoded, input);
-        }
+            let input_is_odd = input.len() % 2 == 1;
 
-        // TODO: reenabled
-        // #[test]
-        fn decode_path_roundtrip(input in any::<Vec<u8>>()) {
-            let decoded = Nibbles::decode_path(&input);
-            let compact = decoded.encode_path();
-            prop_assert_eq!(compact, input);
+            let compact_leaf = input.encode_path_leaf(true);
+            let leaf_flag = compact_leaf[0];
+            // Check flag
+            assert_ne!(leaf_flag & 0x20, 0);
+            assert_eq!(input_is_odd, (leaf_flag & 0x10) != 0);
+            if input_is_odd {
+                assert_eq!(leaf_flag & 0x0f, *input.first().unwrap());
+            }
+
+
+            let compact_extension = input.encode_path_leaf(false);
+            let extension_flag = compact_extension[0];
+            // Check first byte
+            assert_eq!(extension_flag & 0x20, 0);
+            assert_eq!(input_is_odd, (extension_flag & 0x10) != 0);
+            if input_is_odd {
+                assert_eq!(extension_flag & 0x0f, *input.first().unwrap());
+            }
         }
     }
 }
