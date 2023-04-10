@@ -63,13 +63,19 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         // Walk over block bodies within a specified range.
         let bodies = block_meta_cursor.walk_range(start_block..=end_block)?;
 
-        // Collect transactions for each body
-        let mut tx_list = vec![];
+        let mut total_transactions = 0;
+        let mut tx_ranges = Vec::with_capacity((end_block - start_block) as usize);
+
         for block_meta_entry in bodies {
             let (_, block_meta) = block_meta_entry?;
-            let transactions = tx_cursor.walk_range(block_meta.tx_num_range())?;
+            total_transactions += block_meta.tx_count;
+            tx_ranges.push(block_meta.tx_num_range());
+        }
 
-            for tx_entry in transactions {
+        // Collect transactions for each body
+        let mut tx_list = Vec::with_capacity(total_transactions as usize);
+        for tx_num_range in tx_ranges {
+            for tx_entry in tx_cursor.walk_range(tx_num_range)? {
                 let (id, transaction) = tx_entry?;
                 tx_list.push((transaction.hash(), id));
             }
