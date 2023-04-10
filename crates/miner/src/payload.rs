@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use reth_primitives::{Address, Block, SealedBlock, Withdrawal, H256};
+use reth_primitives::{Address, Block, SealedBlock, Withdrawal, H256, U256};
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
 
@@ -13,27 +13,40 @@ use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
 pub struct BuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
-    /// The initially empty block.
-    _initial_empty_block: SealedBlock,
+    /// The built block
+    pub(crate) block: SealedBlock,
+    /// The fees of the block
+    pub(crate) fees: U256,
 }
 
 // === impl BuiltPayload ===
 
 impl BuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub(crate) fn new(id: PayloadId, initial: Block) -> Self {
-        Self { id, _initial_empty_block: initial.seal_slow() }
+    pub(crate) fn new(id: PayloadId, block: Block, fees: U256) -> Self {
+        Self { id, block: block.seal_slow(), fees }
     }
 
     /// Returns the identifier of the payload.
     pub fn id(&self) -> PayloadId {
         self.id
     }
+
+    /// Returns the identifier of the payload.
+    pub fn block(&self) -> &SealedBlock {
+        &self.block
+    }
+
+    /// Fees of the block
+    pub fn fees(&self) -> U256 {
+        self.fees
+    }
 }
 
 /// Container type for all components required to build a payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadBuilderAttributes {
+    // TODO include id here
     /// Parent block to build the payload on top
     pub(crate) parent: H256,
     /// Timestamp for the generated payload
@@ -63,7 +76,7 @@ impl PayloadBuilderAttributes {
     /// Generates the payload id for the configured payload
     ///
     /// Returns an 8-byte identifier by hashing the payload components.
-    pub fn payload_id(&self) -> PayloadId {
+    pub(crate) fn payload_id(&self) -> PayloadId {
         use sha2::Digest;
         let mut hasher = sha2::Sha256::new();
         hasher.update(self.parent.as_bytes());

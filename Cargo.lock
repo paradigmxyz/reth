@@ -4854,12 +4854,17 @@ dependencies = [
 name = "reth-miner"
 version = "0.1.0"
 dependencies = [
+ "futures-core",
+ "futures-util",
  "parking_lot 0.12.1",
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
  "sha2 0.10.6",
  "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
