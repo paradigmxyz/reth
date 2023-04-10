@@ -168,7 +168,7 @@ impl Change {
 /// Since most [PostState]s in reth are for multiple blocks it is better to pre-allocate capacity
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The ID of the current transition.
     current_transition_id: TransitionId,
@@ -592,6 +592,12 @@ impl PostState {
         }
 
         Ok(())
+    }
+}
+
+impl Default for PostState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
