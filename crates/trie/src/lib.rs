@@ -12,5 +12,5 @@
 /// Various branch nodes producde by the hash builder.
 pub mod nodes;
 
-/// The implementation of [HashBuilder].
+/// The implementation of hash builder.
 pub mod hash_builder;
