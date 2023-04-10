@@ -57,8 +57,6 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     block_config: BlockConfig,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
-    /// The configured chain-spec
-    chain_spec: Arc<ChainSpec>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -69,7 +67,6 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         client: Client,
         pool: Pool,
         executor: Tasks,
-        chain_spec: Arc<ChainSpec>,
         config: BasicPayloadJobGeneratorConfig,
         block_config: BlockConfig,
     ) -> Self {
@@ -80,7 +77,6 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             block_config,
-            chain_spec,
         }
     }
 }
@@ -164,8 +160,8 @@ impl Default for BasicPayloadJobGeneratorConfig {
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
 pub struct BasicPayloadJob<Client, Pool, Tasks> {
-    /// Requested attributes for the payload.
-    attributes: PayloadBuilderAttributes,
+    /// The configuration for how the payload will be created.
+    config: PayloadConfig,
     /// The client that can interact with the chain.
     client: Client,
     /// The transaction pool.
@@ -182,8 +178,6 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     pending_block: Option<PendingPayload>,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
-    /// Settings for how to generate a block.
-    block_config: BlockConfig,
 }
 
 impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
@@ -213,11 +207,11 @@ where
             let _cancel = cancel.clone();
             let guard = this.payload_task_guard.clone();
             let attributes = this.attributes.clone();
-            let block_config = this.block_config.clone();
+            let payload_config = this.config.clone();
             this.executor.spawn_blocking(Box::pin(async move {
                 // acquire the permit for executing the task
                 let _permit = guard.0.acquire().await;
-                build_payload(client, pool, attributes, block_config, cancel, tx)
+                build_payload(client, pool,  payload_config, cancel, tx)
             }));
             this.pending_block = Some(PendingPayload { _cancel, payload: rx });
         }
@@ -279,13 +273,6 @@ impl Future for PendingPayload {
     }
 }
 
-/// Tracks static information about the parent block.
-struct ParentBlock {
-    block_env: BlockEnv,
-    cfg_env: CfgEnv,
-    header: Arc<Block>,
-}
-
 /// A marker that can be used to cancel a job.
 #[derive(Default, Clone)]
 struct Cancelled(Arc<AtomicBool>);
@@ -305,12 +292,28 @@ impl Drop for Cancelled {
     }
 }
 
+/// Static config for how to build a payload.
+#[derive(Clone)]
+struct PayloadConfig {
+    /// Pre-configured block environment.
+    initialized_block_env: BlockEnv,
+    /// Configuration for the environment.
+    initialized_cfg: CfgEnv,
+    /// The parent block.
+    parent_block: Arc<Block>,
+    /// Block extra data.
+    extra_data: Bytes,
+    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
+    max_gas_limit: u64,
+    /// Requested attributes for the payload.
+    attributes: PayloadBuilderAttributes
+}
+
 /// Builds the payload and sends the result to the given channel.
 fn build_payload<Pool, Client>(
     client: Client,
     pool: Pool,
-    payload_attributes: PayloadBuilderAttributes,
-    block_config: BlockConfig,
+    config: PayloadConfig,
     cancel: Cancelled,
     to_job: oneshot::Sender<Result<BuiltPayload, PayloadBuilderError>>,
 ) where
@@ -321,20 +324,22 @@ fn build_payload<Pool, Client>(
     fn try_build<Pool, Client>(
         client: Client,
         pool: Pool,
-        payload_attributes: PayloadBuilderAttributes,
-        block_config: BlockConfig,
+        config: PayloadConfig,
         cancel: Cancelled,
     ) -> Result<BuiltPayload, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
-        // TODO this needs to access the state of the parent block
+        // TODO this needs to access the _pending_ state of the parent block hash
         let state = client.latest()?;
+
+        let mut cumulative_gas_used = 0;
+        let mut txs = pool.ready_transactions();
 
         // Configure the environment for the block.
 
         todo!()
     }
-    let _ = to_job.send(try_build(client, pool, payload_attributes, block_config, cancel));
+    let _ = to_job.send(try_build(client, pool,  config, cancel));
 }
