@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// presence and types of its children. They are bitmasks, where each bit corresponds to a nibble
 /// (half-byte, or 4 bits) value from 0 to 15.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
-pub struct BranchNode {
+pub struct BranchNodeCompact {
     /// The bitmask indicating the presence of children at the respective nibble positions in the
     /// trie. If the bit at position i (counting from the right) is set (1), it indicates that a
     /// child exists for the nibble value i. If the bit is unset (0), it means there is no child
@@ -37,8 +37,8 @@ pub struct BranchNode {
     pub root_hash: Option<H256>,
 }
 
-impl BranchNode {
-    /// Creates a new [BranchNode] from the given parameters.
+impl BranchNodeCompact {
+    /// Creates a new [BranchNodeCompact] from the given parameters.
     pub fn new(
         state_mask: TrieMask,
         tree_mask: TrieMask,
@@ -60,9 +60,9 @@ impl BranchNode {
     }
 }
 
-impl Compact for BranchNode {
+impl Compact for BranchNodeCompact {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        let BranchNode { state_mask, tree_mask, hash_mask, root_hash, hashes } = self;
+        let BranchNodeCompact { state_mask, tree_mask, hash_mask, root_hash, hashes } = self;
 
         let mut buf_size = 0;
 
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn node_encoding() {
-        let n = BranchNode::new(
+        let n = BranchNodeCompact::new(
             0xf607.into(),
             0x0005.into(),
             0x4004.into(),
@@ -140,7 +140,7 @@ mod tests {
         );
 
         let mut out = Vec::new();
-        let compact_len = BranchNode::to_compact(n.clone(), &mut out);
-        assert_eq!(BranchNode::from_compact(&out, compact_len).0, n);
+        let compact_len = BranchNodeCompact::to_compact(n.clone(), &mut out);
+        assert_eq!(BranchNodeCompact::from_compact(&out, compact_len).0, n);
     }
 }
