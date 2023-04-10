@@ -10,3 +10,13 @@ Merkle trie implementation
 """
 
 [dependencies]
+# reth
+reth-primitives = { path  = "../primitives" }
+reth-rlp = { path = "../rlp" }
+
+# misc 
+hex = "0.4"
+
+[dev-dependencies]
+# reth
+reth-primitives = { path  = "../primitives", features = ["test-utils"] }
