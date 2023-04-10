@@ -4878,6 +4878,7 @@ dependencies = [
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
+ "revm-primitives",
  "sha2 0.10.6",
  "thiserror",
  "tokio",

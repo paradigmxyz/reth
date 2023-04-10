@@ -48,15 +48,15 @@ impl BuiltPayload {
 pub struct PayloadBuilderAttributes {
     // TODO include id here
     /// Parent block to build the payload on top
-    pub(crate) parent: H256,
+    pub parent: H256,
     /// Timestamp for the generated payload
-    pub(crate) timestamp: u64,
+    pub timestamp: u64,
     /// Address of the recipient for collecting transaction fee
-    pub(crate) suggested_fee_recipient: Address,
+    pub suggested_fee_recipient: Address,
     /// Randomness value for the generated payload
-    pub(crate) prev_randao: H256,
+    pub prev_randao: H256,
     /// Withdrawals for the generated payload
-    pub(crate) withdrawals: Vec<Withdrawal>,
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 // === impl PayloadBuilderAttributes ===

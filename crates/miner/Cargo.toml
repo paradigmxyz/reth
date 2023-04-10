@@ -14,6 +14,9 @@ reth-rpc-types = { path = "../rpc/rpc-types" }
 reth-rlp = { path = "../rlp" }
 reth-interfaces = { path = "../interfaces" }
 
+## ethereum
+revm-primitives = "1"
+
 ## async
 tokio = { version = "1", features = ["sync"] }
 tokio-stream = "0.1"

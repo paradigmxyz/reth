@@ -13,12 +13,17 @@ use reth_miner::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_primitives::{bytes::Bytes, Block, ChainSpec, Header};
-use reth_provider::StateProviderFactory;
+use reth_primitives::{bytes::Bytes, Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction};
+use reth_provider::{PostState, StateProviderFactory};
+use reth_revm::{
+    database::{State, SubState},
+    env::tx_env_with_recovered,
+};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::primitives::{BlockEnv, CfgEnv};
+use revm::primitives::{BlockEnv, CfgEnv, Env};
 use std::{
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -57,6 +62,8 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     block_config: BlockConfig,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
+    /// The chain spec.
+    chain_spec: Arc<ChainSpec>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -69,6 +76,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         block_config: BlockConfig,
+        chain_spec: Arc<ChainSpec>,
     ) -> Self {
         Self {
             client,
@@ -77,6 +85,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             block_config,
+            chain_spec,
         }
     }
 }
@@ -211,7 +220,7 @@ where
             this.executor.spawn_blocking(Box::pin(async move {
                 // acquire the permit for executing the task
                 let _permit = guard.0.acquire().await;
-                build_payload(client, pool,  payload_config, cancel, tx)
+                build_payload(client, pool, payload_config, cancel, tx)
             }));
             this.pending_block = Some(PendingPayload { _cancel, payload: rx });
         }
@@ -303,10 +312,10 @@ struct PayloadConfig {
     parent_block: Arc<Block>,
     /// Block extra data.
     extra_data: Bytes,
-    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
-    max_gas_limit: u64,
     /// Requested attributes for the payload.
-    attributes: PayloadBuilderAttributes
+    attributes: PayloadBuilderAttributes,
+    /// The chain spec.
+    chain_spec: Arc<ChainSpec>,
 }
 
 /// Builds the payload and sends the result to the given channel.
@@ -331,15 +340,74 @@ fn build_payload<Pool, Client>(
         Client: StateProviderFactory,
         Pool: TransactionPool,
     {
+        let PayloadConfig {
+            initialized_block_env,
+            initialized_cfg,
+            parent_block,
+            extra_data,
+            attributes,
+            chain_spec,
+        } = config;
+
         // TODO this needs to access the _pending_ state of the parent block hash
         let state = client.latest()?;
 
+        let mut db = SubState::new(State::new(state));
+        let mut post_state = PostState::default();
+
         let mut cumulative_gas_used = 0;
-        let mut txs = pool.ready_transactions();
+        let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+
+        let mut executed_txs = Vec::new();
+        let mut best_txs = pool.best_transactions();
+
+        while let Some(tx) = best_txs.next() {
+            // ensure we still have capacity for this transaction
+            if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
+                // TODO: try find transactions that can fit into the block
+                break
+            }
+
+            // check if the job was cancelled, if so we can exit early
+            if cancel.is_cancelled() {
+                return Err(PayloadBuilderError::BuildCancelled)
+            }
+
+            // convert tx to a signed transaction
+            let tx = tx.to_recovered_transaction();
+            let env = Env {
+                cfg: initialized_cfg.clone(),
+                block: initialized_block_env.clone(),
+                tx: tx_env_with_recovered(&tx),
+            };
+
+            let mut evm = revm::EVM::with_env(env);
+            evm.database(&mut db);
+
+            // TODO skip invalid transactions
+            let res = evm.transact()?;
+
+            // append transaction to the list of executed transactions
+            executed_txs.push(tx);
+
+            // append gas used
+            cumulative_gas_used += res.result.gas_used();
+        }
+
+        // Process withdrawals
+        if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(attributes.timestamp) {
+            for _withdrawal in attributes.withdrawals.iter() {
+                // // TODO error handling
+                // let beneficiary = db.load_account(withdrawal.address).unwrap();
+                //
+                // *balance_increments.entry(withdrawal.address).or_default() +=
+                //     withdrawal.amount_wei();
+            }
+        }
 
         // Configure the environment for the block.
 
         todo!()
     }
-    let _ = to_job.send(try_build(client, pool,  config, cancel));
+    let _ = to_job.send(try_build(client, pool, config, cancel));
 }
