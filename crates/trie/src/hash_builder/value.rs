@@ -9,7 +9,7 @@ pub(crate) enum HashBuilderValue {
 impl std::fmt::Debug for HashBuilderValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Bytes(bytes) => write!(f, "Bytes({:?})", hex::encode(&bytes)),
+            Self::Bytes(bytes) => write!(f, "Bytes({:?})", hex::encode(bytes)),
             Self::Hash(hash) => write!(f, "Hash({:?})", hash),
         }
     }
