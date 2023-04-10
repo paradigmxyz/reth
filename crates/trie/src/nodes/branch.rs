@@ -1,5 +1,5 @@
-use super::{matches_mask, rlp_node};
-use reth_primitives::{bytes::BytesMut, H256};
+use super::rlp_node;
+use reth_primitives::{bytes::BytesMut, trie::TrieMask, H256};
 use reth_rlp::{BufMut, EMPTY_STRING_CODE};
 
 /// A Branch node is only a pointer to the stack of nodes and is used to
@@ -19,12 +19,16 @@ impl<'a> BranchNode<'a> {
 
     /// Given the hash and state mask of children present, return an iterator over the stack items
     /// that match the mask.
-    pub fn children(&self, state_mask: u16, hash_mask: u16) -> impl Iterator<Item = H256> + '_ {
+    pub fn children(
+        &self,
+        state_mask: TrieMask,
+        hash_mask: TrieMask,
+    ) -> impl Iterator<Item = H256> + '_ {
         let mut index = self.stack.len() - state_mask.count_ones() as usize;
         (0..16).filter_map(move |digit| {
             let mut child = None;
-            if matches_mask(state_mask, digit) {
-                if matches_mask(hash_mask, digit) {
+            if state_mask.is_bit_set(digit) {
+                if hash_mask.is_bit_set(digit) {
                     child = Some(&self.stack[index]);
                 }
                 index += 1;
@@ -34,7 +38,7 @@ impl<'a> BranchNode<'a> {
     }
 
     /// Returns the RLP encoding of the branch node given the state mask of children present.
-    pub fn rlp(&self, state_mask: u16) -> Vec<u8> {
+    pub fn rlp(&self, state_mask: TrieMask) -> Vec<u8> {
         let first_child_idx = self.stack.len() - state_mask.count_ones() as usize;
         let mut buf = BytesMut::new();
 
@@ -43,7 +47,7 @@ impl<'a> BranchNode<'a> {
         let header = (0..16).fold(
             reth_rlp::Header { list: true, payload_length: 1 },
             |mut header, digit| {
-                if matches_mask(state_mask, digit) {
+                if state_mask.is_bit_set(digit) {
                     header.payload_length += self.stack[i].len();
                     i += 1;
                 } else {
@@ -57,7 +61,7 @@ impl<'a> BranchNode<'a> {
         // Extend the RLP buffer with the present children
         let mut i = first_child_idx;
         (0..16).for_each(|idx| {
-            if matches_mask(state_mask, idx) {
+            if state_mask.is_bit_set(idx) {
                 buf.extend_from_slice(&self.stack[i]);
                 i += 1;
             } else {
