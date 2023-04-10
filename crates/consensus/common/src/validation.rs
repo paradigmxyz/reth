@@ -1,9 +1,8 @@
 //! Collection of methods for block validation.
 use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
 use reth_primitives::{
-    constants, BlockNumber, ChainSpec, ForkCondition, Hardfork, Header, InvalidTransactionError,
-    SealedBlock, SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
-    TxLegacy,
+    constants, BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock,
+    SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
 };
 use reth_provider::{AccountProvider, HeaderProvider, WithdrawalsProvider};
 use std::{
