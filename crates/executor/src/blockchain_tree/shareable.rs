@@ -7,7 +7,7 @@ use reth_interfaces::{
     provider::ProviderError,
     Error,
 };
-use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
+use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlock, SealedBlockWithSenders};
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
     PostStateDataProvider,
@@ -65,6 +65,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreeViewer
 {
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
         self.tree.read().block_indices().index_of_number_to_pending_blocks().clone()
+    }
+
+    fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
+        self.tree.read().block_by_hash(block_hash).cloned()
     }
 
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
