@@ -30,7 +30,6 @@ use reth_executor::blockchain_tree::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    events::NewBlockNotificationSink,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
@@ -231,11 +230,11 @@ impl Command {
         let tree_config = BlockchainTreeConfig::default();
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
         // depth at least N blocks must be sent at once.
-        let new_block_notification_sender =
-            NewBlockNotificationSink::new(tree_config.max_reorg_depth() as usize * 2);
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
         let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
             tree_externals,
-            new_block_notification_sender.clone(),
+            canon_state_notification_sender.clone(),
             tree_config,
         )?);
 
@@ -246,7 +245,7 @@ impl Command {
                 shareable_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
-                new_block_notification_sender.clone(),
+                canon_state_notification_sender,
             )
             .build();
 

@@ -44,7 +44,7 @@ impl BuiltPayload {
 }
 
 /// Container type for all components required to build a payload.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadBuilderAttributes {
     // TODO include id here
     /// Parent block to build the payload on top

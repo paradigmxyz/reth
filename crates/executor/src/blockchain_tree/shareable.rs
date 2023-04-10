@@ -4,12 +4,14 @@ use reth_db::database::Database;
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine, BlockchainTreeViewer},
     consensus::Consensus,
-    events::{ChainEventSubscriptions, NewBlockNotifications},
     provider::ProviderError,
     Error,
 };
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
-use reth_provider::{BlockchainTreePendingStateProvider, ExecutorFactory, PostStateDataProvider};
+use reth_provider::{
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, ExecutorFactory,
+    PostStateDataProvider,
+};
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
@@ -100,10 +102,10 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTreePendingState
     }
 }
 
-impl<DB: Database, C: Consensus, EF: ExecutorFactory> ChainEventSubscriptions
+impl<DB: Database, C: Consensus, EF: ExecutorFactory> CanonStateSubscriptions
     for ShareableBlockchainTree<DB, C, EF>
 {
-    fn subscribe_new_blocks(&self) -> NewBlockNotifications {
-        self.tree.read().subscribe_new_blocks()
+    fn subscribe_canon_state(&self) -> reth_provider::CanonStateNotifications {
+        self.tree.read().subscribe_canon_state()
     }
 }

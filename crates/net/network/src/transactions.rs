@@ -728,8 +728,10 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config =
-            NetworkConfigBuilder::new(secret_key).no_discovery().listener_port(0).build(client);
+        let config = NetworkConfigBuilder::new(secret_key)
+            .disable_discovery()
+            .listener_port(0)
+            .build(client);
         let (handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
@@ -771,8 +773,10 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config =
-            NetworkConfigBuilder::new(secret_key).no_discovery().listener_port(0).build(client);
+        let config = NetworkConfigBuilder::new(secret_key)
+            .disable_discovery()
+            .listener_port(0)
+            .build(client);
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()
@@ -844,8 +848,10 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config =
-            NetworkConfigBuilder::new(secret_key).no_discovery().listener_port(0).build(client);
+        let config = NetworkConfigBuilder::new(secret_key)
+            .disable_discovery()
+            .listener_port(0)
+            .build(client);
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
             .unwrap()

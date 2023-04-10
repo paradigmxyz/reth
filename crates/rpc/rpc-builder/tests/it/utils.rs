@@ -1,6 +1,5 @@
-use reth_interfaces::test_utils::TestChainEventSubscriptions;
 use reth_network_api::test_utils::NoopNetwork;
-use reth_provider::test_utils::NoopProvider;
+use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
 use reth_rpc_builder::{
     RpcModuleBuilder, RpcModuleSelection, RpcServerConfig, RpcServerHandle,
     TransportRpcModuleConfig,
@@ -57,12 +56,12 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     TestPool,
     NoopNetwork,
     TokioTaskExecutor,
-    TestChainEventSubscriptions,
+    TestCanonStateSubscriptions,
 > {
     RpcModuleBuilder::default()
         .with_client(NoopProvider::default())
         .with_pool(testing_pool())
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
-        .with_events(TestChainEventSubscriptions::default())
+        .with_events(TestCanonStateSubscriptions::default())
 }
