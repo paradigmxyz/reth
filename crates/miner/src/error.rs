@@ -1,7 +1,7 @@
 //! Error types emitted by types or implementations of this crate.
 
-use revm_primitives::EVMError;
 use reth_primitives::H256;
+use revm_primitives::EVMError;
 use tokio::sync::oneshot;
 
 /// Possible error variants during payload building.
@@ -22,8 +22,8 @@ pub enum PayloadBuilderError {
     #[error("build job cancelled during execution")]
     BuildJobCancelled,
     /// Unrecoverable error during evm execution.
-    #[error(transparent)]
-    EvmExecutionError(#[from] EVMError<reth_interfaces::Error>)
+    #[error("evm execution error: {0:?}")]
+    EvmExecutionError(EVMError<reth_interfaces::Error>),
 }
 
 impl From<oneshot::error::RecvError> for PayloadBuilderError {

@@ -4,6 +4,8 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
+// TODO rm later
+#![allow(unused)]
 
 //! reth basic payload job generator
 
@@ -13,7 +15,7 @@ use reth_miner::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_primitives::{bytes::Bytes, Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction};
+use reth_primitives::{bytes::Bytes, Block, ChainSpec, Hardfork, IntoRecoveredTransaction};
 use reth_provider::{PostState, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
@@ -23,7 +25,6 @@ use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::primitives::{BlockEnv, CfgEnv, Env};
 use std::{
-    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::{atomic::AtomicBool, Arc},
@@ -48,7 +49,6 @@ pub struct BlockConfig {
 }
 
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
-#[derive(Debug)]
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     /// The client that can interact with the chain.
     client: Client,
@@ -215,7 +215,6 @@ where
             let cancel = Cancelled::default();
             let _cancel = cancel.clone();
             let guard = this.payload_task_guard.clone();
-            let attributes = this.attributes.clone();
             let payload_config = this.config.clone();
             this.executor.spawn_blocking(Box::pin(async move {
                 // acquire the permit for executing the task
@@ -343,8 +342,8 @@ fn build_payload<Pool, Client>(
         let PayloadConfig {
             initialized_block_env,
             initialized_cfg,
-            parent_block,
-            extra_data,
+            parent_block: _,
+            extra_data: _,
             attributes,
             chain_spec,
         } = config;
@@ -353,15 +352,15 @@ fn build_payload<Pool, Client>(
         let state = client.latest()?;
 
         let mut db = SubState::new(State::new(state));
-        let mut post_state = PostState::default();
+        let _post_state = PostState::default();
 
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
 
         let mut executed_txs = Vec::new();
-        let mut best_txs = pool.best_transactions();
+        let best_txs = pool.best_transactions();
 
-        while let Some(tx) = best_txs.next() {
+        for tx in best_txs {
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // TODO: try find transactions that can fit into the block
@@ -370,7 +369,7 @@ fn build_payload<Pool, Client>(
 
             // check if the job was cancelled, if so we can exit early
             if cancel.is_cancelled() {
-                return Err(PayloadBuilderError::BuildCancelled)
+                return Err(PayloadBuilderError::BuildJobCancelled)
             }
 
             // convert tx to a signed transaction
@@ -385,7 +384,7 @@ fn build_payload<Pool, Client>(
             evm.database(&mut db);
 
             // TODO skip invalid transactions
-            let res = evm.transact()?;
+            let res = evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
 
             // append transaction to the list of executed transactions
             executed_txs.push(tx);
