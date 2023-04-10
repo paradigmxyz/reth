@@ -6,6 +6,7 @@ use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
 use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
+use secp256k1::SecretKey;
 use std::{path::PathBuf, sync::Arc};
 
 /// Parameters for configuring the network more granularity via CLI
@@ -57,11 +58,12 @@ impl NetworkArgs {
         &self,
         config: &Config,
         chain_spec: Arc<ChainSpec>,
+        secret_key: SecretKey,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
 
         let network_config_builder = config
-            .network_config(self.nat, self.persistent_peers_file())
+            .network_config(self.nat, self.persistent_peers_file(), secret_key)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec);
 

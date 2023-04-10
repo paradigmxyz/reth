@@ -4,7 +4,7 @@ use reth_rlp::{RlpDecodable, RlpEncodable};
 
 /// Withdrawal represents a validator withdrawal from the consensus layer.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable)]
 pub struct Withdrawal {
     /// Monotonically increasing identifier issued by consensus layer.
     #[serde(with = "u64_hex")]

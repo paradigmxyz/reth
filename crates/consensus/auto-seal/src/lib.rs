@@ -152,7 +152,11 @@ impl Storage {
     fn new(chain_spec: &ChainSpec) -> Self {
         let header = chain_spec.genesis_header();
         let best_hash = header.hash_slow();
-        Self { inner: Arc::new(RwLock::new(StorageInner { best_hash, ..Default::default() })) }
+        let mut storage =
+            StorageInner { best_hash, total_difficulty: header.difficulty, ..Default::default() };
+        storage.headers.insert(0, header);
+        storage.bodies.insert(best_hash, BlockBody::default());
+        Self { inner: Arc::new(RwLock::new(storage)) }
     }
 
     /// Returns the write lock of the storage
@@ -178,6 +182,8 @@ pub(crate) struct StorageInner {
     pub(crate) best_block: u64,
     /// Tracks hash of best block
     pub(crate) best_hash: H256,
+    /// The total difficulty of the chain until this block
+    pub(crate) total_difficulty: U256,
 }
 
 // === impl StorageInner ===
@@ -207,6 +213,7 @@ impl StorageInner {
 
         self.best_hash = header.hash_slow();
         self.best_block = header.number;
+        self.total_difficulty += header.difficulty;
 
         trace!(target: "consensus::auto", num=self.best_block, hash=?self.best_hash, "inserting new block");
         self.headers.insert(header.number, header);

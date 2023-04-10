@@ -1,37 +1,25 @@
+name: deny
+
 on:
   push:
     branches: [main]
-    paths:
-      - 'Cargo.lock'
+    paths: [Cargo.lock]
   pull_request:
     branches: [main]
-    paths:
-      - 'Cargo.lock'
+    paths: [Cargo.lock]
 
 env:
   RUSTFLAGS: -D warnings
   CARGO_TERM_COLOR: always
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+concurrency: deny-${{ github.head_ref || github.run_id }}
 
-name: deny
 jobs:
-  check:
+  deny:
+    name: deny
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        checks:
-          - advisories
-          - bans licenses sources
-
-    continue-on-error: ${{ matrix.checks == 'advisories' }}
-
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v3
-      - name: Check
-        uses: EmbarkStudios/cargo-deny-action@v1
+      - uses: actions/checkout@v3
+      - uses: EmbarkStudios/cargo-deny-action@v1
         with:
-          command: check ${{ matrix.checks }}
+          command: check all

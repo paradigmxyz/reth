@@ -12,7 +12,7 @@ use std::sync::Arc;
 ///
 /// - A handle to the database
 /// - A handle to the consensus engine
-/// - The executor factory to exexcute blocks with
+/// - The executor factory to execute blocks with
 /// - The chain spec
 #[derive(Debug)]
 pub struct TreeExternals<DB, C, EF> {

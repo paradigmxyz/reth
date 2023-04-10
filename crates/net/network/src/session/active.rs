@@ -972,7 +972,7 @@ mod tests {
 
         let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
             let _client_stream = client_stream;
-            tokio::time::sleep(drop_timeout * 10).await;
+            tokio::time::sleep(drop_timeout * 60).await;
         });
         tokio::task::spawn(fut);
 
@@ -982,7 +982,8 @@ mod tests {
             .internal_request_timeout
             .store(request_timeout.as_millis() as u64, Ordering::Relaxed);
         session.protocol_breach_request_timeout = drop_timeout;
-        session.internal_request_timeout_interval = tokio::time::interval(request_timeout);
+        session.internal_request_timeout_interval =
+            tokio::time::interval_at(tokio::time::Instant::now(), request_timeout);
         let (tx, rx) = oneshot::channel();
         let req = PeerRequest::GetBlockBodies { request: GetBlockBodies(vec![]), response: tx };
         session.on_internal_peer_request(req, Instant::now());
@@ -995,7 +996,7 @@ mod tests {
         let msg = builder.active_session_rx.next().await.unwrap();
         match msg {
             ActiveSessionMessage::ProtocolBreach { .. } => {}
-            _ => unreachable!(),
+            ev => unreachable!("{ev:?}"),
         }
     }
 
