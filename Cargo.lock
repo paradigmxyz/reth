@@ -4734,6 +4734,7 @@ name = "reth-executor"
 version = "0.1.0"
 dependencies = [
  "aquamarine",
+ "assert_matches",
  "auto_impl",
  "hash-db",
  "parking_lot 0.12.1",
@@ -5005,8 +5006,8 @@ dependencies = [
  "reth-revm-primitives",
  "reth-rlp",
  "reth-tracing",
- "revm-primitives",
  "thiserror",
+ "tokio",
  "tracing",
  "triehash",
 ]
@@ -5109,6 +5110,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.7",
  "tower",
  "tracing",
 ]

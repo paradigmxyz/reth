@@ -3,10 +3,11 @@
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use jsonrpsee::server::ServerHandle;
-use reth_interfaces::events::ChainEventSubscriptions;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives::ChainSpec;
-use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    BlockProvider, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
+};
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
     constants, error::RpcError, IpcServerBuilder, RethRpcModule, RpcModuleSelection,
@@ -134,7 +135,7 @@ impl RpcServerArgs {
         Pool: TransactionPool + Clone + 'static,
         Network: NetworkInfo + Peers + Clone + 'static,
         Tasks: TaskSpawner + Clone + 'static,
-        Events: ChainEventSubscriptions + Clone + 'static,
+        Events: CanonStateSubscriptions + Clone + 'static,
     {
         reth_rpc_builder::launch(
             client,

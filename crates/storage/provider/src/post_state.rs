@@ -263,8 +263,8 @@ impl PostState {
     }
 
     /// Get the number of transitions causing this [PostState]
-    pub fn transitions_count(&self) -> usize {
-        self.current_transition_id as usize
+    pub fn transitions_count(&self) -> TransitionId {
+        self.current_transition_id
     }
 
     /// Extend this [PostState] with the changes in another [PostState].
@@ -291,10 +291,10 @@ impl PostState {
     /// The reverted changes are removed from this post-state, and their effects are reverted.
     ///
     /// The reverted changes are returned.
-    pub fn revert_to(&mut self, transition_id: usize) -> Vec<Change> {
+    pub fn revert_to(&mut self, transition_id: TransitionId) -> Vec<Change> {
         let mut changes_to_revert = Vec::new();
         self.changes.retain(|change| {
-            if change.transition_id() >= transition_id as u64 {
+            if change.transition_id() >= transition_id {
                 changes_to_revert.push(change.clone());
                 false
             } else {
@@ -322,7 +322,7 @@ impl PostState {
     /// 1. This post-state has the changes reverted
     /// 2. The returned post-state does *not* have the changes reverted, but only contains the
     /// descriptions of the changes that were reverted in the first post-state.
-    pub fn split_at(&mut self, transition_id: usize) -> Self {
+    pub fn split_at(&mut self, transition_id: TransitionId) -> Self {
         // Clone ourselves
         let mut non_reverted_state = self.clone();
 
@@ -913,7 +913,7 @@ mod tests {
         assert_eq!(state.transitions_count(), 2);
         assert_eq!(state.accounts().len(), 2);
 
-        let reverted_changes = state.revert_to(revert_to as usize);
+        let reverted_changes = state.revert_to(revert_to);
         assert_eq!(state.accounts().len(), 1);
         assert_eq!(state.transitions_count(), 1);
         assert_eq!(reverted_changes.len(), 1);

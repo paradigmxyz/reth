@@ -1,7 +1,8 @@
 //! Implementation of [`BlockIndices`] related to [`super::BlockchainTree`]
 
-use super::chain::{BlockChainId, Chain};
+use super::chain::BlockChainId;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
+use reth_provider::Chain;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.
