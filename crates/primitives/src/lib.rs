@@ -31,6 +31,7 @@ mod peer;
 mod receipt;
 mod storage;
 mod transaction;
+pub mod trie;
 mod withdrawal;
 
 /// Helper function for calculating Merkle proofs and hashes
