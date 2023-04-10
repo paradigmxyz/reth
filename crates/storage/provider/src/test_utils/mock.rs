@@ -10,7 +10,7 @@ use reth_primitives::{
     Bytecode, Bytes, ChainInfo, Header, Receipt, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TxHash, TxNumber, H256, U256,
 };
-use revm_primitives::{BlockEnv, CfgEnv};
+use reth_revm_primitives::primitives::{BlockEnv, CfgEnv};
 use std::{
     collections::{BTreeMap, HashMap},
     ops::RangeBounds,
