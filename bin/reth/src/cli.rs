@@ -2,7 +2,7 @@
 use std::str::FromStr;
 
 use crate::{
-    chain, db,
+    chain, config, db,
     dirs::{LogsDir, PlatformPath},
     drop_stage, dump_stage, node, p2p,
     runner::CliRunner,
@@ -35,6 +35,7 @@ pub fn run() -> eyre::Result<()> {
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
     }
 }
 
@@ -76,6 +77,9 @@ pub enum Commands {
     /// Generate Test Vectors
     #[command(name = "test-vectors")]
     TestVectors(test_vectors::Command),
+    /// Write config to stdout
+    #[command(name = "config")]
+    Config(config::Command),
 }
 
 #[derive(Debug, Parser)]

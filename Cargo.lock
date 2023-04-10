@@ -4486,6 +4486,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "toml 0.7.3",
  "tracing",
  "tui",
 ]
