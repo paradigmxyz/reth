@@ -568,9 +568,7 @@ mod tests {
         post_state::PostState,
         test_utils::TestExecutorFactory,
     };
-    use reth_interfaces::{
-        events::NewBlockNotificationSink, sync::NoopSyncStateUpdate, test_utils::TestConsensus,
-    };
+    use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_miner::TestPayloadStore;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
@@ -653,8 +651,9 @@ mod tests {
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
         let config = BlockchainTreeConfig::new(1, 2, 3);
+        let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, NewBlockNotificationSink::new(2), config)
+            BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),
         );
 
@@ -709,7 +708,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -747,7 +746,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -782,7 +781,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 

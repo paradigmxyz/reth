@@ -1,7 +1,6 @@
 //! Substate for blockchain trees
 
-use crate::blockchain_tree::chain::ForkBlock;
-use reth_primitives::{BlockHash, BlockNumber};
+use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
 use reth_provider::{post_state::PostState, PostStateDataProvider};
 use std::collections::BTreeMap;
 

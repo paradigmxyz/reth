@@ -20,9 +20,6 @@ pub mod executor;
 mod error;
 pub use error::{Error, Result};
 
-/// Traits for subscribing to events.
-pub mod events;
-
 /// P2P traits.
 pub mod p2p;
 

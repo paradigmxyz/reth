@@ -31,10 +31,17 @@ pub enum BeaconEngineError {
     PayloadBuilderError(#[from] PayloadBuilderError),
     /// Pipeline error.
     #[error(transparent)]
-    Pipeline(#[from] PipelineError),
+    Pipeline(#[from] Box<PipelineError>),
     /// Common error. Wrapper around [reth_interfaces::Error].
     #[error(transparent)]
     Common(#[from] reth_interfaces::Error),
+}
+
+// box the pipeline error as it is a large enum.
+impl From<PipelineError> for BeaconEngineError {
+    fn from(e: PipelineError) -> Self {
+        Self::Pipeline(Box::new(e))
+    }
 }
 
 // for convenience in the beacon engine
