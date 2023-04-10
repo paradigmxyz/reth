@@ -14,9 +14,23 @@ Merkle trie implementation
 reth-primitives = { path  = "../primitives" }
 reth-rlp = { path = "../rlp" }
 
+# tokio
+tokio = { version = "1.21.2", default-features = false, features = ["sync"] }
+
+# tracing
+tracing = "0.1"
+
 # misc 
 hex = "0.4"
 
 [dev-dependencies]
 # reth
-reth-primitives = { path  = "../primitives", features = ["test-utils"] }
+reth-primitives = { path  = "../primitives", features = ["test-utils", "arbitrary"] }
+
+# trie
+triehash = "0.8"
+
+# misc
+proptest = "1.0"
+tokio = { version = "1.21.2", default-features = false, features = ["sync", "rt", "macros"] }
+tokio-stream = "0.1.10"

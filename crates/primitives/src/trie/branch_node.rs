@@ -53,7 +53,7 @@ impl BranchNodeCompact {
     }
 
     /// Returns the hash associated with the given nibble.
-    pub fn hash_for_nibble(&self, nibble: i8) -> H256 {
+    pub fn hash_for_nibble(&self, nibble: u8) -> H256 {
         let mask = *TrieMask::from_nibble(nibble) - 1;
         let index = (*self.hash_mask & mask).count_ones();
         self.hashes[index as usize]
