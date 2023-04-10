@@ -1,8 +1,9 @@
 //! Collection of methods for block validation.
 use reth_interfaces::{consensus::ConsensusError, Result as RethResult};
 use reth_primitives::{
-    constants, BlockNumber, ChainSpec, Hardfork, Header, InvalidTransactionError, SealedBlock,
-    SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxLegacy,
+    constants, BlockNumber, ChainSpec, ForkCondition, Hardfork, Header, InvalidTransactionError,
+    SealedBlock, SealedHeader, Transaction, TransactionSignedEcRecovered, TxEip1559, TxEip2930,
+    TxLegacy,
 };
 use reth_provider::{AccountProvider, HeaderProvider, WithdrawalsProvider};
 use std::{
@@ -31,12 +32,6 @@ pub fn validate_header_standalone(
             timestamp: header.timestamp,
             present_timestamp,
         })
-    }
-
-    // From yellow paper: extraData: An arbitrary byte array containing data
-    // relevant to this block. This must be 32 bytes or fewer; formally Hx.
-    if header.extra_data.len() > 32 {
-        return Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
     }
 
     // Check if base fee is set.
