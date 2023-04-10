@@ -1,0 +1,12 @@
+[package]
+name = "reth-trie"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = """
+Merkle trie implementation
+"""
+
+[dependencies]
