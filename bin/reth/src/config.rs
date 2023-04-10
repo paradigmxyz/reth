@@ -8,37 +8,29 @@ use crate::dirs::{ConfigPath, PlatformPath};
 /// `reth config` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    #[clap(subcommand)]
-    command: Subcommands,
-}
+    /// The path to the configuration file to use.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PlatformPath<ConfigPath>>,
 
-/// `reth config` subcommands
-#[derive(Debug, Parser)]
-pub enum Subcommands {
     /// Show the default config
-    Default,
-    /// Show the active config
-    Show {
-        /// The path to the configuration file to use.
-        #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-        config: PlatformPath<ConfigPath>,
-    },
+    #[arg(long, verbatim_doc_comment, conflicts_with = "config")]
+    default: bool,
 }
 
 impl Command {
     /// Execute `config` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        let config = match &self.command {
-            Subcommands::Default => Config::default(),
-            Subcommands::Show { config } => {
-                // confy will create the file if it doesn't exist; we don't want this
-                if !config.as_ref().exists() {
-                    bail!("Config file does not exist: {}", config.as_ref().display());
-                }
-                confy::load_path::<Config>(&config).wrap_err_with(|| {
-                    format!("Could not load config file: {}", config.as_ref().display())
-                })?
+        let config = if self.default {
+            Config::default()
+        } else {
+            let path = self.config.clone().unwrap_or_default();
+            // confy will create the file if it doesn't exist; we don't want this
+            if !path.as_ref().exists() {
+                bail!("Config file does not exist: {}", path.as_ref().display());
             }
+            confy::load_path::<Config>(path.as_ref()).wrap_err_with(|| {
+                format!("Could not load config file: {}", path.as_ref().display())
+            })?
         };
         println!("{}", toml::to_string_pretty(&config)?);
         Ok(())
