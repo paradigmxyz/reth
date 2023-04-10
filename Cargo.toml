@@ -40,6 +40,7 @@ members = [
     "crates/tracing",
     "crates/tasks",
     "crates/transaction-pool",
+    "crates/trie",
 ]
 exclude = ["crate-template"]
 default-members = ["bin/reth"]
