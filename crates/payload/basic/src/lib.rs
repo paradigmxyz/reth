@@ -15,12 +15,9 @@ use reth_miner::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_primitives::{bytes::Bytes, Block, ChainSpec, Hardfork, IntoRecoveredTransaction};
+use reth_primitives::{bytes::Bytes, Block, ChainSpec, Hardfork, IntoRecoveredTransaction, Receipt};
 use reth_provider::{PostState, StateProviderFactory};
-use reth_revm::{
-    database::{State, SubState},
-    env::tx_env_with_recovered,
-};
+use reth_revm::{database::{State, SubState}, env::tx_env_with_recovered, into_reth_log};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::primitives::{BlockEnv, CfgEnv, Env};
@@ -352,7 +349,7 @@ fn build_payload<Pool, Client>(
         let state = client.latest()?;
 
         let mut db = SubState::new(State::new(state));
-        let _post_state = PostState::default();
+        let mut post_state = PostState::default();
 
         let mut cumulative_gas_used = 0;
         let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
@@ -385,6 +382,18 @@ fn build_payload<Pool, Client>(
 
             // TODO skip invalid transactions
             let res = evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+
+            // cast revm logs to reth logs
+            let logs = res.result.logs().into_iter().map(into_reth_log).collect();
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            post_state.add_receipt(Receipt {
+                tx_type: tx.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: res.result.is_success(),
+                cumulative_gas_used,
+                logs,
+            });
 
             // append transaction to the list of executed transactions
             executed_txs.push(tx);
