@@ -10,7 +10,7 @@ use reth_executor::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
-    ReceiptWithBloom, TransactionSigned, H256, U256,
+    ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
 use revm::{
@@ -115,39 +115,17 @@ where
     ///
     /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
     /// state changes (DAO fork).
-    fn post_block_balance_increments(
-        &self,
-        block: &Block,
-        td: U256,
-    ) -> Result<HashMap<Address, U256>, Error> {
-        let mut balance_increments = HashMap::<Address, U256>::default();
-
-        // Add block rewards if they are enabled.
-        if let Some(base_block_reward) =
-            calc::base_block_reward(&self.chain_spec, block.number, block.difficulty, td)
-        {
-            // Ommer rewards
-            for ommer in block.ommers.iter() {
-                *balance_increments.entry(ommer.beneficiary).or_default() +=
-                    calc::ommer_reward(base_block_reward, block.number, ommer.number);
-            }
-
-            // Full block reward
-            *balance_increments.entry(block.beneficiary).or_default() +=
-                calc::block_reward(base_block_reward, block.ommers.len());
-        }
-
-        // Process withdrawals
-        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
-            if let Some(withdrawals) = block.withdrawals.as_ref() {
-                for withdrawal in withdrawals {
-                    *balance_increments.entry(withdrawal.address).or_default() +=
-                        withdrawal.amount_wei();
-                }
-            }
-        }
-
-        Ok(balance_increments)
+    fn post_block_balance_increments(&self, block: &Block, td: U256) -> HashMap<Address, U256> {
+        post_block_balance_increments(
+            &self.chain_spec,
+            block.number,
+            block.difficulty,
+            block.beneficiary,
+            block.timestamp,
+            td,
+            &block.ommers,
+            block.withdrawals.as_deref(),
+        )
     }
 
     /// Irregular state change at Ethereum DAO hardfork
@@ -331,7 +309,7 @@ where
         }
 
         // Add block rewards
-        let balance_increments = self.post_block_balance_increments(block, total_difficulty)?;
+        let balance_increments = self.post_block_balance_increments(block, total_difficulty);
         let mut includes_block_transition = !balance_increments.is_empty();
         for (address, increment) in balance_increments.into_iter() {
             self.increment_account_balance(address, increment, &mut post_state)?;
@@ -505,6 +483,88 @@ pub fn verify_receipt<'a>(
         })
     }
     Ok(())
+}
+
+/// Collect all balance changes at the end of the block.
+///
+/// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
+/// state changes (DAO fork).
+#[allow(clippy::too_many_arguments)]
+#[inline]
+pub fn post_block_balance_increments(
+    chain_spec: &ChainSpec,
+    block_number: u64,
+    block_difficulty: U256,
+    beneficiary: Address,
+    block_timestamp: u64,
+    total_difficulty: U256,
+    ommers: &[Header],
+    withdrawals: Option<&[Withdrawal]>,
+) -> HashMap<Address, U256> {
+    let mut balance_increments = HashMap::new();
+
+    // Add block rewards if they are enabled.
+    if let Some(base_block_reward) =
+        calc::base_block_reward(chain_spec, block_number, block_difficulty, total_difficulty)
+    {
+        // Ommer rewards
+        for ommer in ommers {
+            *balance_increments.entry(ommer.beneficiary).or_default() +=
+                calc::ommer_reward(base_block_reward, block_number, ommer.number);
+        }
+
+        // Full block reward
+        *balance_increments.entry(beneficiary).or_default() +=
+            calc::block_reward(base_block_reward, ommers.len());
+    }
+
+    // process withdrawals
+    insert_post_block_withdrawals_balance_increments(
+        chain_spec,
+        block_timestamp,
+        withdrawals,
+        &mut balance_increments,
+    );
+
+    balance_increments
+}
+
+/// Returns a map of addresses to their balance increments if shanghai is active at the given
+/// timestamp.
+#[inline]
+pub fn post_block_withdrawals_balance_increments(
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    withdrawals: &[Withdrawal],
+) -> HashMap<Address, U256> {
+    let mut balance_increments = HashMap::with_capacity(withdrawals.len());
+    insert_post_block_withdrawals_balance_increments(
+        chain_spec,
+        block_timestamp,
+        Some(withdrawals),
+        &mut balance_increments,
+    );
+    balance_increments
+}
+
+/// Applies all withdrawal balance increments if shanghai is active at the given timestamp to the
+/// given `balance_increments` map.
+#[inline]
+pub fn insert_post_block_withdrawals_balance_increments(
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    withdrawals: Option<&[Withdrawal]>,
+    balance_increments: &mut HashMap<Address, U256>,
+) {
+    // Process withdrawals
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block_timestamp) {
+        if let Some(withdrawals) = withdrawals {
+            for withdrawal in withdrawals {
+                *balance_increments.entry(withdrawal.address).or_default() +=
+                    withdrawal.amount_wei();
+            }
+        }
+    }
 }
 
 #[cfg(test)]
