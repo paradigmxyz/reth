@@ -1,4 +1,5 @@
 //! reth data directories.
+use reth_primitives::Chain;
 use reth_staged_sync::utils::parse_path;
 use std::{
     env::VarError,
@@ -6,6 +7,19 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
+
+/// Constructs a string to be used as a path for configuration and db paths.
+pub fn build_config_path_prefix(chain: Chain) -> String {
+    if chain == Chain::mainnet() {
+        "mainnet".to_string()
+    } else if chain == Chain::goerli() {
+        "goerli".to_string()
+    } else if chain == Chain::sepolia() {
+        "sepolia".to_string()
+    } else {
+        chain.id().to_string()
+    }
+}
 
 /// Returns the path to the reth data directory.
 ///
@@ -209,5 +223,44 @@ impl<D> PlatformPath<D> {
     /// Returns the path joined with another path
     pub fn join<P: AsRef<Path>>(&self, path: P) -> PathBuf {
         self.0.join(path)
+    }
+
+    /// Converts into a `ChainPath` with the given `Chain`.
+    ///
+    /// Clones the `PlatformPath` and adds the chain to the path.
+    pub fn with_chain(&self, chain: Chain) -> ChainPath<'_, D> {
+        ChainPath::new(self, chain)
+    }
+}
+
+/// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
+/// different networks.
+///
+/// If the chain is either mainnet, goerli, or sepolia, then the path will be:
+///  * mainnet: `<DIR>/mainnet`
+///  * goerli: `<DIR>/goerli`
+///  * sepolia: `<DIR>/sepolia`
+/// Otherwise, the path will be dependent on the chain ID:
+///  * `<DIR>/<CHAIN_ID>`
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChainPath<'a, D>(&'a PlatformPath<D>, Chain);
+
+impl<'a, D> ChainPath<'a, D> {
+    /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
+    pub fn new(path: &'a PlatformPath<D>, chain: Chain) -> Self {
+        // NOTE: lifetimes are used here mainly to prevent partially borrowing the struct holding
+        // the `PlatformPath`. `PathBuf` does not implement `Copy`, so we use references.
+        Self(path, chain)
+    }
+
+    /// Resolves the path to the chain-specific directory.
+    pub fn resolve(&self) -> PathBuf {
+        self.0.join(build_config_path_prefix(self.1))
+    }
+}
+
+impl<D> From<ChainPath<'_, D>> for PathBuf {
+    fn from(value: ChainPath<'_, D>) -> Self {
+        value.resolve()
     }
 }

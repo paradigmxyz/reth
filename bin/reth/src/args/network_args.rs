@@ -4,7 +4,7 @@ use crate::dirs::{KnownPeersPath, PlatformPath};
 use clap::Args;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
-use reth_primitives::{mainnet_nodes, ChainSpec, NodeRecord};
+use reth_primitives::{mainnet_nodes, Chain, ChainSpec, NodeRecord};
 use reth_staged_sync::Config;
 use secp256k1::SecretKey;
 use std::{path::PathBuf, sync::Arc};
@@ -63,7 +63,7 @@ impl NetworkArgs {
         let chain_bootnodes = chain_spec.chain.bootnodes().unwrap_or_else(mainnet_nodes);
 
         let network_config_builder = config
-            .network_config(self.nat, self.persistent_peers_file(), secret_key)
+            .network_config(self.nat, self.persistent_peers_file(chain_spec.chain), secret_key)
             .boot_nodes(self.bootnodes.clone().unwrap_or(chain_bootnodes))
             .chain_spec(chain_spec);
 
@@ -74,12 +74,18 @@ impl NetworkArgs {
 // === impl NetworkArgs ===
 
 impl NetworkArgs {
-    /// If `no_persist_peers` is true then this returns the path to the persistent peers file
-    pub fn persistent_peers_file(&self) -> Option<PathBuf> {
+    /// If `no_persist_peers` is false then this returns the path to the persistent peers file
+    ///
+    /// Takes in a `Chain` to determine the chain-specific path to the peers file.
+    pub fn persistent_peers_file(&self, chain: Chain) -> Option<PathBuf> {
         if self.no_persist_peers {
             return None
         }
-        Some(self.peers_file.clone().into())
+
+        // convert this to a chain-specific path
+        let chain_peers_file = self.peers_file.with_chain(chain);
+
+        Some(chain_peers_file.into())
     }
 }
 
