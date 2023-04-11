@@ -5337,8 +5337,13 @@ name = "reth-trie"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "proptest",
  "reth-primitives",
  "reth-rlp",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "triehash",
 ]
 
 [[package]]
