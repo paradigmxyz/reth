@@ -64,7 +64,7 @@ pub use net::{
     SEPOLIA_BOOTNODES,
 };
 pub use peer::{PeerId, WithPeerId};
-pub use receipt::{Receipt, ReceiptWithBloom};
+pub use receipt::{Receipt, ReceiptWithBloom, ReceiptWithBloomRef};
 pub use revm_primitives::JumpMap;
 pub use serde_helper::JsonU256;
 pub use storage::{StorageEntry, StorageTrieEntry};
