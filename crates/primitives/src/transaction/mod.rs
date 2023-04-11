@@ -540,6 +540,12 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
+impl AsRef<Self> for TransactionSigned {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 // === impl TransactionSigned ===
 
 impl TransactionSigned {

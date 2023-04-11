@@ -36,12 +36,14 @@ impl Hasher for KeccakHasher {
 /// Calculate a transaction root.
 ///
 /// `(rlp(index), encoded(tx))` pairs.
-pub fn calculate_transaction_root<'a>(
-    transactions: impl IntoIterator<Item = &'a TransactionSigned>,
-) -> H256 {
+pub fn calculate_transaction_root<I, T>(transactions: I) -> H256
+where
+    I: IntoIterator<Item = T>,
+    T: AsRef<TransactionSigned>,
+{
     ordered_trie_root::<KeccakHasher, _>(transactions.into_iter().map(|tx| {
         let mut tx_rlp = Vec::new();
-        tx.encode_inner(&mut tx_rlp, false);
+        tx.as_ref().encode_inner(&mut tx_rlp, false);
         tx_rlp
     }))
 }
