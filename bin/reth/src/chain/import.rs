@@ -14,7 +14,7 @@ use reth_downloaders::{
 use reth_interfaces::{
     consensus::Consensus, p2p::headers::client::NoopStatusUpdater, sync::SyncStateUpdater,
 };
-use reth_primitives::{ChainSpec, H256};
+use reth_primitives::{Chain, ChainSpec, H256};
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -77,12 +77,11 @@ impl ImportCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
-        let config: Config = self.load_config()?;
+        let config: Config = self.load_config_with_chain(self.chain.chain)?;
+        info!(target: "reth::cli", path = %self.config.with_chain(self.chain.chain), "Configuration loaded");
 
         // add network name to db directory
-        let db_path = self.db.join(self.chain.chain.to_string());
-
-        info!(target: "reth::cli", path = ?db_path, "Configuration loaded");
+        let db_path = self.db.with_chain(self.chain.chain);
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
@@ -173,8 +172,12 @@ impl ImportCommand {
         Ok((pipeline, events))
     }
 
-    fn load_config(&self) -> eyre::Result<Config> {
-        confy::load_path::<Config>(&self.config).wrap_err("Could not load config")
+    /// Loads the reth config based on the intended chain
+    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
+        // add network name to config directory
+        let config_path = self.config.with_chain(chain);
+        confy::load_path::<Config>(config_path.clone())
+            .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }
 }
 
