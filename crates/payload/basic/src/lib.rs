@@ -15,9 +15,16 @@ use reth_miner::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_primitives::{bytes::Bytes, Block, ChainSpec, Hardfork, IntoRecoveredTransaction, Receipt};
+use reth_primitives::{
+    bytes::Bytes, proofs, Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt,
+    SealedBlock, EMPTY_OMMER_ROOT, U256,
+};
 use reth_provider::{PostState, StateProviderFactory};
-use reth_revm::{database::{State, SubState}, env::tx_env_with_recovered, into_reth_log};
+use reth_revm::{
+    database::{State, SubState},
+    env::tx_env_with_recovered,
+    into_reth_log,
+};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::primitives::{BlockEnv, CfgEnv, Env};
@@ -33,6 +40,7 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::trace;
+use reth_primitives::bloom::logs_bloom;
 
 // TODO move to common since commonly used
 
@@ -97,8 +105,9 @@ where
 
     fn new_payload_job(
         &self,
-        _attr: PayloadBuilderAttributes,
+        attr: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
+        // TODO fetch everything and validate everything
         todo!()
     }
 }
@@ -305,7 +314,7 @@ struct PayloadConfig {
     /// Configuration for the environment.
     initialized_cfg: CfgEnv,
     /// The parent block.
-    parent_block: Arc<Block>,
+    parent_block: Arc<SealedBlock>,
     /// Block extra data.
     extra_data: Bytes,
     /// Requested attributes for the payload.
@@ -339,8 +348,8 @@ fn build_payload<Pool, Client>(
         let PayloadConfig {
             initialized_block_env,
             initialized_cfg,
-            parent_block: _,
-            extra_data: _,
+            parent_block,
+            extra_data,
             attributes,
             chain_spec,
         } = config;
@@ -371,6 +380,8 @@ fn build_payload<Pool, Client>(
 
             // convert tx to a signed transaction
             let tx = tx.to_recovered_transaction();
+
+            // Configure the environment for the block.
             let env = Env {
                 cfg: initialized_cfg.clone(),
                 block: initialized_block_env.clone(),
@@ -383,18 +394,12 @@ fn build_payload<Pool, Client>(
             // TODO skip invalid transactions
             let res = evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
 
-            // TODO commit changes
-
-            // cast revm logs to reth logs
-            let logs = res.result.logs().into_iter().map(into_reth_log).collect();
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
                 tx_type: tx.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
                 success: res.result.is_success(),
                 cumulative_gas_used,
-                logs,
+                logs: res.result.logs().into_iter().map(into_reth_log).collect(),
             });
 
             // append transaction to the list of executed transactions
@@ -404,20 +409,45 @@ fn build_payload<Pool, Client>(
             cumulative_gas_used += res.result.gas_used();
         }
 
-        // process shanghai withdrawals
+        // TODO process shanghai withdrawals, No block reward which is issued by consensus layer
+        // instead
 
-        // Process withdrawals
-        if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(attributes.timestamp) {
-            for _withdrawal in attributes.withdrawals.iter() {
-                // // TODO error handling
-                // let beneficiary = db.load_account(withdrawal.address).unwrap();
-                //
-                // *balance_increments.entry(withdrawal.address).or_default() +=
-                //     withdrawal.amount_wei();
-            }
-        }
+        // create the block header
 
-        // Configure the environment for the block.
+        let transactions_root = proofs::calculate_transaction_root(executed_txs.iter());
+
+        // let receipts_root = proofs::calculate_receipt_root(post_state.receipts.iter());
+        let receipts_root = Default::default();
+        // let logs_bloom = logs_bloom(
+        //     post_state.receipts().flat_map(|receipt| receipt.logs.iter()),
+        // );
+        let withdrawals_root =
+            if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(attributes.timestamp) {
+                Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()))
+            } else {
+                None
+            };
+
+        let header = Header {
+            parent_hash: parent_block.hash,
+            ommers_hash: EMPTY_OMMER_ROOT,
+            beneficiary: initialized_block_env.coinbase,
+            // TODO compute state root
+            state_root: Default::default(),
+            transactions_root,
+            receipts_root,
+            withdrawals_root,
+            logs_bloom: (),
+            timestamp: attributes.timestamp,
+            mix_hash: attributes.prev_randao,
+            nonce: 0,
+            base_fee_per_gas: Some(initialized_block_env.basefee.to::<u64>()),
+            number: parent_block.number + 1,
+            gas_limit: block_gas_limit,
+            difficulty: U256::ZERO,
+            gas_used: cumulative_gas_used,
+            extra_data: extra_data.into(),
+        };
 
         todo!()
     }
