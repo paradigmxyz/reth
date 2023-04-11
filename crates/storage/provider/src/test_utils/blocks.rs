@@ -86,20 +86,21 @@ fn block1() -> (SealedBlockWithSenders, PostState) {
     let mut post_state = PostState::default();
     // Transaction changes
     post_state.create_account(
+        1,
         H160([0x60; 20]),
         Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
     );
     post_state.change_storage(
+        1,
         H160([0x60; 20]),
         BTreeMap::from([(U256::from(5), (U256::ZERO, U256::from(10)))]),
     );
-    post_state.finish_transition();
     // Block changes
     post_state.create_account(
+        2,
         H160([0x61; 20]),
         Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
     );
-    post_state.finish_transition();
 
     (SealedBlockWithSenders { block, senders: vec![H160([0x30; 20])] }, post_state)
 }
@@ -121,22 +122,22 @@ fn block2() -> (SealedBlockWithSenders, PostState) {
     let mut post_state = PostState::default();
     // Transaction changes
     post_state.change_account(
+        1,
         H160([0x60; 20]),
         Account { nonce: 1, balance: U256::from(10), bytecode_hash: None },
         Account { nonce: 2, balance: U256::from(15), bytecode_hash: None },
     );
     post_state.change_storage(
+        1,
         H160([0x60; 20]),
         BTreeMap::from([(U256::from(5), (U256::from(10), U256::from(15)))]),
     );
-    post_state.finish_transition();
     // Block changes
     post_state.change_account(
+        1,
         H160([0x60; 20]),
         Account { nonce: 2, balance: U256::from(15), bytecode_hash: None },
         Account { nonce: 3, balance: U256::from(20), bytecode_hash: None },
     );
-    post_state.finish_transition();
-
     (SealedBlockWithSenders { block, senders: vec![H160([0x31; 20])] }, post_state)
 }

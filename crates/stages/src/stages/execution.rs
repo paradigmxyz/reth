@@ -144,7 +144,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         let start = Instant::now();
         trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
         //state.write_to_db(&**tx, first_transition_id)?;
-        state.write_to_db(&**tx,last_block)?;
+        state.write_to_db(&**tx)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
         let done = !capped;

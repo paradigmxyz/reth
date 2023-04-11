@@ -33,12 +33,6 @@ pub struct Chain {
     state: PostState,
     /// The blocks in this chain.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
-    /// A mapping of each block number in the chain to the highest transition ID in the chain's
-    /// state after execution of the block.
-    ///
-    /// This is used to revert changes in the state until a certain block number when the chain is
-    /// split.
-    block_transitions: BTreeMap<BlockNumber, usize>,
 }
 
 /// Block number and hash of the forked block.
@@ -64,15 +58,11 @@ impl Chain {
     pub fn state_at_block(&self, block_number: BlockNumber) -> Option<PostState> {
         let mut state = self.state.clone();
         if self.tip().number == block_number {
-            return Some(state)
+            return Some(state);
         }
 
-        if let Some(&transition_id) = self.block_transitions.get(&block_number) {
-            state.revert_to(transition_id);
-            return Some(state)
-        }
-
-        None
+        state.revert_to(block_number);
+        return Some(state);
     }
 
     /// Destructure the chain into its inner components, the blocks and the state.
@@ -113,15 +103,13 @@ impl Chain {
     /// Create new chain with given blocks and post state.
     pub fn new(blocks: Vec<(SealedBlockWithSenders, PostState)>) -> Self {
         let mut state = PostState::default();
-        let mut block_transitions = BTreeMap::new();
         let mut block_num_hash = BTreeMap::new();
         for (block, block_state) in blocks.into_iter() {
             state.extend(block_state);
-            block_transitions.insert(block.number, state.transitions_count());
             block_num_hash.insert(block.number, block);
         }
 
-        Self { state, block_transitions, blocks: block_num_hash }
+        Self { state, blocks: block_num_hash }
     }
 
     /// Create a new chain that forks off of the canonical chain.
@@ -178,14 +166,10 @@ impl Chain {
             .get(&parent_number)
             .ok_or(ExecError::BlockNumberNotFoundInChain { block_number: parent_number })?;
 
-        let revert_to_transition_id = self
-            .block_transitions
-            .get(&parent.number)
-            .expect("Should have the transition ID for the parent block");
         let mut state = self.state.clone();
 
         // Revert state to the state after execution of the parent block
-        state.revert_to(*revert_to_transition_id);
+        state.revert_to(parent.number);
 
         // Revert changesets to get the state of the parent that we need to apply the change.
         let post_state_data = PostStateDataRef {
@@ -203,11 +187,7 @@ impl Chain {
         )?;
         state.extend(block_state);
 
-        let chain = Self {
-            block_transitions: BTreeMap::from([(block.number, state.transitions_count())]),
-            state,
-            blocks: BTreeMap::from([(block.number, block)]),
-        };
+        let chain = Self { state, blocks: BTreeMap::from([(block.number, block)]) };
 
         // If all is okay, return new chain back. Present chain is not modified.
         Ok(chain)
@@ -277,7 +257,6 @@ impl Chain {
             externals,
         )?;
         self.state.extend(block_state);
-        self.block_transitions.insert(block.number, self.state.transitions_count());
         self.blocks.insert(block.number, block);
         Ok(())
     }
@@ -292,19 +271,13 @@ impl Chain {
                 chain_tip: chain_tip.num_hash(),
                 other_chain_fork: chain.fork_block().into_components(),
             }
-            .into())
+            .into());
         }
 
         // Insert blocks from other chain
         self.blocks.extend(chain.blocks.into_iter());
-        let current_transition_count = self.state.transitions_count();
         self.state.extend(chain.state);
 
-        // Update the block transition mapping, shifting the transition ID by the current number of
-        // transitions in *this* chain
-        for (block_number, transition_id) in chain.block_transitions.iter() {
-            self.block_transitions.insert(*block_number, transition_id + current_transition_count);
-        }
         Ok(())
     }
 
@@ -331,16 +304,16 @@ impl Chain {
                 let Some(block_number) = self.block_number(block_hash) else { return ChainSplit::NoSplitPending(self)};
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
                 block_number
             }
             SplitAt::Number(block_number) => {
                 if block_number >= chain_tip {
-                    return ChainSplit::NoSplitCanonical(self)
+                    return ChainSplit::NoSplitCanonical(self);
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self)
+                    return ChainSplit::NoSplitPending(self);
                 }
                 block_number
             }
@@ -349,22 +322,12 @@ impl Chain {
         let higher_number_blocks = self.blocks.split_off(&(block_number + 1));
 
         let mut canonical_state = std::mem::take(&mut self.state);
-        let new_state = canonical_state.split_at(
-            *self.block_transitions.get(&block_number).expect("Unknown block transition ID"),
-        );
+        let new_state = canonical_state.split_at(block_number);
         self.state = new_state;
 
         ChainSplit::Split {
-            canonical: Chain {
-                state: canonical_state,
-                block_transitions: BTreeMap::new(),
-                blocks: self.blocks,
-            },
-            pending: Chain {
-                state: self.state,
-                block_transitions: self.block_transitions,
-                blocks: higher_number_blocks,
-            },
+            canonical: Chain { state: canonical_state, blocks: self.blocks },
+            pending: Chain { state: self.state, blocks: higher_number_blocks },
         }
     }
 }
@@ -441,16 +404,13 @@ mod tests {
     fn test_number_split() {
         let mut base_state = PostState::default();
         let account = Account { nonce: 10, ..Default::default() };
-        base_state.create_account(H160([1; 20]), account);
-        base_state.finish_transition();
+        base_state.create_account(1, H160([1; 20]), account);
 
         let mut block_state1 = PostState::default();
-        block_state1.create_account(H160([2; 20]), Account::default());
-        block_state1.finish_transition();
+        block_state1.create_account(2, H160([2; 20]), Account::default());
 
         let mut block_state2 = PostState::default();
-        block_state2.create_account(H160([3; 20]), Account::default());
-        block_state2.finish_transition();
+        block_state2.create_account(3, H160([3; 20]), Account::default());
 
         let mut block1 = SealedBlockWithSenders::default();
         let block1_hash = H256([15; 32]);
@@ -470,17 +430,15 @@ mod tests {
         ]);
 
         let mut split1_state = chain.state.clone();
-        let split2_state = split1_state.split_at(*chain.block_transitions.get(&1).unwrap());
+        let split2_state = split1_state.split_at(1);
 
         let chain_split1 = Chain {
             state: split1_state,
-            block_transitions: BTreeMap::new(),
             blocks: BTreeMap::from([(1, block1.clone())]),
         };
 
         let chain_split2 = Chain {
             state: split2_state,
-            block_transitions: chain.block_transitions.clone(),
             blocks: BTreeMap::from([(2, block2.clone())]),
         };
 

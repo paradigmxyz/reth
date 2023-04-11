@@ -507,8 +507,6 @@ where
         blocks: Vec<SealedBlockWithSenders>,
         state: PostState,
     ) -> Result<(), TransactionError> {
-        // TODO(block_level)
-        /*
         if blocks.is_empty() {
             return Ok(());
         }
@@ -519,29 +517,26 @@ where
 
         let fork_block_number = blocks.first().unwrap().number.saturating_sub(1);
 
-        let first_transition_id = self.get_block_transition(fork_block_number)?;
-
-        let num_transitions = state.transitions_count();
-
         // Write state and changesets to the database
-        state.write_to_db(self.deref_mut(), first_transition_id)?;
+        state.write_to_db(self.deref_mut())?;
+
+        let first_number = blocks.first().unwrap().number;
+
+        let last = blocks.last().unwrap();
+        let last_number = last.number;
+        let last_hash = last.hash();
+        let last_state_root = last.state_root;
 
         // Insert the blocks
         for block in blocks {
             self.insert_block(block)?;
         }
-        self.insert_hashes(
-            fork_block_number,
-            first_transition_id,
-            first_transition_id + num_transitions as u64,
-            new_tip_number,
-            new_tip_hash,
-            expected_state_root,
-        )?;
+
+        self.insert_hashes(first_number..=last_number, last_hash, last_state_root)?;
 
         // Update pipeline progress
         self.update_pipeline_stages(new_tip_number)?;
-         */
+
         Ok(())
     }
 
@@ -587,27 +582,21 @@ where
     /// The resulting state root is compared with `expected_state_root`.
     pub fn insert_hashes(
         &mut self,
-        fork_block_number: BlockNumber,
-        from_transition_id: BlockNumber,
-        to_transition_id: BlockNumber,
-        current_block_number: BlockNumber,
-        current_block_hash: H256,
+        range: RangeInclusive<BlockNumber>,
+        end_block_hash: H256,
         expected_state_root: H256,
     ) -> Result<(), TransactionError> {
-        // TODO(block_level)
-        /*
+        let fork_block_number = *range.start() - 1;
         // storage hashing stage
         {
-            let lists = self
-                .get_addresses_and_keys_of_changed_storages(from_transition_id, to_transition_id)?;
+            let lists = self.get_addresses_and_keys_of_changed_storages(range.clone())?;
             let storages = self.get_plainstate_storages(lists.into_iter())?;
             self.insert_storage_for_hashing(storages.into_iter())?;
         }
 
         // account hashing stage
         {
-            let lists =
-                self.get_addresses_of_changed_accounts(from_transition_id, to_transition_id)?;
+            let lists = self.get_addresses_of_changed_accounts(range.clone())?;
             let accounts = self.get_plainstate_accounts(lists.into_iter())?;
             self.insert_account_for_hashing(accounts.into_iter())?;
         }
@@ -616,19 +605,16 @@ where
         {
             let current_root = self.get_header(fork_block_number)?.state_root;
             let mut loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader
-                .update_root(current_root, from_transition_id..to_transition_id)
-                .and_then(|e| e.root())?;
+            let root = loader.update_root(current_root, range.clone()).and_then(|e| e.root())?;
             if root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: root,
                     expected: expected_state_root,
-                    block_number: current_block_number,
-                    block_hash: current_block_hash,
+                    block_number: *range.end(),
+                    block_hash: end_block_hash,
                 });
             }
         }
-        */
         Ok(())
     }
 
