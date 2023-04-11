@@ -16,5 +16,5 @@ mod secret_key;
 pub use secret_key::{get_secret_key, SecretKeyError};
 
 /// MinerArgs struct for configuring the miner
-mod miner_args;
-pub use miner_args::PayloadBuilderArgs;
+mod payload_build_args;
+pub use payload_build_args::PayloadBuilderArgs;

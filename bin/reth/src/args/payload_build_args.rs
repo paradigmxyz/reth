@@ -1,9 +1,7 @@
-use std::error::Error;
-
-use clap::Args;
+use clap::{builder::RangedU64ValueParser, Args};
 use reth_primitives::Address;
 
-/// Parameters for configuring the builder
+/// Parameters for configuring the Payload Builder
 #[derive(Debug, Args, PartialEq, Default)]
 pub struct PayloadBuilderArgs {
     /// Public address for block mining rewards
@@ -27,26 +25,8 @@ pub struct PayloadBuilderArgs {
     pub recommit: Option<u32>,
 
     /// Number of CPU threads to use for mining
-    #[arg(long = "builder.threads", help_heading = "Builder")]
+    #[arg(long = "builder.threads", help_heading = "Builder", value_parser = RangedU64ValueParser::<usize>::new().range(1..=num_cpus::get() as u64))]
     pub num_threads: Option<usize>,
-}
-
-impl PayloadBuilderArgs {
-    /// Validate the arguments
-    pub fn validate(&self) -> Result<(), Box<dyn Error>> {
-        if let Some(num_threads) = self.num_threads {
-            let num_cpus = num_cpus::get();
-            dbg!(num_cpus);
-            if num_threads < 1 || num_threads > num_cpus {
-                return Err(format!(
-                    "Invalid number of threads: {}. Must be between 1 and {}",
-                    num_threads, num_cpus
-                )
-                .into())
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -67,28 +47,10 @@ mod tests {
         let num_cpus = num_cpus::get();
         let args = CommandParser::<PayloadBuilderArgs>::parse_from([
             "reth",
-            "--builder.etherbase",
-            "0x5408ad45fd5db107766ff88f5faa4b8d1aab6121",
             "--builder.threads",
-            &format!("{}", num_cpus - 1),
+            &format!("{}", num_cpus),
         ])
         .args;
-
-        assert!(args.validate().is_ok());
-    }
-
-    #[test]
-    fn test_args_with_invalid_num_threads() {
-        let num_cpus = num_cpus::get();
-        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
-            "reth",
-            "--builder.etherbase",
-            "0x5408ad45fd5db107766ff88f5faa4b8d1aab6121",
-            "--builder.threads",
-            &format!("{}", num_cpus + 1),
-        ])
-        .args;
-
-        assert!(args.validate().is_err());
+        assert!(args.num_threads.is_some())
     }
 }
