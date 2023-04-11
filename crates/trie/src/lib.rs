@@ -14,3 +14,9 @@ pub mod nodes;
 
 /// The implementation of hash builder.
 pub mod hash_builder;
+
+/// The Ethereum account as represented in the trie.
+pub mod account;
+
+mod nibbles;
+pub use nibbles::Nibbles;
