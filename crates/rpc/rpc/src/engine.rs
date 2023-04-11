@@ -152,9 +152,16 @@ impl EngineApiServer for EngineApi {
     }
 
     /// Handler for `engine_getPayloadV1`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_getPayloadV1>
     ///
     /// Caution: This should not return the `withdrawals` field
+    ///
+    /// Note:
+    /// > Client software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v1(&self, payload_id: PayloadId) -> Result<ExecutionPayload> {
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx)
@@ -163,7 +170,14 @@ impl EngineApiServer for EngineApi {
     }
 
     /// Handler for `engine_getPayloadV2`
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_getpayloadv2>
+    ///
+    /// Note:
+    /// > Client software MAY stop the corresponding build process after serving this call.
     async fn get_payload_v2(&self, payload_id: PayloadId) -> Result<ExecutionPayloadEnvelope> {
         let (tx, rx) = oneshot::channel();
         self.delegate_request(EngineApiMessage::GetPayload(payload_id, tx), rx).await
