@@ -317,17 +317,6 @@ where
                             .then_some(H256::zero());
                     let status = match error {
                         Error::Execution(ExecutorError::PendingBlockIsInFuture { .. }) => {
-                            if let Some(ForkchoiceState { head_block_hash, .. }) =
-                                self.forkchoice_state
-                            {
-                                if self
-                                    .db
-                                    .view(|tx| tx.get::<tables::HeaderNumbers>(head_block_hash))??
-                                    .is_none()
-                                {
-                                    self.require_pipeline_run(PipelineTarget::Head);
-                                }
-                            }
                             PayloadStatusEnum::Syncing
                         }
                         error => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
@@ -375,12 +364,26 @@ where
     /// If the finalized block is missing from the database, trigger the pipeline run.
     fn restore_tree_if_possible(
         &mut self,
-        finalized_hash: BlockHash,
+        state: ForkchoiceState,
     ) -> Result<(), reth_interfaces::Error> {
-        match self.db.view(|tx| tx.get::<tables::HeaderNumbers>(finalized_hash))?? {
-            Some(number) => self.blockchain_tree.restore_canonical_hashes(number)?,
-            None => self.require_pipeline_run(PipelineTarget::Head),
+        let needs_pipeline_run = match self
+            .db
+            .view(|tx| tx.get::<tables::HeaderNumbers>(state.finalized_block_hash))??
+        {
+            Some(number) => {
+                // Attempt to restore the tree.
+                self.blockchain_tree.restore_canonical_hashes(number)?;
+
+                // After restoring the tree, check if the head block is missing.
+                self.db
+                    .view(|tx| tx.get::<tables::HeaderNumbers>(state.head_block_hash))??
+                    .is_none()
+            }
+            None => true,
         };
+        if needs_pipeline_run {
+            self.require_pipeline_run(PipelineTarget::Head);
+        }
         Ok(())
     }
 
@@ -509,9 +512,7 @@ where
                             };
 
                             // Update the state and hashes of the blockchain tree if possible
-                            if let Err(error) =
-                                this.restore_tree_if_possible(forkchoice_state.finalized_block_hash)
-                            {
+                            if let Err(error) = this.restore_tree_if_possible(forkchoice_state) {
                                 error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
                                 return Poll::Ready(Err(error.into()))
                             }
