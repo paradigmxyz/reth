@@ -29,20 +29,20 @@ impl From<Vec<u8>> for StoredNibblesSubKey {
 
 impl Compact for StoredNibblesSubKey {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        assert!(self.inner.len() <= 32);
-        let mut padded = vec![0; 32];
+        assert!(self.inner.len() <= 64);
+        let mut padded = vec![0; 64];
         padded[..self.inner.len()].copy_from_slice(&self.inner[..]);
         buf.put_slice(&padded);
         buf.put_u8(self.inner.len() as u8);
-        33 // 32 + 1
+        65 // 64 + 1
     }
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
     where
         Self: Sized,
     {
-        let len = buf[32] as usize;
+        let len = buf[64] as usize;
         let inner = Vec::from(&buf[..len]).into();
-        (Self(StoredNibbles { inner }), &buf[33..])
+        (Self(StoredNibbles { inner }), &buf[65..])
     }
 }

@@ -122,7 +122,7 @@ impl Encode for StoredNibblesSubKey {
 
     // Delegate to the Compact implementation
     fn encode(self) -> Self::Encoded {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(65);
         self.to_compact(&mut buf);
         buf
     }
