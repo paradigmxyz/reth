@@ -47,7 +47,7 @@ impl Signature {
     }
 
     /// Decodes the `v`, `r`, `s` values without a RLP header.
-    /// This will return a chain ID if the `v` value is EIP-155 compatible.
+    /// This will return a chain ID if the `v` value is [EIP-155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) compatible.
     pub(crate) fn decode_with_eip155_chain_id(
         buf: &mut &[u8],
     ) -> Result<(Self, Option<u64>), DecodeError> {
@@ -60,8 +60,11 @@ impl Signature {
             let chain_id = (v - 35) >> 1;
             Ok((Signature { r, s, odd_y_parity }, Some(chain_id)))
         } else {
-            // non-EIP-155 legacy scheme
-            let odd_y_parity = (v - 27) != 0;
+            // non-EIP-155 legacy scheme, v = 27 for even y-parity, v = 28 for odd y-parity
+            if v != 27 && v != 28 {
+                return Err(DecodeError::Custom("invalid Ethereum signature (V is not 27 or 28)"))
+            }
+            let odd_y_parity = v == 28;
             Ok((Signature { r, s, odd_y_parity }, None))
         }
     }
