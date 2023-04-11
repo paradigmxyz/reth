@@ -383,6 +383,8 @@ fn build_payload<Pool, Client>(
             // TODO skip invalid transactions
             let res = evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
 
+            // TODO commit changes
+
             // cast revm logs to reth logs
             let logs = res.result.logs().into_iter().map(into_reth_log).collect();
             // Push transaction changeset and calculate header bloom filter for receipt.
@@ -401,6 +403,8 @@ fn build_payload<Pool, Client>(
             // append gas used
             cumulative_gas_used += res.result.gas_used();
         }
+
+        // process shanghai withdrawals
 
         // Process withdrawals
         if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(attributes.timestamp) {
