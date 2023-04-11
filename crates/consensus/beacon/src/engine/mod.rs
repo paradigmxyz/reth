@@ -10,8 +10,8 @@ use reth_interfaces::{
 use reth_miner::PayloadStore;
 use reth_primitives::{BlockHash, BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated, PayloadAttributes, PayloadId,
-    PayloadStatus, PayloadStatusEnum,
+    EngineRpcError, ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated,
+    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use reth_stages::{stages::FINISH, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -225,7 +225,7 @@ where
         if attrs.timestamp <= header.timestamp.into() {
             return Ok(ForkchoiceUpdated::new(PayloadStatus::from_status(
                 PayloadStatusEnum::Invalid {
-                    validation_error: BeaconEngineError::InvalidPayloadAttributes.to_string(),
+                    validation_error: EngineRpcError::InvalidPayloadAttributes.to_string(),
                 },
             )))
         }
@@ -268,7 +268,7 @@ where
         // for now just return the output from the payload store
         match self.payload_store.get_execution_payload(payload_id) {
             Some(payload) => Ok(payload),
-            None => Err(BeaconEngineError::UnknownPayload),
+            None => Err(EngineRpcError::UnknownPayload.into()),
         }
     }
 
@@ -457,14 +457,21 @@ where
                         let _ = tx.send(Ok(response));
                     }
                     BeaconEngineMessage::GetPayload { payload_id, tx } => {
-                        let response = match this.on_get_payload(payload_id) {
-                            Ok(response) => response,
+                        match this.on_get_payload(payload_id) {
+                            Ok(response) => {
+                                // good response, send it back
+                                let _ = tx.send(Ok(response));
+                            }
+                            Err(BeaconEngineError::EngineApi(error)) => {
+                                // specific error that we should report back to the client
+                                error!(target: "consensus::engine", ?error, "Sending engine api error response");
+                                let _ = tx.send(Err(BeaconEngineError::EngineApi(error)));
+                            }
                             Err(error) => {
                                 error!(target: "consensus::engine", ?error, "Error getting get payload response");
                                 return Poll::Ready(Err(error))
                             }
                         };
-                        let _ = tx.send(Ok(response));
                     }
                 }
             }
