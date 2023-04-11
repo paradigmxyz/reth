@@ -1,6 +1,5 @@
+use crate::Nibbles;
 use std::collections::BTreeSet;
-
-use reth_primitives::trie::Nibbles;
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
 ///
