@@ -36,6 +36,12 @@ impl From<&[u8]> for Nibbles {
     }
 }
 
+impl<const N: usize> From<&[u8; N]> for Nibbles {
+    fn from(arr: &[u8; N]) -> Self {
+        Nibbles::from_hex(arr.to_vec())
+    }
+}
+
 impl std::fmt::Debug for Nibbles {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Nibbles").field("hex_data", &hex::encode(&self.hex_data)).finish()
