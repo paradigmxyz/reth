@@ -35,7 +35,7 @@ parking_lot = "0.12"
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
-reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
+reth-primitives = { path = "../../primitives", features = ["arbitrary", "test-utils"] }
 parking_lot = "0.12"
 proptest = { version = "1.0" }
 assert_matches = "1.5"
