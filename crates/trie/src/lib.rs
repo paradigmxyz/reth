@@ -14,3 +14,7 @@ pub mod nodes;
 
 /// The implementation of hash builder.
 pub mod hash_builder;
+
+/// The implementation of a container for storing intermediate changes to a trie.
+/// The container indicates when the trie has been modified.
+pub mod prefix_set;
