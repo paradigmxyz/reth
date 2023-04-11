@@ -9,6 +9,12 @@
 //! authenticated radix trie that is used to store key-value bindings.
 //! <https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/>
 
+/// The Ethereum account as represented in the trie.
+pub mod account;
+
+mod nibbles;
+pub use nibbles::Nibbles;
+
 /// Various branch nodes producde by the hash builder.
 pub mod nodes;
 
@@ -19,8 +25,19 @@ pub mod hash_builder;
 /// The container indicates when the trie has been modified.
 pub mod prefix_set;
 
-/// The Ethereum account as represented in the trie.
-pub mod account;
+/// The cursor implementations for navigating account and storage tries.
+pub mod cursor;
 
-mod nibbles;
-pub use nibbles::Nibbles;
+/// The trie walker for iterating over the trie nodes.
+pub mod walker;
+
+mod errors;
+pub use errors::{StateRootError, StorageRootError};
+
+/// The implementation of the Merkle Patricia Trie.
+mod trie;
+pub use trie::{BranchNodeUpdate, BranchNodeUpdateSender, StateRoot, StorageRoot};
+
+/// Collection of trie-related test utilities.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;

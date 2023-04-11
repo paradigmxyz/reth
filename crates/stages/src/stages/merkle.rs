@@ -1,10 +1,9 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
-use reth_db::{database::Database, tables, transaction::DbTx};
+use reth_db::{database::Database, tables, transaction::DbTxMut};
 use reth_interfaces::consensus;
-use reth_provider::{
-    trie::{DBTrieLoader, TrieProgress},
-    Transaction,
-};
+use reth_primitives::{BlockNumber, H256};
+use reth_provider::Transaction;
+use reth_trie::StateRoot;
 use std::{fmt::Debug, ops::DerefMut};
 use tracing::*;
 
@@ -65,6 +64,24 @@ impl MerkleStage {
     pub fn default_unwind() -> Self {
         Self::Unwind
     }
+
+    /// Check that the computed state root matches the expected.
+    fn validate_state_root(
+        &self,
+        got: H256,
+        expected: H256,
+        target_block: BlockNumber,
+    ) -> Result<(), StageError> {
+        if got == expected {
+            Ok(())
+        } else {
+            warn!(target: "sync::stages::merkle", ?target_block, ?got, ?expected, "Block's root state failed verification");
+            Err(StageError::Validation {
+                block: target_block,
+                error: consensus::ConsensusError::BodyStateRootDiff { got, expected },
+            })
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -108,43 +125,23 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let trie_root = if from_transition == to_transition {
             block_root
+        } else if to_transition - from_transition > threshold || stage_progress == 0 {
+            // if there are more blocks than threshold it is faster to rebuild the trie
+            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
+            tx.clear::<tables::AccountsTrie>()?;
+            tx.clear::<tables::StoragesTrie>()?;
+            StateRoot::new(tx.deref_mut()).root(None).map_err(|e| StageError::Fatal(Box::new(e)))?
         } else {
-            let res = if to_transition - from_transition > threshold || stage_progress == 0 {
-                debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
-                // if there are more blocks than threshold it is faster to rebuild the trie
-                let mut loader = DBTrieLoader::new(tx.deref_mut());
-                loader.calculate_root().map_err(|e| StageError::Fatal(Box::new(e)))?
-            } else {
-                debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Updating trie");
-                // Iterate over changeset (similar to Hashing stages) and take new values
-                let current_root = tx.get_header(stage_progress)?.state_root;
-                let mut loader = DBTrieLoader::new(tx.deref_mut());
-                loader
-                    .update_root(current_root, from_transition..to_transition)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?
-            };
-
-            match res {
-                TrieProgress::Complete(root) => root,
-                TrieProgress::InProgress(_) => {
-                    return Ok(ExecOutput { stage_progress, done: false })
-                }
-            }
+            debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target =
+                ?previous_stage_progress, "Updating trie"); // Iterate over
+            StateRoot::incremental_root(tx.deref_mut(), from_transition..to_transition, None)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
-        if block_root != trie_root {
-            warn!(target: "sync::stages::merkle::exec", ?previous_stage_progress, got = ?trie_root, expected = ?block_root, "Block's root state failed verification");
-            return Err(StageError::Validation {
-                block: previous_stage_progress,
-                error: consensus::ConsensusError::BodyStateRootDiff {
-                    got: trie_root,
-                    expected: block_root,
-                },
-            })
-        }
+        self.validate_state_root(trie_root, block_root, previous_stage_progress)?;
 
         info!(target: "sync::stages::merkle::exec", "Stage finished");
-        Ok(ExecOutput { stage_progress: input.previous_stage_progress(), done: true })
+        Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
     }
 
     /// Unwind the stage.
@@ -158,49 +155,24 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let target_root = tx.get_header(input.unwind_to)?.state_root;
-
-        // If the merkle stage fails to execute, the trie changes weren't committed
-        // and the root stayed the same
-        if tx.get::<tables::AccountsTrie>(target_root)?.is_some() {
-            info!(target: "sync::stages::merkle::unwind", "Stage skipped");
+        if input.unwind_to == 0 {
+            tx.clear::<tables::AccountsTrie>()?;
+            tx.clear::<tables::StoragesTrie>()?;
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
 
-        let current_root = tx.get_header(input.stage_progress)?.state_root;
         let from_transition = tx.get_block_transition(input.unwind_to)?;
         let to_transition = tx.get_block_transition(input.stage_progress)?;
 
-        let mut loader = DBTrieLoader::new(tx.deref_mut());
-        let block_root = loop {
-            match loader
-                .update_root(current_root, from_transition..to_transition)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?
-            {
-                TrieProgress::Complete(root) => break root,
-                TrieProgress::InProgress(_) => {
-                    // Save the loader's progress & drop it to allow committing to the database,
-                    // otherwise we're hitting the borrow checker
-                    let progress = loader.current;
-                    let _ = loader;
-                    tx.commit()?;
-                    // Reinstantiate the loader from where it was left off.
-                    loader = DBTrieLoader::new(tx.deref_mut());
-                    loader.current = progress;
-                }
-            }
-        };
-
-        if block_root != target_root {
-            let unwind_to = input.unwind_to;
-            warn!(target: "sync::stages::merkle::unwind", ?unwind_to, got = ?block_root, expected = ?target_root, "Block's root state failed verification");
-            return Err(StageError::Validation {
-                block: unwind_to,
-                error: consensus::ConsensusError::BodyStateRootDiff {
-                    got: block_root,
-                    expected: target_root,
-                },
-            })
+        // Unwind trie only if there are transitions
+        if from_transition < to_transition {
+            let block_root =
+                StateRoot::incremental_root(tx.deref_mut(), from_transition..to_transition, None)
+                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let target_root = tx.get_header(input.unwind_to)?.state_root;
+            self.validate_state_root(block_root, target_root, input.unwind_to)?;
+        } else {
+            info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }
 
         info!(target: "sync::stages::merkle::unwind", "Stage finished");
@@ -217,17 +189,16 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-        database::DatabaseGAT,
-        mdbx::{Env, WriteMap},
+        cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         tables,
         transaction::{DbTx, DbTxMut},
     };
     use reth_interfaces::test_utils::generators::{
         random_block, random_block_range, random_contract_account_range, random_transition_range,
     };
-    use reth_primitives::{keccak256, Account, Address, SealedBlock, StorageEntry, H256, U256};
-    use std::{collections::BTreeMap, ops::Deref};
+    use reth_primitives::{keccak256, SealedBlock, StorageEntry, H256, U256};
+    use reth_trie::test_utils::{state_root, state_root_prehashed};
+    use std::collections::BTreeMap;
 
     stage_test_suite_ext!(MerkleTestRunner, merkle);
 
@@ -288,12 +259,6 @@ mod tests {
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
     }
 
-    fn create_trie_loader<'tx, 'db>(
-        tx: &'tx Transaction<'db, Env<WriteMap>>,
-    ) -> DBTrieLoader<'tx, <Env<WriteMap> as DatabaseGAT<'db>>::TXMut> {
-        DBTrieLoader::new(tx.deref())
-    }
-
     struct MerkleTestRunner {
         tx: TestTransaction,
         clean_threshold: u64,
@@ -325,24 +290,30 @@ mod tests {
             let stage_progress = input.stage_progress.unwrap_or_default();
             let end = input.previous_stage_progress() + 1;
 
-            let n_accounts = 31;
-            let accounts = random_contract_account_range(&mut (0..n_accounts))
+            let num_of_accounts = 31;
+            let accounts = random_contract_account_range(&mut (0..num_of_accounts))
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
+
+            self.tx.insert_accounts_and_storages(
+                accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
+            )?;
 
             let SealedBlock { header, body, ommers, withdrawals } =
                 random_block(stage_progress, None, Some(0), None);
             let mut header = header.unseal();
 
-            header.state_root =
-                self.generate_initial_trie(accounts.iter().map(|(k, v)| (*k, *v)))?;
+            header.state_root = state_root(
+                accounts
+                    .clone()
+                    .into_iter()
+                    .map(|(address, account)| (address, (account, std::iter::empty()))),
+            );
             let sealed_head = SealedBlock { header: header.seal_slow(), body, ommers, withdrawals };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
-
             blocks.extend(random_block_range((stage_progress + 1)..end, head_hash, 0..3));
-
             self.tx.insert_blocks(blocks.iter(), None)?;
 
             let (transitions, final_state) = random_transition_range(
@@ -351,13 +322,30 @@ mod tests {
                 0..3,
                 0..256,
             );
-
             self.tx.insert_transitions(transitions, None)?;
-
             self.tx.insert_accounts_and_storages(final_state)?;
 
+            // Calculate state root
+            let root = self.tx.query(|tx| {
+                let mut accounts = BTreeMap::default();
+                let mut accounts_cursor = tx.cursor_read::<tables::HashedAccount>()?;
+                let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
+                for entry in accounts_cursor.walk_range(..)? {
+                    let (key, account) = entry?;
+                    let storage_entries =
+                        storage_cursor.walk_dup(Some(key), None)?.collect::<Result<Vec<_>, _>>()?;
+                    let storage = storage_entries
+                        .into_iter()
+                        .filter(|(_, v)| v.value != U256::ZERO)
+                        .map(|(_, v)| (v.key, v.value))
+                        .collect::<Vec<_>>();
+                    accounts.insert(key, (account, storage));
+                }
+
+                Ok(state_root_prehashed(accounts.into_iter()))
+            })?;
+
             let last_block_number = end - 1;
-            let root = self.state_root()?;
             self.tx.commit(|tx| {
                 let mut last_header = tx.get::<tables::Headers>(last_block_number)?.unwrap();
                 last_header.state_root = root;
@@ -369,17 +357,11 @@ mod tests {
 
         fn validate_execution(
             &self,
-            input: ExecInput,
-            output: Option<ExecOutput>,
+            _input: ExecInput,
+            _output: Option<ExecOutput>,
         ) -> Result<(), TestRunnerError> {
-            if let Some(output) = output {
-                let start_block = input.stage_progress.unwrap_or_default() + 1;
-                let end_block = output.stage_progress;
-                if start_block > end_block {
-                    return Ok(())
-                }
-            }
-            self.check_root(input.previous_stage_progress())
+            // The execution is validated within the stage
+            Ok(())
         }
     }
 
@@ -394,14 +376,15 @@ mod tests {
 
             self.tx
                 .commit(|tx| {
-                    let mut changeset_cursor =
+                    let mut storage_changesets_cursor =
                         tx.cursor_dup_read::<tables::StorageChangeSet>().unwrap();
-                    let mut hash_cursor = tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
-
-                    let mut rev_changeset_walker = changeset_cursor.walk_back(None).unwrap();
+                    let mut storage_cursor =
+                        tx.cursor_dup_write::<tables::HashedStorage>().unwrap();
 
                     let mut tree: BTreeMap<H256, BTreeMap<H256, U256>> = BTreeMap::new();
 
+                    let mut rev_changeset_walker =
+                        storage_changesets_cursor.walk_back(None).unwrap();
                     while let Some((tid_address, entry)) =
                         rev_changeset_walker.next().transpose().unwrap()
                     {
@@ -413,15 +396,18 @@ mod tests {
                             .or_default()
                             .insert(keccak256(entry.key), entry.value);
                     }
-                    for (key, val) in tree.into_iter() {
-                        for (entry_key, entry_val) in val.into_iter() {
-                            hash_cursor.seek_by_key_subkey(key, entry_key).unwrap();
-                            hash_cursor.delete_current().unwrap();
+                    for (hashed_address, storage) in tree.into_iter() {
+                        for (hashed_slot, value) in storage.into_iter() {
+                            let storage_entry = storage_cursor
+                                .seek_by_key_subkey(hashed_address, hashed_slot)
+                                .unwrap();
+                            if storage_entry.map(|v| v.key == hashed_slot).unwrap_or_default() {
+                                storage_cursor.delete_current().unwrap();
+                            }
 
-                            if entry_val != U256::ZERO {
-                                let storage_entry =
-                                    StorageEntry { key: entry_key, value: entry_val };
-                                hash_cursor.append_dup(key, storage_entry).unwrap();
+                            if value != U256::ZERO {
+                                let storage_entry = StorageEntry { key: hashed_slot, value };
+                                storage_cursor.upsert(hashed_address, storage_entry).unwrap();
                             }
                         }
                     }
@@ -437,28 +423,18 @@ mod tests {
                             break
                         }
 
-                        match account_before_tx.info {
-                            Some(acc) => {
-                                tx.put::<tables::PlainAccountState>(account_before_tx.address, acc)
-                                    .unwrap();
-                                tx.put::<tables::HashedAccount>(
-                                    keccak256(account_before_tx.address),
-                                    acc,
-                                )
-                                .unwrap();
-                            }
-                            None => {
-                                tx.delete::<tables::PlainAccountState>(
-                                    account_before_tx.address,
-                                    None,
-                                )
-                                .unwrap();
-                                tx.delete::<tables::HashedAccount>(
-                                    keccak256(account_before_tx.address),
-                                    None,
-                                )
-                                .unwrap();
-                            }
+                        if let Some(acc) = account_before_tx.info {
+                            tx.put::<tables::HashedAccount>(
+                                keccak256(account_before_tx.address),
+                                acc,
+                            )
+                            .unwrap();
+                        } else {
+                            tx.delete::<tables::HashedAccount>(
+                                keccak256(account_before_tx.address),
+                                None,
+                            )
+                            .unwrap();
                         }
                     }
                     Ok(())
@@ -467,48 +443,8 @@ mod tests {
             Ok(())
         }
 
-        fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            self.check_root(input.unwind_to)
-        }
-    }
-
-    impl MerkleTestRunner {
-        fn state_root(&self) -> Result<H256, TestRunnerError> {
-            Ok(create_trie_loader(&self.tx.inner())
-                .calculate_root()
-                .and_then(|e| e.root())
-                .unwrap())
-        }
-
-        pub(crate) fn generate_initial_trie(
-            &self,
-            accounts: impl IntoIterator<Item = (Address, Account)>,
-        ) -> Result<H256, TestRunnerError> {
-            self.tx.insert_accounts_and_storages(
-                accounts.into_iter().map(|(addr, acc)| (addr, (acc, std::iter::empty()))),
-            )?;
-
-            let mut tx = self.tx.inner();
-            let root = create_trie_loader(&tx)
-                .calculate_root()
-                .and_then(|e| e.root())
-                .expect("couldn't create initial trie");
-
-            tx.commit()?;
-
-            Ok(root)
-        }
-
-        fn check_root(&self, previous_stage_progress: u64) -> Result<(), TestRunnerError> {
-            if previous_stage_progress != 0 {
-                let block_root =
-                    self.tx.inner().get_header(previous_stage_progress).unwrap().state_root;
-                let root = create_trie_loader(&self.tx().inner())
-                    .calculate_root()
-                    .and_then(|e| e.root())
-                    .unwrap();
-                assert_eq!(block_root, root);
-            }
+        fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
+            // The unwind is validated within the stage
             Ok(())
         }
     }

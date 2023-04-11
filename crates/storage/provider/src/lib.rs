@@ -25,9 +25,6 @@ pub use providers::{
     LatestStateProviderRef, ShareableDatabase,
 };
 
-/// Helper type for loading Merkle Patricia Trees from the database
-pub mod trie;
-
 /// Execution result
 pub mod post_state;
 pub use post_state::PostState;

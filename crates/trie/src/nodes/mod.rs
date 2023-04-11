@@ -1,11 +1,15 @@
 use reth_primitives::{keccak256, H256};
 use reth_rlp::EMPTY_STRING_CODE;
+use std::ops::Range;
 
 mod branch;
 mod extension;
 mod leaf;
 
 pub use self::{branch::BranchNode, extension::ExtensionNode, leaf::LeafNode};
+
+/// The range of valid child indexes.
+pub const CHILD_INDEX_RANGE: Range<u8> = 0..16;
 
 /// Given an RLP encoded node, returns either RLP(Node) or RLP(keccak(RLP(node)))
 fn rlp_node(rlp: &[u8]) -> Vec<u8> {
