@@ -4,7 +4,10 @@ use crate::{
     Error,
 };
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::*;
+use reth_primitives::{
+    trie::{StoredNibbles, StoredNibblesSubKey},
+    *,
+};
 
 /// Implements compression for Compact type.
 macro_rules! impl_compression_for_compact {
@@ -40,6 +43,8 @@ impl_compression_for_compact!(
     Receipt,
     TxType,
     StorageEntry,
+    StoredNibbles,
+    StoredNibblesSubKey,
     StorageTrieEntry,
     StoredBlockBodyIndices,
     StoredBlockOmmers,

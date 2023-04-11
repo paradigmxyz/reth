@@ -1,4 +1,13 @@
 //! Implements data structures specific to the database
+use crate::{
+    table::{Decode, Encode},
+    Error,
+};
+use reth_codecs::Compact;
+use reth_primitives::{
+    trie::{StoredNibbles, StoredNibblesSubKey},
+    Address, H256,
+};
 
 pub mod accounts;
 pub mod blocks;
@@ -9,12 +18,6 @@ pub mod storage_sharded_key;
 pub use accounts::*;
 pub use blocks::*;
 pub use sharded_key::ShardedKey;
-
-use crate::{
-    table::{Decode, Encode},
-    Error,
-};
-use reth_primitives::{Address, H256};
 
 /// Macro that implements [`Encode`] and [`Decode`] for uint types.
 macro_rules! impl_uints {
@@ -93,5 +96,41 @@ impl Encode for String {
 impl Decode for String {
     fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
         String::from_utf8(value.as_ref().to_vec()).map_err(|_| Error::DecodeError)
+    }
+}
+
+impl Encode for StoredNibbles {
+    type Encoded = Vec<u8>;
+
+    // Delegate to the Compact implementation
+    fn encode(self) -> Self::Encoded {
+        let mut buf = Vec::with_capacity(self.inner.len());
+        self.to_compact(&mut buf);
+        buf
+    }
+}
+
+impl Decode for StoredNibbles {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        let buf = value.as_ref();
+        Ok(Self::from_compact(buf, buf.len()).0)
+    }
+}
+
+impl Encode for StoredNibblesSubKey {
+    type Encoded = Vec<u8>;
+
+    // Delegate to the Compact implementation
+    fn encode(self) -> Self::Encoded {
+        let mut buf = Vec::with_capacity(65);
+        self.to_compact(&mut buf);
+        buf
+    }
+}
+
+impl Decode for StoredNibblesSubKey {
+    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, Error> {
+        let buf = value.as_ref();
+        Ok(Self::from_compact(buf, buf.len()).0)
     }
 }

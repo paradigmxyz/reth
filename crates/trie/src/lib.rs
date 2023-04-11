@@ -9,6 +9,12 @@
 //! authenticated radix trie that is used to store key-value bindings.
 //! <https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/>
 
+mod nibbles;
+pub use nibbles::Nibbles;
+
+/// The Ethereum account as represented in the trie.
+pub mod account;
+
 /// Various branch nodes producde by the hash builder.
 pub mod nodes;
 
