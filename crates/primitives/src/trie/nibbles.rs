@@ -34,7 +34,7 @@ impl Compact for StoredNibblesSubKey {
         padded[..self.inner.len()].copy_from_slice(&self.inner[..]);
         buf.put_slice(&padded);
         buf.put_u8(self.inner.len() as u8);
-        65 // 64 + 1
+        64 + 1
     }
 
     fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8])
