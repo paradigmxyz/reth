@@ -189,6 +189,18 @@ impl ChainSpec {
         self.hardforks.iter().map(|(f, b)| (*f, *b))
     }
 
+    /// Convenience method to check if a fork is active at a given timestamp.
+    #[inline]
+    pub fn is_fork_active_at_timestamp(&self, fork: Hardfork, timestamp: u64) -> bool {
+        self.fork(fork).active_at_timestamp(timestamp)
+    }
+
+    /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
+    #[inline]
+    pub fn is_shanghai_activated_at_timestamp(&self, timestamp: u64) -> bool {
+        self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp)
+    }
+
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.forks_iter().filter_map(|(_, condition)| {
