@@ -147,6 +147,13 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
         &self.block_indices
     }
 
+    /// Returns the block with matching hash.
+    pub fn block_by_hash(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
+        let id = self.block_indices.get_blocks_chain_id(&block_hash)?;
+        let chain = self.chains.get(&id)?;
+        chain.block(block_hash)
+    }
+
     /// Return items needed to execute on the pending state.
     /// This includes:
     ///     * `BlockHash` of canonical block that chain connects to. Needed for creating database
