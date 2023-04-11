@@ -145,12 +145,12 @@ impl Command {
         raise_fd_limit();
 
         let mut config: Config = self.load_config_with_chain(self.chain.chain)?;
-        info!(target: "reth::cli", path = %self.config, "Configuration loaded");
+        info!(target: "reth::cli", path = %self.config.with_chain(self.chain.chain), "Configuration loaded");
 
         // add network name to db directory
-        let db_path = self.db.with_chain(self.chain.chain).resolve();
+        let db_path = self.db.with_chain(self.chain.chain);
 
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
+        info!(target: "reth::cli", path = %db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
         let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
         info!(target: "reth::cli", "Database opened");
@@ -408,10 +408,9 @@ impl Command {
     /// Loads the reth config based on the intended chain
     fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
         // add network name to config directory
-        let config_path = self.config.with_chain(chain).resolve();
-        confy::load_path::<Config>(config_path).wrap_err_with(|| {
-            format!("Could not load config file {}", self.config.as_ref().display())
-        })
+        let config_path = self.config.with_chain(chain);
+        confy::load_path::<Config>(config_path.clone())
+            .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
@@ -471,7 +470,7 @@ impl Command {
             .request_handler(client)
             .split_with_handle();
 
-        let known_peers_file = self.network.persistent_peers_file(self.chain.chain);
+        let known_peers_file = self.network.persistent_peers_file();
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });

@@ -224,12 +224,27 @@ impl<D> PlatformPath<D> {
     pub fn join<P: AsRef<Path>>(&self, path: P) -> PathBuf {
         self.0.join(path)
     }
+}
 
-    /// Converts into a `ChainPath` with the given `Chain`.
+impl<D> PlatformPath<D> {
+    /// Converts the path to a `ChainPath` with the given `Chain`.
     ///
-    /// Clones the `PlatformPath` and adds the chain to the path.
-    pub fn with_chain(&self, chain: Chain) -> ChainPath<'_, D> {
-        ChainPath::new(self, chain)
+    /// If the inner path type refers to a file, the chain will be inserted between the parent
+    /// directory and the file name. If the inner path type refers to a directory, the chain will be
+    /// inserted between the parent directory and the directory name.
+    pub fn with_chain(&self, chain: Chain) -> ChainPath<D> {
+        // extract the parent and final component
+        let parent = self.0.parent().expect("Could not get parent of path");
+        let final_component = self.0.file_name().expect("Could not get file name of path");
+
+        // put the chain part in the middle
+        let chain_name = build_config_path_prefix(chain);
+        let mut path = PathBuf::from(parent);
+        path.push(chain_name);
+        path.push(final_component);
+
+        let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
+        ChainPath::new(platform_path, chain)
     }
 }
 
@@ -243,24 +258,29 @@ impl<D> PlatformPath<D> {
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
 #[derive(Clone, Debug, PartialEq)]
-pub struct ChainPath<'a, D>(&'a PlatformPath<D>, Chain);
+pub struct ChainPath<D>(PlatformPath<D>, Chain);
 
-impl<'a, D> ChainPath<'a, D> {
+impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
-    pub fn new(path: &'a PlatformPath<D>, chain: Chain) -> Self {
-        // NOTE: lifetimes are used here mainly to prevent partially borrowing the struct holding
-        // the `PlatformPath`. `PathBuf` does not implement `Copy`, so we use references.
+    pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
         Self(path, chain)
-    }
-
-    /// Resolves the path to the chain-specific directory.
-    pub fn resolve(&self) -> PathBuf {
-        self.0.join(build_config_path_prefix(self.1))
     }
 }
 
-impl<D> From<ChainPath<'_, D>> for PathBuf {
-    fn from(value: ChainPath<'_, D>) -> Self {
-        value.resolve()
+impl<D> AsRef<Path> for ChainPath<D> {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
+
+impl<D> Display for ChainPath<D> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<D> From<ChainPath<D>> for PathBuf {
+    fn from(value: ChainPath<D>) -> Self {
+        value.0.into()
     }
 }
