@@ -104,7 +104,7 @@ impl Nibbles {
     /// # Example
     ///
     /// ```
-    /// # use reth_primitives::trie::Nibbles;
+    /// # use reth_trie::Nibbles;
     ///
     /// // Extension node with an even path length:
     /// let nibbles = Nibbles::from_hex(vec![0x0A, 0x0B, 0x0C, 0x0D]);
