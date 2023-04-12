@@ -528,14 +528,15 @@ where
                     this.on_good_import(hash);
                 }
                 Err(err) => {
-                    if err.is_bad_transaction() {
+                    // if we're syncing and the transaction is bad we ignore it, otherwise we
+                    // penalize the peer that sent the bad transaction with the assumption that the
+                    // peer should have known that this transaction is bad. (e.g. consensus rules)
+                    if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
-                        // TODO disabled until properly tested
-                        // this.on_bad_import(*err.hash());
-                        this.on_good_import(*err.hash());
-                    } else {
-                        this.on_good_import(*err.hash());
+                        this.on_bad_import(*err.hash());
+                        continue
                     }
+                    this.on_good_import(*err.hash());
                 }
             }
         }
