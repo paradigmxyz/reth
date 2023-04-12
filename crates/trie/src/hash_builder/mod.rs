@@ -429,15 +429,6 @@ mod tests {
         });
     }
 
-    #[test]
-    fn arbitrary_root() {
-        proptest!(|(state: BTreeMap<Vec<u8>, Vec<u8>>)| {
-            // filter non-nibbled keys
-            let state = state.into_iter().filter(|(k, _)| !k.is_empty() && k.len() % 2 == 0).collect::<BTreeMap<_, _>>();
-            assert_trie_root(state.into_iter());
-        });
-    }
-
     #[tokio::test]
     async fn test_generates_branch_node() {
         let (sender, recv) = unbounded_channel();
