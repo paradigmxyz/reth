@@ -4515,6 +4515,7 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
+ "reth-consensus-common",
  "reth-miner",
  "reth-primitives",
  "reth-provider",

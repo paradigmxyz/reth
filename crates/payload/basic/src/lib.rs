@@ -11,18 +11,22 @@
 
 use futures_core::{ready, Stream};
 use futures_util::FutureExt;
+use reth_consensus_common::validation::calculate_next_block_base_fee;
 use reth_miner::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
 use reth_primitives::{
-    bytes::Bytes, proofs, Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt,
-    SealedBlock, EMPTY_OMMER_ROOT, U256,
+    bloom::logs_bloom, bytes::Bytes, proofs, Block, ChainSpec, Hardfork, Header,
+    IntoRecoveredTransaction, Receipt, SealedBlock, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{PostState, StateProviderFactory};
+use reth_provider::{BlockProvider, EvmEnvProvider, PostState, StateProviderFactory};
 use reth_revm::{
     database::{State, SubState},
     env::tx_env_with_recovered,
+    executor::{
+        commit_state_changes, increment_account_balance, post_block_withdrawals_balance_increments,
+    },
     into_reth_log,
 };
 use reth_tasks::TaskSpawner;
@@ -40,8 +44,6 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::trace;
-use reth_primitives::bloom::logs_bloom;
-use reth_revm::executor::{commit_state_changes, increment_account_balance, post_block_withdrawals_balance_increments};
 
 // TODO move to common since commonly used
 
@@ -96,9 +98,13 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
     }
 }
 
-impl<Client, Pool, Tasks> PayloadJobGenerator for BasicPayloadJob<Client, Pool, Tasks>
+// === impl BasicPayloadJobGenerator ===
+
+impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {}
+
+impl<Client, Pool, Tasks> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Pool, Tasks>
 where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
+    Client: StateProviderFactory + EvmEnvProvider + BlockProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
 {
@@ -106,10 +112,60 @@ where
 
     fn new_payload_job(
         &self,
-        attr: PayloadBuilderAttributes,
+        attributes: PayloadBuilderAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        // TODO fetch everything and validate everything
-        todo!()
+        // TODO this needs to access the _pending_ state of the parent block hash
+        let parent_block = self
+            .client
+            .block_by_hash(attributes.parent)?
+            .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
+
+        // initialize the environment
+        let (parent_cfg, mut parent_block_env) =
+            self.client.env_with_header(&parent_block.header)?;
+
+        // Update block env values
+        parent_block_env.number += U256::from(1);
+        parent_block_env.coinbase = attributes.suggested_fee_recipient;
+        parent_block_env.timestamp = U256::from(attributes.timestamp);
+        parent_block_env.difficulty = U256::ZERO;
+        parent_block_env.prevrandao = Some(attributes.prev_randao);
+
+        // calculate base fee for block based on parent header
+        calculate_next_block_base_fee(
+            parent_block.gas_used,
+            parent_block.gas_limit,
+            parent_block.base_fee_per_gas.unwrap_or_default(),
+        );
+
+        let initialized_block_env = parent_block_env;
+        let initialized_cfg = parent_cfg;
+
+        let config = PayloadConfig {
+            initialized_block_env: Default::default(),
+            initialized_cfg,
+            parent_block: Arc::new(parent_block),
+            extra_data: self.block_config.extradata.clone(),
+            attributes,
+            chain_spec: Arc::clone(&self.chain_spec),
+        };
+
+        // create empty
+
+        let until = tokio::time::Instant::now() + self.config.deadline;
+        let deadline = Box::pin(tokio::time::sleep_until(until));
+
+        Ok(BasicPayloadJob {
+            config,
+            client: self.client.clone(),
+            pool: self.pool.clone(),
+            executor: self.executor.clone(),
+            deadline,
+            interval: tokio::time::interval(self.config.interval),
+            best_payload: None,
+            pending_block: None,
+            payload_task_guard: self.payload_task_guard.clone(),
+        })
     }
 }
 
@@ -189,11 +245,26 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
     /// The best payload so far.
-    best_payload: Arc<BuiltPayload>,
+    best_payload: Option<Arc<BuiltPayload>>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload>,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
+}
+
+// === impl BasicPayloadJob ===
+
+impl<Client, Pool, Tasks> BasicPayloadJob<Client, Pool, Tasks> {
+    /// Checks if the new payload is better than the current best.
+    ///
+    /// This compares the total fees of the blocks, higher is better.
+    fn is_better(&self, new_payload: &BuiltPayload) -> bool {
+        if let Some(best_payload) = &self.best_payload {
+            new_payload.fees() > best_payload.fees()
+        } else {
+            true
+        }
+    }
 }
 
 impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
@@ -236,10 +307,11 @@ where
             match fut.poll_unpin(cx) {
                 Poll::Ready(Ok(payload)) => {
                     this.interval.reset();
-                    // TODO check if payload is better
-                    let payload = Arc::new(payload);
-                    this.best_payload = payload.clone();
-                    return Poll::Ready(Some(Ok(payload)))
+                    if this.is_better(&payload) {
+                        let payload = Arc::new(payload);
+                        this.best_payload = Some(payload.clone());
+                        return Poll::Ready(Some(Ok(payload)))
+                    }
                 }
                 Poll::Ready(Err(err)) => {
                     this.interval.reset();
@@ -267,7 +339,8 @@ where
     Tasks: TaskSpawner + Clone + 'static,
 {
     fn best_payload(&self) -> Arc<BuiltPayload> {
-        self.best_payload.clone()
+        // TODO if still not set, initialize empty block
+        self.best_payload.clone().unwrap()
     }
 }
 
@@ -315,7 +388,7 @@ struct PayloadConfig {
     /// Configuration for the environment.
     initialized_cfg: CfgEnv,
     /// The parent block.
-    parent_block: Arc<SealedBlock>,
+    parent_block: Arc<Block>,
     /// Block extra data.
     extra_data: Bytes,
     /// Requested attributes for the payload.
@@ -367,7 +440,7 @@ fn build_payload<Pool, Client>(
         let mut executed_txs = Vec::new();
         let best_txs = pool.best_transactions();
 
-        let total_fees = U256::ZERO;
+        let mut total_fees = U256::ZERO;
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
         for tx in best_txs {
@@ -396,15 +469,11 @@ fn build_payload<Pool, Client>(
             evm.database(&mut db);
 
             // TODO skip invalid transactions
-            let ResultAndState { result, state } =  evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+            let ResultAndState { result, state } =
+                evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
 
             // commit changes
-            commit_state_changes(
-                &mut db,
-                &mut post_state,
-                state,
-                true,
-            );
+            commit_state_changes(&mut db, &mut post_state, state, true);
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
@@ -416,23 +485,25 @@ fn build_payload<Pool, Client>(
 
             let gas_used = result.gas_used();
 
-            let miner_fee = tx.e
+            // update add to total fees
+            let miner_fee = tx
+                .effective_tip_per_gas(base_fee)
+                .expect("fee is always valid; execution succeeded");
+            total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
             // append gas used
             cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
-            executed_txs.push(tx);
+            executed_txs.push(tx.into_signed());
         }
 
-        if initialized_cfg.sha
         // get balance changes from withdrawals
         let balance_increments = post_block_withdrawals_balance_increments(
             &chain_spec,
             attributes.timestamp,
             &attributes.withdrawals,
-            );
-
+        );
         for (address, increment) in balance_increments {
             increment_account_balance(&mut db, &mut post_state, address, increment)?;
         }
@@ -452,7 +523,7 @@ fn build_payload<Pool, Client>(
             };
 
         let header = Header {
-            parent_hash: parent_block.hash,
+            parent_hash: attributes.parent,
             ommers_hash: EMPTY_OMMER_ROOT,
             beneficiary: initialized_block_env.coinbase,
             // TODO compute state root
@@ -467,13 +538,21 @@ fn build_payload<Pool, Client>(
             base_fee_per_gas: Some(base_fee),
             number: parent_block.number + 1,
             gas_limit: block_gas_limit,
-
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             extra_data: extra_data.into(),
         };
 
-        todo!()
+        // seal the block
+        let block = Block {
+            header,
+            body: executed_txs,
+            ommers: vec![],
+            withdrawals: Some(attributes.withdrawals),
+        };
+
+        let sealed_block = block.seal_slow();
+        Ok(BuiltPayload::new(attributes.id, sealed_block, total_fees))
     }
     let _ = to_job.send(try_build(client, pool, config, cancel));
 }
