@@ -121,4 +121,7 @@ pub enum InvalidPoolTransactionError {
     /// making the transaction invalid, rather a DOS protection.
     #[error("Input data too large")]
     OversizedData(usize, usize),
+    /// Thrown if the transaction's fee is below the minimum fee
+    #[error("transaction underpriced")]
+    Underpriced,
 }
