@@ -13,7 +13,9 @@ use reth_db::{
 use reth_executor::{cache::ExecutionCache, BlockExecutor, ExecutorFactory};
 use reth_interfaces::provider::ProviderError;
 use reth_metrics_derive::Metrics;
-use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
+use reth_primitives::{
+    constants::MGAS_TO_GAS, Address, Block, BlockNumber, BlockWithSenders, U256,
+};
 use reth_provider::{post_state::PostState, LatestStateProviderRef, Transaction};
 use std::{
     sync::{Arc, Mutex},
@@ -58,8 +60,8 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     metrics: ExecutionStageMetrics,
     /// The stage's internal executor
     executor_factory: EF,
-    /// Commit threshold
-    commit_threshold: u64,
+    /// TODO
+    thresholds: ExecutionStageThresholds,
     /// TODO
     execution_cache: Arc<Mutex<ExecutionCache>>,
 }
@@ -72,12 +74,12 @@ static STORAGE_CACHE_SIZE: usize = 1024 * 128; // 131072, assume 12 slots (512 b
 static BYTECODE_CACHE_SIZE: usize = 1024 * 16; // 16384 (* 24 kb + 4 bits = 49 megabyte max)
 
 impl<EF: ExecutorFactory> ExecutionStage<EF> {
-    /// Create new execution stage with specified config.
-    pub fn new(executor_factory: EF, commit_threshold: u64) -> Self {
+    /// Create new execution stage with the provided executor factory and thresholds.
+    pub fn new_with_thresholds(executor_factory: EF, thresholds: ExecutionStageThresholds) -> Self {
         Self {
             metrics: ExecutionStageMetrics::default(),
             executor_factory,
-            commit_threshold,
+            thresholds,
             // TODO: Figure out nice size
             execution_cache: Arc::new(Mutex::new(ExecutionCache::new(
                 ACCOUNT_CACHE_SIZE,
@@ -87,11 +89,9 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         }
     }
 
-    /// Create an execution stage with the provided  executor factory.
-    ///
-    /// The commit threshold will be set to 10_000.
-    pub fn new_with_factory(executor_factory: EF) -> Self {
-        Self::new(executor_factory, 10_000)
+    /// Create an execution stage with the provided executor factory.
+    pub fn new(executor_factory: EF) -> Self {
+        Self::new_with_thresholds(executor_factory, ExecutionStageThresholds::default())
     }
 
     // TODO: This should be in the block provider trait once we consolidate
@@ -124,6 +124,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         // TODO: if we go with gas threshold, rm block threshold
         let (start_block, max_block) = exec_or_return!(input, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
+        let first_transition_id = tx.get_block_transition(last_block)?;
 
         // Create state provider with cached state
         let mut executor = self.executor_factory.with_sp_and_cache(
@@ -180,20 +181,16 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 self.metrics.bytecode_cache_evictions.absolute(cache.bytecode_evictions);
             }
 
-            // TODO (100 ggas, how to make it higher?)
-            let should_write_history = gas_since_history_write >= (100u64 * 1_000_000_000u64);
-            if should_write_history {
-                // TODO: This should be trace
-                info!(target: "sync::stages::execution", ?block_number, changes = ?state.changes().len(), "Writing history.");
-                let first_transition_id = tx.get_block_transition(last_block)?;
+            // Write history periodically to free up memory
+            if self.thresholds.should_write_history(gas_since_history_write) {
+                debug!(target: "sync::stages::execution", ?block_number, changes = ?state.changes().len(), "Writing history.");
                 state.write_history_to_db(&**tx, first_transition_id)?;
-                info!(target: "sync::stages::execution", ?block_number, "Wrote history.");
+                debug!(target: "sync::stages::execution", ?block_number, "Wrote history.");
                 gas_since_history_write = 0;
             }
 
-            // TODO (1000 ggas, how to make it higher?)
-            let gas_processing_threshold_hit = gas_since_start >= (1000u64 * 1_000_000_000u64);
-            if gas_processing_threshold_hit {
+            // Check if we should commit now
+            if self.thresholds.is_end_of_batch(block_number - start_block, gas_since_start) {
                 trace!(target: "sync::stages::execution", ?block_number, "Hit gas processing threshold, committing.");
                 break
             }
@@ -203,18 +200,21 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             let elapsed = now - last_message;
             if elapsed > Duration::from_secs(30) {
                 last_message = now;
-                let batch_progress = gas_since_start as f64 / (1000u64 * 1_000_000_000u64) as f64;
                 let mgas_sec = gas_since_last_message as f64 /
                     (elapsed.as_secs_f64() + (elapsed.subsec_millis() as f64 / 1000f64)) /
                     1_000_000f64;
+                let pending_changes = state.changes().len();
 
-                if mgas_sec < 800. {
+                // Warn whenever a block range was really slow
+                //
+                // Note: This will also be triggered if a lot of empty blocks were processed, as
+                // they do not increment the mgas/s metric.
+                if mgas_sec < 500. {
                     warn!(
                         target: "sync::stages::execution",
-                        ?gas_since_start,
-                        ?block_number,
-                        ?batch_progress,
-                        pending_changes = ?state.changes().len(),
+                        gas_since_start,
+                        block_number,
+                        pending_changes,
                         "Slow block range ({}-{}), {:.2} Mgas/sec",
                         last_message_block,
                         block_number,
@@ -223,11 +223,11 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
                 } else {
                     info!(
                         target: "sync::stages::execution",
-                        ?gas_since_start,
-                        ?block_number,
-                        ?batch_progress,
-                        pending_changes = ?state.changes().len(),
-                        "Executed block {}, {:.2} Mgas/sec",
+                        gas_since_start,
+                        block_number,
+                        pending_changes,
+                        "Executed block range ({}-{}), {:.2} Mgas/sec",
+                        last_message_block,
                         block_number,
                         mgas_sec
                     );
@@ -237,17 +237,13 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             }
         }
 
-        // put execution results to database
-        let first_transition_id = tx.get_block_transition(last_block)?;
-
+        // Write changes
         let start = Instant::now();
         trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
         state.write_to_db(&**tx, first_transition_id)?;
         trace!(target: "sync::stages::execution", took = ?Instant::now().duration_since(start), "Wrote state");
 
-        let done = progress == max_block;
-        info!(target: "sync::stages::execution", stage_progress = progress, done, "Sync iteration finished");
-        Ok(ExecOutput { stage_progress: progress, done })
+        Ok(ExecOutput { stage_progress: progress, done: progress == max_block })
     }
 }
 
@@ -376,6 +372,57 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         }
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
+    }
+}
+
+/// The thresholds at which the execution stage writes state changes to the database.
+///
+/// If either of the thresholds (`max_blocks` and `max_gas`) are hit, then the execution stage
+/// commits all pending changes to the database.
+///
+/// A third threshold, `changeset_max_gas`, can be set to periodically write changesets to the
+/// current database transaction, which frees up memory.
+///
+/// # Defaults
+///
+/// The defaults are:
+///
+/// - A maximum of 500k blocks will be processed per batch
+/// - A maximum of 1000 mgas will be processed per batch
+/// - After 100 mgas history is written to the pending database transaction
+pub struct ExecutionStageThresholds {
+    /// The maximum number of blocks to process before the execution stage commits.
+    pub max_blocks: Option<u64>,
+    /// The maximum amount of gas to process before the execution stage commits.
+    pub max_gas: Option<u64>,
+    /// The maximum amount of gas to processed before changesets are written to the pending
+    /// database transaction.
+    ///
+    /// If this is lower than `max_gas`, then history is periodically flushed to the database
+    /// transaction, which frees up memory.
+    pub changeset_max_gas: Option<u64>,
+}
+
+impl Default for ExecutionStageThresholds {
+    fn default() -> Self {
+        Self {
+            max_blocks: Some(500_000),
+            max_gas: Some(1000 * MGAS_TO_GAS),
+            changeset_max_gas: Some(100 * MGAS_TO_GAS),
+        }
+    }
+}
+
+impl ExecutionStageThresholds {
+    #[inline]
+    pub fn is_end_of_batch(&self, blocks_processed: u64, gas_processed: u64) -> bool {
+        blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
+            gas_processed >= self.max_gas.unwrap_or(u64::MAX)
+    }
+
+    #[inline]
+    pub fn should_write_history(&self, gas_since_history_write: u64) -> bool {
+        gas_since_history_write >= self.changeset_max_gas.unwrap_or(u64::MAX)
     }
 }
 

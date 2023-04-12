@@ -70,7 +70,7 @@ use tokio::sync::{
 use tracing::*;
 
 use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
+use reth_stages::stages::{ExecutionStageThresholds, MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
 
@@ -625,7 +625,14 @@ impl Command {
                 .set(SenderRecoveryStage {
                     commit_threshold: stage_conf.sender_recovery.commit_threshold,
                 })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
+                .set(ExecutionStage::new_with_thresholds(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: config.stages.execution.max_blocks,
+                        max_gas: config.stages.execution.max_gas,
+                        changeset_max_gas: config.stages.execution.changeset_max_gas,
+                    },
+                ))
                 .disable_if(MERKLE_UNWIND, || self.auto_mine)
                 .disable_if(MERKLE_EXECUTION, || self.auto_mine),
             )

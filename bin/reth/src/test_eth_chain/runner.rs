@@ -195,7 +195,7 @@ pub async fn run_test(path: PathBuf) -> eyre::Result<TestOutcome> {
         // Initialize the execution stage
         // Hardcode the chain_id to Ethereum 1.
         let factory = reth_revm::Factory::new(Arc::new(chain_spec));
-        let mut stage = ExecutionStage::new(factory, 1_000);
+        let mut stage = ExecutionStage::new(factory);
 
         // Call execution stage
         let input = ExecInput {

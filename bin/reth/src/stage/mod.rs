@@ -16,7 +16,7 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
+    stages::{BodyStage, ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -164,7 +164,14 @@ impl Command {
             }
             StageEnum::Execution => {
                 let factory = reth_revm::Factory::new(self.chain.clone());
-                let mut stage = ExecutionStage::new(factory, num_blocks);
+                let mut stage = ExecutionStage::new_with_thresholds(
+                    factory,
+                    ExecutionStageThresholds {
+                        max_blocks: Some(num_blocks),
+                        max_gas: None,
+                        changeset_max_gas: None,
+                    },
+                );
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }

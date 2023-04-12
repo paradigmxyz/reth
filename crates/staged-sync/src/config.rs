@@ -5,6 +5,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_network::{config::rng_secret_key, NetworkConfigBuilder, PeersConfig};
+use reth_primitives::constants::MGAS_TO_GAS;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -143,16 +144,30 @@ impl Default for SenderRecoveryConfig {
     }
 }
 
+// TODO: Replace this with a tuple struct just wrapping `ExecutionStageThresholds` in the
+// `reth-stages` crate.
 /// Execution stage configuration.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct ExecutionConfig {
-    /// The maximum number of blocks to execution before committing progress to the database.
-    pub commit_threshold: u64,
+    /// The maximum number of blocks to process before the execution stage commits.
+    pub max_blocks: Option<u64>,
+    /// The maximum amount of gas to process before the execution stage commits.
+    pub max_gas: Option<u64>,
+    /// The maximum amount of gas to processed before changesets are written to the pending
+    /// database transaction.
+    ///
+    /// If this is lower than `max_gas`, then history is periodically flushed to the database
+    /// transaction, which frees up memory.
+    pub changeset_max_gas: Option<u64>,
 }
 
 impl Default for ExecutionConfig {
     fn default() -> Self {
-        Self { commit_threshold: 5_000 }
+        Self {
+            max_blocks: Some(500_000),
+            max_gas: Some(1000 * MGAS_TO_GAS),
+            changeset_max_gas: Some(100 * MGAS_TO_GAS),
+        }
     }
 }
 
