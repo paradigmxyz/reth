@@ -28,7 +28,10 @@ impl From<Vec<u8>> for StoredNibblesSubKey {
 }
 
 impl Compact for StoredNibblesSubKey {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         assert!(self.inner.len() <= 64);
         let mut padded = vec![0; 64];
         padded[..self.inner.len()].copy_from_slice(&self.inner[..]);
