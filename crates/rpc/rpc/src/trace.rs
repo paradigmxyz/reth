@@ -24,6 +24,7 @@ use reth_rpc_types::{
     BlockError, CallRequest, Index, TransactionInfo,
 };
 use revm::primitives::Env;
+use revm_primitives::ResultAndState;
 use std::collections::HashSet;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -164,38 +165,6 @@ where
             .ok_or_else(|| EthApiError::TransactionNotFound)?
     }
 
-    /// Replays all transaction in a block
-    pub async fn replay_block_transactions(
-        &self,
-        block_id: BlockId,
-        trace_types: HashSet<TraceType>,
-    ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>> {
-        let block_hash = match self.client.block_hash_for_id(block_id) {
-            Ok(Some(hash)) => hash,
-            Ok(None) => return Ok(None),
-            Err(_) => return Err(EthApiError::UnknownBlockNumber.into()),
-        };
-
-        let transactions = self
-            .eth_api
-            .transactions_by_block(block_hash)
-            .await?
-            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-
-        let mut result = Vec::new();
-
-        for tx in transactions.into_iter() {
-            let tx_hash = tx.hash();
-            let tx_trace = self.replay_transaction(tx_hash, trace_types.clone()).await?;
-            result.push(TraceResultsWithTransactionHash {
-                transaction_hash: tx_hash,
-                full_trace: tx_trace,
-            });
-        }
-
-        Ok(Some(result))
-    }
-
     /// Returns transaction trace with the given address.
     pub async fn trace_get(
         &self,
@@ -234,11 +203,16 @@ where
             .await
     }
 
-    /// Returns traces created at given block.
-    pub async fn trace_block(
+    /// Executes all transactions of a block and returns a list of callback results.
+    async fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
-    ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        F: Fn(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
+    {
         let block_hash = match self.client.block_hash_for_id(block_id)? {
             Some(hash) => hash,
             None => return Ok(None),
@@ -253,7 +227,7 @@ where
         // replay all transactions of the block
         self.eth_api
             .with_state_at(at, move |state| {
-                let mut all_traces = Vec::with_capacity(transactions.len());
+                let mut results = Vec::with_capacity(transactions.len());
                 let mut db = SubState::new(State::new(state));
 
                 for (idx, tx) in transactions.into_iter().enumerate() {
@@ -268,17 +242,52 @@ where
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
 
-                    let mut inspector =
-                        TracingInspector::new(TracingInspectorConfig::default_parity());
-                    inspect(&mut db, env, &mut inspector)?;
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    all_traces.extend(traces);
+                    let mut inspector = TracingInspector::new(config);
+                    let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                    results.push(f(tx_info, inspector, res)?);
                 }
 
-                Ok(all_traces)
+                Ok(results)
             })
             .map(Some)
+    }
+
+    /// Returns traces created at given block.
+    pub async fn trace_block(
+        &self,
+        block_id: BlockId,
+    ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
+        let traces = self
+            .trace_block_with(
+                block_id,
+                TracingInspectorConfig::default_parity(),
+                |tx_info, inspector, _| {
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    Ok(traces)
+                },
+            )
+            .await?
+            .map(|traces| traces.into_iter().flatten().collect());
+        Ok(traces)
+    }
+
+    /// Replays all transaction in a block
+    pub async fn replay_block_transactions(
+        &self,
+        block_id: BlockId,
+        trace_types: HashSet<TraceType>,
+    ) -> EthResult<Option<Vec<TraceResultsWithTransactionHash>>> {
+        self.trace_block_with(block_id, tracing_config(&trace_types), |tx_info, inspector, res| {
+            let full_trace =
+                inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+            let trace = TraceResultsWithTransactionHash {
+                transaction_hash: tx_info.hash.expect("tx hash is set"),
+                full_trace,
+            };
+            Ok(trace)
+        })
+        .await
     }
 }
 
