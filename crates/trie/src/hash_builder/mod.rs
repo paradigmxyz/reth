@@ -1,8 +1,11 @@
-use crate::nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode};
+use crate::{
+    nodes::{rlp_hash, BranchNode, ExtensionNode, LeafNode},
+    Nibbles,
+};
 use reth_primitives::{
     keccak256,
     proofs::EMPTY_ROOT,
-    trie::{BranchNodeCompact, Nibbles, TrieMask},
+    trie::{BranchNodeCompact, TrieMask},
     H256,
 };
 use std::fmt::Debug;
@@ -358,7 +361,7 @@ impl HashBuilder {
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    use reth_primitives::{hex_literal::hex, proofs::KeccakHasher, trie::Nibbles, H256, U256};
+    use reth_primitives::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
     use std::collections::{BTreeMap, HashMap};
     use tokio::sync::mpsc::unbounded_channel;
     use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};

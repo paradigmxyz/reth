@@ -1,5 +1,6 @@
 use super::rlp_node;
-use reth_primitives::{bytes::BytesMut, trie::Nibbles};
+use crate::Nibbles;
+use reth_primitives::bytes::BytesMut;
 use reth_rlp::{BufMut, Encodable};
 
 /// A leaf node represents the endpoint or terminal node in the trie. In other words, a leaf node is

@@ -1,7 +1,9 @@
 //! Consensus for ethereum network
 use reth_consensus_common::validation;
 use reth_interfaces::consensus::{Consensus, ConsensusError};
-use reth_primitives::{ChainSpec, Hardfork, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256};
+use reth_primitives::{
+    Chain, ChainSpec, Hardfork, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT, U256,
+};
 use std::sync::Arc;
 
 /// Ethereum beacon consensus
@@ -53,12 +55,22 @@ impl Consensus for BeaconConsensus {
                 return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
             }
 
+            // validate header extradata for all networks post merge
+            validate_header_extradata(header)?;
+
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
         } else {
             // TODO Consensus checks for old blocks:
             //  * difficulty, mix_hash & nonce aka PoW stuff
             // low priority as syncing is done in reverse order
+
+            // Goerli exception:
+            //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
+            //  support clique.
+            if self.chain_spec.chain != Chain::goerli() {
+                validate_header_extradata(header)?;
+            }
         }
 
         Ok(())
@@ -70,6 +82,18 @@ impl Consensus for BeaconConsensus {
 
     fn has_block_reward(&self, total_difficulty: U256, difficulty: U256) -> bool {
         !self.chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, difficulty)
+    }
+}
+
+/// Validates the header's extradata according to the beacon consensus rules.
+///
+/// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
+/// This must be 32 bytes or fewer; formally Hx.
+fn validate_header_extradata(header: &SealedHeader) -> Result<(), ConsensusError> {
+    if header.extra_data.len() > 32 {
+        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
+    } else {
+        Ok(())
     }
 }
 

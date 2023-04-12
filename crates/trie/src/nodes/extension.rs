@@ -1,5 +1,6 @@
 use super::rlp_node;
-use reth_primitives::{bytes::BytesMut, trie::Nibbles};
+use crate::Nibbles;
+use reth_primitives::bytes::BytesMut;
 use reth_rlp::{BufMut, Encodable};
 
 /// An intermediate node that exists solely to compress the trie's paths. It contains a path segment

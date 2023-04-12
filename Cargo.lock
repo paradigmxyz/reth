@@ -4454,6 +4454,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
+ "num_cpus",
  "proptest",
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
@@ -5336,6 +5337,7 @@ dependencies = [
 name = "reth-trie"
 version = "0.1.0"
 dependencies = [
+ "derive_more",
  "hex",
  "proptest",
  "reth-primitives",
