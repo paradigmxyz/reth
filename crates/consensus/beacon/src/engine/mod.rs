@@ -1,4 +1,5 @@
 use futures::{Future, FutureExt, StreamExt};
+use metrics::Counter;
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
@@ -7,6 +8,7 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
     Error,
 };
+use reth_metrics_derive::Metrics;
 use reth_miner::PayloadStore;
 use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
@@ -32,6 +34,20 @@ pub use message::{BeaconEngineMessage, BeaconEngineSender};
 
 mod pipeline_state;
 pub use pipeline_state::PipelineState;
+
+/// Beacon consensus engine metrics.
+#[derive(Metrics)]
+#[metrics(scope = "consensus.engine.beacon")]
+struct Metrics {
+    /// The number of times the pipeline was run.
+    pipeline_runs: Counter,
+    /// The total count of forkchoice updated messages received.
+    forkchoice_updated_messages: Counter,
+    /// The total count of new payload messages received.
+    new_payload_messages: Counter,
+    /// The total count of get payload messages received.
+    get_payload_messages: Counter,
+}
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
@@ -80,6 +96,8 @@ where
     max_block: Option<BlockNumber>,
     /// The payload store.
     payload_store: P,
+    /// Consensus engine metrics.
+    metrics: Metrics,
 }
 
 impl<DB, TS, U, BT, P> BeaconConsensusEngine<DB, TS, U, BT, P>
@@ -113,6 +131,7 @@ where
             next_action: BeaconEngineAction::None,
             max_block,
             payload_store,
+            metrics: Metrics::default(),
         }
     }
 
@@ -340,6 +359,7 @@ where
     ) -> PipelineState<DB, U> {
         let next_action = std::mem::take(&mut self.next_action);
         if let BeaconEngineAction::RunPipeline(target) = next_action {
+            self.metrics.pipeline_runs.increment(1);
             let tip = match target {
                 PipelineTarget::Head => forkchoice_state.head_block_hash,
                 PipelineTarget::Safe => forkchoice_state.safe_block_hash,
@@ -431,6 +451,7 @@ where
             while let Poll::Ready(Some(msg)) = this.message_rx.poll_next_unpin(cx) {
                 match msg {
                     BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                        this.metrics.forkchoice_updated_messages.increment(1);
                         let response = match this.on_forkchoice_updated(state, payload_attrs) {
                             Ok(response) => response,
                             Err(error) => {
@@ -452,6 +473,7 @@ where
                         }
                     }
                     BeaconEngineMessage::NewPayload { payload, tx } => {
+                        this.metrics.new_payload_messages.increment(1);
                         let response = match this.on_new_payload(payload) {
                             Ok(response) => response,
                             Err(error) => {
@@ -462,6 +484,7 @@ where
                         let _ = tx.send(Ok(response));
                     }
                     BeaconEngineMessage::GetPayload { payload_id, tx } => {
+                        this.metrics.get_payload_messages.increment(1);
                         match this.on_get_payload(payload_id) {
                             Ok(response) => {
                                 // good response, send it back
