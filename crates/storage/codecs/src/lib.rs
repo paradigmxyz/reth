@@ -35,8 +35,9 @@ pub trait Compact {
         Self: Sized;
 
     /// "Optional": If there's no good reason to use it, don't.
-    fn specialized_to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize
+    fn specialized_to_compact<B>(self, buf: &mut B) -> usize
     where
+        B: bytes::BufMut + AsMut<[u8]>,
         Self: Sized,
     {
         self.to_compact(buf)
@@ -123,7 +124,10 @@ where
     }
 
     /// To be used by fixed sized types like `Vec<H256>`.
-    fn specialized_to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+    fn specialized_to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         buf.put_u16(self.len() as u16);
 
         for element in self {
@@ -186,7 +190,10 @@ where
     }
 
     /// To be used by fixed sized types like `Option<H256>`.
-    fn specialized_to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+    fn specialized_to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         if let Some(element) = self {
             element.to_compact(buf);
             return 1
@@ -266,7 +273,9 @@ macro_rules! impl_hash_compact {
                     (v, buf)
                 }
 
-                fn specialized_to_compact(self, buf: &mut (impl bytes::BufMut + AsMut<[u8]>)) -> usize {
+                fn specialized_to_compact<B>(self, buf: &mut B) -> usize
+                where
+                    B: bytes::BufMut + AsMut<[u8]> {
                     self.to_compact(buf)
                 }
 
