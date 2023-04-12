@@ -20,6 +20,12 @@ impl PayloadId {
     }
 }
 
+impl std::fmt::Display for PayloadId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// This structure maps for the return value of `engine_getPayloadV2` of the beacon chain spec.
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>

@@ -56,6 +56,13 @@ pub static GOERLI: Lazy<ChainSpec> = Lazy::new(|| ChainSpec {
     ))),
     hardforks: BTreeMap::from([
         (Hardfork::Frontier, ForkCondition::Block(0)),
+        (Hardfork::Homestead, ForkCondition::Block(0)),
+        (Hardfork::Dao, ForkCondition::Block(0)),
+        (Hardfork::Tangerine, ForkCondition::Block(0)),
+        (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+        (Hardfork::Byzantium, ForkCondition::Block(0)),
+        (Hardfork::Constantinople, ForkCondition::Block(0)),
+        (Hardfork::Petersburg, ForkCondition::Block(0)),
         (Hardfork::Istanbul, ForkCondition::Block(1561651)),
         (Hardfork::Berlin, ForkCondition::Block(4460644)),
         (Hardfork::London, ForkCondition::Block(5062605)),
@@ -187,6 +194,18 @@ impl ChainSpec {
     /// Get an iterator of all hardforks with their respective activation conditions.
     pub fn forks_iter(&self) -> impl Iterator<Item = (Hardfork, ForkCondition)> + '_ {
         self.hardforks.iter().map(|(f, b)| (*f, *b))
+    }
+
+    /// Convenience method to check if a fork is active at a given timestamp.
+    #[inline]
+    pub fn is_fork_active_at_timestamp(&self, fork: Hardfork, timestamp: u64) -> bool {
+        self.fork(fork).active_at_timestamp(timestamp)
+    }
+
+    /// Convenience method to check if [Hardfork::Shanghai] is active at a given timestamp.
+    #[inline]
+    pub fn is_shanghai_activated_at_timestamp(&self, timestamp: u64) -> bool {
+        self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp)
     }
 
     /// Creates a [`ForkFilter`](crate::ForkFilter) for the block described by [Head].

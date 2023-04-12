@@ -46,6 +46,7 @@ reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-primitives = { path = "../primitives", features = ["test-utils"] }
 reth-provider = { path = "../storage/provider", features = ["test-utils"]  }
 parking_lot = "0.12"
+assert_matches = "1.5"
 
 [features]
 test-utils = []

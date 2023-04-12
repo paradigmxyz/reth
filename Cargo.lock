@@ -4454,6 +4454,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
+ "num_cpus",
  "proptest",
  "reth-auto-seal-consensus",
  "reth-beacon-consensus",
@@ -4486,6 +4487,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "toml 0.7.3",
  "tracing",
  "tui",
 ]
@@ -4734,6 +4736,7 @@ name = "reth-executor"
 version = "0.1.0"
 dependencies = [
  "aquamarine",
+ "assert_matches",
  "auto_impl",
  "hash-db",
  "parking_lot 0.12.1",
@@ -4852,12 +4855,17 @@ dependencies = [
 name = "reth-miner"
 version = "0.1.0"
 dependencies = [
+ "futures-core",
+ "futures-util",
  "parking_lot 0.12.1",
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
  "sha2 0.10.6",
  "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -5005,8 +5013,8 @@ dependencies = [
  "reth-revm-primitives",
  "reth-rlp",
  "reth-tracing",
- "revm-primitives",
  "thiserror",
+ "tokio",
  "tracing",
  "triehash",
 ]
@@ -5109,6 +5117,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.7",
  "tower",
  "tracing",
 ]
@@ -5302,6 +5311,21 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-trie"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "hex",
+ "proptest",
+ "reth-primitives",
+ "reth-rlp",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "triehash",
 ]
 
 [[package]]

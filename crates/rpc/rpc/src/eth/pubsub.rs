@@ -1,12 +1,10 @@
 //! `eth_` PubSub RPC handler implementation
-
 use crate::eth::{cache::EthStateCache, logs_utils};
 use futures::StreamExt;
 use jsonrpsee::{types::SubscriptionResult, SubscriptionSink};
-use reth_interfaces::events::{ChainEventSubscriptions, NewBlockNotification};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{filter::FilteredParams, Receipt, TransactionSigned, TxHash};
-use reth_provider::{BlockProvider, EvmEnvProvider};
+use reth_primitives::{filter::FilteredParams, TxHash};
+use reth_provider::{BlockProvider, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_api::EthPubSubApiServer;
 use reth_rpc_types::{
     pubsub::{
@@ -74,7 +72,7 @@ impl<Client, Pool, Events, Network> EthPubSubApiServer for EthPubSub<Client, Poo
 where
     Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: ChainEventSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
 {
     /// Handler for `eth_subscribe`
@@ -104,7 +102,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
 ) where
     Client: BlockProvider + EvmEnvProvider + Clone + 'static,
     Pool: TransactionPool + 'static,
-    Events: ChainEventSubscriptions + Clone + 'static,
+    Events: CanonStateSubscriptions + Clone + 'static,
     Network: NetworkInfo + Clone + 'static,
 {
     match kind {
@@ -132,7 +130,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
         }
         SubscriptionKind::Syncing => {
             // get new block subscription
-            let mut new_blocks = BroadcastStream::new(pubsub.chain_events.subscribe_new_blocks());
+            let mut canon_state = BroadcastStream::new(pubsub.chain_events.subscribe_canon_state());
             // get current sync status
             let mut initial_sync_status = pubsub.network.is_syncing();
             let current_sub_res = pubsub.sync_status(initial_sync_status).await;
@@ -140,7 +138,7 @@ async fn handle_accepted<Client, Pool, Events, Network>(
             // send the current status immediately
             let _ = accepted_sink.send(&current_sub_res);
 
-            while (new_blocks.next().await).is_some() {
+            while (canon_state.next().await).is_some() {
                 let current_syncing = pubsub.network.is_syncing();
                 // Only send a new response if the sync status has changed
                 if current_syncing != initial_sync_status {
@@ -213,50 +211,45 @@ where
 impl<Client, Pool, Events, Network> EthPubSubInner<Client, Pool, Events, Network>
 where
     Client: BlockProvider + EvmEnvProvider + 'static,
-    Events: ChainEventSubscriptions + 'static,
+    Events: CanonStateSubscriptions + 'static,
     Network: NetworkInfo + 'static,
     Pool: 'static,
 {
     /// Returns a stream that yields all new RPC blocks.
     fn into_new_headers_stream(self) -> impl Stream<Item = Header> {
-        BroadcastStream::new(self.chain_events.subscribe_new_blocks()).map(|new_block| {
-            let new_block = new_block.expect("new block subscription never ends; qed");
-            Header::from_primitive_with_hash(new_block.as_ref().clone())
-        })
+        BroadcastStream::new(self.chain_events.subscribe_canon_state())
+            .map(|new_block| {
+                let new_chain = new_block.expect("new block subscription never ends; qed");
+                new_chain
+                    .commited()
+                    .map(|c| {
+                        c.blocks()
+                            .iter()
+                            .map(|(_, block)| {
+                                Header::from_primitive_with_hash(block.header.clone())
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .flat_map(futures::stream::iter)
     }
 
     /// Returns a stream that yields all logs that match the given filter.
     fn into_log_stream(self, filter: FilteredParams) -> impl Stream<Item = Log> {
-        BroadcastStream::new(self.chain_events.subscribe_new_blocks())
-            .filter_map(move |new_block| {
-                Box::pin(get_block_receipts(self.eth_cache.clone(), new_block.ok()))
+        BroadcastStream::new(self.chain_events.subscribe_canon_state())
+            .map(move |canon_state| {
+                canon_state.expect("new block subscription never ends; qed").block_receipts()
             })
-            .flat_map(move |(new_block, transactions, receipts)| {
-                let block_hash = new_block.hash;
-                let block_number = new_block.header.number;
+            .flat_map(futures::stream::iter)
+            .flat_map(move |(block_receipts, removed)| {
                 let all_logs = logs_utils::matching_block_logs(
                     &filter,
-                    block_hash,
-                    block_number,
-                    transactions.into_iter().map(|tx| tx.hash).zip(receipts),
+                    block_receipts.block,
+                    block_receipts.tx_receipts.into_iter(),
+                    removed,
                 );
                 futures::stream::iter(all_logs)
             })
-    }
-}
-
-/// Helper function for getting block receipts and transactions
-async fn get_block_receipts(
-    eth_cache: EthStateCache,
-    new_block: Option<NewBlockNotification>,
-) -> Option<(NewBlockNotification, Vec<TransactionSigned>, Vec<Receipt>)> {
-    let Some(new_block) = new_block else { return None; };
-    let (txs, receipts) = futures::join!(
-        eth_cache.get_block_transactions(new_block.hash),
-        eth_cache.get_receipts(new_block.hash)
-    );
-    match (txs.ok().flatten(), receipts.ok().flatten()) {
-        (Some(txs), Some(receipts)) => Some((new_block, txs, receipts)),
-        _ => None,
     }
 }

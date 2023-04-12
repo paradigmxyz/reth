@@ -51,6 +51,7 @@ serde_json = "1.0"
 shellexpand = "3.0.0"
 dirs-next = "2.0.0"
 confy = "0.5"
+toml = {version = "0.7", features = ["display"]}
 
 # metrics
 metrics = "0.20.1"
@@ -77,6 +78,7 @@ jsonrpsee = { version = "0.16", features = ["server"] }
 # misc
 eyre = "0.6.8"
 clap = { version = "4", features = ["derive", "cargo"] }
+num_cpus = "1.13.0"
 tempfile = { version = "3.3.0" }
 backon = "0.4"
 hex = "0.4"

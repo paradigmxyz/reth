@@ -44,8 +44,11 @@ impl InitCommand {
     pub async fn execute(&self) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth init starting");
 
-        info!(target: "reth::cli", path = %self.db, "Opening database");
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.with_chain(self.chain.chain);
+
+        info!(target: "reth::cli", path = %db_path, "Opening database");
+        let db = Arc::new(init_db(&db_path)?);
         info!(target: "reth::cli", "Database opened");
 
         info!(target: "reth::cli", "Writing genesis block");

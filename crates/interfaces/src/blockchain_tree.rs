@@ -82,6 +82,9 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Returns both pending and sidechain block numbers and their hashes.
     fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>>;
 
+    /// Returns the block with matching hash.
+    fn block_by_hash(&self, hash: BlockHash) -> Option<SealedBlock>;
+
     /// Canonical block number and hashes best known by the tree.
     fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash>;
 

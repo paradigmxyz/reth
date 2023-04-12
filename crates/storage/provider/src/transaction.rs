@@ -543,7 +543,7 @@ where
         self.insert_hashes(
             fork_block_number,
             first_transition_id,
-            first_transition_id + num_transitions as u64,
+            first_transition_id + num_transitions,
             new_tip_number,
             new_tip_hash,
             expected_state_root,

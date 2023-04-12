@@ -8,10 +8,10 @@ use reth_interfaces::{
     Error,
 };
 use reth_miner::PayloadStore;
-use reth_primitives::{BlockHash, BlockNumber, Header, SealedBlock, H256};
+use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated, PayloadAttributes, PayloadId,
-    PayloadStatus, PayloadStatusEnum,
+    EngineRpcError, ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated,
+    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use reth_stages::{stages::FINISH, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -155,8 +155,7 @@ where
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => {
                     let head_block_number = self
-                        .db
-                        .view(|tx| tx.get::<tables::HeaderNumbers>(state.head_block_hash))??
+                        .get_block_number(state.head_block_hash)?
                         .expect("was canonicalized, so it exists");
                     let pipeline_min_progress =
                         FINISH.get_progress(&self.db.tx()?)?.unwrap_or_default();
@@ -183,7 +182,10 @@ where
                     warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
                     // If this is the first forkchoice received, start downloading from safe block
                     // hash.
-                    let target = if is_first_forkchoice && !state.safe_block_hash.is_zero() {
+                    let target = if is_first_forkchoice &&
+                        !state.safe_block_hash.is_zero() &&
+                        self.get_block_number(state.safe_block_hash)?.is_none()
+                    {
                         PipelineTarget::Safe
                     } else {
                         PipelineTarget::Head
@@ -225,7 +227,7 @@ where
         if attrs.timestamp <= header.timestamp.into() {
             return Ok(ForkchoiceUpdated::new(PayloadStatus::from_status(
                 PayloadStatusEnum::Invalid {
-                    validation_error: BeaconEngineError::InvalidPayloadAttributes.to_string(),
+                    validation_error: EngineRpcError::InvalidPayloadAttributes.to_string(),
                 },
             )))
         }
@@ -268,7 +270,7 @@ where
         // for now just return the output from the payload store
         match self.payload_store.get_execution_payload(payload_id) {
             Some(payload) => Ok(payload),
-            None => Err(BeaconEngineError::UnknownPayload),
+            None => Err(EngineRpcError::UnknownPayload.into()),
         }
     }
 
@@ -317,17 +319,6 @@ where
                             .then_some(H256::zero());
                     let status = match error {
                         Error::Execution(ExecutorError::PendingBlockIsInFuture { .. }) => {
-                            if let Some(ForkchoiceState { head_block_hash, .. }) =
-                                self.forkchoice_state
-                            {
-                                if self
-                                    .db
-                                    .view(|tx| tx.get::<tables::HeaderNumbers>(head_block_hash))??
-                                    .is_none()
-                                {
-                                    self.require_pipeline_run(PipelineTarget::Head);
-                                }
-                            }
                             PayloadStatusEnum::Syncing
                         }
                         error => PayloadStatusEnum::Invalid { validation_error: error.to_string() },
@@ -375,12 +366,23 @@ where
     /// If the finalized block is missing from the database, trigger the pipeline run.
     fn restore_tree_if_possible(
         &mut self,
-        finalized_hash: BlockHash,
+        state: ForkchoiceState,
     ) -> Result<(), reth_interfaces::Error> {
-        match self.db.view(|tx| tx.get::<tables::HeaderNumbers>(finalized_hash))?? {
-            Some(number) => self.blockchain_tree.restore_canonical_hashes(number)?,
-            None => self.require_pipeline_run(PipelineTarget::Head),
+        let needs_pipeline_run = match self.get_block_number(state.finalized_block_hash)? {
+            Some(number) => {
+                // Attempt to restore the tree.
+                self.blockchain_tree.restore_canonical_hashes(number)?;
+
+                // After restoring the tree, check if the head block is missing.
+                self.db
+                    .view(|tx| tx.get::<tables::HeaderNumbers>(state.head_block_hash))??
+                    .is_none()
+            }
+            None => true,
         };
+        if needs_pipeline_run {
+            self.require_pipeline_run(PipelineTarget::Head);
+        }
         Ok(())
     }
 
@@ -397,6 +399,11 @@ where
         } else {
             false
         }
+    }
+
+    /// Retrieve the block number for the given block hash.
+    fn get_block_number(&self, hash: H256) -> Result<Option<BlockNumber>, reth_interfaces::Error> {
+        Ok(self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??)
     }
 }
 
@@ -457,14 +464,21 @@ where
                         let _ = tx.send(Ok(response));
                     }
                     BeaconEngineMessage::GetPayload { payload_id, tx } => {
-                        let response = match this.on_get_payload(payload_id) {
-                            Ok(response) => response,
+                        match this.on_get_payload(payload_id) {
+                            Ok(response) => {
+                                // good response, send it back
+                                let _ = tx.send(Ok(response));
+                            }
+                            Err(BeaconEngineError::EngineApi(error)) => {
+                                // specific error that we should report back to the client
+                                error!(target: "consensus::engine", ?error, "Sending engine api error response");
+                                let _ = tx.send(Err(BeaconEngineError::EngineApi(error)));
+                            }
                             Err(error) => {
                                 error!(target: "consensus::engine", ?error, "Error getting get payload response");
                                 return Poll::Ready(Err(error))
                             }
                         };
-                        let _ = tx.send(Ok(response));
                     }
                 }
             }
@@ -502,9 +516,7 @@ where
                             };
 
                             // Update the state and hashes of the blockchain tree if possible
-                            if let Err(error) =
-                                this.restore_tree_if_possible(forkchoice_state.finalized_block_hash)
-                            {
+                            if let Err(error) = this.restore_tree_if_possible(forkchoice_state) {
                                 error!(target: "consensus::engine", ?error, "Error restoring blockchain tree");
                                 return Poll::Ready(Err(error.into()))
                             }
@@ -568,9 +580,7 @@ mod tests {
         post_state::PostState,
         test_utils::TestExecutorFactory,
     };
-    use reth_interfaces::{
-        events::NewBlockNotificationSink, sync::NoopSyncStateUpdate, test_utils::TestConsensus,
-    };
+    use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_miner::TestPayloadStore;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
@@ -653,8 +663,9 @@ mod tests {
         // Setup blockchain tree
         let externals = TreeExternals::new(db.clone(), consensus, executor_factory, chain_spec);
         let config = BlockchainTreeConfig::new(1, 2, 3);
+        let (canon_state_notification_sender, _) = tokio::sync::broadcast::channel(3);
         let tree = ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, NewBlockNotificationSink::new(2), config)
+            BlockchainTree::new(externals, canon_state_notification_sender, config)
                 .expect("failed to create tree"),
         );
 
@@ -709,7 +720,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -747,7 +758,7 @@ mod tests {
             .await;
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -782,7 +793,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconEngineError::Pipeline(PipelineError::Stage(StageError::ChannelClosed))))
+            Ok(Err(BeaconEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -910,7 +921,6 @@ mod tests {
                 VecDeque::from([
                     Ok(ExecOutput { done: true, stage_progress: 0 }),
                     Ok(ExecOutput { done: true, stage_progress: 0 }),
-                    Ok(ExecOutput { done: true, stage_progress: 0 }),
                 ]),
                 Vec::default(),
             );
@@ -921,27 +931,25 @@ mod tests {
 
             let mut engine_rx = spawn_consensus_engine(consensus_engine);
 
-            let invalid_forkchoice_state = ForkchoiceState {
-                head_block_hash: H256::random(),
+            let next_head = random_block(2, Some(block1.hash), None, Some(0));
+            let next_forkchoice_state = ForkchoiceState {
+                head_block_hash: next_head.hash,
                 finalized_block_hash: block1.hash,
                 ..Default::default()
             };
 
-            let rx = env.send_forkchoice_updated(invalid_forkchoice_state);
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            let invalid_rx = env.send_forkchoice_updated(next_forkchoice_state);
 
-            let rx = env.send_forkchoice_updated(invalid_forkchoice_state);
-            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            // Insert next head immediately after sending forkchoice update
+            insert_blocks(env.db.as_ref(), [&next_head].into_iter());
 
-            let rx_valid = env.send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
-                finalized_block_hash: block1.hash,
-                ..Default::default()
-            });
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
-            assert_matches!(rx_valid.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+            assert_matches!(invalid_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
+
+            let valid_rx = env.send_forkchoice_updated(next_forkchoice_state);
+            let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Valid)
+                .with_latest_valid_hash(next_head.hash);
+            assert_matches!(valid_rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
 
             assert_matches!(engine_rx.try_recv(), Err(TryRecvError::Empty));
         }
@@ -965,7 +973,7 @@ mod tests {
             let block1 = random_block(1, Some(genesis.hash), None, Some(0));
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
 
-            let _engine = spawn_consensus_engine(consensus_engine);
+            let engine = spawn_consensus_engine(consensus_engine);
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
                 head_block_hash: H256::random(),
@@ -974,7 +982,7 @@ mod tests {
             });
             let expected_result = ForkchoiceUpdated::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
-            drop(_engine);
+            drop(engine);
         }
 
         #[tokio::test]
@@ -1000,10 +1008,10 @@ mod tests {
 
             insert_blocks(env.db.as_ref(), [&genesis, &block1].into_iter());
 
-            let _engine = spawn_consensus_engine(consensus_engine);
+            let engine = spawn_consensus_engine(consensus_engine);
 
             let rx = env.send_forkchoice_updated(ForkchoiceState {
-                head_block_hash: H256::random(),
+                head_block_hash: block1.hash,
                 finalized_block_hash: block1.hash,
                 ..Default::default()
             });
@@ -1020,7 +1028,7 @@ mod tests {
             })
             .with_latest_valid_hash(H256::zero());
             assert_matches!(rx.await, Ok(Ok(result)) => assert_eq!(result, expected_result));
-            drop(_engine);
+            drop(engine);
         }
     }
 

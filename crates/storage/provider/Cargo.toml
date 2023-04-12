@@ -14,10 +14,11 @@ reth-interfaces = { path = "../../interfaces" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 reth-db = { path = "../db" }
 reth-codecs = { path = "../codecs" }
-reth-tracing = {path = "../../tracing"}
-reth-rlp = {path = "../../rlp"}
+reth-tracing = { path = "../../tracing" }
+reth-rlp = { path = "../../rlp" }
 
-revm-primitives = "1.1.0"
+# async
+tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
 
 # trie
 cita_trie = "4.0.0"
@@ -30,12 +31,11 @@ tracing = "0.1"
 thiserror = "1.0.37"
 auto_impl = "1.0"
 itertools = "0.10"
-
 parking_lot = "0.12"
 
 [dev-dependencies]
 reth-db = { path = "../db", features = ["test-utils"] }
-reth-primitives = { path = "../../primitives", features = ["arbitrary"] }
+reth-primitives = { path = "../../primitives", features = ["arbitrary", "test-utils"] }
 parking_lot = "0.12"
 proptest = { version = "1.0" }
 assert_matches = "1.5"
