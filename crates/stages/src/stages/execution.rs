@@ -2,7 +2,7 @@ use crate::{
     exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
     UnwindOutput,
 };
-use metrics_core::Counter;
+use metrics_core::{Counter, Gauge};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -29,7 +29,7 @@ pub const EXECUTION: StageId = StageId("Execution");
 #[metrics(scope = "sync.execution")]
 pub struct ExecutionStageMetrics {
     /// The total amount of gas processed (in millions)
-    mgas_processed_total: Counter,
+    mgas_processed_total: Gauge,
     /// Execution account cache hits
     account_cache_hits: Counter,
     /// Execution account cache misses
@@ -189,7 +189,7 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             gas_since_start += block.header.gas_used;
             gas_since_last_message += block.header.gas_used;
             gas_since_history_write += block.header.gas_used;
-            self.metrics.mgas_processed_total.increment(block.header.gas_used / 1_000_000);
+            self.metrics.mgas_processed_total.increment(block.header.gas_used as f64 / 1_000_000.);
 
             // Cache metrics
             {
