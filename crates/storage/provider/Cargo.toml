@@ -34,7 +34,6 @@ parking_lot = { version = "0.12", optional = true }
 reth-db = { path = "../db", features = ["test-utils"] }
 reth-primitives = { path = "../../primitives", features = ["arbitrary", "test-utils"] }
 parking_lot = "0.12"
-assert_matches = "1.5"
 
 [features]
 bench = []
