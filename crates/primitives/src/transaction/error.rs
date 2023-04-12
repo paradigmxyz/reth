@@ -7,7 +7,7 @@ use crate::U256;
 pub enum InvalidTransactionError {
     #[error("Transaction eip1559 priority fee is more then max fee.")]
     PriorityFeeMoreThenMaxFee,
-    #[error("Account does not have enough funds ({available_funds:?}) to cover transaction max fee: {cost:?}.")]
+    #[error("Account does not have enough funds ({available_funds:?}) to cover transaction cost: {cost:?}.")]
     InsufficientFunds { cost: U256, available_funds: U256 },
     #[error("Transaction nonce is not consistent.")]
     NonceNotConsistent,
