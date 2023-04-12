@@ -15,7 +15,7 @@ reth-stages = { path = "../../stages" }
 reth-db = { path = "../../storage/db" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-tasks = { path = "../../tasks" }
-reth-miner = { path = "../../miner" }
+reth-payload-builder = { path = "../../payload/builder" }
 reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # async

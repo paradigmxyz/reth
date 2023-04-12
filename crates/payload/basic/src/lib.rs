@@ -12,7 +12,7 @@
 use futures_core::{ready, Stream};
 use futures_util::FutureExt;
 use reth_consensus_common::validation::calculate_next_block_base_fee;
-use reth_miner::{
+use reth_payload_builder::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };

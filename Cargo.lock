@@ -4443,10 +4443,10 @@ dependencies = [
  "reth-downloaders",
  "reth-executor",
  "reth-interfaces",
- "reth-miner",
  "reth-net-nat",
  "reth-network",
  "reth-network-api",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -4496,7 +4496,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "reth-consensus-common",
- "reth-miner",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -4520,7 +4520,7 @@ dependencies = [
  "reth-executor",
  "reth-interfaces",
  "reth-metrics-derive",
- "reth-miner",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-rpc-types",
@@ -4853,25 +4853,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-miner"
-version = "0.1.0"
-dependencies = [
- "futures-core",
- "futures-util",
- "parking_lot 0.12.1",
- "reth-interfaces",
- "reth-primitives",
- "reth-rlp",
- "reth-rpc-types",
- "revm-primitives",
- "sha2 0.10.6",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
 name = "reth-net-common"
 version = "0.1.0"
 dependencies = [
@@ -4955,6 +4936,25 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "reth-payload-builder"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "parking_lot 0.12.1",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-rlp",
+ "reth-rpc-types",
+ "revm-primitives",
+ "sha2 0.10.6",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

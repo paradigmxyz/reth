@@ -6,7 +6,7 @@ members = [
     "crates/consensus/common",
     "crates/executor",
     "crates/interfaces",
-    "crates/miner",
+    "crates/payload/builder",
     "crates/metrics/metrics-derive",
     "crates/metrics/common",
     "crates/net/common",

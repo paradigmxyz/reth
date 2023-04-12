@@ -1,18 +1,18 @@
 [package]
-name = "reth-miner"
+name = "reth-payload-builder"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/paradigmxyz/reth"
 readme = "README.md"
-description = "Block production"
+description = "reth payload builder"
 
 [dependencies]
 ## reth
-reth-primitives = { path = "../primitives" }
-reth-rpc-types = { path = "../rpc/rpc-types" }
-reth-rlp = { path = "../rlp" }
-reth-interfaces = { path = "../interfaces" }
+reth-primitives = { path = "../../primitives" }
+reth-rpc-types = { path = "../../rpc/rpc-types" }
+reth-rlp = { path = "../../rlp" }
+reth-interfaces = { path = "../../interfaces" }
 
 ## ethereum
 revm-primitives = "1"
