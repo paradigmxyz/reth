@@ -294,7 +294,7 @@ where
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
-                return error.into()
+                return Ok(error.into())
             }
         };
 
