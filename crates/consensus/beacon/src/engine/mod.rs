@@ -155,8 +155,7 @@ where
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => {
                     let head_block_number = self
-                        .db
-                        .view(|tx| tx.get::<tables::HeaderNumbers>(state.head_block_hash))??
+                        .get_block_number(state.head_block_hash)?
                         .expect("was canonicalized, so it exists");
                     let pipeline_min_progress =
                         FINISH.get_progress(&self.db.tx()?)?.unwrap_or_default();
@@ -183,7 +182,10 @@ where
                     warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
                     // If this is the first forkchoice received, start downloading from safe block
                     // hash.
-                    let target = if is_first_forkchoice && !state.safe_block_hash.is_zero() {
+                    let target = if is_first_forkchoice &&
+                        !state.safe_block_hash.is_zero() &&
+                        self.get_block_number(state.safe_block_hash)?.is_none()
+                    {
                         PipelineTarget::Safe
                     } else {
                         PipelineTarget::Head
@@ -317,14 +319,8 @@ where
                             .then_some(H256::zero());
                     let status = match error {
                         Error::Execution(ExecutorError::PendingBlockIsInFuture { .. }) => {
-                            if let Some(ForkchoiceState { head_block_hash, .. }) =
-                                self.forkchoice_state
-                            {
-                                if self
-                                    .db
-                                    .view(|tx| tx.get::<tables::HeaderNumbers>(head_block_hash))??
-                                    .is_none()
-                                {
+                            if let Some(state) = self.forkchoice_state {
+                                if self.get_block_number(state.head_block_hash)?.is_none() {
                                     self.require_pipeline_run(PipelineTarget::Head);
                                 }
                             }
@@ -377,7 +373,7 @@ where
         &mut self,
         finalized_hash: BlockHash,
     ) -> Result<(), reth_interfaces::Error> {
-        match self.db.view(|tx| tx.get::<tables::HeaderNumbers>(finalized_hash))?? {
+        match self.get_block_number(finalized_hash)? {
             Some(number) => self.blockchain_tree.restore_canonical_hashes(number)?,
             None => self.require_pipeline_run(PipelineTarget::Head),
         };
@@ -397,6 +393,11 @@ where
         } else {
             false
         }
+    }
+
+    /// Retrieve the block number for the given block hash.
+    fn get_block_number(&self, hash: H256) -> Result<Option<BlockNumber>, reth_interfaces::Error> {
+        Ok(self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??)
     }
 }
 
