@@ -96,9 +96,9 @@ pub struct EthTransactionValidator<Client, T> {
     /// Fork indicator whether we are using EIP-1559 type transactions.
     eip1559: bool,
     /// The current max gas limit
-    current_max_gas_limit: u64,
-    /// Current base fee.
-    base_fee: Option<u128>,
+    block_gas_limit: u64,
+    /// Minimum priority fee to enforce for acceptance into the pool.
+    minimum_priority_fee: Option<u128>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
 }
@@ -116,8 +116,8 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
             shanghai: true,
             eip2718: true,
             eip1559: true,
-            current_max_gas_limit: 30_000_000,
-            base_fee: None,
+            block_gas_limit: 30_000_000,
+            minimum_priority_fee: None,
             _marker: Default::default(),
         }
     }
@@ -191,11 +191,11 @@ where
         }
 
         // Checks for gas limit
-        if transaction.gas_limit() > self.current_max_gas_limit {
+        if transaction.gas_limit() > self.block_gas_limit {
             let gas_limit = transaction.gas_limit();
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.current_max_gas_limit),
+                InvalidPoolTransactionError::ExceedsGasLimit(gas_limit, self.block_gas_limit),
             )
         }
 
@@ -207,11 +207,15 @@ where
             )
         }
 
-        // Drop non-local transactions under our own minimal accepted gas price or tip
-        if !origin.is_local() && transaction.max_fee_per_gas() < self.base_fee {
+        // Drop non-local transactions with a fee lower than the configured fee for acceptance into
+        // the pool.
+        if !origin.is_local() &&
+            transaction.is_eip1559() &&
+            transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
+        {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidTransactionError::MaxFeeLessThenBaseFee.into(),
+                InvalidPoolTransactionError::Underpriced,
             )
         }
 
