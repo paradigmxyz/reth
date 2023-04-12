@@ -1,7 +1,7 @@
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub(crate) const MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
-///! Configuration options for the Transaction pool.
+/// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
     /// Max number of transaction in the pending sub-pool

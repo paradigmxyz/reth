@@ -1,4 +1,4 @@
-///! Canonical chain state notification trait and types.
+//! Canonical chain state notification trait and types.
 use crate::{chain::BlockReceipts, Chain};
 use auto_impl::auto_impl;
 use std::sync::Arc;
