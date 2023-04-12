@@ -1,10 +1,13 @@
 //! Collection of trie related types.
 
-mod nibbles;
-pub use nibbles::{StoredNibbles, StoredNibblesSubKey};
-
 mod branch_node;
-pub use branch_node::BranchNodeCompact;
-
 mod mask;
-pub use mask::TrieMask;
+mod nibbles;
+mod storage;
+
+pub use self::{
+    branch_node::BranchNodeCompact,
+    mask::TrieMask,
+    nibbles::{StoredNibbles, StoredNibblesSubKey},
+    storage::StorageTrieEntry,
+};

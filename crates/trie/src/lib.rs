@@ -24,3 +24,20 @@ pub mod hash_builder;
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
 pub mod prefix_set;
+
+/// The cursor implementations for navigating account and storage tries.
+pub mod cursor;
+
+/// The trie walker for iterating over the trie nodes.
+pub mod walker;
+
+mod errors;
+pub use errors::{StateRootError, StorageRootError};
+
+/// The implementation of the Merkle Patricia Trie.
+mod trie;
+pub use trie::{BranchNodeUpdate, BranchNodeUpdateSender, StateRoot, StorageRoot};
+
+/// Collection of trie-related test utilities.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;

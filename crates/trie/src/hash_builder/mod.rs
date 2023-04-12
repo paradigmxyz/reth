@@ -8,14 +8,14 @@ use reth_primitives::{
     trie::{BranchNodeCompact, TrieMask},
     H256,
 };
-use std::fmt::Debug;
-use tokio::sync::mpsc;
+use std::{fmt::Debug, sync::mpsc};
 
 mod value;
 use value::HashBuilderValue;
 
 /// A type alias for a sender of branch nodes.
-pub type BranchNodeSender = mpsc::UnboundedSender<(Nibbles, BranchNodeCompact)>;
+/// Branch nodes are sent by the Hash Builder to be stored in the database.
+pub type BranchNodeSender = mpsc::Sender<(Nibbles, BranchNodeCompact)>;
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder
 /// is to build the Merkle proof that is essential for verifying the integrity and authenticity of
@@ -363,8 +363,6 @@ mod tests {
     use proptest::prelude::*;
     use reth_primitives::{hex_literal::hex, proofs::KeccakHasher, H256, U256};
     use std::collections::{BTreeMap, HashMap};
-    use tokio::sync::mpsc::unbounded_channel;
-    use tokio_stream::{wrappers::UnboundedReceiverStream, StreamExt};
 
     fn trie_root<I, K, V>(iter: I) -> H256
     where
@@ -429,9 +427,9 @@ mod tests {
         });
     }
 
-    #[tokio::test]
-    async fn test_generates_branch_node() {
-        let (sender, recv) = unbounded_channel();
+    #[test]
+    fn test_generates_branch_node() {
+        let (sender, recv) = mpsc::channel();
         let mut hb = HashBuilder::new(Some(sender));
 
         // We have 1 branch node update to be stored at 0x01, indicated by the first nibble.
@@ -481,8 +479,7 @@ mod tests {
         let root = hb.root();
         drop(hb);
 
-        let receiver = UnboundedReceiverStream::new(recv);
-        let updates = receiver.collect::<Vec<_>>().await;
+        let updates = recv.iter().collect::<Vec<_>>();
 
         let updates = updates.iter().cloned().collect::<BTreeMap<_, _>>();
         let update = updates.get(&Nibbles::from(hex!("01").as_slice())).unwrap();

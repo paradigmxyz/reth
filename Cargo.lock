@@ -650,17 +650,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cita_trie"
-version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afe7baab47f510f52ca8dc9c0eb9082020c627c7f22285bea30edc3511f7ee29"
-dependencies = [
- "hasher",
- "parking_lot 0.12.1",
- "rlp",
-]
-
-[[package]]
 name = "clang-sys"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2393,15 +2382,6 @@ checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash 0.8.3",
  "serde",
-]
-
-[[package]]
-name = "hasher"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbba678b6567f27ce22870d951f4208e1dc2fef64993bd4521b1d497ef8a3aa"
-dependencies = [
- "tiny-keccak",
 ]
 
 [[package]]
@@ -5001,24 +4981,18 @@ dependencies = [
 name = "reth-provider"
 version = "0.1.0"
 dependencies = [
- "assert_matches",
  "auto_impl",
- "cita_trie",
- "hasher",
  "itertools",
  "parking_lot 0.12.1",
- "proptest",
- "reth-codecs",
  "reth-db",
  "reth-interfaces",
  "reth-primitives",
  "reth-revm-primitives",
  "reth-rlp",
- "reth-tracing",
+ "reth-trie",
  "thiserror",
  "tokio",
  "tracing",
- "triehash",
 ]
 
 [[package]]
@@ -5262,6 +5236,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-rlp",
+ "reth-trie",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -5322,8 +5297,12 @@ dependencies = [
  "derive_more",
  "hex",
  "proptest",
+ "reth-db",
+ "reth-interfaces",
  "reth-primitives",
+ "reth-provider",
  "reth-rlp",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tracing",

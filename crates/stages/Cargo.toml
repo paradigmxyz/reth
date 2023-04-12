@@ -21,6 +21,7 @@ reth-db = { path = "../storage/db" }
 reth-codecs = { path = "../storage/codecs" }
 reth-provider = { path = "../storage/provider" }
 reth-metrics-derive = { path = "../metrics/metrics-derive" }
+reth-trie = { path = "../trie" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
@@ -50,6 +51,7 @@ reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(o
 reth-executor = { path = "../executor" }
 reth-rlp = { path = "../rlp" }
 reth-revm = { path = "../revm" }
+reth-trie = { path = "../trie", features = ["test-utils"] }
 
 itertools = "0.10.5"
 tokio = { version = "*", features = ["rt", "sync", "macros"] }
