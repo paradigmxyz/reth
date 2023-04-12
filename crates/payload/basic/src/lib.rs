@@ -17,11 +17,12 @@ use reth_miner::{
     PayloadJobGenerator,
 };
 use reth_primitives::{
-    bloom::logs_bloom, bytes::Bytes, proofs, Block, ChainSpec, Hardfork, Header,
+    bloom::logs_bloom, bytes::Bytes, proofs, Block, ChainSpec, Hardfork, Head, Header,
     IntoRecoveredTransaction, Receipt, SealedBlock, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, PostState, StateProviderFactory};
 use reth_revm::{
+    config::{revm_spec, revm_spec_by_timestamp_after_merge},
     database::{State, SubState},
     env::tx_env_with_recovered,
     executor::{
@@ -31,7 +32,7 @@ use reth_revm::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::primitives::{BlockEnv, CfgEnv, Env, ResultAndState};
+use revm::primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId};
 use std::{
     future::Future,
     pin::Pin,
@@ -104,7 +105,7 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {}
 
 impl<Client, Pool, Tasks> PayloadJobGenerator for BasicPayloadJobGenerator<Client, Pool, Tasks>
 where
-    Client: StateProviderFactory + EvmEnvProvider + BlockProvider + Clone + Unpin + 'static,
+    Client: StateProviderFactory + BlockProvider + Clone + Unpin + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
 {
@@ -120,29 +121,31 @@ where
             .block_by_hash(attributes.parent)?
             .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
 
-        // initialize the environment
-        let (parent_cfg, mut parent_block_env) =
-            self.client.env_with_header(&parent_block.header)?;
+        // configure evm env based on parent block
+        let initialized_cfg = CfgEnv {
+            chain_id: U256::from(self.chain_spec.chain().id()),
+            // ensure we're not missing any timestamp based hardforks
+            spec_id: revm_spec_by_timestamp_after_merge(&self.chain_spec, attributes.timestamp),
+            ..Default::default()
+        };
 
-        // Update block env values
-        parent_block_env.number += U256::from(1);
-        parent_block_env.coinbase = attributes.suggested_fee_recipient;
-        parent_block_env.timestamp = U256::from(attributes.timestamp);
-        parent_block_env.difficulty = U256::ZERO;
-        parent_block_env.prevrandao = Some(attributes.prev_randao);
-
-        // calculate base fee for block based on parent header
-        calculate_next_block_base_fee(
-            parent_block.gas_used,
-            parent_block.gas_limit,
-            parent_block.base_fee_per_gas.unwrap_or_default(),
-        );
-
-        let initialized_block_env = parent_block_env;
-        let initialized_cfg = parent_cfg;
+        let initialized_block_env = BlockEnv {
+            number: U256::from(parent_block.number + 1),
+            coinbase: attributes.suggested_fee_recipient,
+            timestamp: U256::from(attributes.timestamp),
+            difficulty: U256::ZERO,
+            prevrandao: Some(attributes.prev_randao),
+            gas_limit: U256::from(parent_block.gas_limit),
+            // calculate basefee based on parent block's gas usage
+            basefee: U256::from(calculate_next_block_base_fee(
+                parent_block.gas_used,
+                parent_block.gas_limit,
+                parent_block.base_fee_per_gas.unwrap_or_default(),
+            )),
+        };
 
         let config = PayloadConfig {
-            initialized_block_env: Default::default(),
+            initialized_block_env,
             initialized_cfg,
             parent_block: Arc::new(parent_block),
             extra_data: self.block_config.extradata.clone(),
@@ -498,29 +501,29 @@ fn build_payload<Pool, Client>(
             executed_txs.push(tx.into_signed());
         }
 
+        let mut withdrawals_root = None;
+
         // get balance changes from withdrawals
-        let balance_increments = post_block_withdrawals_balance_increments(
-            &chain_spec,
-            attributes.timestamp,
-            &attributes.withdrawals,
-        );
-        for (address, increment) in balance_increments {
-            increment_account_balance(&mut db, &mut post_state, address, increment)?;
+        if initialized_cfg.spec_id >= SpecId::SHANGHAI {
+            let balance_increments = post_block_withdrawals_balance_increments(
+                &chain_spec,
+                attributes.timestamp,
+                &attributes.withdrawals,
+            );
+            for (address, increment) in balance_increments {
+                increment_account_balance(&mut db, &mut post_state, address, increment)?;
+            }
+
+            // calculate withdrawals root
+            withdrawals_root =
+                Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()));
         }
 
         // create the block header
-
         let transactions_root = proofs::calculate_transaction_root(executed_txs.iter());
 
         let receipts_root = post_state.receipts_root();
         let logs_bloom = post_state.logs_bloom();
-
-        let withdrawals_root =
-            if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(attributes.timestamp) {
-                Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()))
-            } else {
-                None
-            };
 
         let header = Header {
             parent_hash: attributes.parent,
