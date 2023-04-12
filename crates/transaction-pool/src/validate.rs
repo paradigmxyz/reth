@@ -257,11 +257,11 @@ where
 
         // Checks for max cost
         if transaction.cost() > account.balance {
-            let max_fee = transaction.max_fee_per_gas().unwrap_or_default();
+            let cost = transaction.cost();
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::InsufficientFunds {
-                    max_fee,
+                    cost,
                     available_funds: account.balance,
                 }
                 .into(),
