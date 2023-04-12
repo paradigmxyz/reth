@@ -4,7 +4,7 @@ use crate::{
     table::{Decode, Encode},
     Error,
 };
-use reth_primitives::{H160, H256, BlockNumber};
+use reth_primitives::{BlockNumber, H160, H256};
 
 use super::ShardedKey;
 

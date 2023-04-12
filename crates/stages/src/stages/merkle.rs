@@ -168,7 +168,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         }
 
         let current_root = tx.get_header(input.stage_progress)?.state_root;
-        let from_block = input.unwind_to+1;
+        let from_block = input.unwind_to + 1;
         let to_block = input.stage_progress;
 
         let mut loader = DBTrieLoader::new(tx.deref_mut());
@@ -385,7 +385,7 @@ mod tests {
 
     impl UnwindStageTestRunner for MerkleTestRunner {
         fn before_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-            let target_block = input.unwind_to+1;
+            let target_block = input.unwind_to + 1;
 
             self.tx
                 .commit(|tx| {

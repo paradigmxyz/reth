@@ -180,9 +180,8 @@ where
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
-            if next_action.should_continue()
-                && self
-                    .progress
+            if next_action.should_continue() &&
+                self.progress
                     .minimum_progress
                     .zip(self.max_block)
                     .map_or(false, |(progress, target)| progress >= target)
@@ -194,7 +193,7 @@ where
                     max_block = ?self.max_block,
                     "Terminating pipeline."
                 );
-                return Ok(());
+                return Ok(())
             }
         }
     }
@@ -238,7 +237,7 @@ where
                         updater.update_sync_state(SyncState::Downloading { target_block: target });
                     }
                     self.unwind(db.as_ref(), target, bad_block).await?;
-                    return Ok(ControlFlow::Unwind { target, bad_block });
+                    return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
 
@@ -272,7 +271,7 @@ where
             if stage_progress < to {
                 debug!(target: "sync::pipeline", from = %stage_progress, %to, "Unwind point too far for stage");
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
-                continue;
+                continue
             }
 
             debug!(target: "sync::pipeline", from = %stage_progress, %to, ?bad_block, "Starting unwind");
@@ -292,7 +291,7 @@ where
                     }
                     Err(err) => {
                         self.listeners.notify(PipelineEvent::Error { stage_id });
-                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))));
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
                     }
                 }
             }
@@ -328,7 +327,7 @@ where
                 self.listeners.notify(PipelineEvent::Skipped { stage_id });
 
                 // We reached the maximum block, so we skip the stage
-                return Ok(ControlFlow::NoProgress { stage_progress: prev_progress });
+                return Ok(ControlFlow::NoProgress { stage_progress: prev_progress })
             }
 
             self.listeners
@@ -360,7 +359,7 @@ where
                             ControlFlow::Continue { progress: stage_progress }
                         } else {
                             ControlFlow::NoProgress { stage_progress: Some(stage_progress) }
-                        });
+                        })
                     }
                 }
                 Err(err) => {
@@ -396,9 +395,9 @@ where
                             stage = %stage_id,
                             "Stage encountered a non-fatal error: {err}. Retrying"
                         );
-                        continue;
+                        continue
                     };
-                    return out;
+                    return out
                 }
             }
         }

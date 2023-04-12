@@ -58,11 +58,11 @@ impl Chain {
     pub fn state_at_block(&self, block_number: BlockNumber) -> Option<PostState> {
         let mut state = self.state.clone();
         if self.tip().number == block_number {
-            return Some(state);
+            return Some(state)
         }
 
         state.revert_to(block_number);
-        return Some(state);
+        return Some(state)
     }
 
     /// Destructure the chain into its inner components, the blocks and the state.
@@ -271,7 +271,7 @@ impl Chain {
                 chain_tip: chain_tip.num_hash(),
                 other_chain_fork: chain.fork_block().into_components(),
             }
-            .into());
+            .into())
         }
 
         // Insert blocks from other chain
@@ -304,16 +304,16 @@ impl Chain {
                 let Some(block_number) = self.block_number(block_hash) else { return ChainSplit::NoSplitPending(self)};
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self);
+                    return ChainSplit::NoSplitCanonical(self)
                 }
                 block_number
             }
             SplitAt::Number(block_number) => {
                 if block_number >= chain_tip {
-                    return ChainSplit::NoSplitCanonical(self);
+                    return ChainSplit::NoSplitCanonical(self)
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self);
+                    return ChainSplit::NoSplitPending(self)
                 }
                 block_number
             }
@@ -432,15 +432,11 @@ mod tests {
         let mut split1_state = chain.state.clone();
         let split2_state = split1_state.split_at(1);
 
-        let chain_split1 = Chain {
-            state: split1_state,
-            blocks: BTreeMap::from([(1, block1.clone())]),
-        };
+        let chain_split1 =
+            Chain { state: split1_state, blocks: BTreeMap::from([(1, block1.clone())]) };
 
-        let chain_split2 = Chain {
-            state: split2_state,
-            blocks: BTreeMap::from([(2, block2.clone())]),
-        };
+        let chain_split2 =
+            Chain { state: split2_state, blocks: BTreeMap::from([(2, block2.clone())]) };
 
         // return tip state
         assert_eq!(chain.state_at_block(block2.number), Some(chain.state.clone()));

@@ -139,7 +139,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
 
         // put execution results to database
         //let first_transition_id = tx.get_block_transition(last_block)?;
-        
 
         let start = Instant::now();
         trace!(target: "sync::stages::execution", changes = state.changes().len(), accounts = state.accounts().len(), "Writing updated state to database");
@@ -201,13 +200,12 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::execution", to_block = input.unwind_to, "Unwinding");
-        
 
         // Acquire changeset cursors
         let mut account_changeset = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         let mut storage_changeset = tx.cursor_dup_write::<tables::StorageChangeSet>()?;
 
-        let block_range = input.unwind_to+1..=input.stage_progress;
+        let block_range = input.unwind_to + 1..=input.stage_progress;
 
         if block_range.is_empty() {
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
@@ -215,9 +213,8 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         // get all batches for account change
         // Check if walk and walk_dup would do the same thing
-        let account_changeset_batch = account_changeset
-            .walk_range(block_range.clone())?
-            .collect::<Result<Vec<_>, _>>()?;
+        let account_changeset_batch =
+            account_changeset.walk_range(block_range.clone())?.collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainState
         for (_, changeset) in account_changeset_batch.into_iter().rev() {
@@ -230,9 +227,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         // get all batches for storage change
         let storage_changeset_batch = storage_changeset
-            .walk_range(
-                BlockNumberAddress::range(block_range.clone())
-            )?
+            .walk_range(BlockNumberAddress::range(block_range.clone()))?
             .collect::<Result<Vec<_>, _>>()?;
 
         // revert all changes to PlainStorage

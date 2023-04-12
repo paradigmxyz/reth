@@ -1,6 +1,6 @@
 //! Account related models and types.
 
-use std::ops::{RangeInclusive, Range};
+use std::ops::{Range, RangeInclusive};
 
 use crate::{
     impl_fixed_arbitrary,

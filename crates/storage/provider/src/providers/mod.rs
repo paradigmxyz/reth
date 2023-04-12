@@ -415,7 +415,10 @@ impl<DB: Database> StateProviderFactory for ShareableDatabase<DB> {
         Ok(Box::new(LatestStateProvider::new(self.db.tx()?)))
     }
 
-    fn history_by_block_number(&self, mut block_number: BlockNumber) -> Result<StateProviderBox<'_>> {
+    fn history_by_block_number(
+        &self,
+        mut block_number: BlockNumber,
+    ) -> Result<StateProviderBox<'_>> {
         let tx = self.db.tx()?;
 
         // +1 as the changeset that we want is the one that was applied after this block.

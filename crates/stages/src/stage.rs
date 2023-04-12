@@ -15,7 +15,6 @@ pub struct ExecInput {
     pub stage_progress: Option<BlockNumber>,
 }
 
-
 impl ExecInput {
     /// Return the progress of the previous stage or default.
     pub fn previous_stage_progress(&self) -> BlockNumber {
@@ -37,7 +36,7 @@ impl ExecInput {
         let mut end = self.previous_stage_progress();
 
         if end < start {
-            return None;
+            return None
         }
 
         end = min(end, start + threshold);
@@ -165,7 +164,7 @@ macro_rules! exec_or_return {
             ExecAction::Run { range, capped: _capped } => range.into_inner(),
             ExecAction::Done { stage_progress, target } => {
                 info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true });
+                return Ok(ExecOutput { stage_progress, done: true })
             }
         }
     };
@@ -174,7 +173,7 @@ macro_rules! exec_or_return {
             ExecAction::Run { range, capped } => (range.into_inner(), capped),
             ExecAction::Done { stage_progress, target } => {
                 info!(target: $log_target, stage_progress, target, "Target block already reached");
-                return Ok(ExecOutput { stage_progress, done: true });
+                return Ok(ExecOutput { stage_progress, done: true })
             }
         }
     };

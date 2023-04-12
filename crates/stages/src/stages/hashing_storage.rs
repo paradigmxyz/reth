@@ -57,7 +57,7 @@ impl StorageHashingStage {
             tx.get::<tables::SyncStageProgress>(STORAGE_HASHING.0.into())?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(StorageHashingCheckpoint::default());
+            return Ok(StorageHashingCheckpoint::default())
         }
 
         let (checkpoint, _) = StorageHashingCheckpoint::from_compact(&buf, buf.len());
@@ -159,7 +159,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                             keccak_address = Some(keccak256(address));
                         } else {
                             // We have reached the end of table
-                            break;
+                            break
                         }
                     }
                 }
@@ -180,7 +180,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
             self.save_checkpoint(tx, checkpoint)?;
 
             if current_key.is_some() {
-                return Ok(ExecOutput { stage_progress, done: false });
+                return Ok(ExecOutput { stage_progress, done: false })
             }
         } else {
             // Aggregate all transition changesets and and make list of storages that have been
@@ -203,10 +203,9 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        tx.unwind_storage_hashing(
-            BlockNumberAddress((input.unwind_to, Address::zero()))
-                ..=BlockNumberAddress((input.stage_progress, Address::zero())),
-        )?;
+        let start = input.unwind_to + 1;
+
+        tx.unwind_storage_hashing(BlockNumberAddress::range(start..=input.stage_progress))?;
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
@@ -257,7 +256,7 @@ mod tests {
             if let Ok(result) = runner.execute(input).await.unwrap() {
                 if !result.done {
                     // Continue from checkpoint
-                    continue;
+                    continue
                 } else {
                     assert!(result.stage_progress == previous_stage);
 
@@ -267,7 +266,7 @@ mod tests {
                         "execution validation"
                     );
 
-                    break;
+                    break
                 }
             }
             panic!("Failed execution");
@@ -388,7 +387,7 @@ mod tests {
                 let start_block = input.stage_progress.unwrap_or_default() + 1;
                 let end_block = output.stage_progress;
                 if start_block > end_block {
-                    return Ok(());
+                    return Ok(())
                 }
             }
             self.check_hashed_storage()
@@ -489,7 +488,7 @@ mod tests {
 
                 while let Some((bn_address, entry)) = rev_changeset_walker.next().transpose()? {
                     if bn_address.block_number() < target_transition {
-                        break;
+                        break
                     }
 
                     if storage_cursor

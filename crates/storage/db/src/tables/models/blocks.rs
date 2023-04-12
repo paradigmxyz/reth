@@ -103,10 +103,7 @@ mod test {
     fn block_indices() {
         let first_tx_num = 10;
         let tx_count = 6;
-        let block_indices = StoredBlockBodyIndices {
-            first_tx_num,
-            tx_count,
-        };
+        let block_indices = StoredBlockBodyIndices { first_tx_num, tx_count };
 
         assert_eq!(block_indices.first_tx_num(), first_tx_num);
         assert_eq!(block_indices.last_tx_num(), first_tx_num + tx_count - 1);

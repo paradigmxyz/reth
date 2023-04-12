@@ -161,13 +161,8 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 .1;
 
             // insert block meta
-            block_meta_cursor.append(
-                block_number,
-                StoredBlockBodyIndices {
-                    first_tx_num,
-                    tx_count,
-                },
-            )?;
+            block_meta_cursor
+                .append(block_number, StoredBlockBodyIndices { first_tx_num, tx_count })?;
 
             highest_block = block_number;
         }

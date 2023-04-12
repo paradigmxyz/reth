@@ -41,7 +41,7 @@ impl<DB: Database> Stage<DB> for IndexStorageHistoryStage {
         let Some(range) = input.next_block_range_with_threshold(self.commit_threshold)  else { return Ok(ExecOutput::done(target))};
 
         if range.is_empty() {
-            return Ok(ExecOutput::done(target));
+            return Ok(ExecOutput::done(target))
         }
 
         let indices = tx.get_storage_transition_ids_from_changeset(range.clone())?;

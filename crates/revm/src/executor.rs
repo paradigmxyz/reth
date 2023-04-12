@@ -129,7 +129,7 @@ where
                 db_account.account_state = AccountState::NotExisting;
                 db_account.info = AccountInfo::default();
 
-                continue;
+                continue
             } else {
                 // check if account code is new or old.
                 // does it exist inside cached contracts if it doesn't it is new bytecode that
@@ -369,7 +369,7 @@ where
     ) -> Result<(PostState, u64), Error> {
         // perf: do not execute empty blocks
         if block.body.is_empty() {
-            return Ok((PostState::default(), 0));
+            return Ok((PostState::default(), 0))
         }
         let senders = self.recover_senders(&block.body, senders)?;
 
@@ -385,7 +385,7 @@ where
                 return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
-                });
+                })
             }
             // Execute transaction.
             let ResultAndState { result, state } = self.transact(transaction, sender)?;
@@ -434,7 +434,7 @@ where
 
         // Check if gas used matches the value set in header.
         if block.gas_used != cumulative_gas_used {
-            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used });
+            return Err(Error::BlockGasUsed { got: cumulative_gas_used, expected: block.gas_used })
         }
 
         // Add block rewards
@@ -484,10 +484,7 @@ pub fn verify_receipt<'a>(
     let receipts_with_bloom = receipts.map(|r| r.clone().into()).collect::<Vec<ReceiptWithBloom>>();
     let receipts_root = reth_primitives::proofs::calculate_receipt_root(receipts_with_bloom.iter());
     if receipts_root != expected_receipts_root {
-        return Err(Error::ReceiptRootDiff {
-            got: receipts_root,
-            expected: expected_receipts_root,
-        });
+        return Err(Error::ReceiptRootDiff { got: receipts_root, expected: expected_receipts_root })
     }
 
     // Create header log bloom.
@@ -496,7 +493,7 @@ pub fn verify_receipt<'a>(
         return Err(Error::BloomLogDiff {
             expected: Box::new(expected_logs_bloom),
             got: Box::new(logs_bloom),
-        });
+        })
     }
     Ok(())
 }

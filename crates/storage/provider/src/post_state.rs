@@ -91,22 +91,22 @@ impl Change {
     /// Get the transition ID for the change
     pub fn block_number(&self) -> BlockNumber {
         match self {
-            Change::AccountChanged { block_number, .. }
-            | Change::AccountCreated { block_number, .. }
-            | Change::StorageChanged { block_number, .. }
-            | Change::StorageWiped { block_number, .. }
-            | Change::AccountDestroyed { block_number, .. } => *block_number,
+            Change::AccountChanged { block_number, .. } |
+            Change::AccountCreated { block_number, .. } |
+            Change::StorageChanged { block_number, .. } |
+            Change::StorageWiped { block_number, .. } |
+            Change::AccountDestroyed { block_number, .. } => *block_number,
         }
     }
 
     /// Get the address of the account this change operates on.
     pub fn address(&self) -> Address {
         match self {
-            Change::AccountChanged { address, .. }
-            | Change::AccountCreated { address, .. }
-            | Change::StorageChanged { address, .. }
-            | Change::StorageWiped { address, .. }
-            | Change::AccountDestroyed { address, .. } => *address,
+            Change::AccountChanged { address, .. } |
+            Change::AccountCreated { address, .. } |
+            Change::StorageChanged { address, .. } |
+            Change::StorageWiped { address, .. } |
+            Change::AccountDestroyed { address, .. } => *address,
         }
     }
 }
@@ -248,12 +248,12 @@ impl PostState {
     /// Extend this [PostState] with the changes in another [PostState].
     pub fn extend(&mut self, other: PostState) {
         if other.changes.is_empty() {
-            return;
+            return
         }
 
         self.changes.reserve(other.changes.len());
 
-        for mut change in other.changes.into_iter() {
+        for change in other.changes.into_iter() {
             self.add_and_apply(change);
         }
         self.receipts.extend(other.receipts);
@@ -372,8 +372,8 @@ impl PostState {
     /// Add a new change, and apply its transformations to the current state
     pub fn add_and_apply(&mut self, change: Change) {
         match &change {
-            Change::AccountCreated { address, account, .. }
-            | Change::AccountChanged { address, new: account, .. } => {
+            Change::AccountCreated { address, account, .. } |
+            Change::AccountChanged { address, new: account, .. } => {
                 self.accounts.insert(*address, Some(*account));
             }
             Change::AccountDestroyed { address, .. } => {
@@ -432,9 +432,9 @@ impl PostState {
             changesets.into_iter().partition(|changeset| {
                 matches!(
                     changeset,
-                    Change::AccountChanged { .. }
-                        | Change::AccountCreated { .. }
-                        | Change::AccountDestroyed { .. }
+                    Change::AccountChanged { .. } |
+                        Change::AccountCreated { .. } |
+                        Change::AccountDestroyed { .. }
                 )
             });
 
@@ -443,8 +443,8 @@ impl PostState {
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         for changeset in account_changes.into_iter() {
             match changeset {
-                Change::AccountDestroyed { block_number, address, old }
-                | Change::AccountChanged { block_number, address, old, .. } => {
+                Change::AccountDestroyed { block_number, address, old } |
+                Change::AccountChanged { block_number, address, old, .. } => {
                     let destroyed = matches!(changeset, Change::AccountDestroyed { .. });
                     tracing::trace!(target: "provider::post_state", block_number, ?address, ?old, destroyed, "Account changed");
                     account_changeset_cursor
@@ -637,19 +637,19 @@ mod tests {
             .cursor_dup_read::<tables::AccountChangeSet>()
             .expect("Could not open changeset cursor");
         assert_eq!(
-            changeset_cursor.seek_exact(0).expect("Could not read account change set"),
-            Some((0, AccountBeforeTx { address: address_a, info: None })),
+            changeset_cursor.seek_exact(1).expect("Could not read account change set"),
+            Some((1, AccountBeforeTx { address: address_a, info: None })),
             "Account A changeset is wrong"
         );
         assert_eq!(
             changeset_cursor.next_dup().expect("Changeset table is malformed"),
-            Some((0, AccountBeforeTx { address: address_b, info: Some(account_b) })),
+            Some((1, AccountBeforeTx { address: address_b, info: Some(account_b) })),
             "Account B changeset is wrong"
         );
 
         let mut post_state = PostState::new();
         // 0x11.. is destroyed
-        post_state.destroy_account(1, address_b, account_b_changed);
+        post_state.destroy_account(2, address_b, account_b_changed);
         post_state.write_to_db(&tx).expect("Could not write second post state to DB");
 
         // Check new plain state for account B
@@ -661,8 +661,8 @@ mod tests {
 
         // Check change set
         assert_eq!(
-            changeset_cursor.seek_exact(1).expect("Could not read account change set"),
-            Some((1, AccountBeforeTx { address: address_b, info: Some(account_b_changed) })),
+            changeset_cursor.seek_exact(2).expect("Could not read account change set"),
+            Some((2, AccountBeforeTx { address: address_b, info: Some(account_b_changed) })),
             "Account B changeset is wrong after deletion"
         );
     }
@@ -734,9 +734,9 @@ mod tests {
             .cursor_dup_read::<tables::StorageChangeSet>()
             .expect("Could not open storage changeset cursor");
         assert_eq!(
-            changeset_cursor.seek_exact(BlockNumberAddress((0, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
             Some((
-                BlockNumberAddress((0, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(0) }
             )),
             "Slot 0 for account A should have changed from 0"
@@ -744,7 +744,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                BlockNumberAddress((0, address_a)),
+                BlockNumberAddress((1, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(0) }
             )),
             "Slot 1 for account A should have changed from 0"
@@ -756,9 +756,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(BlockNumberAddress((0, address_b))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((1, address_b))).unwrap(),
             Some((
-                BlockNumberAddress((0, address_b)),
+                BlockNumberAddress((1, address_b)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(1) }
             )),
             "Slot 1 for account B should have changed from 1"
@@ -771,7 +771,7 @@ mod tests {
 
         // Delete account A
         let mut post_state = PostState::new();
-        post_state.destroy_account(1, address_a, Account::default());
+        post_state.destroy_account(2, address_a, Account::default());
         post_state.write_to_db(&tx).expect("Could not write post state to DB");
 
         assert_eq!(
@@ -781,9 +781,9 @@ mod tests {
         );
 
         assert_eq!(
-            changeset_cursor.seek_exact(BlockNumberAddress((1, address_a))).unwrap(),
+            changeset_cursor.seek_exact(BlockNumberAddress((2, address_a))).unwrap(),
             Some((
-                BlockNumberAddress((1, address_a)),
+                BlockNumberAddress((2, address_a)),
                 StorageEntry { key: H256::zero(), value: U256::from(1) }
             )),
             "Slot 0 for account A should have changed from 1 on deletion"
@@ -791,7 +791,7 @@ mod tests {
         assert_eq!(
             changeset_cursor.next_dup().unwrap(),
             Some((
-                BlockNumberAddress((1, address_a)),
+                BlockNumberAddress((2, address_a)),
                 StorageEntry { key: H256::from(U256::from(1).to_be_bytes()), value: U256::from(2) }
             )),
             "Slot 1 for account A should have changed from 2 on deletion"

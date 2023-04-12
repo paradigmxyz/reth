@@ -121,7 +121,7 @@ where
         let mut accounts_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
 
         if root == EMPTY_ROOT {
-            return Self::new(tx);
+            return Self::new(tx)
         }
         accounts_trie_cursor.seek_exact(root)?.ok_or(TrieError::MissingAccountRoot(root))?;
 
@@ -224,7 +224,7 @@ where
         root: H256,
     ) -> Result<Self, TrieError> {
         if root == EMPTY_ROOT {
-            return Self::new(storages_trie_cursor, key);
+            return Self::new(storages_trie_cursor, key)
         }
         storages_trie_cursor
             .lock()
@@ -469,7 +469,7 @@ where
                             ProofCheckpoint::default(),
                             self.replace_account_root(&mut trie, previous_root)?,
                             hashed_address,
-                        );
+                        )
                     }
                 }
                 TrieProgress::InProgress(checkpoint) => {
@@ -540,7 +540,7 @@ where
                         )?),
                         storage_key: Some(current_entry.key),
                         ..Default::default()
-                    }));
+                    }))
                 }
             }
         }
@@ -621,7 +621,7 @@ where
                         ProofCheckpoint::default(),
                         self.replace_account_root(&mut trie, previous_root)?,
                         hashed_address,
-                    );
+                    )
                 }
             }
         }
@@ -666,7 +666,7 @@ where
                         )?),
                         storage_key: Some(key),
                         ..Default::default()
-                    }));
+                    }))
                 }
             } else {
                 trie.remove(key.as_bytes())?;
@@ -749,7 +749,7 @@ where
             self.tx.get::<tables::SyncStageProgress>("TrieLoader".into())?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(ProofCheckpoint::default());
+            return Ok(ProofCheckpoint::default())
         }
 
         let (checkpoint, _) = ProofCheckpoint::from_compact(&buf, buf.len());

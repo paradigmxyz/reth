@@ -639,11 +639,12 @@ impl<DB: Database, C: Consensus, EF: ExecutorFactory> BlockchainTree<DB, C, EF> 
 
         let mut tx = Transaction::new(&self.externals.db)?;
 
+        let tip = tx.tip_number()?;
         // read block and execution result from database. and remove traces of block from tables.
         let blocks_and_execution = tx
             .take_block_and_execution_range(
                 self.externals.chain_spec.as_ref(),
-                (revert_until + 1)..,
+                (revert_until + 1)..=tip,
             )
             .map_err(|e| ExecError::CanonicalRevert { inner: e.to_string() })?;
 
