@@ -24,6 +24,7 @@ use reth_rpc_types::{
     BlockError, CallRequest, Index, TransactionInfo,
 };
 use revm::primitives::Env;
+use revm_primitives::ResultAndState;
 use std::collections::HashSet;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -202,11 +203,16 @@ where
             .await
     }
 
-    /// Returns traces created at given block.
-    pub async fn trace_block(
+    /// Executes all transactions of a block and returns a list of callback results.
+    async fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
-    ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> EthResult<Option<Vec<R>>>
+    where
+        F: Fn(TransactionInfo, TracingInspector, ResultAndState) -> EthResult<R> + Send,
+    {
         let block_hash = match self.client.block_hash_for_id(block_id)? {
             Some(hash) => hash,
             None => return Ok(None),
@@ -221,7 +227,7 @@ where
         // replay all transactions of the block
         self.eth_api
             .with_state_at(at, move |state| {
-                let mut all_traces = Vec::with_capacity(transactions.len());
+                let mut results = Vec::with_capacity(transactions.len());
                 let mut db = SubState::new(State::new(state));
 
                 for (idx, tx) in transactions.into_iter().enumerate() {
@@ -236,17 +242,52 @@ where
                     let tx = tx_env_with_recovered(&tx);
                     let env = Env { cfg: cfg.clone(), block: block_env.clone(), tx };
 
-                    let mut inspector =
-                        TracingInspector::new(TracingInspectorConfig::default_parity());
-                    inspect(&mut db, env, &mut inspector)?;
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    all_traces.extend(traces);
+                    let mut inspector = TracingInspector::new(config);
+                    let (res, _) = inspect(&mut db, env, &mut inspector)?;
+                    results.push(f(tx_info, inspector, res)?);
                 }
 
-                Ok(all_traces)
+                Ok(results)
             })
             .map(Some)
+    }
+
+    /// Returns traces created at given block.
+    pub async fn trace_block(
+        &self,
+        block_id: BlockId,
+    ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
+        let traces = self
+            .trace_block_with(
+                block_id,
+                TracingInspectorConfig::default_parity(),
+                |tx_info, inspector, _| {
+                    let traces =
+                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    Ok(traces)
+                },
+            )
+            .await?
+            .map(|traces| traces.into_iter().flatten().collect());
+        Ok(traces)
+    }
+
+    /// Replays all transaction in a block
+    pub async fn replay_block_transactions(
+        &self,
+        block_id: BlockId,
+        trace_types: HashSet<TraceType>,
+    ) -> EthResult<Option<Vec<TraceResultsWithTransactionHash>>> {
+        self.trace_block_with(block_id, tracing_config(&trace_types), |tx_info, inspector, res| {
+            let full_trace =
+                inspector.into_parity_builder().into_trace_results(res.result, &trace_types);
+            let trace = TraceResultsWithTransactionHash {
+                transaction_hash: tx_info.hash.expect("tx hash is set"),
+                full_trace,
+            };
+            Ok(trace)
+        })
+        .await
     }
 }
 
@@ -290,10 +331,10 @@ where
     /// Handler for `trace_replayBlockTransactions`
     async fn replay_block_transactions(
         &self,
-        _block_id: BlockId,
-        _trace_types: HashSet<TraceType>,
+        block_id: BlockId,
+        trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(TraceApi::replay_block_transactions(self, block_id, trace_types).await?)
     }
 
     /// Handler for `trace_replayTransaction`
