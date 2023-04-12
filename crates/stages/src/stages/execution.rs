@@ -24,32 +24,6 @@ use tracing::*;
 /// The [`StageId`] of the execution stage.
 pub const EXECUTION: StageId = StageId("Execution");
 
-/// Execution stage metrics.
-#[derive(Metrics)]
-#[metrics(scope = "sync.execution")]
-pub struct ExecutionStageMetrics {
-    /// The total amount of gas processed (in millions)
-    mgas_processed_total: Gauge,
-    /// Execution account cache hits
-    account_cache_hits: Counter,
-    /// Execution account cache misses
-    account_cache_misses: Counter,
-    /// Execution account cache evictions
-    account_cache_evictions: Counter,
-    /// Execution account cache hits
-    storage_cache_hits: Counter,
-    /// Execution account cache misses
-    storage_cache_misses: Counter,
-    /// Execution storage cache evictions
-    storage_cache_evictions: Counter,
-    /// Execution account cache hits
-    bytecode_cache_hits: Counter,
-    /// Execution account cache misses
-    bytecode_cache_misses: Counter,
-    /// Execution account cache evictions
-    bytecode_cache_evictions: Counter,
-}
-
 /// The execution stage executes all transactions and
 /// update history indexes.
 ///
@@ -403,6 +377,32 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 
         Ok(UnwindOutput { stage_progress: input.unwind_to })
     }
+}
+
+/// Execution stage metrics.
+#[derive(Metrics)]
+#[metrics(scope = "sync.execution")]
+pub struct ExecutionStageMetrics {
+    /// The total amount of gas processed (in millions)
+    mgas_processed_total: Gauge,
+    /// Execution account cache hits
+    account_cache_hits: Counter,
+    /// Execution account cache misses
+    account_cache_misses: Counter,
+    /// Execution account cache evictions
+    account_cache_evictions: Counter,
+    /// Execution account cache hits
+    storage_cache_hits: Counter,
+    /// Execution account cache misses
+    storage_cache_misses: Counter,
+    /// Execution storage cache evictions
+    storage_cache_evictions: Counter,
+    /// Execution account cache hits
+    bytecode_cache_hits: Counter,
+    /// Execution account cache misses
+    bytecode_cache_misses: Counter,
+    /// Execution account cache evictions
+    bytecode_cache_evictions: Counter,
 }
 
 #[cfg(test)]
