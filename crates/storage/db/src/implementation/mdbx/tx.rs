@@ -39,24 +39,20 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     pub fn get_dbi<T: Table>(&self) -> Result<DBI, Error> {
         let mut handles = self.db_handles.write();
 
-        for (idx, (_, table)) in TABLES.iter().enumerate() {
-            if table == &T::NAME {
-                let dbi_handle = handles.get_mut(idx).expect("should exist");
-                let dbi = if let Some(dbi) = dbi_handle {
-                    *dbi
-                } else {
-                    let dbi = self
-                        .inner
-                        .open_db(Some(T::NAME))
-                        .map_err(|e| Error::InitCursor(e.into()))?
-                        .dbi();
-                    *dbi_handle = Some(dbi);
-                    dbi
-                };
-                return Ok(dbi)
-            }
+        let table_index = TABLES
+            .iter()
+            .enumerate()
+            .find_map(|(idx, (_, table))| (table == &T::NAME).then_some(idx))
+            .expect("Requested table should be part of `TABLES`.");
+
+        let dbi_handle = handles.get_mut(table_index).expect("should exist");
+        if dbi_handle.is_none() {
+            *dbi_handle = Some(
+                self.inner.open_db(Some(T::NAME)).map_err(|e| Error::InitCursor(e.into()))?.dbi(),
+            );
         }
-        unreachable!();
+
+        Ok(dbi_handle.expect("is some; qed"))
     }
 
     /// Create db Cursor
