@@ -113,9 +113,6 @@ pub enum InvalidPoolTransactionError {
     /// respect the max_init_code_size.
     #[error("Transaction's size {0} exceeds max_init_code_size {1}.")]
     ExceedsMaxInitCodeSize(usize, usize),
-    /// Thrown if the transaction contains an invalid signature
-    #[error("Invalid sender")]
-    AccountNotFound,
     /// Thrown if the input data of a transaction is greater
     /// than some meaningful limit a user might use. This is not a consensus error
     /// making the transaction invalid, rather a DOS protection.
