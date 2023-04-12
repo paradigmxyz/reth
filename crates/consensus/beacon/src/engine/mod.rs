@@ -37,7 +37,7 @@ pub use pipeline_state::PipelineState;
 
 /// Beacon consensus engine metrics.
 #[derive(Metrics)]
-#[metrics(scope = "consensus.beacon.engine")]
+#[metrics(scope = "consensus.engine.beacon")]
 struct Metrics {
     /// The number of times the pipeline was run.
     pipeline_runs: Counter,
