@@ -9,7 +9,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_metrics_derive::Metrics;
-use reth_miner::PayloadStore;
+use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
     EngineRpcError, ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated,
@@ -602,7 +602,7 @@ mod tests {
         test_utils::TestExecutorFactory,
     };
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
-    use reth_miner::TestPayloadStore;
+    use reth_payload_builder::TestPayloadStore;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};

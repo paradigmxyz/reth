@@ -15,7 +15,7 @@ reth-revm = { path = "../../revm" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-rlp = { path = "../../rlp" }
 reth-provider = { path = "../../storage/provider" }
-reth-miner = { path = "../../miner" }
+reth-payload-builder = { path = "../builder" }
 reth-tasks = { path = "../../tasks" }
 
 ## ethereum
