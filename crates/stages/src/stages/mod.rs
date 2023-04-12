@@ -14,7 +14,7 @@ mod headers;
 mod index_account_history;
 /// Index history of storage changes
 mod index_storage_history;
-/// Intermediate hashes and creating merkle root
+/// Stage for computing state root.
 mod merkle;
 /// The sender recovery stage.
 mod sender_recovery;

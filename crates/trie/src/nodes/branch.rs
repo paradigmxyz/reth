@@ -1,4 +1,4 @@
-use super::rlp_node;
+use super::{rlp_node, CHILD_INDEX_RANGE};
 use reth_primitives::{bytes::BytesMut, trie::TrieMask, H256};
 use reth_rlp::{BufMut, EMPTY_STRING_CODE};
 
@@ -25,7 +25,7 @@ impl<'a> BranchNode<'a> {
         hash_mask: TrieMask,
     ) -> impl Iterator<Item = H256> + '_ {
         let mut index = self.stack.len() - state_mask.count_ones() as usize;
-        (0..16).filter_map(move |digit| {
+        CHILD_INDEX_RANGE.filter_map(move |digit| {
             let mut child = None;
             if state_mask.is_bit_set(digit) {
                 if hash_mask.is_bit_set(digit) {
@@ -44,7 +44,7 @@ impl<'a> BranchNode<'a> {
 
         // Create the RLP header from the mask elements present.
         let mut i = first_child_idx;
-        let header = (0..16).fold(
+        let header = CHILD_INDEX_RANGE.fold(
             reth_rlp::Header { list: true, payload_length: 1 },
             |mut header, digit| {
                 if state_mask.is_bit_set(digit) {
@@ -60,7 +60,7 @@ impl<'a> BranchNode<'a> {
 
         // Extend the RLP buffer with the present children
         let mut i = first_child_idx;
-        (0..16).for_each(|idx| {
+        CHILD_INDEX_RANGE.for_each(|idx| {
             if state_mask.is_bit_set(idx) {
                 buf.extend_from_slice(&self.stack[i]);
                 i += 1;

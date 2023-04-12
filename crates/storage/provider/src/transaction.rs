@@ -1,7 +1,6 @@
 use crate::{
     insert_canonical_block,
     post_state::{Change, PostState, StorageChangeset},
-    trie::{DBTrieLoader, TrieError},
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -24,6 +23,7 @@ use reth_primitives::{
     Header, SealedBlock, SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered,
     TransitionId, TxNumber, H256, U256,
 };
+use reth_trie::{StateRoot, StateRootError};
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
@@ -541,7 +541,6 @@ where
             self.insert_block(block)?;
         }
         self.insert_hashes(
-            fork_block_number,
             first_transition_id,
             first_transition_id + num_transitions,
             new_tip_number,
@@ -598,7 +597,6 @@ where
     /// The resulting state root is compared with `expected_state_root`.
     pub fn insert_hashes(
         &mut self,
-        fork_block_number: BlockNumber,
         from_transition_id: TransitionId,
         to_transition_id: TransitionId,
         current_block_number: BlockNumber,
@@ -623,14 +621,14 @@ where
 
         // merkle tree
         {
-            let current_root = self.get_header(fork_block_number)?.state_root;
-            let mut loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader
-                .update_root(current_root, from_transition_id..to_transition_id)
-                .and_then(|e| e.root())?;
-            if root != expected_state_root {
+            let state_root = StateRoot::incremental_root(
+                self.deref_mut(),
+                from_transition_id..to_transition_id,
+                None,
+            )?;
+            if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
-                    got: root,
+                    got: state_root,
                     expected: expected_state_root,
                     block_number: current_block_number,
                     block_hash: current_block_hash,
@@ -1111,15 +1109,7 @@ where
             self.unwind_storage_history_indices(transition_storage_range)?;
 
             // merkle tree
-            let new_state_root;
-            {
-                let (tip_number, _) =
-                    self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
-                let current_root = self.get_header(tip_number)?.state_root;
-                let mut loader = DBTrieLoader::new(self.deref());
-                new_state_root =
-                    loader.update_root(current_root, transition_range).and_then(|e| e.root())?;
-            }
+            let new_state_root = StateRoot::incremental_root(self.deref(), transition_range, None)?;
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
@@ -1537,14 +1527,14 @@ fn unwind_storage_history_shards<DB: Database>(
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionError {
     /// The transaction encountered a database error.
-    #[error("Database error: {0}")]
+    #[error(transparent)]
     Database(#[from] DbError),
     /// The transaction encountered a database integrity error.
-    #[error("A database integrity error occurred: {0}")]
+    #[error(transparent)]
     DatabaseIntegrity(#[from] ProviderError),
-    /// The transaction encountered merkle trie error.
-    #[error("Merkle trie calculation error: {0}")]
-    MerkleTrie(#[from] TrieError),
+    /// The trie error.
+    #[error(transparent)]
+    TrieError(#[from] StateRootError),
     /// Root mismatch
     #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{expected:?}")]
     StateTrieRootMismatch {
@@ -1565,8 +1555,8 @@ mod test {
         insert_canonical_block, test_utils::blocks::*, ShareableDatabase, Transaction,
         TransactionsProvider,
     };
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, TransitionId, MAINNET};
+    use reth_db::mdbx::test_utils::create_test_rw_db;
+    use reth_primitives::{ChainSpecBuilder, TransitionId, MAINNET};
     use std::{ops::DerefMut, sync::Arc};
 
     #[test]
@@ -1587,14 +1577,11 @@ mod test {
         let (block2, exec_res2) = data.blocks[1].clone();
 
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
-
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
         exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
         tx.insert_block(block1.clone()).unwrap();
         tx.insert_hashes(
-            genesis.number,
             0,
             exec_res1.transitions_count() as TransitionId,
             block1.number,
@@ -1615,7 +1602,6 @@ mod test {
         exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
         tx.insert_block(block1.clone()).unwrap();
         tx.insert_hashes(
-            genesis.number,
             0,
             exec_res1.transitions_count() as TransitionId,
             block1.number,
@@ -1630,7 +1616,6 @@ mod test {
             .unwrap();
         tx.insert_block(block2.clone()).unwrap();
         tx.insert_hashes(
-            block1.number,
             exec_res1.transitions_count() as TransitionId,
             (exec_res1.transitions_count() + exec_res2.transitions_count()) as TransitionId,
             2,
@@ -1698,8 +1683,6 @@ mod test {
         let (block2, exec_res2) = data.blocks[1].clone();
 
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None, false).unwrap();
-
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();

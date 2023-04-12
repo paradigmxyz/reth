@@ -40,12 +40,14 @@ pub struct BranchNodeCompact {
 impl BranchNodeCompact {
     /// Creates a new [BranchNodeCompact] from the given parameters.
     pub fn new(
-        state_mask: TrieMask,
-        tree_mask: TrieMask,
-        hash_mask: TrieMask,
+        state_mask: impl Into<TrieMask>,
+        tree_mask: impl Into<TrieMask>,
+        hash_mask: impl Into<TrieMask>,
         hashes: Vec<H256>,
         root_hash: Option<H256>,
     ) -> Self {
+        let (state_mask, tree_mask, hash_mask) =
+            (state_mask.into(), tree_mask.into(), hash_mask.into());
         assert!(tree_mask.is_subset_of(&state_mask));
         assert!(hash_mask.is_subset_of(&state_mask));
         assert_eq!(hash_mask.count_ones() as usize, hashes.len());
@@ -129,9 +131,9 @@ mod tests {
     #[test]
     fn node_encoding() {
         let n = BranchNodeCompact::new(
-            0xf607.into(),
-            0x0005.into(),
-            0x4004.into(),
+            0xf607,
+            0x0005,
+            0x4004,
             vec![
                 hex!("90d53cd810cc5d4243766cd4451e7b9d14b736a1148b26b3baac7617f617d321").into(),
                 hex!("cc35c964dda53ba6c0b87798073a9628dbc9cd26b5cce88eb69655a9c609caf1").into(),
