@@ -26,33 +26,22 @@
 //!
 //! [w-tinylfu-paper]: https://arxiv.org/abs/1512.00727
 
-use reth_interfaces::{provider::ProviderError, Result};
-use reth_primitives::{
-    Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, StorageValue, H256, U256,
-};
+use metrics::Counter;
+use reth_interfaces::Result;
+use reth_metrics_derive::Metrics;
+use reth_primitives::{Account, Address, Bytecode, StorageKey, StorageValue, H256, U256};
 use reth_provider::post_state::Storage;
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex},
-};
-use tracing::trace;
+use std::collections::HashMap;
 use wtinylfu::WTinyLfuCache;
 
-// TODO: Impl debug
+/// An executor-agnostic cache for EVM objects backed by multiple W-TinyLFU caches.
+///
+/// See the [module level][super] docs for more information.
 pub struct ExecutionCache {
     account_cache: WTinyLfuCache<Address, Option<Account>>,
     storage_cache: WTinyLfuCache<Address, Storage>,
     bytecode_cache: WTinyLfuCache<H256, Option<Bytecode>>,
-    // TODO: Temp
-    pub account_hits: u64,
-    pub account_misses: u64,
-    pub account_evictions: u64,
-    pub storage_hits: u64,
-    pub storage_misses: u64,
-    pub storage_evictions: u64,
-    pub bytecode_hits: u64,
-    pub bytecode_misses: u64,
-    pub bytecode_evictions: u64,
+    metrics: ExecutionCacheMetrics,
 }
 
 // TODO: Replace bytecode cache with an LRU cache (no need for it to be complicated)
@@ -72,15 +61,7 @@ impl ExecutionCache {
             account_cache: WTinyLfuCache::new(account_cache_size, account_cache_size * 16),
             storage_cache: WTinyLfuCache::new(storage_cache_size, account_cache_size * 16),
             bytecode_cache: WTinyLfuCache::new(bytecode_cache_size, bytecode_cache_size * 8),
-            account_hits: 0,
-            account_misses: 0,
-            account_evictions: 0,
-            storage_hits: 0,
-            storage_misses: 0,
-            storage_evictions: 0,
-            bytecode_hits: 0,
-            bytecode_misses: 0,
-            bytecode_evictions: 0,
+            metrics: ExecutionCacheMetrics::default(),
         }
     }
 
@@ -90,14 +71,14 @@ impl ExecutionCache {
     {
         Ok(match self.account_cache.get(&address) {
             Some(entry) => {
-                self.account_hits += 1;
+                self.metrics.account_hits.increment(1);
                 entry.clone()
             }
             None => {
-                self.account_misses += 1;
+                self.metrics.account_misses.increment(1);
                 let account = (f)()?;
                 if self.account_cache.push(address, account.clone()).is_some() {
-                    self.account_evictions += 1;
+                    self.metrics.account_evictions.increment(1);
                 }
                 account
             }
@@ -122,44 +103,35 @@ impl ExecutionCache {
     where
         F: FnOnce() -> Result<StorageValue>,
     {
-        // TODO: If storage = wiped, don't ask DB
-        // TODO: New account should have storage = wiped
         let storage = self.storage_cache.get_mut(&address);
 
         if let Some(storage) = storage {
             if let Some(value) = storage.storage.get(&slot.into()) {
-                self.storage_hits += 1;
+                self.metrics.storage_hits.increment(1);
                 Ok(*value)
             } else if storage.wiped {
-                // TODO: Should we count this as a hit since it does not touch disk?
-                self.storage_misses += 1;
+                // NOTE: This counts as a hit since we know the storage value is 0.
+                self.metrics.storage_hits.increment(1);
                 let value = StorageValue::ZERO;
                 let _ = storage.storage.insert(slot.into(), value.into());
                 Ok(value)
             } else {
-                self.storage_misses += 1;
+                self.metrics.storage_misses.increment(1);
                 let value = (f)()?;
                 let _ = storage.storage.insert(slot.into(), value.into());
                 Ok(value)
             }
         } else {
-            self.storage_misses += 1;
+            self.metrics.storage_misses.increment(1);
             let value = (f)()?;
-            if self
-                .storage_cache
-                .push(
-                    address,
-                    Storage {
-                        storage: HashMap::from([(
-                            U256::from_be_bytes(slot.to_fixed_bytes()),
-                            value,
-                        )]),
-                        wiped: false,
-                    },
-                )
-                .is_some()
-            {
-                self.storage_evictions += 1;
+            if let Some((_, storage)) = self.storage_cache.push(
+                address,
+                Storage {
+                    storage: HashMap::from([(U256::from_be_bytes(slot.to_fixed_bytes()), value)]),
+                    wiped: false,
+                },
+            ) {
+                self.metrics.storage_evictions.increment(storage.storage.len() as u64);
             }
             Ok(value)
         }
@@ -171,14 +143,14 @@ impl ExecutionCache {
     {
         Ok(match self.bytecode_cache.get(&code_hash) {
             Some(bytecode) => {
-                self.bytecode_hits += 1;
+                self.metrics.bytecode_hits.increment(1);
                 bytecode.clone()
             }
             None => {
-                self.bytecode_misses += 1;
+                self.metrics.bytecode_misses.increment(1);
                 let bytecode = (f)()?;
                 if self.bytecode_cache.push(code_hash, bytecode.clone()).is_some() {
-                    self.bytecode_evictions += 1;
+                    self.metrics.bytecode_evictions.increment(1);
                 }
                 bytecode
             }
@@ -231,4 +203,28 @@ impl ExecutionCache {
 
     // TODO: A way to commit changes
     // TODO: We need to keep a cache DB for diffing...
+}
+
+/// Execution cache metrics
+#[derive(Metrics)]
+#[metrics(scope = "sync.execution.cache")]
+pub struct ExecutionCacheMetrics {
+    /// The number of accounts that were present in the cache
+    account_hits: Counter,
+    /// The number of accounts that were not present in the cache
+    account_misses: Counter,
+    /// The number of accounts evicted from the cache
+    account_evictions: Counter,
+    /// The number of storage slots that were present in the cache
+    storage_hits: Counter,
+    /// The number of storage slots that were not present in the cache
+    storage_misses: Counter,
+    /// The number of storage slots evicted from the cache
+    storage_evictions: Counter,
+    /// The number of bytecodes that were present in the cache
+    bytecode_hits: Counter,
+    /// The number of bytecodes that were not present in the cache
+    bytecode_misses: Counter,
+    /// The number of bytecodes evicted from the cache
+    bytecode_evictions: Counter,
 }

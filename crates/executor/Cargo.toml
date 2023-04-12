@@ -20,6 +20,7 @@ reth-rlp = { path = "../rlp" }
 reth-db = { path = "../storage/db" }
 reth-provider = { path = "../storage/provider" }
 reth-consensus-common = { path = "../consensus/common" }
+reth-metrics-derive = { path = "../metrics/metrics-derive" }
 
 # cache
 wtinylfu = "0.1.0"
@@ -27,9 +28,12 @@ wtinylfu = "0.1.0"
 # common
 thiserror = "1.0.37"
 auto_impl = "1.0"
-tracing = "0.1.37"
 tokio = { version = "1.21.2", features = ["sync"] }
 parking_lot = { version = "0.12"}
+
+# observability
+tracing = "0.1.37"
+metrics = "0.20.1"
 
 # misc
 aquamarine = "0.3.0"

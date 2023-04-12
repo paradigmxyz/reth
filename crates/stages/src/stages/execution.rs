@@ -166,21 +166,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
             gas_since_history_write += block.header.gas_used;
             self.metrics.mgas_processed_total.increment(block.header.gas_used as f64 / 1_000_000.);
 
-            // Cache metrics
-            {
-                let mut cache =
-                    self.execution_cache.lock().expect("Could not lock execution cache");
-                self.metrics.account_cache_hits.absolute(cache.account_hits);
-                self.metrics.account_cache_misses.absolute(cache.account_misses);
-                self.metrics.account_cache_evictions.absolute(cache.account_evictions);
-                self.metrics.storage_cache_hits.absolute(cache.storage_hits);
-                self.metrics.storage_cache_misses.absolute(cache.storage_misses);
-                self.metrics.storage_cache_evictions.absolute(cache.storage_evictions);
-                self.metrics.bytecode_cache_hits.absolute(cache.bytecode_hits);
-                self.metrics.bytecode_cache_misses.absolute(cache.bytecode_misses);
-                self.metrics.bytecode_cache_evictions.absolute(cache.bytecode_evictions);
-            }
-
             // Write history periodically to free up memory
             if self.thresholds.should_write_history(gas_since_history_write) {
                 debug!(target: "sync::stages::execution", ?block_number, changes = ?state.changes().len(), "Writing history.");
@@ -432,24 +417,6 @@ impl ExecutionStageThresholds {
 pub struct ExecutionStageMetrics {
     /// The total amount of gas processed (in millions)
     mgas_processed_total: Gauge,
-    /// Execution account cache hits
-    account_cache_hits: Counter,
-    /// Execution account cache misses
-    account_cache_misses: Counter,
-    /// Execution account cache evictions
-    account_cache_evictions: Counter,
-    /// Execution account cache hits
-    storage_cache_hits: Counter,
-    /// Execution account cache misses
-    storage_cache_misses: Counter,
-    /// Execution storage cache evictions
-    storage_cache_evictions: Counter,
-    /// Execution account cache hits
-    bytecode_cache_hits: Counter,
-    /// Execution account cache misses
-    bytecode_cache_misses: Counter,
-    /// Execution account cache evictions
-    bytecode_cache_evictions: Counter,
 }
 
 #[cfg(test)]
