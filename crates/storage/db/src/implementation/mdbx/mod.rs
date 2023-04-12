@@ -160,6 +160,7 @@ mod tests {
     const ERROR_DB_CREATION: &str = "Not able to create the mdbx file.";
     const ERROR_PUT: &str = "Not able to insert value into table.";
     const ERROR_APPEND: &str = "Not able to append the value to the table.";
+    const ERROR_UPSERT: &str = "Not able to upsert the value to the table.";
     const ERROR_GET: &str = "Not able to get value from table.";
     const ERROR_COMMIT: &str = "Not able to commit transaction.";
     const ERROR_RETURN_VALUE: &str = "Mismatching result.";
@@ -553,6 +554,41 @@ mod tests {
         let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
         assert_eq!(res, vec![0, 1, 3, 4, 5]);
         tx.commit().expect(ERROR_COMMIT);
+    }
+
+    #[test]
+    fn db_cursor_upsert() {
+        let db: Arc<Env<WriteMap>> = test_utils::create_test_db(EnvKind::RW);
+        let tx = db.tx_mut().expect(ERROR_INIT_TX);
+
+        let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
+        let key = Address::random();
+
+        let account = Account::default();
+        cursor.upsert(key, account).expect(ERROR_UPSERT);
+        assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
+
+        let account = Account { nonce: 1, ..Default::default() };
+        cursor.upsert(key, account).expect(ERROR_UPSERT);
+        assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
+
+        let account = Account { nonce: 2, ..Default::default() };
+        cursor.upsert(key, account).expect(ERROR_UPSERT);
+        assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
+
+        let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+        let subkey = H256::random();
+
+        let value = U256::from(1);
+        let entry1 = StorageEntry { key: subkey, value };
+        dup_cursor.upsert(key, entry1).expect(ERROR_UPSERT);
+        assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey), Ok(Some(entry1)));
+
+        let value = U256::from(2);
+        let entry2 = StorageEntry { key: subkey, value };
+        dup_cursor.upsert(key, entry2).expect(ERROR_UPSERT);
+        assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey), Ok(Some(entry1)));
+        assert_eq!(dup_cursor.next_dup_val(), Ok(Some(entry2)));
     }
 
     #[test]
