@@ -39,7 +39,7 @@ use reth_interfaces::{
 use reth_miner::TestPayloadStore;
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
+use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
@@ -144,11 +144,14 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = %self.config, "Configuration loaded");
+        let mut config: Config = self.load_config_with_chain(self.chain.chain)?;
+        info!(target: "reth::cli", path = %self.config.with_chain(self.chain.chain), "Configuration loaded");
 
-        info!(target: "reth::cli", path = %self.db, "Opening database");
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.with_chain(self.chain.chain);
+
+        info!(target: "reth::cli", path = %db_path, "Opening database");
+        let db = Arc::new(init_db(&db_path)?);
         let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
         info!(target: "reth::cli", "Database opened");
 
@@ -174,6 +177,7 @@ impl Command {
         info!(target: "reth::cli", "Test transaction pool initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
+        // let secret_key_path = self.p2p_secret_key.join(chain_prefix);
         let secret_key = get_secret_key(&self.p2p_secret_key)?;
         let network_config = self.load_network_config(
             &config,
@@ -401,10 +405,12 @@ impl Command {
         Ok(pipeline)
     }
 
-    fn load_config(&self) -> eyre::Result<Config> {
-        confy::load_path::<Config>(&self.config).wrap_err_with(|| {
-            format!("Could not load config file {}", self.config.as_ref().display())
-        })
+    /// Loads the reth config based on the intended chain
+    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
+        // add network name to config directory
+        let config_path = self.config.with_chain(chain);
+        confy::load_path::<Config>(config_path.clone())
+            .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
