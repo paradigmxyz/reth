@@ -278,6 +278,30 @@ impl Transaction {
         }
     }
 
+    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
+    ///
+    /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
+    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        let base_fee = base_fee as u128;
+        let max_fee_per_gas = self.max_fee_per_gas();
+
+        if max_fee_per_gas < base_fee {
+            return None
+        }
+
+        // the miner tip is the difference between the max fee and the base fee or the
+        // max_priority_fee_per_gas, whatever is lower
+
+        // SAFETY: max_fee_per_gas >= base_fee
+        let fee = max_fee_per_gas - base_fee;
+
+        if let Some(priority_fee) = self.max_priority_fee_per_gas() {
+            return Some(fee.min(priority_fee))
+        }
+
+        Some(fee)
+    }
+
     /// Get the transaction's input field.
     pub fn input(&self) -> &Bytes {
         match self {
