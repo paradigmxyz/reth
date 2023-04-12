@@ -164,7 +164,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 
     /// Returns the current key in the trie.
     pub fn key(&self) -> Option<Nibbles> {
-        self.stack.last().map(|n| Nibbles::from(n.full_key()))
+        self.stack.last().map(|n| n.full_key())
     }
 
     /// Returns the current hash in the trie if any.

@@ -11,11 +11,11 @@ where
     I: Iterator<Item = (Address, (Account, S))>,
     S: IntoIterator<Item = (H256, U256)>,
 {
-    let encoded_accounts = accounts.filter_map(|(address, (account, storage))| {
+    let encoded_accounts = accounts.map(|(address, (account, storage))| {
         let storage_root = storage_root(storage.into_iter());
         let mut out = Vec::new();
         EthAccount::from(account).with_storage_root(storage_root).encode(&mut out);
-        Some((address, out))
+        (address, out)
     });
 
     triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
@@ -34,11 +34,11 @@ where
     I: Iterator<Item = (H256, (Account, S))>,
     S: IntoIterator<Item = (H256, U256)>,
 {
-    let encoded_accounts = accounts.filter_map(|(address, (account, storage))| {
+    let encoded_accounts = accounts.map(|(address, (account, storage))| {
         let storage_root = storage_root_prehashed(storage.into_iter());
         let mut out = Vec::new();
         EthAccount::from(account).with_storage_root(storage_root).encode(&mut out);
-        Some((address, out))
+        (address, out)
     });
 
     triehash::trie_root::<KeccakHasher, _, _, _>(encoded_accounts)

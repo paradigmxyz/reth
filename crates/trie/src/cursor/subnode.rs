@@ -48,7 +48,7 @@ impl CursorSubNode {
     pub fn full_key(&self) -> Nibbles {
         let mut out = self.key.clone();
         if self.nibble >= 0 {
-            out.extend(&[self.nibble as u8]);
+            out.extend([self.nibble as u8]);
         }
         out
     }
