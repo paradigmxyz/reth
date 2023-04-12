@@ -36,9 +36,9 @@ use reth_interfaces::{
     },
     sync::SyncStateUpdater,
 };
-use reth_miner::TestPayloadStore;
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
+use reth_payload_builder::TestPayloadStore;
 use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
