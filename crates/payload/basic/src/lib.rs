@@ -27,7 +27,7 @@ use reth_revm::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::primitives::{BlockEnv, CfgEnv, Env};
+use revm::primitives::{BlockEnv, CfgEnv, Env, ResultAndState};
 use std::{
     future::Future,
     pin::Pin,
@@ -41,6 +41,7 @@ use tokio::{
 };
 use tracing::trace;
 use reth_primitives::bloom::logs_bloom;
+use reth_revm::executor::{commit_state_changes, post_block_withdrawals_balance_increments};
 
 // TODO move to common since commonly used
 
@@ -392,7 +393,15 @@ fn build_payload<Pool, Client>(
             evm.database(&mut db);
 
             // TODO skip invalid transactions
-            let res = evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+            let ResultAndState { result, state } =  evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+
+            // commit changes
+            commit_state_changes(
+                &mut db,
+                &mut post_state,
+                state,
+                true,
+            );
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
@@ -409,8 +418,16 @@ fn build_payload<Pool, Client>(
             cumulative_gas_used += res.result.gas_used();
         }
 
-        // TODO process shanghai withdrawals, No block reward which is issued by consensus layer
-        // instead
+        // get balance changes from withdrawals
+        let balance_increments = post_block_withdrawals_balance_increments(
+            &chain_spec,
+            attributes.timestamp,
+            &attributes.withdrawals,
+            );
+
+        for (address, increment) in balance_increments {
+            // self.increment_account_balance(address, increment, &mut post_state)?;
+        }
 
         // create the block header
 
