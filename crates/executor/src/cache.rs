@@ -39,7 +39,6 @@ use tracing::trace;
 use wtinylfu::WTinyLfuCache;
 
 // TODO: Impl debug
-
 pub struct ExecutionCache {
     account_cache: WTinyLfuCache<Address, Option<Account>>,
     storage_cache: WTinyLfuCache<Address, Storage>,
@@ -151,7 +150,10 @@ impl ExecutionCache {
                 .push(
                     address,
                     Storage {
-                        storage: BTreeMap::from([(slot.into(), value.into())]),
+                        storage: HashMap::from([(
+                            U256::from_be_bytes(slot.to_fixed_bytes()),
+                            value,
+                        )]),
                         wiped: false,
                     },
                 )

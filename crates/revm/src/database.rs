@@ -20,7 +20,6 @@ struct SubStateInner {
     pub accounts: HashMap<Address, Option<Account>>,
     pub storages: HashMap<Address, Storage>,
     pub bytecode: HashMap<H256, reth_primitives::Bytecode>,
-    pub block_hashes: HashMap<U256, U256>,
 }
 
 // TODO

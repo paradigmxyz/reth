@@ -9,7 +9,7 @@ use reth_db::{
 use reth_primitives::{
     Account, Address, Bytecode, Receipt, StorageEntry, TransitionId, H256, U256,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Storage for an account.
 ///
@@ -25,7 +25,7 @@ pub struct Storage {
     /// Whether the storage was wiped or not.
     pub wiped: bool,
     /// The storage slots.
-    pub storage: BTreeMap<U256, U256>,
+    pub storage: HashMap<U256, U256>,
 }
 
 /// Storage for an account with the old and new values for each slot.
@@ -175,12 +175,12 @@ pub struct PostState {
     /// The state of all modified accounts after execution.
     ///
     /// If the value contained is `None`, then the account should be deleted.
-    accounts: BTreeMap<Address, Option<Account>>,
+    accounts: HashMap<Address, Option<Account>>,
     /// The state of all modified storage after execution
     ///
     /// If the contained [Storage] is marked as wiped, then all storage values should be cleared
     /// from the database.
-    storage: BTreeMap<Address, Storage>,
+    storage: HashMap<Address, Storage>,
     /// The changes to state that happened during execution
     changes: Vec<Change>,
     /// New code created during the execution
@@ -217,7 +217,7 @@ impl PostState {
     }
 
     /// Get the latest state of accounts.
-    pub fn accounts(&self) -> &BTreeMap<Address, Option<Account>> {
+    pub fn accounts(&self) -> &HashMap<Address, Option<Account>> {
         &self.accounts
     }
 
@@ -233,7 +233,7 @@ impl PostState {
     }
 
     /// Get the latest state of storage.
-    pub fn storage(&self) -> &BTreeMap<Address, Storage> {
+    pub fn storage(&self) -> &HashMap<Address, Storage> {
         &self.storage
     }
 
