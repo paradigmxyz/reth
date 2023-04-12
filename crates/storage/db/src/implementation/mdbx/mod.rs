@@ -74,7 +74,7 @@ impl<E: EnvironmentKind> Env<E> {
                     ..Default::default()
                 })
                 .open(path)
-                .map_err(|e| Error::DatabaseLocation(e.into()))?,
+                .map_err(|e| Error::FailedToOpen(e.into()))?,
         };
 
         Ok(env)

@@ -2,8 +2,8 @@
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum Error {
     /// Failed to open database.
-    #[error("{0:?}")]
-    DatabaseLocation(i32),
+    #[error("Failed to open database: {0:?}")]
+    FailedToOpen(i32),
     /// Failed to create a table in database.
     #[error("Table Creating error code: {0:?}")]
     TableCreation(i32),
