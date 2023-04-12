@@ -2,7 +2,7 @@ use crate::{
     exec_or_return, ExecAction, ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput,
     UnwindOutput,
 };
-use metrics_core::{Counter, Gauge};
+use metrics_core::Gauge;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -11,7 +11,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_executor::{cache::ExecutionCache, BlockExecutor, ExecutorFactory};
-use reth_interfaces::provider::ProviderError;
 use reth_metrics_derive::Metrics;
 use reth_primitives::{
     constants::MGAS_TO_GAS, Address, Block, BlockNumber, BlockWithSenders, U256,
@@ -60,9 +59,9 @@ pub struct ExecutionStage<EF: ExecutorFactory> {
     metrics: ExecutionStageMetrics,
     /// The stage's internal executor
     executor_factory: EF,
-    /// TODO
+    /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
-    /// TODO
+    /// The execution cache for the execution stage.
     execution_cache: Arc<Mutex<ExecutionCache>>,
 }
 
@@ -121,7 +120,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        // TODO: if we go with gas threshold, rm block threshold
         let (start_block, max_block) = exec_or_return!(input, "sync::stages::execution");
         let last_block = input.stage_progress.unwrap_or_default();
         let first_transition_id = tx.get_block_transition(last_block)?;
@@ -375,6 +373,7 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
 /// - A maximum of 500k blocks will be processed per batch
 /// - A maximum of 1000 mgas will be processed per batch
 /// - After 100 mgas history is written to the pending database transaction
+#[derive(Debug)]
 pub struct ExecutionStageThresholds {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
@@ -399,12 +398,14 @@ impl Default for ExecutionStageThresholds {
 }
 
 impl ExecutionStageThresholds {
+    /// Check if the batch thresholds have been hit.
     #[inline]
     pub fn is_end_of_batch(&self, blocks_processed: u64, gas_processed: u64) -> bool {
         blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
             gas_processed >= self.max_gas.unwrap_or(u64::MAX)
     }
 
+    /// Check if the history write threshold has been hit.
     #[inline]
     pub fn should_write_history(&self, gas_since_history_write: u64) -> bool {
         gas_since_history_write >= self.changeset_max_gas.unwrap_or(u64::MAX)

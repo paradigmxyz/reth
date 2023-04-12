@@ -3,80 +3,50 @@ use reth_interfaces::Error;
 use reth_primitives::{Account, Address, Bytecode, H160, H256, KECCAK_EMPTY, U256};
 use reth_provider::{post_state::Storage, StateProvider};
 use reth_revm_primitives::to_reth_acc;
-use revm::{
-    db::{CacheDB, DatabaseRef},
-    primitives::AccountInfo,
-    Database, DatabaseCommit,
-};
+use revm::{db::DatabaseRef, primitives::AccountInfo, Database, DatabaseCommit};
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
-#[derive(Default)]
-struct SubStateInner {
-    /// Account info where None means it is not existing. Not existing state is needed for Pre
-    /// TANGERINE forks. `code` is always `None`, and bytecode can be found in `contracts`.
-    pub accounts: HashMap<Address, Option<Account>>,
-    pub storages: HashMap<Address, Storage>,
-    pub bytecode: HashMap<H256, reth_primitives::Bytecode>,
-}
-
-// TODO
+/// A substate contains the current world state after execution. It uses a [`StateProvider`] to
+/// fetch pre-execution state from disk.
+///
+/// The database can be used with a shared [`ExecutionCache`] to reduce reads in-between execution
+/// of blocks or batches of blocks.
 pub struct SubState<SP: StateProvider> {
     cache: Arc<Mutex<ExecutionCache>>,
-    substate: SubStateInner,
+    substate: FlatCache,
     state_provider: SP,
 }
 
 impl<SP: StateProvider> SubState<SP> {
+    /// Create a new `SubState` database with the given state provider and a 0-capacity execution
+    /// cache.
     pub fn new(state_provider: SP) -> Self {
         Self::new_with_cache(state_provider, Arc::new(Mutex::new(ExecutionCache::new(0, 0, 0))))
     }
 
+    /// Create a new `SubState` database with the given state provider and execution cache.
     pub fn new_with_cache(state_provider: SP, cache: Arc<Mutex<ExecutionCache>>) -> Self {
-        Self { cache, substate: SubStateInner::default(), state_provider }
+        Self { cache, substate: FlatCache::default(), state_provider }
     }
 
-    #[deprecated]
-    pub fn load_account(&mut self, address: Address) -> Result<&mut Option<Account>, Error> {
-        // TODO: Make this function go away. We should not mutate this state directly.
-        // Currently, as a fast PoC, I just remove the loaded account from the LRU and manage the
-        // state using the dumb cache.
-        self.cache.lock().expect("Could not lock execution cache").drop_account(address);
-        match self.substate.accounts.entry(address) {
-            Entry::Occupied(entry) => Ok(entry.into_mut()),
-            Entry::Vacant(entry) => Ok(entry.insert(self.state_provider.basic_account(address)?)),
-        }
-    }
-
-    #[deprecated]
-    pub fn substate_account(&mut self, address: Address) -> Option<Account> {
-        if let Some(v) =
-            self.cache.lock().expect("Could not lock execution cache").get_account(address)
-        {
-            Some(v.clone())
-        } else if let Some(account) = self.substate.accounts.get(&address).map(|a| a.as_ref()) {
-            account.cloned()
-        } else {
-            None
-        }
-    }
-
-    #[deprecated]
+    /// Check if the cache contains a specific bytecode.
+    ///
+    /// # Note
+    ///
+    /// This will not attempt to load from the database if the bytecode is not in the cache.
     pub fn has_code(&mut self, code_hash: H256) -> bool {
-        if let Some(_) =
+        if code_hash == KECCAK_EMPTY {
+            true
+        } else if let Some(_) =
             self.cache.lock().expect("Could not lock execution cache").get_bytecode(code_hash)
         {
             true
         } else {
             self.substate.bytecode.contains_key(&code_hash)
         }
-    }
-
-    #[deprecated]
-    pub fn state(&self) -> &SP {
-        &self.state_provider
     }
 }
 
@@ -114,7 +84,6 @@ impl<SP: StateProvider> DatabaseCommit for SubState<SP> {
             }
 
             // Update account
-            // TODO: Maybe doesnt exist account state will fuck things up here ?
             let db_account = self.substate.accounts.entry(address).or_default();
             *db_account = Some(to_reth_acc(&account.info));
             cache.update_account(address, db_account.clone());
@@ -145,7 +114,6 @@ impl<SP: StateProvider> DatabaseCommit for SubState<SP> {
     }
 }
 
-// TODO: Remove unwraps
 impl<SP: StateProvider> Database for SubState<SP> {
     type Error = Error;
 
@@ -220,33 +188,36 @@ impl<SP: StateProvider> Database for SubState<SP> {
     }
 }
 
-/// Wrapper around StateProvider that implements revm database trait
-#[deprecated]
-pub struct State<DB: StateProvider>(pub DB);
+/// This is a dumb unbounded flat cache for EVM objects.
+///
+/// It is used in tandem with an [`ExecutionCache`] to ensure changes to state that have not been
+/// committed to disk are still available, as those objects might get evicted from the LRU in the
+/// [`ExecutionCache`].
+///
+/// Ideally, this is either replaced with a reference to `PostState` (since it already contains all
+/// of this information), or it is repurposed to *only* being an overflow cache, as currently the
+/// [`SubState`] database writes to both the execution cache and this cache.
+#[derive(Default)]
+struct FlatCache {
+    /// The account cache. `None` represents that the account does not exist.
+    accounts: HashMap<Address, Option<Account>>,
+    /// The storage cache.
+    storages: HashMap<Address, Storage>,
+    /// The bytecode cache.
+    bytecode: HashMap<H256, Bytecode>,
+}
 
-impl<DB: StateProvider> State<DB> {
-    /// Create new State with generic StateProvider.
+/// Wrapper around a [`StateProvider`] that implements the revm [`DatabaseRef`] trait.
+pub struct StateProviderDatabase<DB: StateProvider>(pub DB);
+
+impl<DB: StateProvider> StateProviderDatabase<DB> {
+    /// Create a new [`StateProviderDatabase`] with the given state provider.
     pub fn new(db: DB) -> Self {
         Self(db)
     }
-
-    /// Return inner state reference
-    pub fn state(&self) -> &DB {
-        &self.0
-    }
-
-    /// Return inner state mutable reference
-    pub fn state_mut(&mut self) -> &mut DB {
-        &mut self.0
-    }
-
-    /// Consume State and return inner StateProvider.
-    pub fn into_inner(self) -> DB {
-        self.0
-    }
 }
 
-impl<DB: StateProvider> DatabaseRef for State<DB> {
+impl<DB: StateProvider> DatabaseRef for StateProviderDatabase<DB> {
     type Error = Error;
 
     fn basic(&self, address: H160) -> Result<Option<AccountInfo>, Self::Error> {

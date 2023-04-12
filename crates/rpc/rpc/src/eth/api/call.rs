@@ -15,14 +15,11 @@ use ethers_core::utils::get_contract_address;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{AccessList, BlockId, BlockNumberOrTag, U256};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProvider, StateProviderFactory};
-use reth_revm::{
-    access_list::AccessListInspector,
-    database::{State, SubState},
-};
+use reth_revm::{access_list::AccessListInspector, database::SubState};
 use reth_rpc_types::CallRequest;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    db::{CacheDB, Database},
+    db::Database,
     primitives::{BlockEnv, CfgEnv, Env, ExecutionResult, Halt, TransactTo},
 };
 use tracing::trace;
@@ -81,17 +78,18 @@ where
 
         // Configure the evm env
         let mut env = build_call_evm_env(cfg, block, request)?;
-        let mut db = SubState::new(state);
 
         // if the request is a simple transfer we can optimize
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
-                if let Ok(code) = db.state().account_code(to) {
+                if let Ok(code) = state.account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // simple transfer, check if caller has sufficient funds
-                        let available_funds =
-                            db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
+                        let available_funds = state
+                            .basic_account(env.tx.caller)?
+                            .map(|acc| acc.balance)
+                            .unwrap_or_default();
                         if env.tx.value > available_funds {
                             return Err(InvalidTransactionError::InsufficientFundsForTransfer.into())
                         }
@@ -105,7 +103,7 @@ where
         let gas_price = env.tx.gas_price;
         if gas_price > U256::ZERO {
             let mut available_funds =
-                db.basic(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
+                state.basic_account(env.tx.caller)?.map(|acc| acc.balance).unwrap_or_default();
             if env.tx.value > available_funds {
                 return Err(InvalidTransactionError::InsufficientFunds.into())
             }
@@ -129,6 +127,7 @@ where
         trace!(target: "rpc::eth::estimate", ?env, "Starting gas estimation");
 
         // execute the call without writing to db
+        let mut db = SubState::new(state);
         let ethres = transact(&mut db, env.clone());
 
         // Exceptional case: init used too much gas, we need to increase the gas limit and try

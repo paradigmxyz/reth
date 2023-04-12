@@ -47,11 +47,13 @@ pub struct ExecutionCache {
 // TODO: Replace bytecode cache with an LRU cache (no need for it to be complicated)
 // TODO: Figure out sample sizes
 // TODO: Appropriate default cache sizes
-// TODO: return Result<Option>
+// TODO: On sample sizes/cache mechanism: https://9vx.org/post/on-window-tinylfu/
+// TODO: https://news.ycombinator.com/item?id=26452890
+// TODO: Explain current sample sizes and why we chose them
+// TODO: A way to commit changes
 
 impl ExecutionCache {
-    // TODO: On sample sizes/cache mechanism: https://9vx.org/post/on-window-tinylfu/
-    // TODO: https://news.ycombinator.com/item?id=26452890
+    /// Create a new execution cache with the given capacities.
     pub fn new(
         account_cache_size: usize,
         storage_cache_size: usize,
@@ -65,6 +67,13 @@ impl ExecutionCache {
         }
     }
 
+    /// Returns a clone of the account corresponding to the given address.
+    ///
+    /// If the account is not in the cache, calls `f`.
+    ///
+    /// # Note
+    ///
+    /// This produces a cache sample, updates metrics, and bumps recency of the entry.
     pub fn get_account_with<F>(&mut self, address: Address, f: F) -> Result<Option<Account>>
     where
         F: FnOnce() -> Result<Option<Account>>,
@@ -85,7 +94,11 @@ impl ExecutionCache {
         })
     }
 
-    // TODO
+    /// Returns a reference to the account corresponding to the given address.
+    ///
+    /// # Note
+    ///
+    /// This does not produce a cache sample, update metrics, or increase recency of the entry.
     pub fn get_account(&mut self, address: Address) -> Option<&Account> {
         if let Some(account) = self.account_cache.get(&address).map(|a| a.as_ref()) {
             account
@@ -94,6 +107,13 @@ impl ExecutionCache {
         }
     }
 
+    /// Returns a clone of the storage value corresponding to the given storage slot.
+    ///
+    /// If the value is not in the cache, calls `f`.
+    ///
+    /// # Note
+    ///
+    /// This produces a cache sample, updates metrics, and bumps recency of the entry.
     pub fn get_storage_with<F>(
         &mut self,
         address: Address,
@@ -137,6 +157,13 @@ impl ExecutionCache {
         }
     }
 
+    /// Returns a clone of the bytecode corresponding to the given code hash.
+    ///
+    /// If the bytecode is not in the cache, calls `f`.
+    ///
+    /// # Note
+    ///
+    /// This produces a cache sample, updates metrics, and bumps recency of the entry.
     pub fn get_bytecode_with<F>(&mut self, code_hash: H256, f: F) -> Result<Option<Bytecode>>
     where
         F: FnOnce() -> Result<Option<Bytecode>>,
@@ -157,12 +184,16 @@ impl ExecutionCache {
         })
     }
 
-    // TODO
+    /// Returns a reference to the bytecode corresponding to the given code hash.
+    ///
+    /// # Note
+    ///
+    /// This does not produce a cache sample, update metrics, or increase recency of the entry.
     pub fn get_bytecode(&mut self, code_hash: H256) -> Option<Bytecode> {
         self.bytecode_cache.get(&code_hash).cloned().flatten()
     }
 
-    #[deprecated]
+    /// Clear the storage of an account.
     pub fn clear_storage(&mut self, address: Address) {
         if let Some(cached_storage) = self.storage_cache.peek_mut(&address) {
             cached_storage.storage.clear();
@@ -170,7 +201,7 @@ impl ExecutionCache {
         }
     }
 
-    #[deprecated]
+    /// Update the storage of an account.
     pub fn update_storage<T: IntoIterator<Item = (U256, U256)>>(
         &mut self,
         address: Address,
@@ -184,25 +215,15 @@ impl ExecutionCache {
         }
     }
 
-    #[deprecated]
+    /// Update an account.
     pub fn update_account(&mut self, address: Address, account: Option<Account>) {
         self.account_cache.push(address, account.clone());
     }
 
-    #[deprecated]
+    /// Update a bytecode.
     pub fn update_bytecode(&mut self, code_hash: H256, code: Bytecode) {
         self.bytecode_cache.push(code_hash, Some(code));
     }
-
-    // TODO: Temp
-    #[deprecated]
-    pub fn drop_account(&mut self, address: Address) {
-        self.account_cache.pop(&address);
-        self.storage_cache.pop(&address);
-    }
-
-    // TODO: A way to commit changes
-    // TODO: We need to keep a cache DB for diffing...
 }
 
 /// Execution cache metrics

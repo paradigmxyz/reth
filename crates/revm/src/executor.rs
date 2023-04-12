@@ -9,13 +9,13 @@ use reth_consensus_common::calc;
 use reth_executor::BlockExecutor;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    constants::EMPTY_RECEIPTS, hex_literal::hex, Account, Address, Block, Bloom, Bytecode,
-    ChainSpec, Hardfork, Header, Log, Receipt, ReceiptWithBloom, TransactionSigned, H256, U256,
+    constants::EMPTY_RECEIPTS, Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork,
+    Header, Log, Receipt, ReceiptWithBloom, TransactionSigned, H256, KECCAK_EMPTY, U256,
 };
 use reth_provider::{post_state::StorageChangeset, PostState, StateProvider};
 use revm::{
-    primitives::{hash_map, Account as RevmAccount, ResultAndState},
-    DatabaseCommit, EVM,
+    primitives::{hash_map, Account as RevmAccount, AccountInfo, ResultAndState},
+    Database, DatabaseCommit, EVM,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -106,7 +106,10 @@ where
         // iterate over all changed accounts
         for (address, account) in &changes {
             let code_is_new = !account.is_destroyed && !db.has_code(account.info.code_hash);
-            let db_account = db.substate_account(*address);
+            let db_account = db
+                .basic(*address)
+                .expect("An account that was not in the cache was mutated, this should not happen")
+                .map(|info| to_reth_acc(&info));
 
             if account.is_destroyed {
                 // The account was destroyed
@@ -209,19 +212,34 @@ where
 
         let mut drained_balance = U256::ZERO;
 
-        // drain all accounts ether
+        // Drain all accounts of ether
+        let mut changes = revm::primitives::HashMap::new();
         for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
-            if let Some(db_account) = db.load_account(address).map_err(|_| Error::ProviderError)? {
+            if let Some(db_account) = db.basic(address).map_err(|_| Error::ProviderError)? {
                 let old = db_account.clone();
-                // drain balance
-                drained_balance += core::mem::take(&mut db_account.balance);
-                let new = db_account.clone();
-                // assume it is changeset as it is irregular state change
-                post_state.change_account(address, old, new);
+                let mut new = db_account.clone();
+                drained_balance += std::mem::take(&mut new.balance);
+
+                // Assume it is changeset as it is irregular state change
+                post_state.change_account(address, to_reth_acc(&old), to_reth_acc(&new));
+                changes.insert(
+                    address,
+                    revm::primitives::Account {
+                        info: new,
+                        storage: Default::default(),
+                        storage_cleared: false,
+                        is_destroyed: false,
+                        is_touched: false,
+                        is_not_existing: false,
+                    },
+                );
             }
         }
 
-        // add drained ether to beneficiary.
+        // Update the accounts in the in-memory database
+        db.commit(changes);
+
+        // Add drained ether to beneficiary
         let beneficiary = reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
         self.increment_account_balance(beneficiary, drained_balance, post_state)?;
 
@@ -236,23 +254,47 @@ where
         post_state: &mut PostState,
     ) -> Result<(), Error> {
         let db = self.db();
-        let beneficiary = db.load_account(address).map_err(|_| Error::ProviderError)?;
+        let beneficiary = db.basic(address).map_err(|_| Error::ProviderError)?;
 
-        if let Some(beneficiary) = beneficiary {
+        let new_account = if let Some(beneficiary) = beneficiary {
             // Account already existed
             let old = beneficiary.clone();
-            beneficiary.balance += increment;
             let mut new = beneficiary.clone();
+            new.balance += increment;
+            post_state.change_account(address, to_reth_acc(&old), to_reth_acc(&new));
 
-            post_state.change_account(address, old, new);
+            revm::primitives::Account {
+                info: new,
+                storage: Default::default(),
+                storage_cleared: false,
+                is_destroyed: false,
+                is_touched: false,
+                is_not_existing: false,
+            }
         } else {
-            // TODO: Will this cause trouble?
+            // The account is new
             post_state.create_account(
                 address,
                 Account { nonce: 0, balance: increment, bytecode_hash: None },
             );
-            *beneficiary = Some(Account { nonce: 0, balance: increment, bytecode_hash: None });
-        }
+
+            revm::primitives::Account {
+                info: AccountInfo {
+                    balance: increment,
+                    nonce: 0,
+                    code_hash: KECCAK_EMPTY,
+                    code: None,
+                },
+                storage: Default::default(),
+                storage_cleared: false,
+                is_destroyed: false,
+                is_touched: false,
+                is_not_existing: false,
+            }
+        };
+
+        // Update the account in the in-memory database
+        db.commit(revm::primitives::HashMap::from([(address, new_account)]).into());
 
         Ok(())
     }
@@ -451,7 +493,7 @@ pub fn verify_receipt<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::State;
+    use crate::database::StateProviderDatabase;
     use reth_consensus_common::calc;
     use reth_primitives::{
         constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
@@ -588,7 +630,7 @@ mod tests {
         // spec at berlin fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDatabase::new(db));
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
@@ -761,7 +803,7 @@ mod tests {
                 .build(),
         );
 
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDatabase::new(db));
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
         let out = executor
@@ -850,7 +892,7 @@ mod tests {
         // spec at berlin fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build());
 
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDatabase::new(db));
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
@@ -900,7 +942,7 @@ mod tests {
         // spec at shanghai fork
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let db = SubState::new(State::new(StateProviderTest::default()));
+        let db = SubState::new(StateProviderDatabase::new(StateProviderTest::default()));
 
         // execute chain and verify receipts
         let mut executor = Executor::new(chain_spec, db);
@@ -946,7 +988,7 @@ mod tests {
         db.insert_account(account, Account::default(), None, HashMap::default());
 
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().istanbul_activated().build());
-        let db = SubState::new(State::new(db));
+        let db = SubState::new(StateProviderDatabase::new(db));
 
         let default_acc = RevmAccount {
             info: AccountInfo::default(),

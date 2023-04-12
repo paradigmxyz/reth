@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
-    database::{State, SubState},
+    database::{StateProviderDatabase, SubState},
     tracing::{TracingInspector, TracingInspectorConfig},
 };
 use reth_rpc_types::{
@@ -88,7 +88,11 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send;
+        F: for<'r> FnOnce(
+                CacheDB<StateProviderDatabase<StateProviderBox<'r>>>,
+                Env,
+            ) -> EthResult<R>
+            + Send;
 
     /// Executes the call request at the given [BlockId].
     async fn transact_call_at(
@@ -107,7 +111,7 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send;
+        I: for<'r> Inspector<CacheDB<StateProviderDatabase<StateProviderBox<'r>>>> + Send;
 
     /// Executes the transaction at the given [BlockId] with a tracer configured by the config.
     /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
@@ -325,11 +329,15 @@ where
         f: F,
     ) -> EthResult<R>
     where
-        F: for<'r> FnOnce(CacheDB<State<StateProviderBox<'r>>>, Env) -> EthResult<R> + Send,
+        F: for<'r> FnOnce(
+                CacheDB<StateProviderDatabase<StateProviderBox<'r>>>,
+                Env,
+            ) -> EthResult<R>
+            + Send,
     {
         let (cfg, block_env, at) = self.evm_env_at(at).await?;
         let state = self.state_at(at)?;
-        let mut db = CacheDB::new(State::new(state));
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         let env = prepare_call_env(cfg, block_env, request, &mut db, state_overrides)?;
         f(db, env)
@@ -352,7 +360,7 @@ where
         inspector: I,
     ) -> EthResult<(ResultAndState, Env)>
     where
-        I: for<'r> Inspector<CacheDB<State<StateProviderBox<'r>>>> + Send,
+        I: for<'r> Inspector<CacheDB<StateProviderDatabase<StateProviderBox<'r>>>> + Send,
     {
         self.with_call_at(request, at, state_overrides, |db, env| inspect(db, env, inspector)).await
     }

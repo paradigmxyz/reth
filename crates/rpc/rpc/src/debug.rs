@@ -12,7 +12,7 @@ use jsonrpsee::core::RpcResult;
 use reth_primitives::{BlockId, BlockNumberOrTag, Bytes, H256, U256};
 use reth_provider::{BlockProvider, HeaderProvider};
 use reth_revm::{
-    database::{State, SubState},
+    database::SubState,
     env::tx_env_with_recovered,
     tracing::{TracingInspector, TracingInspectorConfig},
 };
