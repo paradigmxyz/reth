@@ -253,7 +253,9 @@ impl Transaction {
         }
     }
 
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price
+    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     pub fn max_fee_per_gas(&self) -> u128 {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
@@ -264,6 +266,8 @@ impl Transaction {
 
     /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
     /// is `None`
+    ///
+    /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
     pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             Transaction::Legacy(_) => None,
