@@ -3,8 +3,8 @@
 use crate::PostState;
 use reth_interfaces::{executor::Error as ExecError, Error};
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlockWithSenders, TransitionId,
-    TxHash,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
+    TransitionId, TxHash,
 };
 use std::collections::BTreeMap;
 
@@ -49,6 +49,13 @@ impl Chain {
     /// Return block inner transition ids.
     pub fn block_transitions(&self) -> &BTreeMap<BlockNumber, TransitionId> {
         &self.block_transitions
+    }
+
+    /// Returns the block with matching hash.
+    pub fn block(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
+        self.blocks
+            .iter()
+            .find_map(|(_num, block)| (block.hash() == block_hash).then_some(&block.block))
     }
 
     /// Return post state of the block at the `block_number` or None if block is not known

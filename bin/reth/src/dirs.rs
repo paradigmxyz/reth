@@ -1,4 +1,5 @@
 //! reth data directories.
+use reth_primitives::Chain;
 use reth_staged_sync::utils::parse_path;
 use std::{
     env::VarError,
@@ -6,6 +7,19 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
+
+/// Constructs a string to be used as a path for configuration and db paths.
+pub fn build_config_path_prefix(chain: Chain) -> String {
+    if chain == Chain::mainnet() {
+        "mainnet".to_string()
+    } else if chain == Chain::goerli() {
+        "goerli".to_string()
+    } else if chain == Chain::sepolia() {
+        "sepolia".to_string()
+    } else {
+        chain.id().to_string()
+    }
+}
 
 /// Returns the path to the reth data directory.
 ///
@@ -202,5 +216,71 @@ impl<D> AsRef<Path> for PlatformPath<D> {
 impl<D> From<PlatformPath<D>> for PathBuf {
     fn from(value: PlatformPath<D>) -> Self {
         value.0
+    }
+}
+
+impl<D> PlatformPath<D> {
+    /// Returns the path joined with another path
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> PathBuf {
+        self.0.join(path)
+    }
+}
+
+impl<D> PlatformPath<D> {
+    /// Converts the path to a `ChainPath` with the given `Chain`.
+    ///
+    /// If the inner path type refers to a file, the chain will be inserted between the parent
+    /// directory and the file name. If the inner path type refers to a directory, the chain will be
+    /// inserted between the parent directory and the directory name.
+    pub fn with_chain(&self, chain: Chain) -> ChainPath<D> {
+        // extract the parent and final component
+        let parent = self.0.parent().expect("Could not get parent of path");
+        let final_component = self.0.file_name().expect("Could not get file name of path");
+
+        // put the chain part in the middle
+        let chain_name = build_config_path_prefix(chain);
+        let mut path = PathBuf::from(parent);
+        path.push(chain_name);
+        path.push(final_component);
+
+        let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
+        ChainPath::new(platform_path, chain)
+    }
+}
+
+/// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
+/// different networks.
+///
+/// If the chain is either mainnet, goerli, or sepolia, then the path will be:
+///  * mainnet: `<DIR>/mainnet`
+///  * goerli: `<DIR>/goerli`
+///  * sepolia: `<DIR>/sepolia`
+/// Otherwise, the path will be dependent on the chain ID:
+///  * `<DIR>/<CHAIN_ID>`
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChainPath<D>(PlatformPath<D>, Chain);
+
+impl<D> ChainPath<D> {
+    /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
+    pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
+        Self(path, chain)
+    }
+}
+
+impl<D> AsRef<Path> for ChainPath<D> {
+    fn as_ref(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
+
+impl<D> Display for ChainPath<D> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<D> From<ChainPath<D>> for PathBuf {
+    fn from(value: ChainPath<D>) -> Self {
+        value.0.into()
     }
 }

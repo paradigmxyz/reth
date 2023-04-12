@@ -33,12 +33,6 @@ pub fn validate_header_standalone(
         })
     }
 
-    // From yellow paper: extraData: An arbitrary byte array containing data
-    // relevant to this block. This must be 32 bytes or fewer; formally Hx.
-    if header.extra_data.len() > 32 {
-        return Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
-    }
-
     // Check if base fee is set.
     if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
         header.base_fee_per_gas.is_none()

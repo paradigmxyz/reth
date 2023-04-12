@@ -53,9 +53,12 @@ pub struct Command {
 impl Command {
     /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        std::fs::create_dir_all(&self.db)?;
+        // add network name to db directory
+        let db_path = self.db.with_chain(self.chain.chain);
 
-        let db = Env::<WriteMap>::open(self.db.as_ref(), reth_db::mdbx::EnvKind::RW)?;
+        std::fs::create_dir_all(&db_path)?;
+
+        let db = Env::<WriteMap>::open(db_path.as_ref(), reth_db::mdbx::EnvKind::RW)?;
 
         let tool = DbTool::new(&db)?;
 
