@@ -16,6 +16,7 @@ reth-db = { path = "../../storage/db" }
 reth-rpc-types = { path = "../../rpc/rpc-types" }
 reth-tasks = { path = "../../tasks" }
 reth-miner = { path = "../../miner" }
+reth-metrics-derive = { path = "../../metrics/metrics-derive" }
 
 # async
 tokio = { version = "1.21.2", features = ["sync"] }
@@ -25,6 +26,7 @@ futures = "0.3"
 # misc
 tracing = "0.1"
 thiserror = "1.0"
+metrics = "0.20.1"
 
 [dev-dependencies]
 # reth

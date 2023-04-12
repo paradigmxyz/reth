@@ -4515,10 +4515,12 @@ version = "0.1.0"
 dependencies = [
  "assert_matches",
  "futures",
+ "metrics",
  "reth-consensus-common",
  "reth-db",
  "reth-executor",
  "reth-interfaces",
+ "reth-metrics-derive",
  "reth-miner",
  "reth-primitives",
  "reth-provider",
