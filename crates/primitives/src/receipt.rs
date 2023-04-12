@@ -66,62 +66,17 @@ impl ReceiptWithBloom {
     pub fn into_components(self) -> (Receipt, Bloom) {
         (self.receipt, self.bloom)
     }
+
+    #[inline]
+    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+        ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
+    }
 }
 
 impl ReceiptWithBloom {
-    /// Returns the rlp header for the receipt payload.
-    fn receipt_rlp_header(&self) -> reth_rlp::Header {
-        let mut rlp_head = reth_rlp::Header { list: true, payload_length: 0 };
-
-        rlp_head.payload_length += self.receipt.success.length();
-        rlp_head.payload_length += self.receipt.cumulative_gas_used.length();
-        rlp_head.payload_length += self.bloom.length();
-        rlp_head.payload_length += self.receipt.logs.length();
-
-        rlp_head
-    }
-
-    /// Encodes the receipt data.
-    fn encode_fields(&self, out: &mut dyn BufMut) {
-        self.receipt_rlp_header().encode(out);
-        self.receipt.success.encode(out);
-        self.receipt.cumulative_gas_used.encode(out);
-        self.bloom.encode(out);
-        self.receipt.logs.encode(out);
-    }
-
     /// Encode receipt with or without the header data.
     pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
-        if matches!(self.receipt.tx_type, TxType::Legacy) {
-            self.encode_fields(out);
-            return
-        }
-
-        let mut payload = BytesMut::new();
-        self.encode_fields(&mut payload);
-
-        if with_header {
-            let payload_length = payload.len() + 1;
-            let header = reth_rlp::Header { list: false, payload_length };
-            header.encode(out);
-        }
-
-        match self.receipt.tx_type {
-            TxType::EIP2930 => {
-                out.put_u8(0x01);
-            }
-            TxType::EIP1559 => {
-                out.put_u8(0x02);
-            }
-            _ => unreachable!("legacy handled; qed."),
-        }
-        out.put_slice(payload.as_ref());
-    }
-
-    /// Returns the length of the receipt data.
-    fn receipt_length(&self) -> usize {
-        let rlp_head = self.receipt_rlp_header();
-        length_of_length(rlp_head.payload_length) + rlp_head.payload_length
+        self.as_encoder().encode_inner(out, with_header)
     }
 
     /// Decodes the receipt payload
@@ -135,7 +90,7 @@ impl ReceiptWithBloom {
 
         let success = reth_rlp::Decodable::decode(b)?;
         let cumulative_gas_used = reth_rlp::Decodable::decode(b)?;
-        let bloom = reth_rlp::Decodable::decode(b)?;
+        let bloom = Decodable::decode(b)?;
         let logs = reth_rlp::Decodable::decode(b)?;
 
         let this = Self { receipt: Receipt { tx_type, success, cumulative_gas_used, logs }, bloom };
@@ -156,15 +111,7 @@ impl Encodable for ReceiptWithBloom {
         self.encode_inner(out, true)
     }
     fn length(&self) -> usize {
-        let mut payload_len = self.receipt_length();
-        // account for eip-2718 type prefix and set the list
-        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930) {
-            payload_len += 1;
-            // we include a string header for typed receipts, so include the length here
-            payload_len += length_of_length(payload_len);
-        }
-
-        payload_len
+        self.as_encoder().length()
     }
 }
 
@@ -199,6 +146,122 @@ impl Decodable for ReceiptWithBloom {
             }
             Ordering::Greater => Self::decode_receipt(buf, TxType::Legacy),
         }
+    }
+}
+
+/// [`Receipt`] reference type with calculated bloom filter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReceiptWithBloomRef<'a> {
+    /// Bloom filter build from logs.
+    pub bloom: Bloom,
+    /// Main receipt body
+    pub receipt: &'a Receipt,
+}
+
+impl<'a> ReceiptWithBloomRef<'a> {
+    /// Create new [ReceiptWithBloomRef]
+    pub fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
+        Self { receipt, bloom }
+    }
+
+    #[inline]
+    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+        ReceiptWithBloomEncoder { receipt: self.receipt, bloom: &self.bloom }
+    }
+}
+
+impl<'a> Encodable for ReceiptWithBloomRef<'a> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.as_encoder().encode_inner(out, true)
+    }
+    fn length(&self) -> usize {
+        self.as_encoder().length()
+    }
+}
+
+impl<'a> From<&'a Receipt> for ReceiptWithBloomRef<'a> {
+    fn from(receipt: &'a Receipt) -> Self {
+        let bloom = receipt.bloom_slow();
+        ReceiptWithBloomRef { receipt, bloom }
+    }
+}
+
+struct ReceiptWithBloomEncoder<'a> {
+    bloom: &'a Bloom,
+    receipt: &'a Receipt,
+}
+
+impl<'a> ReceiptWithBloomEncoder<'a> {
+    /// Returns the rlp header for the receipt payload.
+    fn receipt_rlp_header(&self) -> reth_rlp::Header {
+        let mut rlp_head = reth_rlp::Header { list: true, payload_length: 0 };
+
+        rlp_head.payload_length += self.receipt.success.length();
+        rlp_head.payload_length += self.receipt.cumulative_gas_used.length();
+        rlp_head.payload_length += self.bloom.length();
+        rlp_head.payload_length += self.receipt.logs.length();
+
+        rlp_head
+    }
+
+    /// Encodes the receipt data.
+    fn encode_fields(&self, out: &mut dyn BufMut) {
+        self.receipt_rlp_header().encode(out);
+        self.receipt.success.encode(out);
+        self.receipt.cumulative_gas_used.encode(out);
+        self.bloom.encode(out);
+        self.receipt.logs.encode(out);
+    }
+
+    /// Encode receipt with or without the header data.
+    fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
+        if matches!(self.receipt.tx_type, TxType::Legacy) {
+            self.encode_fields(out);
+            return
+        }
+
+        let mut payload = BytesMut::new();
+        self.encode_fields(&mut payload);
+
+        if with_header {
+            let payload_length = payload.len() + 1;
+            let header = reth_rlp::Header { list: false, payload_length };
+            header.encode(out);
+        }
+
+        match self.receipt.tx_type {
+            TxType::EIP2930 => {
+                out.put_u8(0x01);
+            }
+            TxType::EIP1559 => {
+                out.put_u8(0x02);
+            }
+            _ => unreachable!("legacy handled; qed."),
+        }
+        out.put_slice(payload.as_ref());
+    }
+
+    /// Returns the length of the receipt data.
+    fn receipt_length(&self) -> usize {
+        let rlp_head = self.receipt_rlp_header();
+        length_of_length(rlp_head.payload_length) + rlp_head.payload_length
+    }
+}
+
+impl<'a> Encodable for ReceiptWithBloomEncoder<'a> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.encode_inner(out, true)
+    }
+    fn length(&self) -> usize {
+        let mut payload_len = self.receipt_length();
+        // account for eip-2718 type prefix and set the list
+        if matches!(self.receipt.tx_type, TxType::EIP1559 | TxType::EIP2930) {
+            payload_len += 1;
+            // we include a string header for typed receipts, so include the length here
+            payload_len += length_of_length(payload_len);
+        }
+
+        payload_len
     }
 }
 

@@ -1,5 +1,7 @@
 //! Database debugging tool
 mod hashing_storage;
+use std::sync::Arc;
+
 use hashing_storage::dump_hashing_storage_stage;
 
 mod hashing_account;
@@ -10,6 +12,7 @@ use execution::dump_execution_stage;
 
 mod merkle;
 use merkle::dump_merkle_stage;
+use reth_primitives::ChainSpec;
 
 use crate::{
     dirs::{DbPath, PlatformPath},
@@ -19,7 +22,7 @@ use clap::Parser;
 use reth_db::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
-use reth_staged_sync::utils::init::init_db;
+use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use tracing::info;
 
 /// `reth dump-stage` command
@@ -34,6 +37,23 @@ pub struct Command {
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
     db: PlatformPath<DbPath>,
+
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    ///
+    /// Built-in chains:
+    /// - mainnet
+    /// - goerli
+    /// - sepolia
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        verbatim_doc_comment,
+        default_value = "mainnet",
+        value_parser = genesis_value_parser
+    )]
+    chain: Arc<ChainSpec>,
 
     #[clap(subcommand)]
     command: Stages,
@@ -79,11 +99,14 @@ pub struct StageCommand {
 impl Command {
     /// Execute `dump-stage` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        std::fs::create_dir_all(&self.db)?;
+        // add network name to db directory
+        let db_path = self.db.with_chain(self.chain.chain);
+
+        std::fs::create_dir_all(&db_path)?;
 
         // TODO: Auto-impl for Database trait
         let db = reth_db::mdbx::Env::<reth_db::mdbx::WriteMap>::open(
-            self.db.as_ref(),
+            db_path.as_ref(),
             reth_db::mdbx::EnvKind::RW,
         )?;
 

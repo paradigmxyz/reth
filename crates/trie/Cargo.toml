@@ -22,6 +22,7 @@ tracing = "0.1"
 
 # misc 
 hex = "0.4"
+derive_more = "0.99"
 
 [dev-dependencies]
 # reth

@@ -109,7 +109,10 @@ impl Command {
 
         let unwind = UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
 
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.with_chain(self.chain.chain);
+
+        let db = Arc::new(init_db(db_path)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
         if let Some(listen_addr) = self.metrics {

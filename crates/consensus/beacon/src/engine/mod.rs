@@ -155,8 +155,7 @@ where
             match self.blockchain_tree.make_canonical(&state.head_block_hash) {
                 Ok(_) => {
                     let head_block_number = self
-                        .db
-                        .view(|tx| tx.get::<tables::HeaderNumbers>(state.head_block_hash))??
+                        .get_block_number(state.head_block_hash)?
                         .expect("was canonicalized, so it exists");
                     let pipeline_min_progress =
                         FINISH.get_progress(&self.db.tx()?)?.unwrap_or_default();
@@ -183,7 +182,10 @@ where
                     warn!(target: "consensus::engine", ?state, ?error, "Error canonicalizing the head hash");
                     // If this is the first forkchoice received, start downloading from safe block
                     // hash.
-                    let target = if is_first_forkchoice && !state.safe_block_hash.is_zero() {
+                    let target = if is_first_forkchoice &&
+                        !state.safe_block_hash.is_zero() &&
+                        self.get_block_number(state.safe_block_hash)?.is_none()
+                    {
                         PipelineTarget::Safe
                     } else {
                         PipelineTarget::Head
@@ -366,10 +368,7 @@ where
         &mut self,
         state: ForkchoiceState,
     ) -> Result<(), reth_interfaces::Error> {
-        let needs_pipeline_run = match self
-            .db
-            .view(|tx| tx.get::<tables::HeaderNumbers>(state.finalized_block_hash))??
-        {
+        let needs_pipeline_run = match self.get_block_number(state.finalized_block_hash)? {
             Some(number) => {
                 // Attempt to restore the tree.
                 self.blockchain_tree.restore_canonical_hashes(number)?;
@@ -400,6 +399,11 @@ where
         } else {
             false
         }
+    }
+
+    /// Retrieve the block number for the given block hash.
+    fn get_block_number(&self, hash: H256) -> Result<Option<BlockNumber>, reth_interfaces::Error> {
+        Ok(self.db.view(|tx| tx.get::<tables::HeaderNumbers>(hash))??)
     }
 }
 
