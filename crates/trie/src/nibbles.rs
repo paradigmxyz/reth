@@ -217,8 +217,8 @@ impl Nibbles {
     }
 
     /// Extend the current nibbles with another nibbles.
-    pub fn extend(&mut self, b: &Nibbles) {
-        self.hex_data.extend_from_slice(b);
+    pub fn extend(&mut self, b: impl AsRef<[u8]>) {
+        self.hex_data.extend_from_slice(b.as_ref());
     }
 
     /// Truncate the current nibbles to the given length.

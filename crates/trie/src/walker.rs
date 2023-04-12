@@ -82,7 +82,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
-    fn node(&mut self, exact: bool) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
+    fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, Error> {
         let key = self.key().expect("key must exist");
         let entry = if exact {
             self.cursor.seek_exact(key.hex_data.into())?
@@ -94,7 +94,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             assert!(!node.state_mask.is_empty());
         }
 
-        Ok(entry)
+        Ok(entry.map(|(k, v)| (Nibbles::from(k), v)))
     }
 
     /// Consumes the next node in the trie, updating the stack.
@@ -262,12 +262,12 @@ mod tests {
 
         // We're traversing the path in lexigraphical order.
         for expected in expected {
-            let got = walker.next().unwrap();
+            let got = walker.advance().unwrap();
             assert_eq!(got.unwrap(), Nibbles::from(&expected[..]));
         }
 
         // There should be 8 paths traversed in total from 3 branches.
-        let got = walker.next().unwrap();
+        let got = walker.advance().unwrap();
         assert!(got.is_none());
     }
 
@@ -314,7 +314,7 @@ mod tests {
         let mut cursor = TrieWalker::new(&mut trie, Default::default());
         assert_eq!(cursor.key(), Some(Nibbles::from(vec![]))); // root
         assert!(cursor.can_skip_current_node); // due to root_hash
-        cursor.next().unwrap(); // skips to the end of trie
+        cursor.advance().unwrap(); // skips to the end of trie
         assert_eq!(cursor.key(), None);
 
         // We insert something that's not part of the existing trie/prefix.
@@ -326,14 +326,14 @@ mod tests {
         assert_eq!(cursor.key(), Some(Nibbles::from(vec![])));
         // Should not be able to skip state due to the changed values
         assert!(!cursor.can_skip_current_node);
-        cursor.next().unwrap();
+        cursor.advance().unwrap();
         assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x2])));
-        cursor.next().unwrap();
+        cursor.advance().unwrap();
         assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x2, 0x1])));
-        cursor.next().unwrap();
+        cursor.advance().unwrap();
         assert_eq!(cursor.key(), Some(Nibbles::from(vec![0x4])));
 
-        cursor.next().unwrap();
+        cursor.advance().unwrap();
         assert_eq!(cursor.key(), None); // the end of trie
     }
 }

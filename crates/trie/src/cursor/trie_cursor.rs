@@ -1,7 +1,7 @@
 use reth_db::{table::Key, Error};
 use reth_primitives::trie::BranchNodeCompact;
 
-/// A cursor for navigating a trie.
+/// A cursor for navigating a trie that works with both Tables and DupSort tables.
 pub trait TrieCursor<K: Key> {
     /// Move the cursor to the key and return if it is an exact match.
     fn seek_exact(&mut self, key: K) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error>;

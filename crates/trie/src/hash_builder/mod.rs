@@ -426,8 +426,8 @@ mod tests {
         });
     }
 
-    #[tokio::test]
-    async fn test_generates_branch_node() {
+    #[test]
+    fn test_generates_branch_node() {
         let (sender, recv) = mpsc::channel();
         let mut hb = HashBuilder::new(Some(sender));
 

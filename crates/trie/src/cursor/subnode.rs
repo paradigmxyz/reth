@@ -1,11 +1,11 @@
-use crate::nodes::CHILD_INDEX_RANGE;
+use crate::{nodes::CHILD_INDEX_RANGE, Nibbles};
 use reth_primitives::{trie::BranchNodeCompact, H256};
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
 pub struct CursorSubNode {
     /// The key of the current node.
-    pub key: Vec<u8>,
+    pub key: Nibbles,
     /// The index of the next child to visit.
     pub nibble: i8,
     /// The node itself.
@@ -14,7 +14,7 @@ pub struct CursorSubNode {
 
 impl Default for CursorSubNode {
     fn default() -> Self {
-        Self::new(vec![], None)
+        Self::new(Nibbles::default(), None)
     }
 }
 
@@ -33,7 +33,7 @@ impl std::fmt::Debug for CursorSubNode {
 
 impl CursorSubNode {
     /// Creates a new `CursorSubNode` from a key and an optional node.
-    pub fn new(key: Vec<u8>, node: Option<BranchNodeCompact>) -> Self {
+    pub fn new(key: Nibbles, node: Option<BranchNodeCompact>) -> Self {
         // Find the first nibble that is set in the state mask of the node.
         let nibble = match &node {
             Some(n) if n.root_hash.is_none() => {
@@ -45,10 +45,10 @@ impl CursorSubNode {
     }
 
     /// Returns the full key of the current node.
-    pub fn full_key(&self) -> Vec<u8> {
+    pub fn full_key(&self) -> Nibbles {
         let mut out = self.key.clone();
         if self.nibble >= 0 {
-            out.push(self.nibble as u8)
+            out.extend(&[self.nibble as u8]);
         }
         out
     }
