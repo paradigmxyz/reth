@@ -14,6 +14,7 @@ mod value;
 use value::HashBuilderValue;
 
 /// A type alias for a sender of branch nodes.
+/// Branch nodes are sent by the Hash Builder to be stored in the database.
 pub type BranchNodeSender = mpsc::Sender<(Nibbles, BranchNodeCompact)>;
 
 /// A component used to construct the root hash of the trie. The primary purpose of a Hash Builder

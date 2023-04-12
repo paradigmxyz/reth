@@ -69,7 +69,7 @@ impl Nibbles {
     pub fn pack(&self) -> Vec<u8> {
         let length = (self.len() + 1) / 2;
         if length == 0 {
-            Vec::default()
+            Vec::new()
         } else {
             self.iter()
                 .enumerate()
