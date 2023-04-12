@@ -294,9 +294,7 @@ where
             Ok(block) => block,
             Err(error) => {
                 error!(target: "consensus::engine", ?block_hash, block_number, ?error, "Invalid payload");
-                return Ok(PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
-                    validation_error: error.to_string(),
-                }))
+                return Ok(error.into())
             }
         };
 
