@@ -4490,6 +4490,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-basic-payload-builder"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "reth-consensus-common",
+ "reth-miner",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "reth-rlp",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "revm",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-beacon-consensus"
 version = "0.1.0"
 dependencies = [
@@ -4840,9 +4859,11 @@ dependencies = [
  "futures-core",
  "futures-util",
  "parking_lot 0.12.1",
+ "reth-interfaces",
  "reth-primitives",
  "reth-rlp",
  "reth-rpc-types",
+ "revm-primitives",
  "sha2 0.10.6",
  "thiserror",
  "tokio",

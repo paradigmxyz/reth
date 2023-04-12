@@ -1,0 +1,30 @@
+[package]
+name = "reth-basic-payload-builder"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = "A basic payload builder for reth that uses the txpool API to build payloads."
+
+[dependencies]
+## reth
+reth-primitives = { path = "../../primitives" }
+reth-consensus-common = { path = "../../consensus/common" }
+reth-revm = { path = "../../revm" }
+reth-transaction-pool = { path = "../../transaction-pool" }
+reth-rlp = { path = "../../rlp" }
+reth-provider = { path = "../../storage/provider" }
+reth-miner = { path = "../../miner" }
+reth-tasks = { path = "../../tasks" }
+
+## ethereum
+revm = { version = "3" }
+
+## async
+tokio = { version = "1", features = ["sync", "time"] }
+futures-core = "0.3"
+futures-util = "0.3"
+
+## misc
+tracing = "0.1"

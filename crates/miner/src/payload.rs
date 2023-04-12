@@ -1,6 +1,6 @@
 //! Contains types required for building a payload.
 
-use reth_primitives::{Address, Block, SealedBlock, Withdrawal, H256, U256};
+use reth_primitives::{Address, SealedBlock, Withdrawal, H256, U256};
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
 
@@ -23,8 +23,8 @@ pub struct BuiltPayload {
 
 impl BuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub(crate) fn new(id: PayloadId, block: Block, fees: U256) -> Self {
-        Self { id, block: block.seal_slow(), fees }
+    pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
+        Self { id, block, fees }
     }
 
     /// Returns the identifier of the payload.
@@ -46,25 +46,30 @@ impl BuiltPayload {
 /// Container type for all components required to build a payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PayloadBuilderAttributes {
-    // TODO include id here
+    /// Id of the payload
+    pub id: PayloadId,
     /// Parent block to build the payload on top
-    pub(crate) parent: H256,
+    pub parent: H256,
     /// Timestamp for the generated payload
-    pub(crate) timestamp: u64,
+    pub timestamp: u64,
     /// Address of the recipient for collecting transaction fee
-    pub(crate) suggested_fee_recipient: Address,
+    pub suggested_fee_recipient: Address,
     /// Randomness value for the generated payload
-    pub(crate) prev_randao: H256,
+    pub prev_randao: H256,
     /// Withdrawals for the generated payload
-    pub(crate) withdrawals: Vec<Withdrawal>,
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 // === impl PayloadBuilderAttributes ===
 
 impl PayloadBuilderAttributes {
-    /// Creates a new payload builder for the given parent block and the attributes
+    /// Creates a new payload builder for the given parent block and the attributes.
+    ///
+    /// Derives the unique [PayloadId] for the given parent and attributes
     pub fn new(parent: H256, attributes: PayloadAttributes) -> Self {
+        let id = payload_id(&parent, &attributes);
         Self {
+            id,
             parent,
             timestamp: attributes.timestamp.as_u64(),
             suggested_fee_recipient: attributes.suggested_fee_recipient,
@@ -73,20 +78,27 @@ impl PayloadBuilderAttributes {
         }
     }
 
-    /// Generates the payload id for the configured payload
-    ///
-    /// Returns an 8-byte identifier by hashing the payload components.
-    pub(crate) fn payload_id(&self) -> PayloadId {
-        use sha2::Digest;
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(self.parent.as_bytes());
-        hasher.update(&self.timestamp.to_be_bytes()[..]);
-        hasher.update(self.prev_randao.as_bytes());
-        hasher.update(self.suggested_fee_recipient.as_bytes());
-        let mut buf = Vec::new();
-        self.withdrawals.encode(&mut buf);
-        hasher.update(buf);
-        let out = hasher.finalize();
-        PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
+    /// Returns the identifier of the payload.
+    pub fn payload_id(&self) -> PayloadId {
+        self.id
     }
+}
+
+/// Generates the payload id for the configured payload
+///
+/// Returns an 8-byte identifier by hashing the payload components.
+pub(crate) fn payload_id(parent: &H256, attributes: &PayloadAttributes) -> PayloadId {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(parent.as_bytes());
+    hasher.update(&attributes.timestamp.as_u64().to_be_bytes()[..]);
+    hasher.update(attributes.prev_randao.as_bytes());
+    hasher.update(attributes.suggested_fee_recipient.as_bytes());
+    if let Some(withdrawals) = &attributes.withdrawals {
+        let mut buf = Vec::new();
+        withdrawals.encode(&mut buf);
+        hasher.update(buf);
+    }
+    let out = hasher.finalize();
+    PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }

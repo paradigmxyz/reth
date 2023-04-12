@@ -11,6 +11,14 @@ pub trait EvmEnvProvider: Send + Sync {
     /// Fills the [CfgEnv] and [BlockEnv] fields with values specific to the given [BlockId].
     fn fill_env_at(&self, cfg: &mut CfgEnv, block_env: &mut BlockEnv, at: BlockId) -> Result<()>;
 
+    /// Fills the default [CfgEnv] and [BlockEnv] fields with values specific to the given [Header].
+    fn env_with_header(&self, header: &Header) -> Result<(CfgEnv, BlockEnv)> {
+        let mut cfg = CfgEnv::default();
+        let mut block_env = BlockEnv::default();
+        self.fill_env_with_header(&mut cfg, &mut block_env, header)?;
+        Ok((cfg, block_env))
+    }
+
     /// Fills the [CfgEnv] and [BlockEnv]  fields with values specific to the given [Header].
     fn fill_env_with_header(
         &self,
