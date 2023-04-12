@@ -46,7 +46,7 @@ where
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
         Ok(self
             .cursor
-            .seek_by_key_subkey(self.hashed_address, key.clone())?
+            .seek_by_key_subkey(self.hashed_address, key)?
             .map(|value| (value.nibbles.inner.to_vec(), value.node)))
     }
 
@@ -63,7 +63,7 @@ where
     }
 
     fn delete_current(&mut self) -> Result<(), Error> {
-        Ok(self.cursor.delete_current()?)
+        self.cursor.delete_current()
     }
 }
 

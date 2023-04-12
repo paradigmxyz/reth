@@ -59,7 +59,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
     /// # Returns
     ///
     /// * `Result<Option<Nibbles>, Error>` - The next key in the trie or an error.
-    pub fn next(&mut self) -> Result<Option<Nibbles>, Error> {
+    pub fn advance(&mut self) -> Result<Option<Nibbles>, Error> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,

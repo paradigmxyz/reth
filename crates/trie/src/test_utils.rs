@@ -11,7 +11,7 @@ where
     I: Iterator<Item = (Address, (Account, S))>,
     S: IntoIterator<Item = (H256, U256)>,
 {
-    let encoded_accounts = accounts.into_iter().filter_map(|(address, (account, storage))| {
+    let encoded_accounts = accounts.filter_map(|(address, (account, storage))| {
         let storage_root = storage_root(storage.into_iter());
         let mut out = Vec::new();
         EthAccount::from(account).with_storage_root(storage_root).encode(&mut out);
@@ -34,7 +34,7 @@ where
     I: Iterator<Item = (H256, (Account, S))>,
     S: IntoIterator<Item = (H256, U256)>,
 {
-    let encoded_accounts = accounts.into_iter().filter_map(|(address, (account, storage))| {
+    let encoded_accounts = accounts.filter_map(|(address, (account, storage))| {
         let storage_root = storage_root_prehashed(storage.into_iter());
         let mut out = Vec::new();
         EthAccount::from(account).with_storage_root(storage_root).encode(&mut out);

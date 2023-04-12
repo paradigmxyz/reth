@@ -25,7 +25,7 @@ impl<'a> BranchNode<'a> {
         hash_mask: TrieMask,
     ) -> impl Iterator<Item = H256> + '_ {
         let mut index = self.stack.len() - state_mask.count_ones() as usize;
-        CHILD_INDEX_RANGE.into_iter().filter_map(move |digit| {
+        CHILD_INDEX_RANGE.clone().filter_map(move |digit| {
             let mut child = None;
             if state_mask.is_bit_set(digit) {
                 if hash_mask.is_bit_set(digit) {

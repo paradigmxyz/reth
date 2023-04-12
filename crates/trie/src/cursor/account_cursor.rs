@@ -23,19 +23,19 @@ where
         &mut self,
         key: StoredNibbles,
     ) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
-        Ok(self.0.seek_exact(key.into())?.map(|value| (value.0.inner.to_vec(), value.1)))
+        Ok(self.0.seek_exact(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
     }
 
     fn seek(&mut self, key: StoredNibbles) -> Result<Option<(Vec<u8>, BranchNodeCompact)>, Error> {
-        Ok(self.0.seek(key.into())?.map(|value| (value.0.inner.to_vec(), value.1)))
+        Ok(self.0.seek(key)?.map(|value| (value.0.inner.to_vec(), value.1)))
     }
 
     fn upsert(&mut self, key: StoredNibbles, value: BranchNodeCompact) -> Result<(), Error> {
-        Ok(self.0.upsert(key, value)?)
+        self.0.upsert(key, value)
     }
 
     fn delete_current(&mut self) -> Result<(), Error> {
-        Ok(self.0.delete_current()?)
+        self.0.delete_current()
     }
 }
 

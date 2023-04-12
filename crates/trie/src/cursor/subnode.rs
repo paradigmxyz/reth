@@ -1,7 +1,7 @@
 use crate::nodes::CHILD_INDEX_RANGE;
 use reth_primitives::{trie::BranchNodeCompact, H256};
 
-/// TODO:
+/// Cursor for iterating over a subtrie.
 #[derive(Clone)]
 pub struct CursorSubNode {
     /// The key of the current node.
@@ -37,7 +37,7 @@ impl CursorSubNode {
         // Find the first nibble that is set in the state mask of the node.
         let nibble = match &node {
             Some(n) if n.root_hash.is_none() => {
-                CHILD_INDEX_RANGE.into_iter().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8
+                CHILD_INDEX_RANGE.clone().find(|i| n.state_mask.is_bit_set(*i)).unwrap() as i8
             }
             _ => -1,
         };

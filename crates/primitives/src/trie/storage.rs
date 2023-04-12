@@ -26,8 +26,8 @@ impl Compact for StorageTrieEntry {
         Self: Sized,
     {
         let (nibbles, buf) = StoredNibblesSubKey::from_compact(buf, 33);
-        let (node, buf) = BranchNodeCompact::from_compact(&buf, len - 33);
+        let (node, buf) = BranchNodeCompact::from_compact(buf, len - 33);
         let this = Self { nibbles, node };
-        (this, &buf)
+        (this, buf)
     }
 }

@@ -122,7 +122,7 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
 
         while let Some(key) = walker.key() {
             if walker.can_skip_current_node {
-                let value = walker.hash().clone().unwrap();
+                let value = walker.hash().unwrap();
                 let is_in_db_trie = walker.children_are_in_trie();
                 hash_builder.add_branch(key, value, is_in_db_trie);
             }
@@ -132,7 +132,7 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StateRoot<'a, TX> {
                 None => break, // no more keys
             };
 
-            let next_key = walker.next()?;
+            let next_key = walker.advance()?;
             let mut next_account_entry = hashed_account_cursor.seek(seek_key)?;
             while let Some((hashed_address, account)) = next_account_entry {
                 let account_nibbles = Nibbles::unpack(hashed_address);
@@ -224,7 +224,7 @@ pub struct StorageRoot<'a, TX> {
 impl<'a, TX> StorageRoot<'a, TX> {
     /// Creates a new storage root calculator given an raw address.
     pub fn new(tx: &'a TX, address: Address) -> Self {
-        Self::new_hashed(tx, keccak256(&address))
+        Self::new_hashed(tx, keccak256(address))
     }
 
     /// Creates a new storage root calculator given a hashed address.
@@ -278,7 +278,7 @@ impl<'a, 'tx, TX: DbTx<'tx> + DbTxMut<'tx>> StorageRoot<'a, TX> {
                 None => break, // no more keys
             };
 
-            let next_key = walker.next()?;
+            let next_key = walker.advance()?;
             let mut storage =
                 hashed_storage_cursor.seek_by_key_subkey(self.hashed_address, seek_key)?;
             while let Some(StorageEntry { key: hashed_key, value }) = storage {
@@ -543,70 +543,6 @@ mod tests {
         let got = StorageRoot::new(tx.deref_mut(), address).root(None).unwrap();
 
         assert_eq!(storage_root(storage.into_iter()), got);
-    }
-
-    // Helper for finding slots with the same prefix
-    fn slot_starts_with_hash(prefix: &[u8], mut i: u64) -> (H256, u64) {
-        loop {
-            let slot = H256::from_low_u64_be(i);
-            let hash = keccak256(slot);
-            if hash.starts_with(prefix) {
-                // Return the found slot and the next index to start searching
-                // from to find more slots
-                return (slot, i + 1)
-            }
-            i += 1;
-        }
-    }
-
-    #[test]
-    // This ensures that the walker goes over all the storage slots
-    fn test_storage_root_incremental() {
-        let db = create_test_rw_db();
-        let mut tx = Transaction::new(db.as_ref()).unwrap();
-
-        let hashed_address = H256::random();
-        let (slot1, i) = slot_starts_with_hash(&hex!("caba"), 0);
-        let (slot2, _) = slot_starts_with_hash(&hex!("caba"), i);
-
-        let storage = BTreeMap::from([
-            (H256::zero(), U256::from(3)),
-            // create two nodes with a shared prefix to insert an intermediate node
-            (slot1, U256::from(1)),
-            (slot2, U256::from(1)),
-        ]);
-
-        insert_storage(&mut *tx, hashed_address, &storage);
-        tx.commit().unwrap();
-
-        // create channel to get the storagetrie updates and write them to storage trie
-        let (sender, receiver) = mpsc::channel();
-        let loader = StorageRoot::new_hashed(tx.deref_mut(), hashed_address);
-        let got = loader.root(Some(sender)).unwrap();
-        drop(loader);
-
-        // Check account trie
-        let updates = receiver.iter().collect::<Vec<_>>();
-        let updates = updates
-            .iter()
-            .map(|u| {
-                if let BranchNodeUpdate::Storage(hashed_address, nibbles, node) = u {
-                    (hashed_address, nibbles, node)
-                } else {
-                    panic!("Unexpected update")
-                }
-            })
-            .collect::<Vec<_>>();
-        // assert_eq!(updates.len(), 2);
-
-        // assert_eq!(storage_root(storage.clone().into_iter()), got);
-
-        // // change the storage commit new root
-        // let mut storage = storage;
-        // storage.insert(&H256::from_low_u64_be(2), U256::from(2));
-        // insert_account(&mut *tx, address, account.clone(), &storage);
-        // tx.commit().unwrap();
-        // let got = StorageRoot::new(tx.deref_mut(), address, None).root().unwrap();
     }
 
     type State = BTreeMap<Address, (Account, BTreeMap<H256, U256>)>;

@@ -87,26 +87,6 @@ impl<'a, 'b, TX: DbTx<'a>> StateProvider for LatestStateProviderRef<'a, 'b, TX> 
             .state_root;
 
         unimplemented!()
-        // TODO:
-        // let loader = DBTrieLoader::new(self.db);
-        // let (account_proof, storage_root) = loader
-        //     .generate_account_proof(root, hashed_address)
-        //     .map_err(|_| ProviderError::StateTrie)?;
-        // let account_proof = account_proof.into_iter().map(Bytes::from).collect();
-
-        // let storage_proof = if storage_root == KECCAK_EMPTY {
-        //     // if there isn't storage, we return empty storage proofs
-        //     (0..keys.len()).map(|_| Vec::new()).collect()
-        // } else {
-        //     let hashed_keys: Vec<H256> = keys.iter().map(keccak256).collect();
-        //     loader
-        //         .generate_storage_proofs(storage_root, hashed_address, &hashed_keys)
-        //         .map_err(|_| ProviderError::StateTrie)?
-        //         .into_iter()
-        //         .map(|v| v.into_iter().map(Bytes::from).collect())
-        //         .collect()
-        // };
-        // Ok((account_proof, storage_root, storage_proof))
     }
 }
 
