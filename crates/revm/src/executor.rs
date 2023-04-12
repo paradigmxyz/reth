@@ -318,6 +318,7 @@ where
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
                 return Err(Error::TransactionGasLimitMoreThenAvailableBlockGas {
+                    transaction_hash: transaction.hash,
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 })

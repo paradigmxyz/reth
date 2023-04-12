@@ -1,4 +1,4 @@
-use reth_primitives::{BlockHash, BlockNumber, Bloom, H256};
+use reth_primitives::{BlockHash, BlockNumber, Bloom, TxHash, H256};
 use thiserror::Error;
 
 /// BlockExecutor Errors
@@ -27,6 +27,7 @@ pub enum Error {
     BloomLogDiff { got: Box<Bloom>, expected: Box<Bloom> },
     #[error("Transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
     TransactionGasLimitMoreThenAvailableBlockGas {
+        transaction_hash: TxHash,
         transaction_gas_limit: u64,
         block_available_gas: u64,
     },
