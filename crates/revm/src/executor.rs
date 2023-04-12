@@ -108,7 +108,7 @@ where
         post_state: &mut PostState,
     ) {
         let db = self.db();
-        commit_changes(db, changes, has_state_clear_eip, post_state);
+        commit_state_changes(db, post_state, changes, has_state_clear_eip);
     }
 
     /// Collect all balance changes at the end of the block.
@@ -371,11 +371,11 @@ where
 ///
 /// Note: This does _not_ commit to the underlying database [DatabaseRef], but only to the
 /// [CacheDB].
-pub fn commit_changes<DB>(
+pub fn commit_state_changes<DB>(
     db: &mut CacheDB<DB>,
+    post_state: &mut PostState,
     changes: hash_map::HashMap<Address, RevmAccount>,
     has_state_clear_eip: bool,
-    post_state: &mut PostState,
 ) where
     DB: DatabaseRef,
 {
