@@ -24,6 +24,7 @@ pub enum PayloadBuilderError {
     /// Unrecoverable error during evm execution.
     #[error("evm execution error: {0:?}")]
     EvmExecutionError(EVMError<reth_interfaces::Error>),
+    /// Thrown if the payload requests withdrawals before Shanghai activation.
     #[error("withdrawals set before Shanghai activation")]
     WithdrawalsBeforeShanghai,
 }

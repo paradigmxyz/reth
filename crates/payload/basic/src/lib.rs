@@ -41,7 +41,7 @@ use tokio::{
 };
 use tracing::trace;
 use reth_primitives::bloom::logs_bloom;
-use reth_revm::executor::{commit_state_changes, post_block_withdrawals_balance_increments};
+use reth_revm::executor::{commit_state_changes, increment_account_balance, post_block_withdrawals_balance_increments};
 
 // TODO move to common since commonly used
 
@@ -367,6 +367,9 @@ fn build_payload<Pool, Client>(
         let mut executed_txs = Vec::new();
         let best_txs = pool.best_transactions();
 
+        let total_fees = U256::ZERO;
+        let base_fee = initialized_block_env.basefee.to::<u64>();
+
         for tx in best_txs {
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
@@ -406,18 +409,23 @@ fn build_payload<Pool, Client>(
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
                 tx_type: tx.tx_type(),
-                success: res.result.is_success(),
+                success: result.is_success(),
                 cumulative_gas_used,
-                logs: res.result.logs().into_iter().map(into_reth_log).collect(),
+                logs: result.logs().into_iter().map(into_reth_log).collect(),
             });
+
+            let gas_used = result.gas_used();
+
+            let miner_fee = tx.e
+
+            // append gas used
+            cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
             executed_txs.push(tx);
-
-            // append gas used
-            cumulative_gas_used += res.result.gas_used();
         }
 
+        if initialized_cfg.sha
         // get balance changes from withdrawals
         let balance_increments = post_block_withdrawals_balance_increments(
             &chain_spec,
@@ -426,18 +434,16 @@ fn build_payload<Pool, Client>(
             );
 
         for (address, increment) in balance_increments {
-            // self.increment_account_balance(address, increment, &mut post_state)?;
+            increment_account_balance(&mut db, &mut post_state, address, increment)?;
         }
 
         // create the block header
 
         let transactions_root = proofs::calculate_transaction_root(executed_txs.iter());
 
-        // let receipts_root = proofs::calculate_receipt_root(post_state.receipts.iter());
-        let receipts_root = Default::default();
-        // let logs_bloom = logs_bloom(
-        //     post_state.receipts().flat_map(|receipt| receipt.logs.iter()),
-        // );
+        let receipts_root = post_state.receipts_root();
+        let logs_bloom = post_state.logs_bloom();
+
         let withdrawals_root =
             if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(attributes.timestamp) {
                 Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()))
@@ -454,13 +460,14 @@ fn build_payload<Pool, Client>(
             transactions_root,
             receipts_root,
             withdrawals_root,
-            logs_bloom: (),
+            logs_bloom,
             timestamp: attributes.timestamp,
             mix_hash: attributes.prev_randao,
             nonce: 0,
-            base_fee_per_gas: Some(initialized_block_env.basefee.to::<u64>()),
+            base_fee_per_gas: Some(base_fee),
             number: parent_block.number + 1,
             gas_limit: block_gas_limit,
+
             difficulty: U256::ZERO,
             gas_used: cumulative_gas_used,
             extra_data: extra_data.into(),

@@ -11,6 +11,7 @@ use reth_primitives::{
     H256, U256,
 };
 use std::collections::BTreeMap;
+use reth_primitives::proofs::calculate_receipt_root_ref;
 
 /// Storage for an account.
 ///
@@ -271,6 +272,13 @@ impl PostState {
     /// Returns the logs bloom for all recorded logs.
     pub fn logs_bloom(&self) -> Bloom {
         logs_bloom(self.logs())
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    pub fn receipts_root(&self) -> H256 {
+        calculate_receipt_root_ref(
+            self.receipts().iter().map(Into::into)
+        )
     }
 
     /// Get the number of transitions causing this [PostState]
