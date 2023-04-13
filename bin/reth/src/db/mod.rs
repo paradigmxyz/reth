@@ -80,6 +80,9 @@ pub struct ListArgs {
     /// How many items to take from the walker
     #[arg(long, short, default_value = DEFAULT_NUM_ITEMS)]
     len: usize,
+    /// Dump as JSON instead of using TUI.
+    #[arg(long, short)]
+    json: bool,
 }
 
 impl Command {
@@ -169,9 +172,18 @@ impl Command {
                                         return Ok(());
                                     }
 
-                                    tui::DbListTUI::<_, tables::$table>::new(|start, count| {
-                                        tool.list::<tables::$table>(start, count).unwrap()
-                                    }, $start, $len, total_entries).run()
+                                    if args.json {
+                                        let list_result = tool.list::<tables::$table>(args.start, args.len)?;
+                                        for (k, v) in list_result {
+                                            let json = serde_json::to_string(&(format!("{:?}", k), v))?;
+                                            println!("{json}");
+                                        }
+                                        Ok(())
+                                    } else {
+                                        tui::DbListTUI::<_, tables::$table>::new(|start, count| {
+                                            tool.list::<tables::$table>(start, count).unwrap()
+                                        }, $start, $len, total_entries).run()
+                                    }
                                 })??
                             },)*
                             _ => {
