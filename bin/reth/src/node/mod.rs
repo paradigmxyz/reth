@@ -3,7 +3,7 @@
 //! Starts the client
 use crate::{
     args::{get_secret_key, DebugArgs, NetworkArgs, RpcServerArgs},
-    dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
+    dirs::{ConfigPath, DbPath, SecretKeyPath},
     prometheus_exporter,
     runner::CliContext,
     utils::get_single_header,
@@ -70,6 +70,7 @@ use tokio::sync::{
 };
 use tracing::*;
 
+use crate::dirs::MaybePlatformPath;
 use reth_interfaces::p2p::headers::client::HeadersClient;
 use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
@@ -80,7 +81,7 @@ pub mod events;
 pub struct Command {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: PlatformPath<ConfigPath>,
+    config: MaybePlatformPath<ConfigPath>,
 
     /// The path to the database folder.
     ///
@@ -90,7 +91,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
 
     /// The chain this node is running.
     ///
@@ -113,7 +114,7 @@ pub struct Command {
     ///
     /// This also will deterministically set the peer ID.
     #[arg(long, value_name = "PATH", global = true, required = false, default_value_t)]
-    p2p_secret_key: PlatformPath<SecretKeyPath>,
+    p2p_secret_key: MaybePlatformPath<SecretKeyPath>,
 
     /// Enable Prometheus metrics.
     ///
@@ -145,10 +146,10 @@ impl Command {
         raise_fd_limit();
 
         let mut config: Config = self.load_config_with_chain(self.chain.chain)?;
-        info!(target: "reth::cli", path = %self.config.with_chain(self.chain.chain), "Configuration loaded");
+        info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
 
         // add network name to db directory
-        let db_path = self.db.with_chain(self.chain.chain);
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
         info!(target: "reth::cli", path = %db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);
@@ -177,7 +178,8 @@ impl Command {
         info!(target: "reth::cli", "Test transaction pool initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = get_secret_key(&self.p2p_secret_key)?;
+        let secret_key =
+            get_secret_key(self.p2p_secret_key.unwrap_or_chain_default(self.chain.chain))?;
         let network_config = self.load_network_config(
             &config,
             Arc::clone(&db),
@@ -407,7 +409,7 @@ impl Command {
     /// Loads the reth config based on the intended chain
     fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
         // add network name to config directory
-        let config_path = self.config.with_chain(chain);
+        let config_path = self.config.unwrap_or_chain_default(chain);
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }
@@ -694,7 +696,7 @@ async fn run_network_until_shutdown<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::IpAddr;
+    use std::{net::IpAddr, path::Path};
 
     #[test]
     fn parse_help_node_command() {
@@ -734,5 +736,40 @@ mod tests {
 
         let cmd = Command::try_parse_from(["reth", "--metrics", "localhost:9000"]).unwrap();
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9000)));
+    }
+
+    #[test]
+    fn parse_config_path() {
+        let cmd = Command::try_parse_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
+        assert_eq!(
+            cmd.config.unwrap_or_chain_default(cmd.chain.chain).as_ref(),
+            Path::new("my/path/to/reth.toml")
+        );
+
+        let cmd = Command::try_parse_from(["reth"]).unwrap();
+        assert!(
+            cmd.config
+                .unwrap_or_chain_default(cmd.chain.chain)
+                .as_ref()
+                .ends_with("reth/mainnet/reth.toml"),
+            "{:?}",
+            cmd.config
+        );
+    }
+
+    #[test]
+    fn parse_db_path() {
+        let cmd = Command::try_parse_from(["reth", "--db", "my/path/to/db"]).unwrap();
+        assert_eq!(
+            cmd.db.unwrap_or_chain_default(cmd.chain.chain).as_ref(),
+            Path::new("my/path/to/db")
+        );
+
+        let cmd = Command::try_parse_from(["reth"]).unwrap();
+        assert!(
+            cmd.db.unwrap_or_chain_default(cmd.chain.chain).as_ref().ends_with("reth/mainnet/db"),
+            "{:?}",
+            cmd.config
+        );
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    dirs::{ConfigPath, DbPath, PlatformPath},
+    dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath},
     node::events::{handle_events, NodeEvent},
 };
 use clap::{crate_version, Parser};
@@ -35,7 +35,7 @@ use tracing::{debug, info};
 pub struct ImportCommand {
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: PlatformPath<ConfigPath>,
+    config: MaybePlatformPath<ConfigPath>,
 
     /// The path to the database folder.
     ///
@@ -45,7 +45,7 @@ pub struct ImportCommand {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
 
     /// The chain this node is running.
     ///
@@ -78,10 +78,10 @@ impl ImportCommand {
         info!(target: "reth::cli", "reth {} starting", crate_version!());
 
         let config: Config = self.load_config_with_chain(self.chain.chain)?;
-        info!(target: "reth::cli", path = %self.config.with_chain(self.chain.chain), "Configuration loaded");
+        info!(target: "reth::cli", path = %self.config.unwrap_or_chain_default(self.chain.chain), "Configuration loaded");
 
         // add network name to db directory
-        let db_path = self.db.with_chain(self.chain.chain);
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
         info!(target: "reth::cli", path = ?db_path, "Opening database");
         let db = Arc::new(init_db(db_path)?);
@@ -175,7 +175,7 @@ impl ImportCommand {
     /// Loads the reth config based on the intended chain
     fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
         // add network name to config directory
-        let config_path = self.config.with_chain(chain);
+        let config_path = self.config.unwrap_or_chain_default(chain);
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }

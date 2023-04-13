@@ -1,6 +1,6 @@
 //! clap [Args](clap::Args) for network related arguments.
 
-use crate::dirs::{KnownPeersPath, PlatformPath};
+use crate::dirs::{KnownPeersPath, MaybePlatformPath};
 use clap::Args;
 use reth_net_nat::NatResolver;
 use reth_network::NetworkConfigBuilder;
@@ -36,7 +36,7 @@ pub struct NetworkArgs {
     /// dumped to this file on node shutdown, and read on startup.
     /// Cannot be used with --no-persist-peers
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    pub peers_file: PlatformPath<KnownPeersPath>,
+    pub peers_file: MaybePlatformPath<KnownPeersPath>,
 
     /// Do not persist peers. Cannot be used with --peers-file
     #[arg(long, verbatim_doc_comment, conflicts_with = "peers_file")]
@@ -82,7 +82,7 @@ impl NetworkArgs {
             return None
         }
 
-        let peers_file = self.peers_file.clone().with_chain(chain);
+        let peers_file = self.peers_file.clone().unwrap_or_chain_default(chain);
         Some(peers_file.into())
     }
 }

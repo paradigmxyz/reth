@@ -3,7 +3,7 @@
 //! Stage debugging tool
 use crate::{
     args::{get_secret_key, NetworkArgs},
-    dirs::{ConfigPath, DbPath, PlatformPath, SecretKeyPath},
+    dirs::{ConfigPath, DbPath, MaybePlatformPath, PlatformPath, SecretKeyPath},
     prometheus_exporter, StageEnum,
 };
 use clap::Parser;
@@ -33,11 +33,11 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
 
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment, default_value_t)]
-    config: PlatformPath<ConfigPath>,
+    config: MaybePlatformPath<ConfigPath>,
 
     /// The chain this node is running.
     ///
@@ -99,7 +99,9 @@ impl Command {
         // Does not do anything on windows.
         fdlimit::raise_fd_limit();
 
-        let config: Config = confy::load_path(&self.config).unwrap_or_default();
+        let config: Config =
+            confy::load_path(self.config.unwrap_or_chain_default(self.chain.chain))
+                .unwrap_or_default();
         info!(target: "reth::cli", "reth {} starting stage {:?}", clap::crate_version!(), self.stage);
 
         let input = ExecInput {
@@ -110,7 +112,7 @@ impl Command {
         let unwind = UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
 
         // add network name to db directory
-        let db_path = self.db.with_chain(self.chain.chain);
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
         let db = Arc::new(init_db(db_path)?);
         let mut tx = Transaction::new(db.as_ref())?;

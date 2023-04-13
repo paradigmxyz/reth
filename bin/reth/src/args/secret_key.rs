@@ -2,7 +2,7 @@ use crate::dirs::{PlatformPath, SecretKeyPath};
 use hex::encode as hex_encode;
 use reth_network::config::rng_secret_key;
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
-use std::fs::read_to_string;
+use std::{fs::read_to_string, path::Path};
 use thiserror::Error;
 
 /// Errors returned by loading a [`SecretKey`][secp256k1::SecretKey], including IO errors.
@@ -19,9 +19,7 @@ pub enum SecretKeyError {
 /// there, then it generates a secret key and stores it in the default path. I/O
 /// errors might occur during write operations in the form of a
 /// [`SecretKeyError`]
-pub fn get_secret_key(
-    secret_key_path: &PlatformPath<SecretKeyPath>,
-) -> Result<SecretKey, SecretKeyError> {
+pub fn get_secret_key(secret_key_path: impl AsRef<Path>) -> Result<SecretKey, SecretKeyError> {
     let fpath = secret_key_path.as_ref();
     let exists = fpath.try_exists();
 
