@@ -4437,6 +4437,7 @@ dependencies = [
  "num_cpus",
  "proptest",
  "reth-auto-seal-consensus",
+ "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-db",
  "reth-discv4",
@@ -4943,7 +4944,6 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
- "parking_lot 0.12.1",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",

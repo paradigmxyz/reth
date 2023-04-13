@@ -32,6 +32,7 @@ reth-tracing = { path = "../../crates/tracing" }
 reth-tasks = { path = "../../crates/tasks" }
 reth-net-nat = { path = "../../crates/net/nat" }
 reth-payload-builder = { path = "../../crates/payload/builder" }
+reth-basic-payload-builder = { path = "../../crates/payload/basic" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 
 # crypto

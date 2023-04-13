@@ -13,6 +13,7 @@ use eyre::Context;
 use fdlimit::raise_fd_limit;
 use futures::{pin_mut, stream::select as stream_select, FutureExt, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
+use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
 use reth_db::{
     database::Database,
@@ -38,7 +39,6 @@ use reth_interfaces::{
 };
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_payload_builder::TestPayloadStore;
 use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
@@ -72,6 +72,7 @@ use tracing::*;
 
 use crate::dirs::MaybePlatformPath;
 use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_payload_builder::PayloadBuilderService;
 use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
@@ -291,8 +292,19 @@ impl Command {
         ctx.task_executor
             .spawn_critical("events task", events::handle_events(Some(network.clone()), events));
 
-        // TODO: change to non-test or rename this component eventually
-        let test_payload_store = TestPayloadStore::default();
+        // configure the payload builder
+        let payload_generator = BasicPayloadJobGenerator::new(
+            shareable_db.clone(),
+            transaction_pool.clone(),
+            ctx.task_executor.clone(),
+            // TODO use extradata from args
+            BasicPayloadJobGeneratorConfig::default(),
+            Arc::clone(&self.chain),
+        );
+        let (payload_service, payload_builder) = PayloadBuilderService::new(payload_generator);
+
+        debug!(target: "reth::cli", "Spawning payload builder service");
+        ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
         let beacon_consensus_engine = BeaconConsensusEngine::new(
             Arc::clone(&db),
@@ -301,7 +313,7 @@ impl Command {
             blockchain_tree.clone(),
             consensus_engine_rx,
             self.debug.max_block,
-            test_payload_store,
+            payload_builder,
         );
         info!(target: "reth::cli", "Consensus engine initialized");
 

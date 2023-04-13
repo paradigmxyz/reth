@@ -9,7 +9,7 @@ use reth_interfaces::{
     Error,
 };
 use reth_metrics_derive::Metrics;
-use reth_payload_builder::PayloadStore;
+use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
     EngineRpcError, ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated,
@@ -66,13 +66,12 @@ struct Metrics {
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, TS, U, BT, P>
+pub struct BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database,
     TS: TaskSpawner,
     U: SyncStateUpdater,
     BT: BlockchainTreeEngine,
-    P: PayloadStore,
 {
     /// The database handle.
     db: Arc<DB>,
@@ -95,18 +94,17 @@ where
     /// purposes.
     max_block: Option<BlockNumber>,
     /// The payload store.
-    payload_store: P,
+    payload_builder: PayloadBuilderHandle,
     /// Consensus engine metrics.
     metrics: Metrics,
 }
 
-impl<DB, TS, U, BT, P> BeaconConsensusEngine<DB, TS, U, BT, P>
+impl<DB, TS, U, BT> BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner,
     U: SyncStateUpdater + 'static,
     BT: BlockchainTreeEngine + 'static,
-    P: PayloadStore + 'static,
 {
     /// Create new instance of the [BeaconConsensusEngine].
     ///
@@ -119,7 +117,7 @@ where
         blockchain_tree: BT,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
         max_block: Option<BlockNumber>,
-        payload_store: P,
+        payload_builder: PayloadBuilderHandle,
     ) -> Self {
         Self {
             db,
@@ -130,7 +128,7 @@ where
             forkchoice_state: None,
             next_action: BeaconEngineAction::None,
             max_block,
-            payload_store,
+            payload_builder,
             metrics: Metrics::default(),
         }
     }
@@ -256,7 +254,9 @@ where
         //    if payloadAttributes is not null and the forkchoice state has been
         //    updated successfully. The build process is specified in the Payload
         //    building section.
-        let payload_id = self.payload_store.new_payload(header.parent_hash, attrs)?;
+        let attributes = PayloadBuilderAttributes::new(header.parent_hash, attrs);
+        // TODO(mattsse) this needs to be handled asynchronously
+        let payload_id = self.payload_builder.send_new_payload(attributes);
 
         // Client software MUST respond to this method call in the following way:
         // {
@@ -279,7 +279,7 @@ where
     /// Called to receive the execution payload associated with a payload build process.
     pub fn on_get_payload(
         &self,
-        payload_id: PayloadId,
+        _payload_id: PayloadId,
     ) -> Result<ExecutionPayloadEnvelope, BeaconEngineError> {
         // TODO: Client software SHOULD stop the updating process when either a call to
         // engine_getPayload with the build process's payloadId is made or SECONDS_PER_SLOT (12s in
@@ -287,10 +287,12 @@ where
         // timestamp parameter.
 
         // for now just return the output from the payload store
-        match self.payload_store.get_execution_payload(payload_id) {
-            Some(payload) => Ok(payload),
-            None => Err(EngineRpcError::UnknownPayload.into()),
-        }
+        // match self.payload_builder.get_execution_payload(payload_id) {
+        //     Some(payload) => Ok(payload),
+        //     None => Err(EngineRpcError::UnknownPayload.into()),
+        // }
+
+        todo!()
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
@@ -432,13 +434,12 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, TS, U, BT, P> Future for BeaconConsensusEngine<DB, TS, U, BT, P>
+impl<DB, TS, U, BT> Future for BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner + Unpin,
     U: SyncStateUpdater + Unpin + 'static,
     BT: BlockchainTreeEngine + Unpin + 'static,
-    P: PayloadStore + Unpin + 'static,
 {
     type Output = Result<(), BeaconEngineError>;
 
@@ -602,7 +603,7 @@ mod tests {
         test_utils::TestExecutorFactory,
     };
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
-    use reth_payload_builder::TestPayloadStore;
+    use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
@@ -619,7 +620,6 @@ mod tests {
         TokioTaskExecutor,
         NoopSyncStateUpdate,
         ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
-        TestPayloadStore,
     >;
 
     struct TestEnv<DB> {
@@ -670,7 +670,8 @@ mod tests {
         reth_tracing::init_test_tracing();
         let db = create_test_rw_db();
         let consensus = TestConsensus::default();
-        let payload_store = TestPayloadStore::default();
+        let payload_builder = spawn_test_payload_service();
+
         let executor_factory = TestExecutorFactory::new(chain_spec.clone());
         executor_factory.extend(executor_results);
 
@@ -699,7 +700,7 @@ mod tests {
                 tree,
                 sync_rx,
                 None,
-                payload_store,
+                payload_builder,
             ),
             TestEnv::new(db, tip_rx, sync_tx),
         )
