@@ -2,9 +2,19 @@
 
 use crate::{H256, U256};
 use hex_literal::hex;
+use std::time::Duration;
 
 /// The first four bytes of the call data for a function call specifies the function to be called.
 pub const SELECTOR_LEN: usize = 4;
+
+/// The duration of a slot in seconds.
+///
+/// This is the time period of 12 seconds in which a randomly chosen validator has time to propose a
+/// block.
+pub const SLOT_DURATION: Duration = Duration::from_secs(12);
+
+/// An EPOCH is a series of 32 slots (~6.4min).
+pub const EPOCH_DURATION: Duration = Duration::from_secs(12 * 32);
 
 /// The minimal value the basefee can decrease to.
 ///
