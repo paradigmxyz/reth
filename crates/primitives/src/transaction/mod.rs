@@ -615,9 +615,8 @@ impl Decodable for TransactionKind {
 }
 
 /// Signed transaction.
-#[main_codec(no_arbitrary)]
 #[add_arbitrary_tests(rlp, compact)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
@@ -629,6 +628,30 @@ pub struct TransactionSigned {
     pub transaction: Transaction,
 }
 
+impl Compact for TransactionSigned {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        let mut tmp = vec![];
+        let sig_bit = self.signature.to_compact(&mut tmp) as u8;
+        let tx_bit = self.transaction.to_compact(&mut tmp) as u8;
+        buf.put_u8(sig_bit | (tx_bit << 1));
+        buf.put_slice(&tmp);
+        1 + tmp.len()
+    }
+
+    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        let prefix = buf.get_u8() as usize;
+
+        let (signature, buf) = Signature::from_compact(buf, prefix & 1);
+        let (transaction, buf) = Transaction::from_compact(buf, prefix >> 1);
+
+        let mut tx = TransactionSigned { signature, transaction, hash: TxHash::default() };
+
+        // Could skip it and do it on the first `hash()` call.
+        tx.hash = tx.recalculate_hash();
+
+        (tx, buf)
+    }
+}
 impl AsRef<Self> for TransactionSigned {
     fn as_ref(&self) -> &Self {
         self
