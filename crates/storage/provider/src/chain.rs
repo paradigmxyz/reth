@@ -4,7 +4,7 @@ use crate::PostState;
 use reth_interfaces::{executor::Error as ExecError, Error};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransitionId, TxHash,
+    TxHash,
 };
 use std::collections::BTreeMap;
 
@@ -40,11 +40,6 @@ impl Chain {
         self.blocks.iter().find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
     }
 
-    /// Return block inner transition ids.
-    pub fn block_transitions(&self) -> &BTreeMap<BlockNumber, TransitionId> {
-        &self.block_transitions
-    }
-
     /// Returns the block with matching hash.
     pub fn block(&self, block_hash: BlockHash) -> Option<&SealedBlock> {
         self.blocks
@@ -58,13 +53,8 @@ impl Chain {
         if self.tip().number == block_number {
             return Some(state)
         }
-
-        if let Some(&transition_id) = self.block_transitions.get(&block_number) {
-            state.revert_to(transition_id);
-            return Some(state)
-        }
-
-        None
+        state.revert_to(block_number);
+        Some(state)
     }
 
     /// Destructure the chain into its inner components, the blocks and the state.
@@ -133,8 +123,7 @@ impl Chain {
         receipt_attch
     }
 
-
-/// Merge two chains by appending the given chain into the current one.
+    /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
     pub fn append_chain(&mut self, chain: Chain) -> Result<(), Error> {
@@ -204,7 +193,6 @@ impl Chain {
         }
     }
 }
-
 
 /// Used to hold receipts and their attachment.
 #[derive(Default, Clone, Debug)]

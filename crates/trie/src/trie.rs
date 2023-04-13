@@ -16,10 +16,14 @@ use reth_primitives::{
     keccak256,
     proofs::EMPTY_ROOT,
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibblesSubKey},
-    Address, StorageEntry, TransitionId, H256,
+    Address, BlockNumber, StorageEntry, H256,
 };
 use reth_rlp::Encodable;
-use std::{collections::HashMap, ops::Range, sync::mpsc};
+use std::{
+    collections::HashMap,
+    ops::{Range, RangeInclusive},
+    sync::mpsc,
+};
 
 /// The branch node update sender
 pub type BranchNodeUpdateSender = mpsc::Sender<BranchNodeUpdate>;

@@ -603,11 +603,7 @@ where
 
         // merkle tree
         {
-            let state_root = StateRoot::incremental_root(
-                self.deref_mut(),
-                from_transition_id..to_transition_id,
-                None,
-            )?;
+            let state_root = StateRoot::incremental_root(self.deref_mut(), range.clone(), None)?;
             if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
                     got: state_root,
@@ -1028,7 +1024,11 @@ where
             self.unwind_storage_history_indices(storage_range)?;
 
             // merkle tree
-            let new_state_root = StateRoot::incremental_root(self.deref(), transition_range, None)?;
+            let new_state_root = StateRoot::incremental_root(self.deref(), range.clone(), None)?;
+            
+            let parent_number = range.start().saturating_sub(1);
+            let parent_state_root = self.get_header(parent_number)?.state_root;
+
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
@@ -1492,7 +1492,6 @@ mod test {
 
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None).unwrap();
 
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
@@ -1572,7 +1571,6 @@ mod test {
 
         insert_canonical_block(tx.deref_mut(), data.genesis.clone(), None).unwrap();
 
-        tx.put::<tables::AccountsTrie>(EMPTY_ROOT, vec![0x80]).unwrap();
         assert_genesis_block(&tx, data.genesis);
 
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();

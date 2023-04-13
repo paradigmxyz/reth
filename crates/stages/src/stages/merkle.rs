@@ -115,17 +115,17 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             MerkleStage::Both { clean_threshold } => *clean_threshold,
         };
 
-        let stage_progress = input.stage_progress.unwrap_or_default()+1;
+        let stage_progress = input.stage_progress.unwrap_or_default() + 1;
         let previous_stage_progress = input.previous_stage_progress();
 
-        let from_block = stage_progress;
+        let from_block = stage_progress + 1;
         let to_block = previous_stage_progress;
 
         let block_root = tx.get_header(previous_stage_progress)?.state_root;
 
         let trie_root = if from_block == to_block {
             block_root
-        } else if to_transition - from_transition > threshold || stage_progress == 0 {
+        } else if to_block - from_block > threshold || stage_progress == 0 {
             // if there are more blocks than threshold it is faster to rebuild the trie
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             tx.clear::<tables::AccountsTrie>()?;
@@ -134,7 +134,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target =
                 ?previous_stage_progress, "Updating trie"); // Iterate over
-            StateRoot::incremental_root(tx.deref_mut(), from_transition..to_transition, None)
+            StateRoot::incremental_root(tx.deref_mut(), from_block..=to_block, None)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?
         };
 
@@ -160,15 +160,12 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             tx.clear::<tables::StoragesTrie>()?;
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
-
-        let current_root = tx.get_header(input.stage_progress)?.state_root;
         let range = input.unwind_to + 1..=input.stage_progress;
 
         // Unwind trie only if there are transitions
         if !range.is_empty() {
-            let block_root =
-                StateRoot::incremental_root(tx.deref_mut(), range, None)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let block_root = StateRoot::incremental_root(tx.deref_mut(), range, None)
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
             let target_root = tx.get_header(input.unwind_to)?.state_root;
             self.validate_state_root(block_root, target_root, input.unwind_to)?;
         } else {

@@ -431,6 +431,8 @@ fn build_payload<Pool, Client>(
         let mut total_fees = U256::ZERO;
         let base_fee = initialized_block_env.basefee.to::<u64>();
 
+        let block_number = initialized_block_env.number.to::<u64>();
+
         for tx in best_txs {
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
@@ -461,7 +463,7 @@ fn build_payload<Pool, Client>(
                 evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
 
             // commit changes
-            commit_state_changes(&mut db, &mut post_state, state, true);
+            commit_state_changes(&mut db, &mut post_state, block_number, state, true);
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
@@ -502,7 +504,13 @@ fn build_payload<Pool, Client>(
                 &attributes.withdrawals,
             );
             for (address, increment) in balance_increments {
-                increment_account_balance(&mut db, &mut post_state, address, increment)?;
+                increment_account_balance(
+                    &mut db,
+                    &mut post_state,
+                    block_number,
+                    address,
+                    increment,
+                )?;
             }
 
             // calculate withdrawals root

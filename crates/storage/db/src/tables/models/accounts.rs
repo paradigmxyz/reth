@@ -45,7 +45,7 @@ impl Compact for AccountBeforeTx {
     }
 }
 
-/// [`TransitionId`] concatenated with [`Address`]. Used as the key for
+/// [`BlockNumber`] concatenated with [`Address`]. Used as the key for
 /// [`StorageChangeSet`](crate::tables::StorageChangeSet)
 ///
 /// Since it's used as a key, it isn't compressed when encoding it.
@@ -70,7 +70,7 @@ impl BlockNumberAddress {
         self.0 .1
     }
 
-    /// Consumes `Self` and returns [`TransitionId`], [`Address`]
+    /// Consumes `Self` and returns [`BlockNumber`], [`Address`]
     pub fn take(self) -> (BlockNumber, Address) {
         (self.0 .0, self.0 .1)
     }

@@ -3,13 +3,16 @@ use crate::Nibbles;
 use derive_more::Deref;
 use reth_db::{
     cursor::DbCursorRO,
-    models::{AccountBeforeTx, TransitionIdAddress},
+    models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::DbTx,
     Error,
 };
-use reth_primitives::{keccak256, Address, StorageEntry, TransitionId, H256};
-use std::{collections::HashMap, ops::Range};
+use reth_primitives::{keccak256, BlockNumber, StorageEntry, H256};
+use std::{
+    collections::HashMap,
+    ops::{Range, RangeInclusive},
+};
 
 /// A wrapper around a database transaction that loads prefix sets within a given transition range.
 #[derive(Deref)]
@@ -37,7 +40,7 @@ where
 
         // Walk account changeset and insert account prefixes.
         let mut account_cursor = self.cursor_read::<tables::AccountChangeSet>()?;
-        for account_entry in account_cursor.walk_range(tid_range.clone())? {
+        for account_entry in account_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
             account_prefix_set.insert(Nibbles::unpack(keccak256(address)));
         }

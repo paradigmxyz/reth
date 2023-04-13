@@ -35,7 +35,7 @@ use crate::{
 use reth_primitives::{
     trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
-    TransactionSigned, TransitionId, TxHash, TxNumber, H256,
+    TransactionSigned, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
