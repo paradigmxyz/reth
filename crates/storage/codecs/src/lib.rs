@@ -94,10 +94,14 @@ where
 
         for element in self {
             let length_index = buf.as_mut().len();
+
+            // Placeholder for the length, since it can only be known after compacting the element
+            // and BufMut doesn't support going back
             buf.put_slice(&[0, 0]);
 
             let len = element.to_compact(buf);
 
+            // Replace placeholder with the real length
             buf.as_mut()[length_index..=length_index + 1]
                 .copy_from_slice(&(len as u16).to_be_bytes());
         }
@@ -165,9 +169,14 @@ where
     {
         if let Some(element) = self {
             let length_index = buf.as_mut().len();
+
+            // Placeholder for the length, since it can only be known after compacting the element
+            // and BufMut doesn't support going back
             buf.put_slice(&[0, 0]);
 
             let len = element.to_compact(buf);
+
+            // Replace placeholder with the real length
             buf.as_mut()[length_index..=length_index + 1]
                 .copy_from_slice(&(len as u16).to_be_bytes());
 
