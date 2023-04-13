@@ -36,7 +36,10 @@ pub use errors::{StateRootError, StorageRootError};
 
 /// The implementation of the Merkle Patricia Trie.
 mod trie;
-pub use trie::{BranchNodeUpdate, BranchNodeUpdateSender, StateRoot, StorageRoot};
+pub use trie::{StateRoot, StorageRoot};
+
+/// Buffer for trie updates.
+mod updates;
 
 /// Collection of trie-related test utilities.
 #[cfg(any(test, feature = "test-utils"))]

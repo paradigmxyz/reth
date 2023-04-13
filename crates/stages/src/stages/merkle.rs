@@ -123,22 +123,34 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         let block_root = tx.get_header(previous_stage_progress)?.state_root;
 
-        let trie_root = if from_transition == to_transition {
-            block_root
+        let (trie_root, updates) = if from_transition == to_transition {
+            (block_root, None)
         } else if to_transition - from_transition > threshold || stage_progress == 0 {
             // if there are more blocks than threshold it is faster to rebuild the trie
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target = ?previous_stage_progress, "Rebuilding trie");
             tx.clear::<tables::AccountsTrie>()?;
             tx.clear::<tables::StoragesTrie>()?;
-            StateRoot::new(tx.deref_mut()).root(None).map_err(|e| StageError::Fatal(Box::new(e)))?
+            let (root, updates) = StateRoot::new(tx.deref_mut())
+                .root_with_updates()
+                .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            (root, Some(updates))
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?stage_progress, target =
                 ?previous_stage_progress, "Updating trie"); // Iterate over
-            StateRoot::incremental_root(tx.deref_mut(), from_transition..to_transition, None)
-                .map_err(|e| StageError::Fatal(Box::new(e)))?
+            let (root, updates) = StateRoot::incremental_root_with_updates(
+                tx.deref_mut(),
+                from_transition..to_transition,
+            )
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            (root, Some(updates))
         };
 
         self.validate_state_root(trie_root, block_root, previous_stage_progress)?;
+
+        // Validation passed, now we can apply updates to the database.
+        if let Some(updates) = updates {
+            updates.flush(tx.deref_mut())?;
+        }
 
         info!(target: "sync::stages::merkle::exec", "Stage finished");
         Ok(ExecOutput { stage_progress: previous_stage_progress, done: true })
@@ -166,11 +178,18 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         // Unwind trie only if there are transitions
         if from_transition < to_transition {
-            let block_root =
-                StateRoot::incremental_root(tx.deref_mut(), from_transition..to_transition, None)
-                    .map_err(|e| StageError::Fatal(Box::new(e)))?;
+            let (block_root, updates) = StateRoot::incremental_root_with_updates(
+                tx.deref_mut(),
+                from_transition..to_transition,
+            )
+            .map_err(|e| StageError::Fatal(Box::new(e)))?;
+
+            // Validate the calulated state root
             let target_root = tx.get_header(input.unwind_to)?.state_root;
             self.validate_state_root(block_root, target_root, input.unwind_to)?;
+
+            // Validation passed, apply unwind changes to the database.
+            updates.flush(tx.deref_mut())?;
         } else {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         }

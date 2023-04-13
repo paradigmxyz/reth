@@ -621,10 +621,9 @@ where
 
         // merkle tree
         {
-            let state_root = StateRoot::incremental_root(
+            let (state_root, trie_updates) = StateRoot::incremental_root_with_updates(
                 self.deref_mut(),
                 from_transition_id..to_transition_id,
-                None,
             )?;
             if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
@@ -634,6 +633,7 @@ where
                     block_hash: current_block_hash,
                 })
             }
+            trie_updates.flush(self.deref_mut())?;
         }
 
         Ok(())
@@ -1109,7 +1109,8 @@ where
             self.unwind_storage_history_indices(transition_storage_range)?;
 
             // merkle tree
-            let new_state_root = StateRoot::incremental_root(self.deref(), transition_range, None)?;
+            let (new_state_root, trie_updates) =
+                StateRoot::incremental_root_with_updates(self.deref(), transition_range)?;
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
@@ -1121,6 +1122,7 @@ where
                     block_hash: parent_hash,
                 })
             }
+            trie_updates.flush(self.deref())?;
         }
         // get blocks
         let blocks = self.get_take_block_range::<TAKE>(chain_spec, range.clone())?;

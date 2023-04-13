@@ -8,7 +8,7 @@ use reth_primitives::{
     trie::{BranchNodeCompact, TrieMask},
     H256,
 };
-use std::{fmt::Debug, sync::mpsc};
+use std::{collections::BTreeMap, fmt::Debug, sync::mpsc};
 
 mod value;
 use value::HashBuilderValue;
@@ -52,19 +52,25 @@ pub struct HashBuilder {
 
     stored_in_database: bool,
 
-    branch_node_sender: Option<BranchNodeSender>,
+    updated_branch_nodes: Option<BTreeMap<Nibbles, BranchNodeCompact>>,
 }
 
 impl HashBuilder {
-    /// Creates a new instance of the Hash Builder.
-    pub fn new(store_tx: Option<BranchNodeSender>) -> Self {
-        Self { branch_node_sender: store_tx, ..Default::default() }
+    /// Enables the Hash Builder to store updated branch nodes to the database.
+    ///
+    /// Call [Self::root_with_updates] to get the updates to branch nodes.
+    pub fn with_updates(mut self) -> Self {
+        self.updated_branch_nodes = Some(BTreeMap::default());
+        self
     }
 
-    /// Set a branch node sender on the Hash Builder instance.
-    pub fn with_branch_node_sender(mut self, tx: BranchNodeSender) -> Self {
-        self.branch_node_sender = Some(tx);
-        self
+    /// Enables the Hash Builder to store updated branch nodes to the database.
+    ///
+    /// Call [Self::root_with_updates] to get the updates to branch nodes.
+    pub fn set_updates(&mut self, should_store: bool) {
+        if should_store {
+            self.updated_branch_nodes = Some(BTreeMap::default());
+        }
     }
 
     /// Print the current stack of the Hash Builder.
@@ -113,6 +119,13 @@ impl HashBuilder {
             self.value = HashBuilderValue::Bytes(vec![]);
         }
         self.current_root()
+    }
+
+    /// Returns the current root hash of the trie builder together with branch node updates accrued.
+    ///
+    /// NOTE: The builder must have been created with `with_updates` to return updates.
+    pub fn root_with_updates(mut self) -> (H256, BTreeMap<Nibbles, BranchNodeCompact>) {
+        (self.root(), self.updated_branch_nodes.take().unwrap_or_default())
     }
 
     fn current_root(&self) -> H256 {
@@ -326,8 +339,8 @@ impl HashBuilder {
             // other side of the HashBuilder
             tracing::debug!(target: "trie::hash_builder", node = ?n, "intermediate node");
             let common_prefix = current.slice(0, len);
-            if let Some(tx) = &self.branch_node_sender {
-                let _ = tx.send((common_prefix, n));
+            if let Some(nodes) = self.updated_branch_nodes.as_mut() {
+                nodes.insert(common_prefix, n);
             }
         }
     }
@@ -429,8 +442,7 @@ mod tests {
 
     #[test]
     fn test_generates_branch_node() {
-        let (sender, recv) = mpsc::channel();
-        let mut hb = HashBuilder::new(Some(sender));
+        let mut hb = HashBuilder::default().with_updates();
 
         // We have 1 branch node update to be stored at 0x01, indicated by the first nibble.
         // That branch root node has 2 branch node children present at 0x1 and 0x2.
@@ -476,12 +488,8 @@ mod tests {
             let nibbles = Nibbles::unpack(key);
             hb.add_leaf(nibbles, val.as_ref());
         });
-        let root = hb.root();
-        drop(hb);
+        let (root, updates) = hb.root_with_updates();
 
-        let updates = recv.iter().collect::<Vec<_>>();
-
-        let updates = updates.iter().cloned().collect::<BTreeMap<_, _>>();
         let update = updates.get(&Nibbles::from(hex!("01").as_slice())).unwrap();
         assert_eq!(update.state_mask, TrieMask::new(0b1111)); // 1st nibble: 0, 1, 2, 3
         assert_eq!(update.tree_mask, TrieMask::new(0));

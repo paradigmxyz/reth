@@ -1,6 +1,7 @@
 use crate::{
     cursor::{CursorSubNode, TrieCursor},
     prefix_set::PrefixSet,
+    updates::TrieUpdates,
     Nibbles,
 };
 use reth_db::{table::Key, Error};
@@ -20,6 +21,8 @@ pub struct TrieWalker<'a, K, C> {
     pub can_skip_current_node: bool,
     /// A `PrefixSet` representing the changes to be applied to the trie.
     pub changes: PrefixSet,
+    /// The trie updates to be applied to the trie.
+    trie_updates: Option<TrieUpdates>,
     __phantom: PhantomData<K>,
 }
 
@@ -32,6 +35,7 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
             changes,
             can_skip_current_node: false,
             stack: vec![CursorSubNode::default()],
+            trie_updates: None,
             __phantom: PhantomData::default(),
         };
 
@@ -43,6 +47,19 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         // Update the skip state for the root node.
         this.update_skip_node();
         this
+    }
+
+    /// Sets the flag whether the trie updates should be stored.
+    pub fn with_updates(mut self, should_store_updates: bool) -> Self {
+        if should_store_updates {
+            self.trie_updates = Some(TrieUpdates::default());
+        }
+        self
+    }
+
+    /// Consumes the walker and returns the trie updates.
+    pub fn finish(mut self) -> TrieUpdates {
+        self.trie_updates.take().unwrap_or_default()
     }
 
     /// Prints the current stack of trie nodes.
@@ -121,7 +138,9 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
         if !self.can_skip_current_node || nibble != -1 {
-            self.cursor.delete_current()?;
+            if let Some((updates, key)) = self.trie_updates.as_mut().zip(self.cursor.current()?) {
+                updates.schedule_delete(key);
+            }
         }
 
         Ok(())
@@ -209,7 +228,10 @@ impl<'a, K: Key + From<Vec<u8>>, C: TrieCursor<K>> TrieWalker<'a, K, C> {
 mod tests {
     use super::*;
     use crate::cursor::{AccountTrieCursor, StorageTrieCursor};
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
+    use reth_db::{
+        cursor::DbCursorRW, mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut,
+    };
+    use reth_primitives::trie::StorageTrieEntry;
     use reth_provider::Transaction;
 
     #[test]
@@ -237,26 +259,32 @@ mod tests {
 
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
-        let account_trie =
-            AccountTrieCursor::new(tx.cursor_write::<tables::AccountsTrie>().unwrap());
-        test_cursor(account_trie, &inputs, &expected);
+        let mut account_cursor = tx.cursor_write::<tables::AccountsTrie>().unwrap();
+        for (k, v) in &inputs {
+            account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
+        }
+        let account_trie = AccountTrieCursor::new(account_cursor);
+        test_cursor(account_trie, &expected);
 
-        let storage_trie = StorageTrieCursor::new(
-            tx.cursor_dup_write::<tables::StoragesTrie>().unwrap(),
-            H256::random(),
-        );
-        test_cursor(storage_trie, &inputs, &expected);
+        let hashed_address = H256::random();
+        let mut storage_cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
+        for (k, v) in &inputs {
+            storage_cursor
+                .upsert(
+                    hashed_address,
+                    StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() },
+                )
+                .unwrap();
+        }
+        let storage_trie = StorageTrieCursor::new(storage_cursor, hashed_address);
+        test_cursor(storage_trie, &expected);
     }
 
-    fn test_cursor<K, T>(mut trie: T, inputs: &[(Vec<u8>, BranchNodeCompact)], expected: &[Vec<u8>])
+    fn test_cursor<K, T>(mut trie: T, expected: &[Vec<u8>])
     where
         K: Key + From<Vec<u8>>,
         T: TrieCursor<K>,
     {
-        for (k, v) in inputs {
-            trie.upsert(k.clone().into(), v.clone()).unwrap();
-        }
-
         let mut walker = TrieWalker::new(&mut trie, Default::default());
         assert!(walker.key().unwrap().is_empty());
 
@@ -275,11 +303,7 @@ mod tests {
     fn cursor_rootnode_with_changesets() {
         let db = create_test_rw_db();
         let tx = Transaction::new(db.as_ref()).unwrap();
-
-        let mut trie = StorageTrieCursor::new(
-            tx.cursor_dup_write::<tables::StoragesTrie>().unwrap(),
-            H256::random(),
-        );
+        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>().unwrap();
 
         let nodes = vec![
             (
@@ -306,9 +330,12 @@ mod tests {
             ),
         ];
 
+        let hashed_address = H256::random();
         for (k, v) in nodes {
-            trie.upsert(k.into(), v).unwrap();
+            cursor.upsert(hashed_address, StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
         }
+
+        let mut trie = StorageTrieCursor::new(cursor, hashed_address);
 
         // No changes
         let mut cursor = TrieWalker::new(&mut trie, Default::default());
