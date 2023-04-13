@@ -1,6 +1,6 @@
 //! Database debugging tool
 use crate::{
-    dirs::{DbPath, PlatformPath},
+    dirs::{DbPath, MaybePlatformPath},
     utils::DbTool,
     StageEnum,
 };
@@ -28,7 +28,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(global = true, long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
 
     /// The chain this node is running.
     ///
@@ -54,7 +54,7 @@ impl Command {
     /// Execute `db` command
     pub async fn execute(&self) -> eyre::Result<()> {
         // add network name to db directory
-        let db_path = self.db.with_chain(self.chain.chain);
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
         std::fs::create_dir_all(&db_path)?;
 
