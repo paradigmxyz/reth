@@ -26,7 +26,10 @@ pub struct AccountBeforeTx {
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for AccountBeforeTx {
-    fn to_compact(self, buf: &mut impl BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         // for now put full bytes and later compress it.
         buf.put_slice(&self.address.to_fixed_bytes()[..]);
         self.info.to_compact(buf) + 32

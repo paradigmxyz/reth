@@ -16,7 +16,7 @@ use reth_staged_sync::{
     Config,
 };
 use reth_stages::{
-    stages::{BodyStage, ExecutionStage, SenderRecoveryStage},
+    stages::{BodyStage, ExecutionStage, SenderRecoveryStage, TransactionLookupStage},
     ExecInput, Stage, StageId, UnwindInput,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -109,7 +109,10 @@ impl Command {
 
         let unwind = UnwindInput { stage_progress: self.to, unwind_to: self.from, bad_block: None };
 
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.with_chain(self.chain.chain);
+
+        let db = Arc::new(init_db(db_path)?);
         let mut tx = Transaction::new(db.as_ref())?;
 
         if let Some(listen_addr) = self.metrics {
@@ -176,6 +179,16 @@ impl Command {
                 if !self.skip_unwind {
                     stage.unwind(&mut tx, unwind).await?;
                 }
+                stage.execute(&mut tx, input).await?;
+            }
+            StageEnum::TxLookup => {
+                let mut stage = TransactionLookupStage::new(num_blocks);
+
+                // Unwind first
+                if !self.skip_unwind {
+                    stage.unwind(&mut tx, unwind).await?;
+                }
+
                 stage.execute(&mut tx, input).await?;
             }
             _ => {}

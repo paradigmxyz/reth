@@ -1,0 +1,48 @@
+[package]
+name = "reth-trie"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/paradigmxyz/reth"
+readme = "README.md"
+description = """
+Merkle trie implementation
+"""
+
+[dependencies]
+# reth
+reth-primitives = { path  = "../primitives" }
+reth-interfaces = { path  = "../interfaces" }
+reth-rlp = { path = "../rlp" }
+reth-db = { path = "../storage/db" }
+
+# tokio
+tokio = { version = "1.21.2", default-features = false, features = ["sync"] }
+
+# tracing
+tracing = "0.1"
+
+# misc 
+hex = "0.4"
+thiserror = "1.0"
+derive_more = "0.99"
+
+# test-utils
+triehash = { version = "0.8", optional = true }
+
+[dev-dependencies]
+# reth
+reth-primitives = { path  = "../primitives", features = ["test-utils", "arbitrary"] }
+reth-db = { path = "../storage/db", features = ["test-utils"] }
+reth-provider = { path = "../storage/provider" }
+
+# trie
+triehash = "0.8"
+
+# misc
+proptest = "1.0"
+tokio = { version = "1.21.2", default-features = false, features = ["sync", "rt", "macros"] }
+tokio-stream = "0.1.10"
+
+[features]
+test-utils = ["triehash"]

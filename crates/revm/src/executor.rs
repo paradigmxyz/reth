@@ -14,7 +14,7 @@ use reth_primitives::{
 };
 use reth_provider::{BlockExecutor, StateProvider};
 use revm::{
-    db::AccountState,
+    db::{AccountState, CacheDB, DatabaseRef},
     primitives::{
         hash_map::{self, Entry},
         Account as RevmAccount, AccountInfo, ResultAndState,
@@ -109,6 +109,7 @@ where
         post_state: &mut PostState,
     ) {
         let db = self.db();
+<<<<<<< HEAD
 
         // iterate over all changed accounts
         for (address, account) in changes {
@@ -210,45 +211,26 @@ where
                 }
             }
         }
+=======
+        commit_state_changes(db, post_state, changes, has_state_clear_eip);
+>>>>>>> origin/main
     }
 
     /// Collect all balance changes at the end of the block.
     ///
     /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
     /// state changes (DAO fork).
-    fn post_block_balance_increments(
-        &self,
-        block: &Block,
-        td: U256,
-    ) -> Result<HashMap<Address, U256>, Error> {
-        let mut balance_increments = HashMap::<Address, U256>::default();
-
-        // Add block rewards if they are enabled.
-        if let Some(base_block_reward) =
-            calc::base_block_reward(&self.chain_spec, block.number, block.difficulty, td)
-        {
-            // Ommer rewards
-            for ommer in block.ommers.iter() {
-                *balance_increments.entry(ommer.beneficiary).or_default() +=
-                    calc::ommer_reward(base_block_reward, block.number, ommer.number);
-            }
-
-            // Full block reward
-            *balance_increments.entry(block.beneficiary).or_default() +=
-                calc::block_reward(base_block_reward, block.ommers.len());
-        }
-
-        // Process withdrawals
-        if self.chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block.timestamp) {
-            if let Some(withdrawals) = block.withdrawals.as_ref() {
-                for withdrawal in withdrawals {
-                    *balance_increments.entry(withdrawal.address).or_default() +=
-                        withdrawal.amount_wei();
-                }
-            }
-        }
-
-        Ok(balance_increments)
+    fn post_block_balance_increments(&self, block: &Block, td: U256) -> HashMap<Address, U256> {
+        post_block_balance_increments(
+            &self.chain_spec,
+            block.number,
+            block.difficulty,
+            block.beneficiary,
+            block.timestamp,
+            td,
+            &block.ommers,
+            block.withdrawals.as_deref(),
+        )
     }
 
     /// Irregular state change at Ethereum DAO hardfork
@@ -287,6 +269,7 @@ where
         increment: U256,
         post_state: &mut PostState,
     ) -> Result<(), Error> {
+<<<<<<< HEAD
         let db = self.db();
         let beneficiary = db.load_account(address).map_err(|_| Error::ProviderError)?;
         let old = to_reth_acc(&beneficiary.info);
@@ -320,6 +303,10 @@ where
         }
 
         Ok(())
+=======
+        increment_account_balance(self.db(), post_state, address, increment)
+            .map_err(|_| Error::ProviderError)
+>>>>>>> origin/main
     }
 
     /// Runs a single transaction in the configured environment and proceeds
@@ -438,7 +425,12 @@ where
         }
 
         // Add block rewards
+<<<<<<< HEAD
         let balance_increments = self.post_block_balance_increments(block, total_difficulty)?;
+=======
+        let balance_increments = self.post_block_balance_increments(block, total_difficulty);
+        let mut includes_block_transition = !balance_increments.is_empty();
+>>>>>>> origin/main
         for (address, increment) in balance_increments.into_iter() {
             self.increment_account_balance(block.number, address, increment, &mut post_state)?;
         }
@@ -474,6 +466,161 @@ where
     }
 }
 
+/// Increment the balance for the given account in the [PostState].
+///
+/// Returns an error if the database encountered an error while loading the account.
+pub fn increment_account_balance<DB>(
+    db: &mut CacheDB<DB>,
+    post_state: &mut PostState,
+    address: Address,
+    increment: U256,
+) -> Result<(), <DB as DatabaseRef>::Error>
+where
+    DB: DatabaseRef,
+{
+    let beneficiary = db.load_account(address)?;
+    let old = to_reth_acc(&beneficiary.info);
+    // Increment beneficiary balance by mutating db entry in place.
+    beneficiary.info.balance += increment;
+    let new = to_reth_acc(&beneficiary.info);
+    match beneficiary.account_state {
+        AccountState::NotExisting => {
+            // if account was not existing that means that storage is not
+            // present.
+            beneficiary.account_state = AccountState::StorageCleared;
+
+            // if account was not present append `Created` changeset
+            post_state.create_account(
+                address,
+                Account { nonce: 0, balance: new.balance, bytecode_hash: None },
+            )
+        }
+
+        AccountState::StorageCleared | AccountState::Touched | AccountState::None => {
+            // If account is None that means that EVM didn't touch it.
+            // we are changing the state to Touched as account can have
+            // storage in db.
+            if beneficiary.account_state == AccountState::None {
+                beneficiary.account_state = AccountState::Touched;
+            }
+            // if account was present, append changed changeset.
+            post_state.change_account(address, old, new);
+        }
+    }
+
+    Ok(())
+}
+
+/// Commit change to the _run-time_ database [CacheDB], and update the given [PostState] with the
+/// changes made in the transaction, which can be persisted to the database.
+///
+/// Note: This does _not_ commit to the underlying database [DatabaseRef], but only to the
+/// [CacheDB].
+pub fn commit_state_changes<DB>(
+    db: &mut CacheDB<DB>,
+    post_state: &mut PostState,
+    changes: hash_map::HashMap<Address, RevmAccount>,
+    has_state_clear_eip: bool,
+) where
+    DB: DatabaseRef,
+{
+    // iterate over all changed accounts
+    for (address, account) in changes {
+        if account.is_destroyed {
+            // get old account that we are destroying.
+            let db_account = match db.accounts.entry(address) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(_entry) => {
+                    panic!("Left panic to critically jumpout if happens, as every account should be hot loaded.");
+                }
+            };
+            // Insert into `change` a old account and None for new account
+            // and mark storage to be mapped
+            post_state.destroy_account(address, to_reth_acc(&db_account.info));
+
+            // clear cached DB and mark account as not existing
+            db_account.storage.clear();
+            db_account.account_state = AccountState::NotExisting;
+            db_account.info = AccountInfo::default();
+
+            continue
+        } else {
+            // check if account code is new or old.
+            // does it exist inside cached contracts if it doesn't it is new bytecode that
+            // we are inserting inside `change`
+            if let Some(ref code) = account.info.code {
+                if !code.is_empty() && !db.contracts.contains_key(&account.info.code_hash) {
+                    db.contracts.insert(account.info.code_hash, code.clone());
+                    post_state.add_bytecode(account.info.code_hash, Bytecode(code.clone()));
+                }
+            }
+
+            // get old account that is going to be overwritten or none if it does not exist
+            // and get new account that was just inserted. new account mut ref is used for
+            // inserting storage
+            let cached_account = match db.accounts.entry(address) {
+                Entry::Vacant(entry) => {
+                    let entry = entry.insert(Default::default());
+                    entry.info = account.info.clone();
+
+                    let account = to_reth_acc(&entry.info);
+                    if !(has_state_clear_eip && account.is_empty()) {
+                        post_state.create_account(address, account);
+                    }
+                    entry
+                }
+                Entry::Occupied(entry) => {
+                    let entry = entry.into_mut();
+
+                    if matches!(entry.account_state, AccountState::NotExisting) {
+                        let account = to_reth_acc(&account.info);
+                        if !(has_state_clear_eip && account.is_empty()) {
+                            post_state.create_account(address, account);
+                        }
+                    } else if entry.info != account.info {
+                        post_state.change_account(
+                            address,
+                            to_reth_acc(&entry.info),
+                            to_reth_acc(&account.info),
+                        );
+                    } else if has_state_clear_eip && account.is_empty() {
+                        // The account was touched, but it is empty, so it should be deleted.
+                        post_state.destroy_account(address, to_reth_acc(&account.info));
+                    }
+
+                    entry.info = account.info.clone();
+                    entry
+                }
+            };
+
+            cached_account.account_state = if account.storage_cleared {
+                cached_account.storage.clear();
+                AccountState::StorageCleared
+            } else if cached_account.account_state.is_storage_cleared() {
+                // the account already exists and its storage was cleared, preserve its previous
+                // state
+                AccountState::StorageCleared
+            } else {
+                AccountState::Touched
+            };
+
+            // Insert storage.
+            let mut storage_changeset = BTreeMap::new();
+
+            // insert storage into new db account.
+            cached_account.storage.extend(account.storage.into_iter().map(|(key, value)| {
+                storage_changeset.insert(key, (value.original_value(), value.present_value()));
+                (key, value.present_value())
+            }));
+
+            // Insert into change.
+            if !storage_changeset.is_empty() {
+                post_state.change_storage(address, storage_changeset);
+            }
+        }
+    }
+}
+
 /// Verify receipts
 pub fn verify_receipt<'a>(
     expected_receipts_root: H256,
@@ -496,6 +643,88 @@ pub fn verify_receipt<'a>(
         })
     }
     Ok(())
+}
+
+/// Collect all balance changes at the end of the block.
+///
+/// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
+/// state changes (DAO fork).
+#[allow(clippy::too_many_arguments)]
+#[inline]
+pub fn post_block_balance_increments(
+    chain_spec: &ChainSpec,
+    block_number: u64,
+    block_difficulty: U256,
+    beneficiary: Address,
+    block_timestamp: u64,
+    total_difficulty: U256,
+    ommers: &[Header],
+    withdrawals: Option<&[Withdrawal]>,
+) -> HashMap<Address, U256> {
+    let mut balance_increments = HashMap::new();
+
+    // Add block rewards if they are enabled.
+    if let Some(base_block_reward) =
+        calc::base_block_reward(chain_spec, block_number, block_difficulty, total_difficulty)
+    {
+        // Ommer rewards
+        for ommer in ommers {
+            *balance_increments.entry(ommer.beneficiary).or_default() +=
+                calc::ommer_reward(base_block_reward, block_number, ommer.number);
+        }
+
+        // Full block reward
+        *balance_increments.entry(beneficiary).or_default() +=
+            calc::block_reward(base_block_reward, ommers.len());
+    }
+
+    // process withdrawals
+    insert_post_block_withdrawals_balance_increments(
+        chain_spec,
+        block_timestamp,
+        withdrawals,
+        &mut balance_increments,
+    );
+
+    balance_increments
+}
+
+/// Returns a map of addresses to their balance increments if shanghai is active at the given
+/// timestamp.
+#[inline]
+pub fn post_block_withdrawals_balance_increments(
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    withdrawals: &[Withdrawal],
+) -> HashMap<Address, U256> {
+    let mut balance_increments = HashMap::with_capacity(withdrawals.len());
+    insert_post_block_withdrawals_balance_increments(
+        chain_spec,
+        block_timestamp,
+        Some(withdrawals),
+        &mut balance_increments,
+    );
+    balance_increments
+}
+
+/// Applies all withdrawal balance increments if shanghai is active at the given timestamp to the
+/// given `balance_increments` map.
+#[inline]
+pub fn insert_post_block_withdrawals_balance_increments(
+    chain_spec: &ChainSpec,
+    block_timestamp: u64,
+    withdrawals: Option<&[Withdrawal]>,
+    balance_increments: &mut HashMap<Address, U256>,
+) {
+    // Process withdrawals
+    if chain_spec.fork(Hardfork::Shanghai).active_at_timestamp(block_timestamp) {
+        if let Some(withdrawals) = withdrawals {
+            for withdrawal in withdrawals {
+                *balance_increments.entry(withdrawal.address).or_default() +=
+                    withdrawal.amount_wei();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

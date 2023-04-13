@@ -6,26 +6,26 @@ use crate::{blockchain_tree::PostStateDataRef, post_state::PostState};
 use reth_db::database::Database;
 use reth_interfaces::{consensus::Consensus, executor::Error as ExecError, Error};
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders, SealedHeader, U256,
+    BlockHash, BlockNumber, ForkBlock, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
-    providers::PostStateProvider, BlockExecutor, ExecutorFactory, PostStateDataProvider,
+    providers::PostStateProvider, BlockExecutor, Chain, ExecutorFactory, PostStateDataProvider,
     StateProviderFactory,
 };
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    ops::{Deref, DerefMut},
+};
 
 use super::externals::TreeExternals;
 
 /// The ID of a sidechain internally in a [`BlockchainTree`][super::BlockchainTree].
 pub(crate) type BlockChainId = u64;
 
-/// A side chain.
-///
-/// The sidechain contains the state of accounts after execution of its blocks,
-/// changesets for those blocks (and their transactions), as well as the blocks themselves.
-///
-/// Each chain in the tree are identified using a unique ID.
+/// A chain if the blockchain tree, that has functionality to execute blocks and append them to the
+/// it self.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+<<<<<<< HEAD
 pub struct Chain {
     /// The state of accounts after execution of the blocks in this chain.
     ///
@@ -33,83 +33,35 @@ pub struct Chain {
     state: PostState,
     /// The blocks in this chain.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
+=======
+pub struct AppendableChain {
+    chain: Chain,
+>>>>>>> origin/main
 }
 
-/// Block number and hash of the forked block.
-pub type ForkBlock = BlockNumHash;
+impl Deref for AppendableChain {
+    type Target = Chain;
 
-impl Chain {
-    /// Get the blocks in this chain.
-    pub fn blocks(&self) -> &BTreeMap<BlockNumber, SealedBlockWithSenders> {
-        &self.blocks
+    fn deref(&self) -> &Self::Target {
+        &self.chain
+    }
+}
+
+impl DerefMut for AppendableChain {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.chain
+    }
+}
+
+impl AppendableChain {
+    /// Crate a new appendable chain from a given chain.
+    pub fn new(chain: Chain) -> Self {
+        Self { chain }
     }
 
-    /// Get post state of this chain
-    pub fn state(&self) -> &PostState {
-        &self.state
-    }
-
-    /// Return block number of the block hash.
-    pub fn block_number(&self, block_hash: BlockHash) -> Option<BlockNumber> {
-        self.blocks.iter().find_map(|(num, block)| (block.hash() == block_hash).then_some(*num))
-    }
-
-    /// Return post state of the block at the `block_number` or None if block is not known
-    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<PostState> {
-        let mut state = self.state.clone();
-        if self.tip().number == block_number {
-            return Some(state)
-        }
-
-        state.revert_to(block_number);
-        return Some(state)
-    }
-
-    /// Destructure the chain into its inner components, the blocks and the state.
-    pub fn into_inner(self) -> (BTreeMap<BlockNumber, SealedBlockWithSenders>, PostState) {
-        (self.blocks, self.state)
-    }
-
-    /// Get the block at which this chain forked.
-    pub fn fork_block(&self) -> ForkBlock {
-        let tip = self.first();
-        ForkBlock { number: tip.number.saturating_sub(1), hash: tip.parent_hash }
-    }
-
-    /// Get the block number at which this chain forked.
-    pub fn fork_block_number(&self) -> BlockNumber {
-        self.first().number.saturating_sub(1)
-    }
-
-    /// Get the block hash at which this chain forked.
-    pub fn fork_block_hash(&self) -> BlockHash {
-        self.first().parent_hash
-    }
-
-    /// Get the first block in this chain.
-    pub fn first(&self) -> &SealedBlockWithSenders {
-        self.blocks.first_key_value().expect("Chain has at least one block for first").1
-    }
-
-    /// Get the tip of the chain.
-    ///
-    /// # Note
-    ///
-    /// Chains always have at least one block.
-    pub fn tip(&self) -> &SealedBlockWithSenders {
-        self.blocks.last_key_value().expect("Chain should have at least one block").1
-    }
-
-    /// Create new chain with given blocks and post state.
-    pub fn new(blocks: Vec<(SealedBlockWithSenders, PostState)>) -> Self {
-        let mut state = PostState::default();
-        let mut block_num_hash = BTreeMap::new();
-        for (block, block_state) in blocks.into_iter() {
-            state.extend(block_state);
-            block_num_hash.insert(block.number, block);
-        }
-
-        Self { state, blocks: block_num_hash }
+    /// Get the chain.
+    pub fn into_inner(self) -> Chain {
+        self.chain
     }
 
     /// Create a new chain that forks off of the canonical chain.
@@ -143,7 +95,7 @@ impl Chain {
             externals,
         )?;
 
-        Ok(Self::new(vec![(block.clone(), changeset)]))
+        Ok(Self { chain: Chain::new(vec![(block.clone(), changeset)]) })
     }
 
     /// Create a new chain that forks off of an existing sidechain.
@@ -162,7 +114,7 @@ impl Chain {
     {
         let parent_number = block.number - 1;
         let parent = self
-            .blocks
+            .blocks()
             .get(&parent_number)
             .ok_or(ExecError::BlockNumberNotFoundInChain { block_number: parent_number })?;
 
@@ -257,6 +209,7 @@ impl Chain {
             externals,
         )?;
         self.state.extend(block_state);
+<<<<<<< HEAD
         self.blocks.insert(block.number, block);
         Ok(())
     }
@@ -465,4 +418,11 @@ mod tests {
         // split at lower number
         assert_eq!(chain.clone().split(SplitAt::Number(0)), ChainSplit::NoSplitPending(chain));
     }
+=======
+        let transition_count = self.state.transitions_count();
+        self.block_transitions.insert(block.number, transition_count);
+        self.blocks.insert(block.number, block);
+        Ok(())
+    }
+>>>>>>> origin/main
 }

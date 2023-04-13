@@ -3,8 +3,8 @@
 use crate::{post_state::PostState, Transaction};
 use reth_db::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_primitives::{
-    hex_literal::hex, proofs::EMPTY_ROOT, Account, Header, SealedBlock, SealedBlockWithSenders,
-    Withdrawal, H160, H256, U256,
+    hex_literal::hex, Account, Header, SealedBlock, SealedBlockWithSenders, Withdrawal, H160, H256,
+    U256,
 };
 use reth_rlp::Decodable;
 use std::collections::BTreeMap;
@@ -39,7 +39,7 @@ pub fn assert_genesis_block<DB: Database>(tx: &Transaction<'_, DB>, g: SealedBlo
     assert_eq!(tx.table::<tables::StorageChangeSet>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::HashedAccount>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::HashedStorage>().unwrap(), vec![]);
-    assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![(EMPTY_ROOT, vec![0x80])]);
+    assert_eq!(tx.table::<tables::AccountsTrie>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::StoragesTrie>().unwrap(), vec![]);
     assert_eq!(tx.table::<tables::TxSenders>().unwrap(), vec![]);
     // SyncStage is not updated in tests

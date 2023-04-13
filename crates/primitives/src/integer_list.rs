@@ -35,6 +35,14 @@ impl IntegerList {
         vec
     }
 
+    /// Serializes a [`IntegerList`] into a sequence of bytes.
+    pub fn to_mut_bytes<B: bytes::BufMut>(&self, buf: &mut B) {
+        let len = self.0.size_in_bytes();
+        let mut vec = Vec::with_capacity(len);
+        self.0.serialize_into(&mut vec).unwrap();
+        buf.put_slice(vec.as_slice());
+    }
+
     /// Deserializes a sequence of bytes into a proper [`IntegerList`].
     pub fn from_bytes(data: &[u8]) -> Result<Self, Error> {
         Ok(Self(EliasFano::deserialize_from(data).map_err(|_| Error::FailedDeserialize)?))

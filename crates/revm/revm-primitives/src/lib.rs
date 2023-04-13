@@ -14,3 +14,6 @@ pub mod env;
 /// Helpers for type compatibility between reth and revm types
 mod compat;
 pub use compat::*;
+
+/// Re-exports revm types;
+pub use revm::*;

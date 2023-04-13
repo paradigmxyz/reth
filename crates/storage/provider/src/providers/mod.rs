@@ -12,8 +12,8 @@ use reth_primitives::{
 use reth_revm_primitives::{
     config::revm_spec,
     env::{fill_block_env, fill_cfg_and_block_env, fill_cfg_env},
+    primitives::{BlockEnv, CfgEnv, SpecId},
 };
-use revm_primitives::{BlockEnv, CfgEnv, SpecId};
 use std::{ops::RangeBounds, sync::Arc};
 
 mod state;

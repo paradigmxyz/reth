@@ -6,7 +6,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     Error as DbError,
 };
-use reth_primitives::{Account, Address, BlockNumber, Bytecode, Receipt, StorageEntry, H256, U256};
+use reth_primitives::{
+    bloom::logs_bloom, proofs::calculate_receipt_root_ref, Account, Address, BlockNumber, Bloom,
+    Bytecode, Log, Receipt, StorageEntry, TransitionId, H256, U256,
+};
 use std::collections::BTreeMap;
 
 /// Storage for an account.
@@ -91,22 +94,22 @@ impl Change {
     /// Get the transition ID for the change
     pub fn block_number(&self) -> BlockNumber {
         match self {
-            Change::AccountChanged { block_number, .. } |
-            Change::AccountCreated { block_number, .. } |
-            Change::StorageChanged { block_number, .. } |
-            Change::StorageWiped { block_number, .. } |
-            Change::AccountDestroyed { block_number, .. } => *block_number,
+            Change::AccountChanged { block_number, .. }
+            | Change::AccountCreated { block_number, .. }
+            | Change::StorageChanged { block_number, .. }
+            | Change::StorageWiped { block_number, .. }
+            | Change::AccountDestroyed { block_number, .. } => *block_number,
         }
     }
 
     /// Get the address of the account this change operates on.
     pub fn address(&self) -> Address {
         match self {
-            Change::AccountChanged { address, .. } |
-            Change::AccountCreated { address, .. } |
-            Change::StorageChanged { address, .. } |
-            Change::StorageWiped { address, .. } |
-            Change::AccountDestroyed { address, .. } => *address,
+            Change::AccountChanged { address, .. }
+            | Change::AccountCreated { address, .. }
+            | Change::StorageChanged { address, .. }
+            | Change::StorageWiped { address, .. }
+            | Change::AccountDestroyed { address, .. } => *address,
         }
     }
 }
@@ -153,7 +156,7 @@ impl Change {
 /// Since most [PostState]s in reth are for multiple blocks it is better to pre-allocate capacity
 /// for receipts and changes, which [PostState::new] does, and thus it (or
 /// [PostState::with_tx_capacity]) should be preferred to using the [Default] implementation.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PostState {
     /// The state of all modified accounts after execution.
     ///
@@ -187,7 +190,7 @@ const PREALLOC_CHANGES_SIZE: usize = 256 * BEST_GUESS_CHANGES_PER_TX;
 impl PostState {
     /// Create an empty [PostState].
     pub fn new() -> Self {
-        Self { changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE), ..Default::default() }
+        Self::default()
     }
 
     /// Create an empty [PostState] with pre-allocated space for a certain amount of transactions.
@@ -245,10 +248,30 @@ impl PostState {
         &self.receipts
     }
 
+    /// Returns an iterator over all logs in this [PostState].
+    pub fn logs(&self) -> impl Iterator<Item = &Log> + '_ {
+        self.receipts().iter().flat_map(|r| r.logs.iter())
+    }
+
+    /// Returns the logs bloom for all recorded logs.
+    pub fn logs_bloom(&self) -> Bloom {
+        logs_bloom(self.logs())
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    pub fn receipts_root(&self) -> H256 {
+        calculate_receipt_root_ref(self.receipts().iter().map(Into::into))
+    }
+
+    /// Get the number of transitions causing this [PostState]
+    pub fn transitions_count(&self) -> TransitionId {
+        self.current_transition_id
+    }
+
     /// Extend this [PostState] with the changes in another [PostState].
     pub fn extend(&mut self, other: PostState) {
         if other.changes.is_empty() {
-            return
+            return;
         }
 
         self.changes.reserve(other.changes.len());
@@ -372,8 +395,8 @@ impl PostState {
     /// Add a new change, and apply its transformations to the current state
     pub fn add_and_apply(&mut self, change: Change) {
         match &change {
-            Change::AccountCreated { address, account, .. } |
-            Change::AccountChanged { address, new: account, .. } => {
+            Change::AccountCreated { address, account, .. }
+            | Change::AccountChanged { address, new: account, .. } => {
                 self.accounts.insert(*address, Some(*account));
             }
             Change::AccountDestroyed { address, .. } => {
@@ -432,9 +455,9 @@ impl PostState {
             changesets.into_iter().partition(|changeset| {
                 matches!(
                     changeset,
-                    Change::AccountChanged { .. } |
-                        Change::AccountCreated { .. } |
-                        Change::AccountDestroyed { .. }
+                    Change::AccountChanged { .. }
+                        | Change::AccountCreated { .. }
+                        | Change::AccountDestroyed { .. }
                 )
             });
 
@@ -443,8 +466,8 @@ impl PostState {
         let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSet>()?;
         for changeset in account_changes.into_iter() {
             match changeset {
-                Change::AccountDestroyed { block_number, address, old } |
-                Change::AccountChanged { block_number, address, old, .. } => {
+                Change::AccountDestroyed { block_number, address, old }
+                | Change::AccountChanged { block_number, address, old, .. } => {
                     let destroyed = matches!(changeset, Change::AccountDestroyed { .. });
                     tracing::trace!(target: "provider::post_state", block_number, ?address, ?old, destroyed, "Account changed");
                     account_changeset_cursor
@@ -553,6 +576,18 @@ impl PostState {
         }
 
         Ok(())
+    }
+}
+
+impl Default for PostState {
+    fn default() -> Self {
+        Self {
+            accounts: Default::default(),
+            storage: Default::default(),
+            changes: Vec::with_capacity(PREALLOC_CHANGES_SIZE),
+            bytecode: Default::default(),
+            receipts: vec![],
+        }
     }
 }
 

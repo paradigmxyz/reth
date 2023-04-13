@@ -20,6 +20,12 @@ impl PayloadId {
     }
 }
 
+impl std::fmt::Display for PayloadId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// This structure maps for the return value of `engine_getPayloadV2` of the beacon chain spec.
 ///
 /// See also: <https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2>
@@ -187,7 +193,7 @@ pub enum PayloadError {
     #[error("Invalid payload base fee: {0}")]
     BaseFee(U256),
     /// Invalid payload block hash.
-    #[error("Invalid payload block hash. Execution: {execution}. Consensus: {consensus}")]
+    #[error("blockhash mismatch, want {consensus}, got {execution}")]
     BlockHash {
         /// The block hash computed from the payload.
         execution: H256,
@@ -274,6 +280,21 @@ impl Serialize for PayloadStatus {
         map.serialize_entry("latestValidHash", &self.latest_valid_hash)?;
         map.serialize_entry("validationError", &self.status.validation_error())?;
         map.end()
+    }
+}
+
+impl From<PayloadError> for PayloadStatus {
+    fn from(error: PayloadError) -> Self {
+        match error {
+            error @ PayloadError::BlockHash { .. } => {
+                PayloadStatus::from_status(PayloadStatusEnum::InvalidBlockHash {
+                    validation_error: error.to_string(),
+                })
+            }
+            _ => PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+                validation_error: error.to_string(),
+            }),
+        }
     }
 }
 

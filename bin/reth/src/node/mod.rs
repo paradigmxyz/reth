@@ -30,17 +30,16 @@ use reth_executor::blockchain_tree::{
 };
 use reth_interfaces::{
     consensus::{Consensus, ForkchoiceState},
-    events::NewBlockNotificationSink,
     p2p::{
         bodies::{client::BodiesClient, downloader::BodyDownloader},
         headers::{client::StatusUpdater, downloader::HeaderDownloader},
     },
     sync::SyncStateUpdater,
 };
-use reth_miner::TestPayloadStore;
 use reth_network::{error::NetworkError, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockHashOrNumber, ChainSpec, Head, Header, SealedHeader, H256};
+use reth_payload_builder::TestPayloadStore;
+use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedHeader, H256};
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
@@ -145,11 +144,14 @@ impl Command {
         // Does not do anything on windows.
         raise_fd_limit();
 
-        let mut config: Config = self.load_config()?;
-        info!(target: "reth::cli", path = %self.config, "Configuration loaded");
+        let mut config: Config = self.load_config_with_chain(self.chain.chain)?;
+        info!(target: "reth::cli", path = %self.config.with_chain(self.chain.chain), "Configuration loaded");
 
-        info!(target: "reth::cli", path = %self.db, "Opening database");
-        let db = Arc::new(init_db(&self.db)?);
+        // add network name to db directory
+        let db_path = self.db.with_chain(self.chain.chain);
+
+        info!(target: "reth::cli", path = %db_path, "Opening database");
+        let db = Arc::new(init_db(&db_path)?);
         let shareable_db = ShareableDatabase::new(Arc::clone(&db), Arc::clone(&self.chain));
         info!(target: "reth::cli", "Database opened");
 
@@ -231,11 +233,11 @@ impl Command {
         let tree_config = BlockchainTreeConfig::default();
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
         // depth at least N blocks must be sent at once.
-        let new_block_notification_sender =
-            NewBlockNotificationSink::new(tree_config.max_reorg_depth() as usize * 2);
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
         let blockchain_tree = ShareableBlockchainTree::new(BlockchainTree::new(
             tree_externals,
-            new_block_notification_sender.clone(),
+            canon_state_notification_sender.clone(),
             tree_config,
         )?);
 
@@ -246,7 +248,7 @@ impl Command {
                 shareable_db.clone(),
                 transaction_pool.clone(),
                 consensus_engine_tx.clone(),
-                new_block_notification_sender.clone(),
+                canon_state_notification_sender,
             )
             .build();
 
@@ -402,10 +404,12 @@ impl Command {
         Ok(pipeline)
     }
 
-    fn load_config(&self) -> eyre::Result<Config> {
-        confy::load_path::<Config>(&self.config).wrap_err_with(|| {
-            format!("Could not load config file {}", self.config.as_ref().display())
-        })
+    /// Loads the reth config based on the intended chain
+    fn load_config_with_chain(&self, chain: Chain) -> eyre::Result<Config> {
+        // add network name to config directory
+        let config_path = self.config.with_chain(chain);
+        confy::load_path::<Config>(config_path.clone())
+            .wrap_err_with(|| format!("Could not load config file {}", config_path))
     }
 
     fn init_trusted_nodes(&self, config: &mut Config) {
@@ -465,7 +469,7 @@ impl Command {
             .request_handler(client)
             .split_with_handle();
 
-        let known_peers_file = self.network.persistent_peers_file();
+        let known_peers_file = self.network.persistent_peers_file(self.chain.chain);
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });

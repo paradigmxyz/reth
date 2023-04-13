@@ -33,8 +33,9 @@ use crate::{
     },
 };
 use reth_primitives::{
+    trie::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, StorageEntry,
-    StorageTrieEntry, TransactionSigned, TxHash, TxNumber, H256,
+    TransactionSigned, TransitionId, TxHash, TxNumber, H256,
 };
 
 /// Enum for the types of tables present in libmdbx.
@@ -46,8 +47,11 @@ pub enum TableType {
     DupSort,
 }
 
+/// Number of tables that should be present inside database.
+pub const NUM_TABLES: usize = 25;
+
 /// Default tables that should be present inside database.
-pub const TABLES: [(TableType, &str); 25] = [
+pub const TABLES: [(TableType, &str); NUM_TABLES] = [
     (TableType::Table, CanonicalHeaders::const_name()),
     (TableType::Table, HeaderTD::const_name()),
     (TableType::Table, HeaderNumbers::const_name()),
@@ -279,12 +283,12 @@ dupsort!(
 
 table!(
     /// Stores the current state's Merkle Patricia Tree.
-    ( AccountsTrie ) H256 | Vec<u8>
+    ( AccountsTrie ) StoredNibbles | BranchNodeCompact
 );
 
 dupsort!(
-    /// Stores the Merkle Patricia Trees of each [`Account`]'s storage.
-    ( StoragesTrie ) H256 | [H256] StorageTrieEntry
+    /// From HashedAddress => NibblesSubKey => Intermediate value
+    ( StoragesTrie ) H256 | [StoredNibblesSubKey] StorageTrieEntry
 );
 
 table!(

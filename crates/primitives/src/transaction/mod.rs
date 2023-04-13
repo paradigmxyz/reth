@@ -253,7 +253,9 @@ impl Transaction {
         }
     }
 
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price
+    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
+    ///
+    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     pub fn max_fee_per_gas(&self) -> u128 {
         match self {
             Transaction::Legacy(TxLegacy { gas_price, .. }) |
@@ -264,6 +266,8 @@ impl Transaction {
 
     /// Max priority fee per gas for eip1559 transaction, for legacy and eip2930 transactions this
     /// is `None`
+    ///
+    /// This is also commonly referred to as the "Gas Tip Cap" (`GasTipCap`).
     pub fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
             Transaction::Legacy(_) => None,
@@ -272,6 +276,30 @@ impl Transaction {
                 Some(*max_priority_fee_per_gas)
             }
         }
+    }
+
+    /// Returns the effective miner gas tip cap (`gasTipCap`) for the given base fee.
+    ///
+    /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
+    pub fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        let base_fee = base_fee as u128;
+        let max_fee_per_gas = self.max_fee_per_gas();
+
+        if max_fee_per_gas < base_fee {
+            return None
+        }
+
+        // the miner tip is the difference between the max fee and the base fee or the
+        // max_priority_fee_per_gas, whatever is lower
+
+        // SAFETY: max_fee_per_gas >= base_fee
+        let fee = max_fee_per_gas - base_fee;
+
+        if let Some(priority_fee) = self.max_priority_fee_per_gas() {
+            return Some(fee.min(priority_fee))
+        }
+
+        Some(fee)
     }
 
     /// Get the transaction's input field.
@@ -538,6 +566,12 @@ pub struct TransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
+}
+
+impl AsRef<Self> for TransactionSigned {
+    fn as_ref(&self) -> &Self {
+        self
+    }
 }
 
 // === impl TransactionSigned ===

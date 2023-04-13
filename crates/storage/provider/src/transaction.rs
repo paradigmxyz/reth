@@ -1,7 +1,6 @@
 use crate::{
     insert_canonical_block,
     post_state::{Change, PostState, StorageChangeset},
-    trie::{DBTrieLoader, TrieError},
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -23,6 +22,7 @@ use reth_primitives::{
     keccak256, Account, Address, BlockHash, BlockNumber, ChainSpec, Hardfork, Header, SealedBlock,
     SealedBlockWithSenders, StorageEntry, TransactionSignedEcRecovered, TxNumber, H256, U256,
 };
+use reth_trie::{StateRoot, StateRootError};
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt::Debug,
@@ -603,12 +603,14 @@ where
 
         // merkle tree
         {
-            let current_root = self.get_header(fork_block_number)?.state_root;
-            let mut loader = DBTrieLoader::new(self.deref_mut());
-            let root = loader.update_root(current_root, range.clone()).and_then(|e| e.root())?;
-            if root != expected_state_root {
+            let state_root = StateRoot::incremental_root(
+                self.deref_mut(),
+                from_transition_id..to_transition_id,
+                None,
+            )?;
+            if state_root != expected_state_root {
                 return Err(TransactionError::StateTrieRootMismatch {
-                    got: root,
+                    got: state_root,
                     expected: expected_state_root,
                     block_number: *range.end(),
                     block_hash: end_block_hash,
@@ -1026,19 +1028,7 @@ where
             self.unwind_storage_history_indices(storage_range)?;
 
             // merkle tree
-            let new_state_root;
-            {
-                let (tip_number, _) =
-                    self.cursor_read::<tables::CanonicalHeaders>()?.last()?.unwrap_or_default();
-                let current_root = self.get_header(tip_number)?.state_root;
-                let mut loader = DBTrieLoader::new(self.deref());
-                new_state_root =
-                    loader.update_root(current_root, range.clone()).and_then(|e| e.root())?;
-            }
-
-            let parent_number = range.start().saturating_sub(1);
-            let parent_state_root = self.get_header(parent_number)?.state_root;
-
+            let new_state_root = StateRoot::incremental_root(self.deref(), transition_range, None)?;
             // state root should be always correct as we are reverting state.
             // but for sake of double verification we will check it again.
             if new_state_root != parent_state_root {
@@ -1451,14 +1441,14 @@ fn unwind_storage_history_shards<DB: Database>(
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionError {
     /// The transaction encountered a database error.
-    #[error("Database error: {0}")]
+    #[error(transparent)]
     Database(#[from] DbError),
     /// The transaction encountered a database integrity error.
-    #[error("A database integrity error occurred: {0}")]
+    #[error(transparent)]
     DatabaseIntegrity(#[from] ProviderError),
-    /// The transaction encountered merkle trie error.
-    #[error("Merkle trie calculation error: {0}")]
-    MerkleTrie(#[from] TrieError),
+    /// The trie error.
+    #[error(transparent)]
+    TrieError(#[from] StateRootError),
     /// Root mismatch
     #[error("Merkle trie root mismatch on block: #{block_number:?} {block_hash:?}. got: {got:?} expected:{expected:?}")]
     StateTrieRootMismatch {
