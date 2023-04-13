@@ -4,10 +4,11 @@ use bytes::{Buf, BytesMut};
 use derive_more::{AsRef, Deref};
 pub use error::InvalidTransactionError;
 pub use meta::TransactionMeta;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use reth_rlp::{
     length_of_length, Decodable, DecodeError, Encodable, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
+use serde::{Deserialize, Serialize};
 pub use signature::Signature;
 pub use tx_type::{TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID};
 
@@ -167,8 +168,8 @@ pub struct TxEip1559 {
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive_arbitrary(compact)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
     /// Legacy transaction.
     Legacy(TxLegacy),
@@ -176,6 +177,43 @@ pub enum Transaction {
     Eip2930(TxEip2930),
     /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
     Eip1559(TxEip1559),
+}
+
+impl Compact for Transaction {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        match self {
+            Transaction::Legacy(tx) => {
+                tx.to_compact(buf);
+                0
+            }
+            Transaction::Eip2930(tx) => {
+                tx.to_compact(buf);
+                1
+            }
+            Transaction::Eip1559(tx) => {
+                tx.to_compact(buf);
+                2
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                (Transaction::Legacy(tx), buf)
+            }
+            1 => {
+                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
+                (Transaction::Eip2930(tx), buf)
+            }
+            2 => {
+                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
+                (Transaction::Eip1559(tx), buf)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 // === impl Transaction ===
@@ -512,14 +550,37 @@ impl Encodable for Transaction {
 }
 
 /// Whether or not the transaction is a contract creation.
-#[main_codec]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive_arbitrary(compact, rlp)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum TransactionKind {
     /// A transaction that creates a contract.
     #[default]
     Create,
     /// A transaction that calls a contract or transfer.
     Call(Address),
+}
+
+impl Compact for TransactionKind {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        match self {
+            TransactionKind::Create => 0,
+            TransactionKind::Call(address) => {
+                address.to_compact(buf);
+                1
+            }
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        match identifier {
+            0 => return (TransactionKind::Create, buf),
+            1 => {
+                let (addr, buf) = Address::from_compact(buf, buf.len());
+                (TransactionKind::Call(addr), buf)
+            }
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Encodable for TransactionKind {
