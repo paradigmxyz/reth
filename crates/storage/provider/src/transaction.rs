@@ -836,16 +836,11 @@ where
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<PostState>, TransactionError> {
-        // We are not removing block meta as it is used to get block transitions.
-        let block_transition =
-            self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
-
-        if block_transition.is_empty() {
+        if range.is_empty() {
             return Ok(Vec::new())
         }
 
-        // NOTE: Just get block bodies dont remove them
-        // it is connection point for bodies getter and execution result getter.
+        // We are not removing block meta as it is used to get block transitions.
         let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
 
         // get transaction receipts
@@ -924,8 +919,8 @@ where
 
         // add storage changeset changes
         let mut storage_changes: BTreeMap<BlockNumberAddress, StorageChangeset> = BTreeMap::new();
-        for (transition_and_address, storage_entry) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((_, address)) = transition_and_address;
+        for (block_and_address, storage_entry) in storage_changeset.into_iter().rev() {
+            let BlockNumberAddress((_, address)) = block_and_address;
             let new_storage =
                 match local_plain_state.entry(address).or_default().1.entry(storage_entry.key) {
                     Entry::Vacant(entry) => {
@@ -940,7 +935,7 @@ where
                         std::mem::replace(entry.get_mut(), storage_entry.value)
                     }
                 };
-            storage_changes.entry(transition_and_address).or_default().insert(
+            storage_changes.entry(block_and_address).or_default().insert(
                 U256::from_be_bytes(storage_entry.key.0),
                 (storage_entry.value, new_storage),
             );
@@ -1000,7 +995,6 @@ where
         for (block_number, block_body) in block_bodies.into_iter() {
             let mut block_post_state = PostState::new();
             if let Some(changes) = all_changesets.remove(&block_number) {
-                // TODO when PostState was introduced we didn't optimize this part of the code.
                 for change in changes.into_iter() {
                     block_post_state.add_and_apply(change);
                 }
@@ -1515,42 +1509,19 @@ mod test {
 
         // get one block
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=1).unwrap();
-        assert_eq!(get, vec![(block1.clone(), exec_res1.clone())]);
+        let get_block = get[0].0.clone();
+        let get_state = get[0].1.clone();
+        assert_eq!(get_block, block1.clone());
+        assert_eq!(get_state, exec_res1.clone());
+        //assert_eq!(get, vec![(block1.clone(), exec_res1.clone())]);
 
         // take one block
         let take = tx.take_block_and_execution_range(&chain_spec, 1..=1).unwrap();
         assert_eq!(take, vec![(block1.clone(), exec_res1.clone())]);
         assert_genesis_block(&tx, genesis.clone());
 
-        //exec_res1.clone().write_to_db(tx.deref_mut(), 0).unwrap();
-        // tx.insert_block(block1.clone()).unwrap();
-        // tx.insert_hashes(
-        //     genesis.number,
-        //     0,
-        //     exec_res1.transitions_count() as TransitionId,
-        //     block1.number,
-        //     block1.hash,
-        //     block1.state_root,
-        // )
-        // .unwrap();
         tx.append_blocks_with_post_state(vec![block1.clone()], exec_res1.clone()).unwrap();
-
-        // exec_res2
-        //     .clone()
-        //     .write_to_db(tx.deref_mut(), exec_res1.transitions_count() as TransitionId)
-        //     .unwrap();
-        // tx.insert_block(block2.clone()).unwrap();
-        // tx.insert_hashes(
-        //     block1.number,
-        //     exec_res1.transitions_count() as TransitionId,
-        //     (exec_res1.transitions_count() + exec_res2.transitions_count()) as TransitionId,
-        //     2,
-        //     block2.hash,
-        //     block2.state_root,
-        // )
-        // .unwrap();
         tx.append_blocks_with_post_state(vec![block2.clone()], exec_res2.clone()).unwrap();
-
         tx.commit().unwrap();
 
         // Check that transactions map onto blocks correctly.
@@ -1579,10 +1550,10 @@ mod test {
 
         // get two blocks
         let get = tx.get_block_and_execution_range(&chain_spec, 1..=2).unwrap();
-        assert_eq!(
-            get,
-            vec![(block1.clone(), exec_res1.clone()), (block2.clone(), exec_res2.clone())]
-        );
+        assert_eq!(get[0].0, block1.clone());
+        assert_eq!(get[1].0, block2.clone());
+        assert_eq!(get[0].1, exec_res1.clone());
+        assert_eq!(get[1].1, exec_res2.clone());
 
         // take two blocks
         let get = tx.take_block_and_execution_range(&chain_spec, 1..=2).unwrap();
