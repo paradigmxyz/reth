@@ -273,7 +273,7 @@ impl<D: XdgPath> Display for MaybePlatformPath<D> {
             path.fmt(f)
         } else {
             // NOTE: this is a workaround for making it work with clap's `default_value_t` which
-            // computes the default value by via `Default -> Display -> FromStr`
+            // computes the default value via `Default -> Display -> FromStr`
             write!(f, "default")
         }
     }
@@ -292,7 +292,7 @@ impl<D> FromStr for MaybePlatformPath<D> {
         let p = match s {
             "default" => {
                 // NOTE: this is a workaround for making it work with clap's `default_value_t` which
-                // computes the default value by via `Default -> Display -> FromStr`
+                // computes the default value via `Default -> Display -> FromStr`
                 None
             }
             _ => Some(PlatformPath::from_str(s)?),
