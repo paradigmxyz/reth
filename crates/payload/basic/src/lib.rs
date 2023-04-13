@@ -17,8 +17,8 @@ use reth_payload_builder::{
     PayloadJobGenerator,
 };
 use reth_primitives::{
-    bloom::logs_bloom, bytes::Bytes, proofs, Block, ChainSpec, Hardfork, Head, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock, EMPTY_OMMER_ROOT, U256,
+    bloom::logs_bloom, bytes::Bytes, constants::SLOT_DURATION, proofs, Block, ChainSpec, Hardfork,
+    Head, Header, IntoRecoveredTransaction, Receipt, SealedBlock, EMPTY_OMMER_ROOT, U256,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, PostState, StateProviderFactory};
 use reth_revm::{
@@ -227,7 +227,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
         Self {
             interval: Duration::from_secs(1),
             // 12s slot time
-            deadline: Duration::from_secs(12),
+            deadline: SLOT_DURATION,
             max_payload_tasks: 3,
         }
     }
