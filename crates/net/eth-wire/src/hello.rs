@@ -1,13 +1,10 @@
 use crate::{capability::Capability, EthVersion, ProtocolVersion};
 use reth_codecs::derive_arbitrary;
-use reth_primitives::PeerId;
+use reth_primitives::{constants::RETH_CLIENT_VERSION, PeerId};
 use reth_rlp::{RlpDecodable, RlpEncodable};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-/// The client version: `reth/v{major}.{minor}.{patch}`
-pub(crate) const DEFAULT_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Message used in the `p2p` handshake, containing information about the supported RLPx protocol
@@ -98,7 +95,7 @@ impl HelloMessageBuilder {
         let Self { protocol_version, client_version, capabilities, port, id } = self;
         HelloMessage {
             protocol_version: protocol_version.unwrap_or_default(),
-            client_version: client_version.unwrap_or_else(|| DEFAULT_CLIENT_VERSION.to_string()),
+            client_version: client_version.unwrap_or_else(|| RETH_CLIENT_VERSION.to_string()),
             capabilities: capabilities.unwrap_or_else(|| {
                 vec![EthVersion::Eth68.into(), EthVersion::Eth67.into(), EthVersion::Eth66.into()]
             }),

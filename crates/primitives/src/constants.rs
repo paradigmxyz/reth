@@ -4,6 +4,9 @@ use crate::{H256, U256};
 use hex_literal::hex;
 use std::time::Duration;
 
+/// The client version: `reth/v{major}.{minor}.{patch}`
+pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
+
 /// The first four bytes of the call data for a function call specifies the function to be called.
 pub const SELECTOR_LEN: usize = 4;
 
