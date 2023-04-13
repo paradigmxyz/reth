@@ -16,11 +16,6 @@ pub enum PayloadBuilderError {
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] reth_interfaces::Error),
-
-    // TODO move to standalone error type specific to job
-    /// Thrown if a running build job has been cancelled.
-    #[error("build job cancelled during execution")]
-    BuildJobCancelled,
     /// Unrecoverable error during evm execution.
     #[error("evm execution error: {0:?}")]
     EvmExecutionError(EVMError<reth_interfaces::Error>),
