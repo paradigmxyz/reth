@@ -177,7 +177,6 @@ impl Command {
         info!(target: "reth::cli", "Test transaction pool initialized");
 
         info!(target: "reth::cli", "Connecting to P2P network");
-        // let secret_key_path = self.p2p_secret_key.join(chain_prefix);
         let secret_key = get_secret_key(&self.p2p_secret_key)?;
         let network_config = self.load_network_config(
             &config,
@@ -470,7 +469,7 @@ impl Command {
             .request_handler(client)
             .split_with_handle();
 
-        let known_peers_file = self.network.persistent_peers_file();
+        let known_peers_file = self.network.persistent_peers_file(self.chain.chain);
         task_executor.spawn_critical_with_signal("p2p network task", |shutdown| {
             run_network_until_shutdown(shutdown, network, known_peers_file)
         });
