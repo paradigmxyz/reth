@@ -19,19 +19,19 @@ pub enum EngineRpcError {
     #[error("Internal JSON-RPC error")]
     InternalError,
     /// Generic client error while processing request.
-    #[error("Generic client error while processing request")]
+    #[error("Server error")]
     ServerError,
     /// Payload does not exist / is not available.
-    #[error("Payload does not exist / is not available")]
+    #[error("Unknown payload")]
     UnknownPayload,
     /// Forkchoice state is invalid / inconsistent.
-    #[error("Forkchoice state is invalid / inconsistent")]
+    #[error("Invalid forkchoice state")]
     InvalidForkchoiceState,
     /// Payload attributes are invalid / inconsistent.
-    #[error("Payload attributes are invalid / inconsistent")]
+    #[error("Invalid payload attributes")]
     InvalidPayloadAttributes,
     /// Number of requested entities is too large.
-    #[error("Number of requested entities is too large")]
+    #[error("Too large request")]
     TooLargeRequest,
 }
 
