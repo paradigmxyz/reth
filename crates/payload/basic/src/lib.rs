@@ -11,7 +11,6 @@
 
 use futures_core::{ready, Stream};
 use futures_util::FutureExt;
-use reth_consensus_common::validation::calculate_next_block_base_fee;
 use reth_payload_builder::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
@@ -122,27 +121,8 @@ where
             .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
 
         // configure evm env based on parent block
-        let initialized_cfg = CfgEnv {
-            chain_id: U256::from(self.chain_spec.chain().id()),
-            // ensure we're not missing any timestamp based hardforks
-            spec_id: revm_spec_by_timestamp_after_merge(&self.chain_spec, attributes.timestamp),
-            ..Default::default()
-        };
-
-        let initialized_block_env = BlockEnv {
-            number: U256::from(parent_block.number + 1),
-            coinbase: attributes.suggested_fee_recipient,
-            timestamp: U256::from(attributes.timestamp),
-            difficulty: U256::ZERO,
-            prevrandao: Some(attributes.prev_randao),
-            gas_limit: U256::from(parent_block.gas_limit),
-            // calculate basefee based on parent block's gas usage
-            basefee: U256::from(calculate_next_block_base_fee(
-                parent_block.gas_used,
-                parent_block.gas_limit,
-                parent_block.base_fee_per_gas.unwrap_or_default(),
-            )),
-        };
+        let (initialized_cfg, initialized_block_env) =
+            attributes.cfg_and_block_env(&self.chain_spec, &parent_block);
 
         let config = PayloadConfig {
             initialized_block_env,
