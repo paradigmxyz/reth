@@ -1,8 +1,11 @@
 //! Contains types required for building a payload.
 
-use reth_primitives::{Address, SealedBlock, Withdrawal, H256, U256};
+use reth_consensus_common::validation::calculate_next_block_base_fee;
+use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256};
+use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
 use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
+use revm_primitives::{BlockEnv, CfgEnv};
 
 /// Contains the built payload.
 ///
@@ -76,6 +79,42 @@ impl PayloadBuilderAttributes {
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default(),
         }
+    }
+
+    /// Returns the configured [CfgEnv] and [BlockEnv] for the targeted payload (that has the
+    /// `parent` as its parent).
+    ///
+    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
+    /// based on its timestamp.
+    ///
+    /// Block related settings are derived from the `parent` block and the configured attributes.
+    ///
+    /// NOTE: This is only intended for beacon consensus (after merge).
+    pub fn cfg_and_block_env(&self, chain_spec: &ChainSpec, parent: &Header) -> (CfgEnv, BlockEnv) {
+        // configure evm env based on parent block
+        let cfg = CfgEnv {
+            chain_id: U256::from(chain_spec.chain().id()),
+            // ensure we're not missing any timestamp based hardforks
+            spec_id: revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp),
+            ..Default::default()
+        };
+
+        let block_env = BlockEnv {
+            number: U256::from(parent.number + 1),
+            coinbase: self.suggested_fee_recipient,
+            timestamp: U256::from(self.timestamp),
+            difficulty: U256::ZERO,
+            prevrandao: Some(self.prev_randao),
+            gas_limit: U256::from(parent.gas_limit),
+            // calculate basefee based on parent block's gas usage
+            basefee: U256::from(calculate_next_block_base_fee(
+                parent.gas_used,
+                parent.gas_limit,
+                parent.base_fee_per_gas.unwrap_or_default(),
+            )),
+        };
+
+        (cfg, block_env)
     }
 
     /// Returns the identifier of the payload.

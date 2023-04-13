@@ -4495,7 +4495,6 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
- "reth-consensus-common",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -4945,8 +4944,10 @@ dependencies = [
  "futures-core",
  "futures-util",
  "parking_lot 0.12.1",
+ "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
+ "reth-revm-primitives",
  "reth-rlp",
  "reth-rpc-types",
  "revm-primitives",
