@@ -3,19 +3,22 @@
 use super::cursor::Cursor;
 use crate::{
     table::{Compress, DupSort, Encode, Table, TableImporter},
-    tables::utils::decode_one,
+    tables::{utils::decode_one, NUM_TABLES, TABLES},
     transaction::{DbTx, DbTxGAT, DbTxMut, DbTxMutGAT},
     Error,
 };
 use metrics::histogram;
-use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, RW};
-use std::{marker::PhantomData, time::Instant};
+use parking_lot::RwLock;
+use reth_libmdbx::{EnvironmentKind, Transaction, TransactionKind, WriteFlags, DBI, RW};
+use std::{marker::PhantomData, sync::Arc, time::Instant};
 
 /// Wrapper for the libmdbx transaction.
 #[derive(Debug)]
 pub struct Tx<'a, K: TransactionKind, E: EnvironmentKind> {
     /// Libmdbx-sys transaction.
     pub inner: Transaction<'a, K, E>,
+    /// Database table handle cache
+    pub db_handles: Arc<RwLock<[Option<DBI>; NUM_TABLES]>>,
 }
 
 impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
@@ -24,7 +27,7 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
     where
         'a: 'env,
     {
-        Self { inner }
+        Self { inner, db_handles: Default::default() }
     }
 
     /// Gets this transaction ID.
@@ -32,17 +35,36 @@ impl<'env, K: TransactionKind, E: EnvironmentKind> Tx<'env, K, E> {
         self.inner.id()
     }
 
+    /// Gets a table database handle if it exists, otherwise creates it.
+    pub fn get_dbi<T: Table>(&self) -> Result<DBI, Error> {
+        let mut handles = self.db_handles.write();
+
+        let table_index = TABLES
+            .iter()
+            .enumerate()
+            .find_map(|(idx, (_, table))| (table == &T::NAME).then_some(idx))
+            .expect("Requested table should be part of `TABLES`.");
+
+        let dbi_handle = handles.get_mut(table_index).expect("should exist");
+        if dbi_handle.is_none() {
+            *dbi_handle = Some(
+                self.inner.open_db(Some(T::NAME)).map_err(|e| Error::InitCursor(e.into()))?.dbi(),
+            );
+        }
+
+        Ok(dbi_handle.expect("is some; qed"))
+    }
+
     /// Create db Cursor
     pub fn new_cursor<T: Table>(&self) -> Result<Cursor<'env, K, T>, Error> {
         Ok(Cursor {
             inner: self
                 .inner
-                .cursor(
-                    &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::InitCursor(e.into()))?,
-                )
+                .cursor_with_dbi(self.get_dbi::<T>()?)
                 .map_err(|e| Error::InitCursor(e.into()))?,
             table: T::NAME,
             _dbi: PhantomData,
+            buf: vec![],
         })
     }
 }
@@ -83,10 +105,7 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, Error> {
         self.inner
-            .get(
-                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Read(e.into()))?,
-                key.encode().as_ref(),
-            )
+            .get(self.get_dbi::<T>()?, key.encode().as_ref())
             .map_err(|e| Error::Read(e.into()))?
             .map(decode_one::<T>)
             .transpose()
@@ -96,12 +115,7 @@ impl<'tx, K: TransactionKind, E: EnvironmentKind> DbTx<'tx> for Tx<'tx, K, E> {
 impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error> {
         self.inner
-            .put(
-                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Write(e.into()))?,
-                &key.encode(),
-                &value.compress(),
-                WriteFlags::UPSERT,
-            )
+            .put(self.get_dbi::<T>()?, &key.encode(), &value.compress(), WriteFlags::UPSERT)
             .map_err(|e| Error::Write(e.into()))
     }
 
@@ -114,18 +128,12 @@ impl<E: EnvironmentKind> DbTxMut<'_> for Tx<'_, RW, E> {
         };
 
         self.inner
-            .del(
-                &self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Delete(e.into()))?,
-                key.encode(),
-                data,
-            )
+            .del(self.get_dbi::<T>()?, key.encode(), data)
             .map_err(|e| Error::Delete(e.into()))
     }
 
     fn clear<T: Table>(&self) -> Result<(), Error> {
-        self.inner
-            .clear_db(&self.inner.open_db(Some(T::NAME)).map_err(|e| Error::Delete(e.into()))?)
-            .map_err(|e| Error::Delete(e.into()))?;
+        self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| Error::Delete(e.into()))?;
 
         Ok(())
     }
