@@ -4944,7 +4944,6 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
- "parking_lot 0.12.1",
  "reth-consensus-common",
  "reth-interfaces",
  "reth-primitives",
