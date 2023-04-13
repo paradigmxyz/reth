@@ -20,18 +20,19 @@ pub struct Signature {
 
 impl Compact for Signature {
     fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
-        buf.put_slice(self.r.as_le_slice());
-        buf.put_slice(self.s.as_le_slice());
+        buf.put_slice(self.r.as_le_bytes().as_ref());
+        buf.put_slice(self.s.as_le_bytes().as_ref());
         self.odd_y_parity as usize
     }
 
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
-        let r = U256::try_from_le_slice(&buf[..32]).expect(&format!("1qed {}", &buf.len()));
+        let r = U256::try_from_le_slice(&buf[..32]).expect("qed");
         buf.advance(32);
-        let s = U256::try_from_le_slice(&buf[..32]).expect(&format!("2qed {}", &buf.len()));
+
+        let s = U256::try_from_le_slice(&buf[..32]).expect("qed");
         buf.advance(32);
-        let odd_y_parity = identifier != 0;
-        (Signature { r, s, odd_y_parity }, buf)
+
+        (Signature { r, s, odd_y_parity: identifier != 0 }, buf)
     }
 }
 

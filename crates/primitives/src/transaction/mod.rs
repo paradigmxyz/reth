@@ -573,7 +573,7 @@ impl Compact for TransactionKind {
 
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         match identifier {
-            0 => return (TransactionKind::Create, buf),
+            0 => (TransactionKind::Create, buf),
             1 => {
                 let (addr, buf) = Address::from_compact(buf, buf.len());
                 (TransactionKind::Call(addr), buf)
@@ -638,7 +638,7 @@ impl Compact for TransactionSigned {
         1 + tmp.len()
     }
 
-    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let prefix = buf.get_u8() as usize;
 
         let (signature, buf) = Signature::from_compact(buf, prefix & 1);
