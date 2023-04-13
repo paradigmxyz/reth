@@ -9,7 +9,7 @@ use std::{
 };
 
 /// Constructs a string to be used as a path for configuration and db paths.
-pub fn build_config_path_prefix(chain: Chain) -> String {
+pub fn config_path_prefix(chain: Chain) -> String {
     if chain == Chain::mainnet() {
         "mainnet".to_string()
     } else if chain == Chain::goerli() {
@@ -233,15 +233,13 @@ impl<D> PlatformPath<D> {
     /// directory and the file name. If the inner path type refers to a directory, the chain will be
     /// inserted between the parent directory and the directory name.
     pub fn with_chain(&self, chain: Chain) -> ChainPath<D> {
-        // extract the parent and final component
+        // extract the parent directory
         let parent = self.0.parent().expect("Could not get parent of path");
         let final_component = self.0.file_name().expect("Could not get file name of path");
 
         // put the chain part in the middle
-        let chain_name = build_config_path_prefix(chain);
-        let mut path = PathBuf::from(parent);
-        path.push(chain_name);
-        path.push(final_component);
+        let chain_name = config_path_prefix(chain);
+        let path = parent.join(chain_name).join(final_component);
 
         let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
         ChainPath::new(platform_path, chain)

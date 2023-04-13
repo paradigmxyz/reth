@@ -33,5 +33,8 @@ pub trait PayloadJobGenerator: Send + Sync {
     ///
     /// Note: this is expected to build a new (empty) payload without transactions, so it can be
     /// returned directly. when asked for
-    fn new_payload_job(&self, attr: PayloadBuilderAttributes) -> Self::Job;
+    fn new_payload_job(
+        &self,
+        attr: PayloadBuilderAttributes,
+    ) -> Result<Self::Job, PayloadBuilderError>;
 }

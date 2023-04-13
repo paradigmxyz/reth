@@ -164,6 +164,11 @@ impl<'a> ReceiptWithBloomRef<'a> {
         Self { receipt, bloom }
     }
 
+    /// Encode receipt with or without the header data.
+    pub fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
+        self.as_encoder().encode_inner(out, with_header)
+    }
+
     #[inline]
     fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: self.receipt, bloom: &self.bloom }

@@ -1,4 +1,4 @@
-use reth_miner::error::PayloadBuilderError;
+use reth_payload_builder::error::PayloadBuilderError;
 use reth_rpc_types::engine::{EngineRpcError, PayloadError};
 use reth_stages::PipelineError;
 use thiserror::Error;

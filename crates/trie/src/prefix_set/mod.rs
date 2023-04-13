@@ -1,6 +1,9 @@
 use crate::Nibbles;
 use std::collections::BTreeSet;
 
+mod loader;
+pub use loader::PrefixSetLoader;
+
 /// A container for efficiently storing and checking for the presence of key prefixes.
 ///
 /// This data structure stores a set of `Nibbles` and provides methods to insert

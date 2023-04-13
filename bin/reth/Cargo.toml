@@ -31,7 +31,7 @@ reth-downloaders = { path = "../../crates/net/downloaders", features = ["test-ut
 reth-tracing = { path = "../../crates/tracing" }
 reth-tasks = { path = "../../crates/tasks" }
 reth-net-nat = { path = "../../crates/net/nat" }
-reth-miner = { path = "../../crates/miner" }
+reth-payload-builder = { path = "../../crates/payload/builder" }
 reth-discv4 = { path = "../../crates/net/discv4" }
 
 # crypto

@@ -45,7 +45,7 @@ impl TrieMask {
     }
 
     /// Returns `true` if a given bit is set in a mask.
-    pub fn is_bit_set(&self, index: i32) -> bool {
+    pub fn is_bit_set(&self, index: u8) -> bool {
         self.0 & (1u16 << index) != 0
     }
 
