@@ -1,12 +1,14 @@
 use crate::{transaction::util::secp256k1, Address, H256, U256};
-use reth_codecs::{main_codec, Compact};
+use bytes::Buf;
+use reth_codecs::{derive_arbitrary, Compact};
 use reth_rlp::{Decodable, DecodeError, Encodable};
+use serde::{Deserialize, Serialize};
 
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
-#[main_codec]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+#[derive_arbitrary(compact)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
     pub r: U256,
@@ -14,6 +16,23 @@ pub struct Signature {
     pub s: U256,
     /// yParity: Signature Y parity; formally Ty
     pub odd_y_parity: bool,
+}
+
+impl Compact for Signature {
+    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+        buf.put_slice(self.r.as_le_slice());
+        buf.put_slice(self.s.as_le_slice());
+        self.odd_y_parity as usize
+    }
+
+    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        let r = U256::try_from_le_slice(&buf[..32]).expect(&format!("1qed {}", &buf.len()));
+        buf.advance(32);
+        let s = U256::try_from_le_slice(&buf[..32]).expect(&format!("2qed {}", &buf.len()));
+        buf.advance(32);
+        let odd_y_parity = identifier != 0;
+        (Signature { r, s, odd_y_parity }, buf)
+    }
 }
 
 impl Signature {
