@@ -45,17 +45,6 @@ use tokio::{
 };
 use tracing::trace;
 
-// TODO move to common since commonly used
-
-/// Settings for how to generate a block
-#[derive(Debug, Clone)]
-pub struct BlockConfig {
-    /// Data to include in the block's extra data field.
-    extradata: Bytes,
-    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
-    max_gas_limit: u64,
-}
-
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     /// The client that can interact with the chain.
@@ -66,8 +55,6 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
-    /// The configuration for how to create a block.
-    block_config: BlockConfig,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
     /// The chain spec.
@@ -83,7 +70,6 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
-        block_config: BlockConfig,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
         Self {
@@ -92,7 +78,6 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
             executor,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
-            block_config,
             chain_spec,
         }
     }
@@ -128,7 +113,7 @@ where
             initialized_block_env,
             initialized_cfg,
             parent_block: Arc::new(parent_block),
-            extra_data: self.block_config.extradata.clone(),
+            extra_data: self.config.extradata.clone(),
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
         };
@@ -167,6 +152,10 @@ impl PayloadTaskGuard {
 /// Settings for the [BasicPayloadJobGenerator].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
+    /// Data to include in the block's extra data field.
+    extradata: Bytes,
+    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
+    max_gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline when this job should resolve.
@@ -200,11 +189,30 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
+
+    /// Sets the data to include in the block's extra data field.
+    ///
+    /// Defaults to the current client version.
+    pub fn extradata(mut self, extradata: Bytes) -> Self {
+        self.extradata = extradata;
+        self
+    }
+
+    /// Sets the target gas ceiling for mined blocks.
+    ///
+    /// Defaults to 30_000_000 gas.
+    pub fn max_gas_limit(mut self, max_gas_limit: u64) -> Self {
+        self.max_gas_limit = max_gas_limit;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
+        // TODO: use default rlp client version as extradata
         Self {
+            extradata: Default::default(),
+            max_gas_limit: 30_000_000,
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,

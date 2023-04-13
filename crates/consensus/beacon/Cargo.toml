@@ -30,6 +30,7 @@ metrics = "0.20.1"
 
 [dev-dependencies]
 # reth
+reth-payload-builder = { path = "../../payload/builder", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
 reth-stages = { path = "../../stages", features = ["test-utils"] }
 reth-executor = { path = "../../executor", features = ["test-utils"] }
