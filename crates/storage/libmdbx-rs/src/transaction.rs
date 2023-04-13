@@ -123,7 +123,7 @@ where
     /// returned. Retrieval of other items requires the use of
     /// [Cursor]. If the item is not in the database, then
     /// [None] will be returned.
-    pub fn get<'txn, Key>(&'txn self, db: &Database<'txn>, key: &[u8]) -> Result<Option<Key>>
+    pub fn get<'txn, Key>(&'txn self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
     where
         Key: TableObject<'txn>,
     {
@@ -132,7 +132,7 @@ where
         let mut data_val: ffi::MDBX_val = ffi::MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };
 
         txn_execute(&self.txn, |txn| unsafe {
-            match ffi::mdbx_get(txn, db.dbi(), &key_val, &mut data_val) {
+            match ffi::mdbx_get(txn, dbi, &key_val, &mut data_val) {
                 ffi::MDBX_SUCCESS => Key::decode_val::<K>(txn, &data_val).map(Some),
                 ffi::MDBX_NOTFOUND => Ok(None),
                 err_code => Err(Error::from_err_code(err_code)),
@@ -213,7 +213,12 @@ where
 
     /// Open a new cursor on the given database.
     pub fn cursor<'txn>(&'txn self, db: &Database<'txn>) -> Result<Cursor<'txn, K>> {
-        Cursor::new(self, db)
+        Cursor::new(self, db.dbi())
+    }
+
+    /// Open a new cursor on the given dbi.
+    pub fn cursor_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<'_, K>> {
+        Cursor::new(self, dbi)
     }
 }
 
@@ -263,9 +268,9 @@ where
     /// behavior is to enter the new key/data pair, replacing any previously
     /// existing key if duplicates are disallowed, or adding a duplicate data
     /// item if duplicates are allowed ([DatabaseFlags::DUP_SORT]).
-    pub fn put<'txn>(
-        &'txn self,
-        db: &Database<'txn>,
+    pub fn put(
+        &self,
+        dbi: ffi::MDBX_dbi,
         key: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
         flags: WriteFlags,
@@ -277,7 +282,7 @@ where
         let mut data_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: data.len(), iov_base: data.as_ptr() as *mut c_void };
         mdbx_result(txn_execute(&self.txn, |txn| unsafe {
-            ffi::mdbx_put(txn, db.dbi(), &key_val, &mut data_val, flags.bits())
+            ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits())
         }))?;
 
         Ok(())
@@ -321,9 +326,9 @@ where
     /// be deleted.
     ///
     /// Returns `true` if the key/value pair was present.
-    pub fn del<'txn>(
-        &'txn self,
-        db: &Database<'txn>,
+    pub fn del(
+        &self,
+        dbi: ffi::MDBX_dbi,
         key: impl AsRef<[u8]>,
         data: Option<&[u8]>,
     ) -> Result<bool> {
@@ -338,9 +343,9 @@ where
         mdbx_result({
             txn_execute(&self.txn, |txn| {
                 if let Some(d) = data_val {
-                    unsafe { ffi::mdbx_del(txn, db.dbi(), &key_val, &d) }
+                    unsafe { ffi::mdbx_del(txn, dbi, &key_val, &d) }
                 } else {
-                    unsafe { ffi::mdbx_del(txn, db.dbi(), &key_val, ptr::null()) }
+                    unsafe { ffi::mdbx_del(txn, dbi, &key_val, ptr::null()) }
                 }
             })
         })
@@ -352,8 +357,8 @@ where
     }
 
     /// Empties the given database. All items will be removed.
-    pub fn clear_db<'txn>(&'txn self, db: &Database<'txn>) -> Result<()> {
-        mdbx_result(txn_execute(&self.txn, |txn| unsafe { ffi::mdbx_drop(txn, db.dbi(), false) }))?;
+    pub fn clear_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+        mdbx_result(txn_execute(&self.txn, |txn| unsafe { ffi::mdbx_drop(txn, dbi, false) }))?;
 
         Ok(())
     }

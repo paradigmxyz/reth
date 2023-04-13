@@ -32,4 +32,5 @@ enum StageEnum {
     Execution,
     Hashing,
     Merkle,
+    TxLookup,
 }

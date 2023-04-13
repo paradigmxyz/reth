@@ -12,6 +12,9 @@ impl Compress for IntegerList {
     fn compress(self) -> Self::Compressed {
         self.to_bytes()
     }
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+        self.to_mut_bytes(buf)
+    }
 }
 
 impl Decompress for IntegerList {

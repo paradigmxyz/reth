@@ -108,6 +108,15 @@ impl<V: Value> Compress for RawValue<V> {
     fn compress(self) -> Self::Compressed {
         self.value
     }
+
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+        buf.put_slice(self.value.as_slice())
+    }
+
+    fn uncompressable_ref(&self) -> Option<&[u8]> {
+        // Already compressed
+        Some(&self.value)
+    }
 }
 
 impl<V: Value> Decompress for RawValue<V> {
