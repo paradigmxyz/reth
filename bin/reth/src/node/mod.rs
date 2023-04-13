@@ -72,7 +72,7 @@ use tracing::*;
 
 use crate::dirs::MaybePlatformPath;
 use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_payload_builder::PayloadBuilderService;
+use reth_payload_builder::{PayloadBuilderService, PayloadStore};
 use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
@@ -318,7 +318,7 @@ impl Command {
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let engine_api_handle =
-            self.init_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
+            self.spawn_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let launch_rpc = self
@@ -447,18 +447,18 @@ impl Command {
         Ok(())
     }
 
-    fn init_engine_api(
+    fn spawn_engine_api(
         &self,
         db: Arc<Env<WriteMap>>,
-        engine_tx: UnboundedSender<BeaconEngineMessage>,
+        to_beacon_engine: UnboundedSender<BeaconEngineMessage>,
         task_executor: &TaskExecutor,
+        payload_store: PayloadStore,
     ) -> EngineApiHandle {
-        let (message_tx, message_rx) = unbounded_channel();
         let engine_api = EngineApi::new(
             ShareableDatabase::new(db, self.chain.clone()),
             self.chain.clone(),
-            message_rx,
-            engine_tx,
+            to_beacon_engine,
+            payload_store
         );
         task_executor.spawn_critical("engine API task", engine_api);
         message_tx

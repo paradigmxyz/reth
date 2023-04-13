@@ -15,15 +15,31 @@ use tokio::sync::{
     oneshot,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use reth_payload_builder::PayloadStore;
 
-/// The Engine API handle.
-pub type EngineApiHandle = mpsc::UnboundedSender<EngineApiMessage>;
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
 
 /// The upper limit for payload bodies request.
 const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
+
+/// A sender type that's connected to the [Engine API](EngineApi).
+#[derive(Debug, Clone)]
+pub struct EngineApiHandle {
+    to_engine_api: UnboundedSender<EngineApiMessage>,
+}
+
+// === impl EngineApiHandle ===
+
+impl EngineApiHandle {
+
+    /// Attempts to send a message to the [Engine API](EngineApi).
+    pub fn send(&self, message: EngineApiMessage) -> Result<(), mpsc::error::SendError<EngineApiMessage>> {
+        self.to_engine_api.send(message)
+    }
+
+}
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -32,21 +48,29 @@ pub struct EngineApi<Client> {
     client: Client,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
-    message_rx: UnboundedReceiverStream<EngineApiMessage>,
-    engine_tx: UnboundedSender<BeaconEngineMessage>,
+    /// The channel to receive messages from [EngineApiHandle].
+    from_handle: UnboundedReceiverStream<EngineApiMessage>,
+    /// The channel to send messages to the beacon consensus engine
+    to_beacon_consensus: UnboundedSender<BeaconEngineMessage>,
+    /// The type that can communicate with the payload service to retrieve payloads.
+    payload_store: PayloadStore,
 }
 
-impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider>
+impl<Client>
     EngineApi<Client>
+where Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvider
 {
     /// Create new instance of [EngineApi].
     pub fn new(
         client: Client,
         chain_spec: Arc<ChainSpec>,
-        message_rx: mpsc::UnboundedReceiver<EngineApiMessage>,
-        engine_tx: UnboundedSender<BeaconEngineMessage>,
-    ) -> Self {
-        Self { client, chain_spec, message_rx: UnboundedReceiverStream::new(message_rx), engine_tx }
+        to_beacon_consensus: UnboundedSender<BeaconEngineMessage>,
+        payload_store: PayloadStore,
+    ) -> (Self, EngineApiHandle) {
+        let (to_engine_api, rx) = mpsc::unbounded_channel();
+        let handle = EngineApiHandle{to_engine_api};
+        let this = Self { client, chain_spec, from_handle: UnboundedReceiverStream::new(rx), to_beacon_consensus, payload_store };
+        (this, handle)
     }
 
     fn on_message(&mut self, msg: EngineApiMessage) {
@@ -56,7 +80,7 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
             }
             EngineApiMessage::GetPayload(payload_id, tx) => {
                 // forward message to the consensus engine
-                let _ = self.engine_tx.send(BeaconEngineMessage::GetPayload { payload_id, tx });
+                let _ = self.to_beacon_consensus.send(BeaconEngineMessage::GetPayload { payload_id, tx });
             }
             EngineApiMessage::GetPayloadBodiesByHash(hashes, tx) => {
                 let _ = tx.send(self.get_payload_bodies_by_hash(hashes));
@@ -66,11 +90,11 @@ impl<Client: HeaderProvider + BlockProvider + StateProviderFactory + EvmEnvProvi
             }
             EngineApiMessage::NewPayload(payload, tx) => {
                 // forward message to the consensus engine
-                let _ = self.engine_tx.send(BeaconEngineMessage::NewPayload { payload, tx });
+                let _ = self.to_beacon_consensus.send(BeaconEngineMessage::NewPayload { payload, tx });
             }
             EngineApiMessage::ForkchoiceUpdated(state, payload_attrs, tx) => {
                 // forward message to the consensus engine
-                let _ = self.engine_tx.send(BeaconEngineMessage::ForkchoiceUpdated {
+                let _ = self.to_beacon_consensus.send(BeaconEngineMessage::ForkchoiceUpdated {
                     state,
                     payload_attrs,
                     tx,
@@ -191,7 +215,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         loop {
-            match ready!(this.message_rx.poll_next_unpin(cx)) {
+            match ready!(this.from_handle.poll_next_unpin(cx)) {
                 Some(msg) => this.on_message(msg),
                 None => {
                     // channel closed
@@ -220,8 +244,8 @@ mod tests {
         let api = EngineApi {
             client: client.clone(),
             chain_spec: chain_spec.clone(),
-            message_rx: UnboundedReceiverStream::new(msg_rx),
-            engine_tx,
+            from_handle: UnboundedReceiverStream::new(msg_rx),
+            to_beacon_consensus: engine_tx,
         };
         let handle = EngineApiTestHandle { chain_spec, client, msg_tx, engine_rx };
         (handle, api)
