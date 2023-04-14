@@ -13,7 +13,7 @@ use reth_rpc_builder::{
     constants, error::RpcError, IpcServerBuilder, RethRpcModule, RpcModuleSelection,
     RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
-use reth_rpc_engine_api::EngineApiHandle;
+use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -156,8 +156,7 @@ impl RpcServerArgs {
         pool: Pool,
         network: Network,
         executor: Tasks,
-        chain_spec: Arc<ChainSpec>,
-        handle: EngineApiHandle,
+        engine_api: EngineApi<Client>,
     ) -> Result<ServerHandle, RpcError>
     where
         Client: BlockProvider
@@ -181,8 +180,7 @@ impl RpcServerArgs {
             pool,
             network,
             executor,
-            chain_spec,
-            handle,
+            engine_api,
             socket_address,
             secret,
         )

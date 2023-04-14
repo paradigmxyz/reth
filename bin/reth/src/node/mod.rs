@@ -313,12 +313,16 @@ impl Command {
             blockchain_tree.clone(),
             consensus_engine_rx,
             self.debug.max_block,
-            payload_builder,
+            payload_builder.clone(),
         );
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        let engine_api_handle =
-            self.spawn_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
+        let engine_api = EngineApi::new(
+            ShareableDatabase::new(db, self.chain.clone()),
+            self.chain.clone(),
+            to_beacon_engine,
+            payload_builder.into(),
+        );
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let launch_rpc = self
@@ -341,8 +345,7 @@ impl Command {
                 transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
-                self.chain.clone(),
-                engine_api_handle,
+                engine_api,
             )
             .inspect(|_| {
                 info!(target: "reth::cli", "Started Auth server");
@@ -445,23 +448,6 @@ impl Command {
         }
 
         Ok(())
-    }
-
-    fn spawn_engine_api(
-        &self,
-        db: Arc<Env<WriteMap>>,
-        to_beacon_engine: UnboundedSender<BeaconEngineMessage>,
-        task_executor: &TaskExecutor,
-        payload_store: PayloadStore,
-    ) -> EngineApiHandle {
-        let engine_api = EngineApi::new(
-            ShareableDatabase::new(db, self.chain.clone()),
-            self.chain.clone(),
-            to_beacon_engine,
-            payload_store
-        );
-        task_executor.spawn_critical("engine API task", engine_api);
-        message_tx
     }
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected

@@ -20,8 +20,7 @@ pub async fn launch<Client, Pool, Network, Tasks>(
     pool: Pool,
     network: Network,
     executor: Tasks,
-    chain_spec: Arc<ChainSpec>,
-    handle: EngineApiHandle,
+    engine_api: EngineApi<Client>,
     socket_addr: SocketAddr,
     secret: JwtSecret,
 ) -> Result<ServerHandle, RpcError>
@@ -41,15 +40,14 @@ where
     let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
     let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache);
     let eth_filter = EthFilter::new(client, pool);
-    launch_with_eth_api(eth_api, chain_spec, eth_filter, handle, socket_addr, secret).await
+    launch_with_eth_api(eth_api,  eth_filter, engine_api, socket_addr, secret).await
 }
 
 /// Configure and launch an auth server with existing EthApi implementation.
 pub async fn launch_with_eth_api<Client, Pool, Network>(
     eth_api: EthApi<Client, Pool, Network>,
-    chain_spec: Arc<ChainSpec>,
     eth_filter: EthFilter<Client, Pool>,
-    handle: EngineApiHandle,
+    engine_api: EngineApi<Client>,
     socket_addr: SocketAddr,
     secret: JwtSecret,
 ) -> Result<ServerHandle, RpcError>
@@ -66,7 +64,7 @@ where
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
-    module.merge(EngineApi::new(chain_spec, handle).into_rpc()).expect("No conflicting methods");
+    module.merge(engine_api.into_rpc()).expect("No conflicting methods");
     module.merge(eth_api.into_rpc()).expect("No conflicting methods");
     module.merge(eth_filter.into_rpc()).expect("No conflicting methods");
 

@@ -5164,7 +5164,7 @@ name = "reth-rpc-engine-api"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
- "futures",
+ "async-trait",
  "jsonrpsee-core",
  "jsonrpsee-types",
  "reth-beacon-consensus",
@@ -5172,10 +5172,11 @@ dependencies = [
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
+ "reth-rpc-api",
  "reth-rpc-types",
  "thiserror",
  "tokio",
- "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

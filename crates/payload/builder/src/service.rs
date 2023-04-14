@@ -34,6 +34,12 @@ impl PayloadStore {
     }
 }
 
+impl From<PayloadBuilderHandle> for PayloadStore {
+    fn from(inner: PayloadBuilderHandle) -> Self {
+        Self { inner }
+    }
+}
+
 /// A communication channel to the [PayloadBuilderService].
 ///
 /// This is the API used to create new payloads and to get the current state of existing ones.

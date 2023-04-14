@@ -1,6 +1,10 @@
 //! Commonly used errors for the `engine_` namespace.
 
-/// List of Engine API errors, see <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+/// List of Engine API errors used in RPC, see <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
+///
+/// Note: These are all errors that can be returned by the `engine_` namespace in the error case.
+///
+/// TODO: get rid of this
 #[derive(Debug, Copy, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum EngineRpcError {
     /// Invalid JSON was received by the server.
