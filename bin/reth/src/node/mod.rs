@@ -217,13 +217,7 @@ impl Command {
                 debug!(target: "reth::cli", %tip, "Tip manually set");
                 Some(tip_rx)
             }
-            None => {
-                let warn_msg = "No tip specified. \
-                reth cannot communicate with consensus clients, \
-                so a tip must manually be provided for the online stages with --debug.tip <HASH>.";
-                warn!(target: "reth::cli", warn_msg);
-                None
-            }
+            None => None,
         };
 
         // configure blockchain tree
