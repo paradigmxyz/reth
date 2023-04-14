@@ -9,7 +9,7 @@ use reth_consensus_common::calc;
 use reth_executor::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
+    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
