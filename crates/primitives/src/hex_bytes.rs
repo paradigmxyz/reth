@@ -1,7 +1,8 @@
+use crate::serde_helper::hex_bytes;
 use bytes::Buf;
 use reth_codecs::Compact;
 use reth_rlp::{Decodable, DecodeError, Encodable};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
     clone::Clone,
@@ -13,10 +14,7 @@ use thiserror::Error;
 
 /// Wrapper type around Bytes to deserialize/serialize "0x" prefixed ethereum hex strings
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-pub struct Bytes(
-    #[serde(serialize_with = "serialize_bytes", deserialize_with = "deserialize_bytes")]
-    pub  bytes::Bytes,
-);
+pub struct Bytes(#[serde(with = "hex_bytes")] pub bytes::Bytes);
 
 fn bytes_to_hex(b: &Bytes) -> String {
     hex::encode(b.0.as_ref())
@@ -183,28 +181,6 @@ impl FromStr for Bytes {
         .map(Into::into)
         .map_err(|e| ParseBytesError(format!("Invalid hex: {e}")))
     }
-}
-
-fn serialize_bytes<S, T>(x: T, s: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-    T: AsRef<[u8]>,
-{
-    s.serialize_str(&format!("0x{}", hex::encode(x.as_ref())))
-}
-
-fn deserialize_bytes<'de, D>(d: D) -> Result<bytes::Bytes, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = String::deserialize(d)?;
-    if let Some(value) = value.strip_prefix("0x") {
-        hex::decode(value)
-    } else {
-        hex::decode(&value)
-    }
-    .map(Into::into)
-    .map_err(|e| serde::de::Error::custom(e.to_string()))
 }
 
 impl Compact for Bytes {
