@@ -1,7 +1,5 @@
 //! Traits used when interacting with the sync status of the network.
 
-use reth_primitives::BlockNumber;
-
 /// A type that provides information about whether the node is currently syncing and the network is
 /// currently serving syncing related requests.
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -12,16 +10,11 @@ pub trait SyncStateProvider: Send + Sync {
 
 /// An updater for updating the [SyncState] of the network.
 ///
-/// The chain sync pipeline consists of several sequential Stages, like the `HeaderStage` for
-/// downloading bodies, or `ExecutionStage` for process all downloaded data.
-///
-/// Some stage transitions will result in an update of the [SyncState] of the network. For example,
-/// the transition from a download stage (`Headers`, `Bodies`) to a processing stage (`Sender
-/// Recovery`, `Execution`) marks a transition from [`SyncState::Downloading`] to
-/// [`SyncState::Executing`]. Since the execution takes some time, after the first pass the node
-/// will not be synced ([`SyncState::Idle`]) yet and instead transition back to download data, but
-/// now with a higher `block_target`. This cycle will continue until the node has caught up with the
-/// chain and will transition to [`SyncState::Idle`] sync.
+/// The node is either syncing, or it is idle.
+/// While syncing, the node will download data from the network and process it. The processing
+/// consists of several stages, like recovering senders, executing the blocks and indexing.
+/// Eventually the node reaches the `Finish` stage and will transition to [`SyncState::Idle`], it
+/// which point the node is considered fully synced.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait SyncStateUpdater: SyncStateProvider {
     /// Notifies about an [SyncState] update.
@@ -35,21 +28,8 @@ pub enum SyncState {
     ///
     /// The network just serves requests to keep up of the chain.
     Idle,
-    /// Network is syncing and downloading up to the `target_block`.
-    ///
-    /// This represents the headers and bodies stage.
-    Downloading {
-        /// The block to which the node is downloading state.
-        target_block: BlockNumber,
-    },
-    /// All headers and bodies up to the `target_block` have been downloaded and are now being
-    /// executed.
-    ///
-    /// This represents stages that execute/recover the downloaded data.
-    Executing {
-        /// The block to which the node executes downloaded state.
-        target_block: BlockNumber,
-    },
+    /// Network is syncing
+    Syncing,
 }
 
 impl SyncState {
