@@ -12,8 +12,8 @@ use reth_metrics_derive::Metrics;
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
-    EngineRpcError, ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
+    EngineRpcError, ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum,
 };
 use reth_stages::{stages::FINISH, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -30,7 +30,7 @@ mod error;
 pub use error::{BeaconEngineError, BeaconEngineResult};
 
 mod message;
-pub use message::{BeaconEngineMessage, BeaconEngineSender};
+pub use message::BeaconEngineMessage;
 
 mod pipeline_state;
 pub use pipeline_state::PipelineState;
@@ -45,8 +45,6 @@ struct Metrics {
     forkchoice_updated_messages: Counter,
     /// The total count of new payload messages received.
     new_payload_messages: Counter,
-    /// The total count of get payload messages received.
-    get_payload_messages: Counter,
 }
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
@@ -276,25 +274,6 @@ where
         .with_payload_id(payload_id))
     }
 
-    /// Called to receive the execution payload associated with a payload build process.
-    pub fn on_get_payload(
-        &self,
-        _payload_id: PayloadId,
-    ) -> Result<ExecutionPayloadEnvelope, BeaconEngineError> {
-        // TODO: Client software SHOULD stop the updating process when either a call to
-        // engine_getPayload with the build process's payloadId is made or SECONDS_PER_SLOT (12s in
-        // the Mainnet configuration) have passed since the point in time identified by the
-        // timestamp parameter.
-
-        // for now just return the output from the payload store
-        // match self.payload_builder.get_execution_payload(payload_id) {
-        //     Some(payload) => Ok(payload),
-        //     None => Err(EngineRpcError::UnknownPayload.into()),
-        // }
-
-        todo!()
-    }
-
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
     /// [`ExecutionPayload`]. The Execution layer executes the transactions and validates the
@@ -483,24 +462,6 @@ where
                             }
                         };
                         let _ = tx.send(Ok(response));
-                    }
-                    BeaconEngineMessage::GetPayload { payload_id, tx } => {
-                        this.metrics.get_payload_messages.increment(1);
-                        match this.on_get_payload(payload_id) {
-                            Ok(response) => {
-                                // good response, send it back
-                                let _ = tx.send(Ok(response));
-                            }
-                            Err(BeaconEngineError::EngineApi(error)) => {
-                                // specific error that we should report back to the client
-                                error!(target: "consensus::engine", ?error, "Sending engine api error response");
-                                let _ = tx.send(Err(BeaconEngineError::EngineApi(error)));
-                            }
-                            Err(error) => {
-                                error!(target: "consensus::engine", ?error, "Error getting get payload response");
-                                return Poll::Ready(Err(error))
-                            }
-                        };
                     }
                 }
             }

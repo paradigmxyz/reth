@@ -7,6 +7,9 @@ use reth_primitives::{
 use reth_rlp::{Decodable, Encodable};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
+/// The execution payload body response that allows for `null` values.
+pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
+
 /// And 8-byte identifier for an execution payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct PayloadId(H64);
@@ -227,9 +230,6 @@ impl From<Block> for ExecutionPayloadBody {
         }
     }
 }
-
-/// The execution payload body response that allows for `null` values.
-pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
 
 /// This structure contains the attributes required to initiate a payload build process in the
 /// context of an `engine_forkchoiceUpdated` call.

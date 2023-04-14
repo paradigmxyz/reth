@@ -4,7 +4,9 @@ use reth_consensus_common::validation::calculate_next_block_base_fee;
 use reth_primitives::{Address, ChainSpec, Header, SealedBlock, Withdrawal, H256, U256};
 use reth_revm_primitives::config::revm_spec_by_timestamp_after_merge;
 use reth_rlp::Encodable;
-use reth_rpc_types::engine::{PayloadAttributes, PayloadId};
+use reth_rpc_types::engine::{
+    ExecutionPayload, ExecutionPayloadEnvelope, PayloadAttributes, PayloadId,
+};
 use revm_primitives::{BlockEnv, CfgEnv};
 
 /// Contains the built payload.
@@ -12,7 +14,7 @@ use revm_primitives::{BlockEnv, CfgEnv};
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
 /// Therefore, the empty-block here is always available and full-block will be set/updated
 /// afterwards.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
@@ -43,6 +45,32 @@ impl BuiltPayload {
     /// Fees of the block
     pub fn fees(&self) -> U256 {
         self.fees
+    }
+
+    /// Converts the type into the response expected by `engine_getPayloadV1`
+    pub fn into_v1_payload(self) -> ExecutionPayload {
+        self.into()
+    }
+
+    /// Converts the type into the response expected by `engine_getPayloadV2`
+    pub fn into_v2_payload(self) -> ExecutionPayloadEnvelope {
+        self.into()
+    }
+}
+
+// V1 engine_getPayloadV1 response
+impl From<BuiltPayload> for ExecutionPayload {
+    fn from(value: BuiltPayload) -> Self {
+        value.block.into()
+    }
+}
+
+// V2 engine_getPayloadV2 response
+impl From<BuiltPayload> for ExecutionPayloadEnvelope {
+    fn from(value: BuiltPayload) -> Self {
+        let BuiltPayload { block, fees, .. } = value;
+
+        ExecutionPayloadEnvelope { block_value: fees, payload: block.into() }
     }
 }
 

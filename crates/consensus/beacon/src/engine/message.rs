@@ -1,15 +1,12 @@
 use crate::BeaconEngineResult;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated, PayloadAttributes, PayloadId,
-    PayloadStatus,
+    ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
 use tokio::sync::oneshot;
 
-/// Beacon engine sender.
-pub type BeaconEngineSender<Ok> = oneshot::Sender<BeaconEngineResult<Ok>>;
-
-/// A message for the beacon engine from other components of the node.
+/// A message for the beacon engine from other components of the node (engine RPC API invoked by the
+/// consensus layer).
 #[derive(Debug)]
 pub enum BeaconEngineMessage {
     /// Message with new payload.
@@ -17,7 +14,7 @@ pub enum BeaconEngineMessage {
         /// The execution payload received by Engine API.
         payload: ExecutionPayload,
         /// The sender for returning payload status result.
-        tx: BeaconEngineSender<PayloadStatus>,
+        tx: oneshot::Sender<BeaconEngineResult<PayloadStatus>>,
     },
     /// Message with updated forkchoice state.
     ForkchoiceUpdated {
@@ -26,13 +23,6 @@ pub enum BeaconEngineMessage {
         /// The payload attributes for block building.
         payload_attrs: Option<PayloadAttributes>,
         /// The sender for returning forkchoice updated result.
-        tx: BeaconEngineSender<ForkchoiceUpdated>,
-    },
-    /// Message with get payload parameters.
-    GetPayload {
-        /// The payload id.
-        payload_id: PayloadId,
-        /// The sender for returning payload result.
-        tx: BeaconEngineSender<ExecutionPayloadEnvelope>,
+        tx: oneshot::Sender<BeaconEngineResult<ForkchoiceUpdated>>,
     },
 }
