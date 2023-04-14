@@ -17,7 +17,7 @@ reth-consensus-common = { path = "../../consensus/common" }
 reth-revm-primitives = { path = "../../revm/revm-primitives" }
 
 ## ethereum
-revm-primitives = "1"
+revm-primitives = "1.1"
 
 ## async
 tokio = { version = "1", features = ["sync"] }

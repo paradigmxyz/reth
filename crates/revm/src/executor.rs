@@ -9,7 +9,7 @@ use reth_consensus_common::calc;
 use reth_executor::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
+    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
@@ -241,9 +241,6 @@ where
             // append gas used
             cumulative_gas_used += result.gas_used();
 
-            // cast revm logs to reth logs
-            let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
-
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
                 tx_type: transaction.tx_type(),
@@ -251,7 +248,8 @@ where
                 // receipts`.
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
             });
             post_state.finish_transition();
         }
