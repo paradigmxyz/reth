@@ -7,8 +7,8 @@ use futures::FutureExt;
 use reth_eth_wire::{
     capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
     GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts, NewBlock,
-    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    SharedTransactions, Transactions,
+    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, RawBlockBodies,
+    Receipts, SharedTransactions, Transactions,
 };
 use reth_interfaces::p2p::error::{RequestError, RequestResult};
 use reth_primitives::{
@@ -80,12 +80,19 @@ pub enum PeerRequest {
         request: GetBlockHeaders,
         response: oneshot::Sender<RequestResult<BlockHeaders>>,
     },
-    /// Request Block headers from the peer.
+    /// Request Block bodies from the peer.
     ///
     /// The response should be sent through the channel.
     GetBlockBodies {
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
+    },
+    /// Request for raw block bodies.
+    ///
+    /// The response should be sent through the channel.
+    GetRawBlockBodies {
+        request: GetBlockBodies,
+        response: oneshot::Sender<RequestResult<RawBlockBodies>>,
     },
     /// Request pooled transactions from the peer.
     ///
@@ -117,6 +124,7 @@ impl PeerRequest {
         let _ = match self {
             PeerRequest::GetBlockHeaders { response, .. } => response.send(Err(err)).ok(),
             PeerRequest::GetBlockBodies { response, .. } => response.send(Err(err)).ok(),
+            PeerRequest::GetRawBlockBodies { response, .. } => response.send(Err(err)).ok(),
             PeerRequest::GetPooledTransactions { response, .. } => response.send(Err(err)).ok(),
             PeerRequest::GetNodeData { response, .. } => response.send(Err(err)).ok(),
             PeerRequest::GetReceipts { response, .. } => response.send(Err(err)).ok(),
@@ -129,7 +137,8 @@ impl PeerRequest {
             PeerRequest::GetBlockHeaders { request, .. } => {
                 EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
             }
-            PeerRequest::GetBlockBodies { request, .. } => {
+            PeerRequest::GetBlockBodies { request, .. } |
+            PeerRequest::GetRawBlockBodies { request, .. } => {
                 EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() })
             }
             PeerRequest::GetPooledTransactions { request, .. } => {
@@ -153,6 +162,7 @@ impl PeerRequest {
 pub enum PeerResponse {
     BlockHeaders { response: oneshot::Receiver<RequestResult<BlockHeaders>> },
     BlockBodies { response: oneshot::Receiver<RequestResult<BlockBodies>> },
+    RawBlockBodies { response: oneshot::Receiver<RequestResult<RawBlockBodies>> },
     PooledTransactions { response: oneshot::Receiver<RequestResult<PooledTransactions>> },
     NodeData { response: oneshot::Receiver<RequestResult<NodeData>> },
     Receipts { response: oneshot::Receiver<RequestResult<Receipts>> },
@@ -179,6 +189,9 @@ impl PeerResponse {
             PeerResponse::BlockBodies { response } => {
                 poll_request!(response, BlockBodies, cx)
             }
+            PeerResponse::RawBlockBodies { response } => {
+                poll_request!(response, RawBlockBodies, cx)
+            }
             PeerResponse::PooledTransactions { response } => {
                 poll_request!(response, PooledTransactions, cx)
             }
@@ -199,6 +212,7 @@ impl PeerResponse {
 pub enum PeerResponseResult {
     BlockHeaders(RequestResult<Vec<Header>>),
     BlockBodies(RequestResult<Vec<BlockBody>>),
+    RawBlockBodies(RequestResult<Vec<Bytes>>),
     PooledTransactions(RequestResult<Vec<TransactionSigned>>),
     NodeData(RequestResult<Vec<Bytes>>),
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom>>>),
@@ -227,6 +241,9 @@ impl PeerResponseResult {
             PeerResponseResult::BlockBodies(resp) => {
                 to_message!(resp, BlockBodies, id)
             }
+            PeerResponseResult::RawBlockBodies(resp) => {
+                to_message!(resp, RawBlockBodies, id)
+            }
             PeerResponseResult::PooledTransactions(resp) => {
                 to_message!(resp, PooledTransactions, id)
             }
@@ -244,6 +261,7 @@ impl PeerResponseResult {
         match self {
             PeerResponseResult::BlockHeaders(res) => res.as_ref().err(),
             PeerResponseResult::BlockBodies(res) => res.as_ref().err(),
+            PeerResponseResult::RawBlockBodies(res) => res.as_ref().err(),
             PeerResponseResult::PooledTransactions(res) => res.as_ref().err(),
             PeerResponseResult::NodeData(res) => res.as_ref().err(),
             PeerResponseResult::Receipts(res) => res.as_ref().err(),
@@ -256,6 +274,7 @@ impl PeerResponseResult {
         match self {
             PeerResponseResult::BlockHeaders(res) => res.is_err(),
             PeerResponseResult::BlockBodies(res) => res.is_err(),
+            PeerResponseResult::RawBlockBodies(res) => res.is_err(),
             PeerResponseResult::PooledTransactions(res) => res.is_err(),
             PeerResponseResult::NodeData(res) => res.is_err(),
             PeerResponseResult::Receipts(res) => res.is_err(),

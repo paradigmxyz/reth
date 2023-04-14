@@ -383,6 +383,13 @@ where
                     response,
                 })
             }
+            PeerRequest::GetRawBlockBodies { request, response } => {
+                self.delegate_eth_request(IncomingEthRequest::GetRawBlockBodies {
+                    peer_id,
+                    request,
+                    response,
+                })
+            }
             PeerRequest::GetNodeData { request, response } => {
                 self.delegate_eth_request(IncomingEthRequest::GetNodeData {
                     peer_id,

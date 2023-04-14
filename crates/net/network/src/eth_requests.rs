@@ -4,11 +4,14 @@ use crate::peers::PeersHandle;
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
-    Receipts,
+    RawBlockBodies, Receipts,
 };
 use reth_interfaces::p2p::error::RequestResult;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, PeerId};
+use reth_primitives::{
+    bytes::BytesMut, BlockBody, BlockHashOrNumber, Bytes, Header, HeadersDirection, PeerId,
+};
 use reth_provider::{BlockProvider, HeaderProvider};
+use reth_rlp::{Decodable, Encodable};
 use std::{
     borrow::Borrow,
     future::Future,
@@ -31,10 +34,6 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// Used to limit lookups. With 24KB block sizes nowadays, the practical limit will always be
 /// SOFT_RESPONSE_LIMIT.
 const MAX_BODIES_SERVE: usize = 1024;
-
-/// Estimated size in bytes of an RLP encoded body.
-// TODO: check 24kb blocksize assumption
-const APPROX_BODY_SIZE: usize = 24 * 1024;
 
 /// Maximum size of replies to data retrievals.
 const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
@@ -152,10 +151,31 @@ where
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
     ) {
+        let bodies = self.get_raw_bodies(request);
+        todo!()
+        // let mut bodies = BlockBodies::decode(&mut bodies.as_ref()).expect("Valid bodies");
+        // let _ = response.send(Ok(bodies));
+    }
+
+    fn on_raw_bodies_request(
+        &mut self,
+        _peer_id: PeerId,
+        request: GetBlockBodies,
+        response: oneshot::Sender<RequestResult<RawBlockBodies>>,
+    ) {
+        let bodies = self.get_raw_bodies(request);
+        let bodies = RawBlockBodies(bodies);
+        let mut b = Vec::new();
+        bodies.encode(&mut b);
+        let h = reth_primitives::hex::encode(&b);
+        dbg!(h);
+        let mut b = BlockBodies::decode(&mut b.as_ref()).expect("Valid bodies");
+        let _ = response.send(Ok(bodies));
+    }
+
+    fn get_raw_bodies(&mut self, request: GetBlockBodies) -> Vec<Bytes> {
         let mut bodies = Vec::new();
-
-        let mut total_bytes = APPROX_BODY_SIZE;
-
+        let mut total_len = 0;
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
                 let body = BlockBody {
@@ -163,14 +183,16 @@ where
                     ommers: block.ommers,
                     withdrawals: block.withdrawals,
                 };
+                let mut buf = BytesMut::new();
+                body.encode(&mut buf);
 
-                bodies.push(body);
-
-                total_bytes += APPROX_BODY_SIZE;
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                total_len += buf.len();
+                // check if we are over the limit first
+                if total_len >= SOFT_RESPONSE_LIMIT {
                     break
                 }
+
+                bodies.push(buf.freeze().into());
 
                 if bodies.len() >= MAX_BODIES_SERVE {
                     break
@@ -180,7 +202,7 @@ where
             }
         }
 
-        let _ = response.send(Ok(BlockBodies(bodies)));
+        bodies
     }
 }
 
@@ -204,9 +226,10 @@ where
                     IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
                         this.on_headers_request(peer_id, request, response)
                     }
-                    IncomingEthRequest::GetBlockBodies { peer_id, request, response } => {
-                        this.on_bodies_request(peer_id, request, response)
+                    IncomingEthRequest::GetRawBlockBodies { peer_id, request, response } => {
+                        this.on_raw_bodies_request(peer_id, request, response)
                     }
+                    IncomingEthRequest::GetBlockBodies { .. } => {}
                     IncomingEthRequest::GetNodeData { .. } => {}
                     IncomingEthRequest::GetReceipts { .. } => {}
                 },
@@ -250,6 +273,14 @@ pub enum IncomingEthRequest {
         peer_id: PeerId,
         request: GetBlockBodies,
         response: oneshot::Sender<RequestResult<BlockBodies>>,
+    },
+    /// Request Block headers from the peer.
+    ///
+    /// The response should be sent through the channel.
+    GetRawBlockBodies {
+        peer_id: PeerId,
+        request: GetBlockBodies,
+        response: oneshot::Sender<RequestResult<RawBlockBodies>>,
     },
     /// Request Node Data from the peer.
     ///

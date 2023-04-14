@@ -4,7 +4,7 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{errors::EthStreamError, EthVersion, SharedTransactions};
+use crate::{errors::EthStreamError, EthVersion, RawBlockBodies, SharedTransactions};
 use reth_primitives::bytes::{Buf, BufMut};
 use reth_rlp::{length_of_length, Decodable, Encodable, Header};
 use std::{fmt::Debug, sync::Arc};
@@ -177,6 +177,7 @@ pub enum EthMessage {
     BlockHeaders(RequestPair<BlockHeaders>),
     GetBlockBodies(RequestPair<GetBlockBodies>),
     BlockBodies(RequestPair<BlockBodies>),
+    RawBlockBodies(RequestPair<RawBlockBodies>),
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
     PooledTransactions(RequestPair<PooledTransactions>),
     GetNodeData(RequestPair<GetNodeData>),
@@ -199,6 +200,7 @@ impl EthMessage {
             EthMessage::BlockHeaders(_) => EthMessageID::BlockHeaders,
             EthMessage::GetBlockBodies(_) => EthMessageID::GetBlockBodies,
             EthMessage::BlockBodies(_) => EthMessageID::BlockBodies,
+            EthMessage::RawBlockBodies(_) => EthMessageID::BlockBodies,
             EthMessage::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
             EthMessage::PooledTransactions(_) => EthMessageID::PooledTransactions,
             EthMessage::GetNodeData(_) => EthMessageID::GetNodeData,
@@ -222,6 +224,7 @@ impl Encodable for EthMessage {
             EthMessage::BlockHeaders(headers) => headers.encode(out),
             EthMessage::GetBlockBodies(request) => request.encode(out),
             EthMessage::BlockBodies(bodies) => bodies.encode(out),
+            EthMessage::RawBlockBodies(bodies) => bodies.encode(out),
             EthMessage::GetPooledTransactions(request) => request.encode(out),
             EthMessage::PooledTransactions(transactions) => transactions.encode(out),
             EthMessage::GetNodeData(request) => request.encode(out),
@@ -242,6 +245,7 @@ impl Encodable for EthMessage {
             EthMessage::BlockHeaders(headers) => headers.length(),
             EthMessage::GetBlockBodies(request) => request.length(),
             EthMessage::BlockBodies(bodies) => bodies.length(),
+            EthMessage::RawBlockBodies(bodies) => bodies.length(),
             EthMessage::GetPooledTransactions(request) => request.length(),
             EthMessage::PooledTransactions(transactions) => transactions.length(),
             EthMessage::GetNodeData(request) => request.length(),

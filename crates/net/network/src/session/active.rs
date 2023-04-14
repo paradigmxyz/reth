@@ -201,10 +201,13 @@ impl ActiveSession {
                 on_response!(resp, GetBlockHeaders)
             }
             EthMessage::GetBlockBodies(req) => {
-                on_request!(req, BlockBodies, GetBlockBodies)
+                on_request!(req, RawBlockBodies, GetRawBlockBodies)
             }
             EthMessage::BlockBodies(resp) => {
                 on_response!(resp, GetBlockBodies)
+            }
+            EthMessage::RawBlockBodies(resp) => {
+                on_response!(resp, GetRawBlockBodies)
             }
             EthMessage::GetPooledTransactions(req) => {
                 on_request!(req, PooledTransactions, GetPooledTransactions)
