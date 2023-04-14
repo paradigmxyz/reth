@@ -2,16 +2,15 @@ use crate::error::{RpcError, ServerKind};
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::server::{RpcModule, ServerHandle};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::ChainSpec;
+
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{
     eth::cache::EthStateCache, AuthLayer, EngineApi, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::servers::*;
-use reth_rpc_engine_api::EngineApiHandle;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 /// Configure and launch an auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
@@ -40,7 +39,7 @@ where
     let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
     let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache);
     let eth_filter = EthFilter::new(client, pool);
-    launch_with_eth_api(eth_api,  eth_filter, engine_api, socket_addr, secret).await
+    launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 
 /// Configure and launch an auth server with existing EthApi implementation.

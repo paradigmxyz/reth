@@ -43,7 +43,7 @@ use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedH
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
-use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
+use reth_rpc_engine_api::EngineApi;
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -64,15 +64,12 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
-    oneshot, watch,
-};
+use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
 use crate::dirs::MaybePlatformPath;
 use reth_interfaces::p2p::headers::client::HeadersClient;
-use reth_payload_builder::{PayloadBuilderService, PayloadStore};
+use reth_payload_builder::PayloadBuilderService;
 use reth_stages::stages::{MERKLE_EXECUTION, MERKLE_UNWIND};
 
 pub mod events;
@@ -320,7 +317,7 @@ impl Command {
         let engine_api = EngineApi::new(
             ShareableDatabase::new(db, self.chain.clone()),
             self.chain.clone(),
-            to_beacon_engine,
+            consensus_engine_tx.clone(),
             payload_builder.into(),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
