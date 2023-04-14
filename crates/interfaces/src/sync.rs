@@ -1,7 +1,5 @@
 //! Traits used when interacting with the sync status of the network.
 
-use reth_primitives::BlockNumber;
-
 /// A type that provides information about whether the node is currently syncing and the network is
 /// currently serving syncing related requests.
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -35,21 +33,8 @@ pub enum SyncState {
     ///
     /// The network just serves requests to keep up of the chain.
     Idle,
-    /// Network is syncing and downloading up to the `target_block`.
-    ///
-    /// This represents the headers and bodies stage.
-    Downloading {
-        /// The block to which the node is downloading state.
-        target_block: BlockNumber,
-    },
-    /// All headers and bodies up to the `target_block` have been downloaded and are now being
-    /// executed.
-    ///
-    /// This represents stages that execute/recover the downloaded data.
-    Executing {
-        /// The block to which the node executes downloaded state.
-        target_block: BlockNumber,
-    },
+    /// Network is syncing
+    Syncing,
 }
 
 impl SyncState {

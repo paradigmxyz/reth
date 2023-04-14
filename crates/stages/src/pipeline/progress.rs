@@ -1,6 +1,5 @@
 use super::ctrl::ControlFlow;
 use crate::util::opt;
-use reth_interfaces::sync::SyncState;
 use reth_primitives::BlockNumber;
 
 #[derive(Debug, Default)]
@@ -18,15 +17,6 @@ impl PipelineProgress {
         self.progress = Some(progress);
         self.minimum_progress = opt::min(self.minimum_progress, progress);
         self.maximum_progress = opt::max(self.maximum_progress, progress);
-    }
-
-    /// Create a sync state from pipeline progress.
-    pub(crate) fn current_sync_state(&self, downloading: bool) -> SyncState {
-        match self.progress {
-            Some(progress) if downloading => SyncState::Downloading { target_block: progress },
-            Some(progress) => SyncState::Executing { target_block: progress },
-            None => SyncState::Idle,
-        }
     }
 
     /// Get next control flow step

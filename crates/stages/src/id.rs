@@ -1,4 +1,4 @@
-use crate::stages::{BODIES, HEADERS};
+use crate::stages::{BODIES, FINISH, HEADERS};
 use reth_db::{
     tables::SyncStage,
     transaction::{DbTx, DbTxMut},
@@ -20,9 +20,14 @@ impl Display for StageId {
 }
 
 impl StageId {
-    /// Returns a flag indicating if it's a downloading stage
+    /// Returns true if it's a downloading stage [HEADERS] or [BODIES
     pub fn is_downloading_stage(&self) -> bool {
         *self == HEADERS || *self == BODIES
+    }
+
+    /// Returns true indicating if it's the finish stage [FINISH]
+    pub fn is_finish(&self) -> bool {
+        *self == FINISH
     }
 
     /// Get the last committed progress of this stage.
