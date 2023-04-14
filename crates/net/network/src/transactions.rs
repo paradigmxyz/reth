@@ -741,7 +741,7 @@ mod tests {
 
         tokio::task::spawn(network);
 
-        handle.update_sync_state(SyncState::Downloading { target_block: 100 });
+        handle.update_sync_state(SyncState::Syncing);
         assert!(NetworkInfo::is_syncing(&handle));
 
         let peer_id = PeerId::random();

@@ -212,8 +212,11 @@ where
 
             // Update sync state
             if let Some(ref updater) = self.sync_state_updater {
-                let state = self.progress.current_sync_state(stage_id.is_downloading_stage());
-                updater.update_sync_state(state);
+                if stage_id.is_finish() {
+                    updater.update_sync_state(SyncState::Idle);
+                } else {
+                    updater.update_sync_state(SyncState::Syncing);
+                }
             }
 
             trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
@@ -234,7 +237,7 @@ where
                 ControlFlow::Unwind { target, bad_block } => {
                     // reset the sync state
                     if let Some(ref updater) = self.sync_state_updater {
-                        updater.update_sync_state(SyncState::Downloading { target_block: target });
+                        updater.update_sync_state(SyncState::Syncing);
                     }
                     self.unwind(db.as_ref(), target, bad_block).await?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
@@ -430,20 +433,6 @@ mod tests {
         progress.update(1);
         assert_eq!(progress.minimum_progress, Some(1));
         assert_eq!(progress.maximum_progress, Some(20));
-    }
-
-    #[test]
-    fn sync_states() {
-        let mut progress = PipelineProgress::default();
-
-        // no progress, so we're idle
-        assert_eq!(progress.current_sync_state(false), SyncState::Idle);
-        assert_eq!(progress.current_sync_state(true), SyncState::Idle);
-
-        // progress and downloading/executing
-        progress.update(1);
-        assert_eq!(progress.current_sync_state(true), SyncState::Downloading { target_block: 1 });
-        assert_eq!(progress.current_sync_state(false), SyncState::Executing { target_block: 1 });
     }
 
     #[test]
