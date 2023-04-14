@@ -43,7 +43,7 @@ use reth_primitives::{BlockHashOrNumber, Chain, ChainSpec, Head, Header, SealedH
 use reth_provider::{BlockProvider, HeaderProvider, ShareableDatabase};
 use reth_revm::Factory;
 use reth_revm_inspectors::stack::Hook;
-use reth_rpc_engine_api::{EngineApi, EngineApiHandle};
+use reth_rpc_engine_api::EngineApi;
 use reth_staged_sync::{
     utils::{
         chainspec::genesis_value_parser,
@@ -64,10 +64,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
-    oneshot, watch,
-};
+use tokio::sync::{mpsc::unbounded_channel, oneshot, watch};
 use tracing::*;
 
 use crate::dirs::MaybePlatformPath;
@@ -307,12 +304,16 @@ impl Command {
             blockchain_tree.clone(),
             consensus_engine_rx,
             self.debug.max_block,
-            payload_builder,
+            payload_builder.clone(),
         );
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        let engine_api_handle =
-            self.init_engine_api(Arc::clone(&db), consensus_engine_tx.clone(), &ctx.task_executor);
+        let engine_api = EngineApi::new(
+            ShareableDatabase::new(db, self.chain.clone()),
+            self.chain.clone(),
+            consensus_engine_tx.clone(),
+            payload_builder.into(),
+        );
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let launch_rpc = self
@@ -335,8 +336,7 @@ impl Command {
                 transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
-                self.chain.clone(),
-                engine_api_handle,
+                engine_api,
             )
             .inspect(|_| {
                 info!(target: "reth::cli", "Started Auth server");
@@ -439,23 +439,6 @@ impl Command {
         }
 
         Ok(())
-    }
-
-    fn init_engine_api(
-        &self,
-        db: Arc<Env<WriteMap>>,
-        engine_tx: UnboundedSender<BeaconEngineMessage>,
-        task_executor: &TaskExecutor,
-    ) -> EngineApiHandle {
-        let (message_tx, message_rx) = unbounded_channel();
-        let engine_api = EngineApi::new(
-            ShareableDatabase::new(db, self.chain.clone()),
-            self.chain.clone(),
-            message_rx,
-            engine_tx,
-        );
-        task_executor.spawn_critical("engine API task", engine_api);
-        message_tx
     }
 
     /// Spawns the configured network and associated tasks and returns the [NetworkHandle] connected
