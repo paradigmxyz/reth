@@ -71,6 +71,7 @@ human_bytes = "0.4.1"
 # async
 tokio = { version = "1.21", features = ["sync", "macros", "rt-multi-thread"] }
 futures = "0.3.25"
+pin-project = "1.0"
 
 # http/rpc
 hyper = "0.14.25"

@@ -100,11 +100,11 @@ pub struct Command {
     /// - goerli
     /// - sepolia
     #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
-        value_parser = genesis_value_parser
+    long,
+    value_name = "CHAIN_OR_PATH",
+    verbatim_doc_comment,
+    default_value = "mainnet",
+    value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
 
@@ -244,7 +244,7 @@ impl Command {
                 consensus_engine_tx.clone(),
                 canon_state_notification_sender,
             )
-            .build();
+                .build();
 
             let mut pipeline = self
                 .build_networked_pipeline(
@@ -273,7 +273,7 @@ impl Command {
                 db.clone(),
                 &ctx.task_executor,
             )
-            .await?
+                .await?
         };
 
         let events = stream_select(
@@ -377,8 +377,8 @@ impl Command {
         db: Arc<Env<WriteMap>>,
         task_executor: &TaskExecutor,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, NetworkHandle>>
-    where
-        Client: HeadersClient + BodiesClient + Clone + 'static,
+        where
+            Client: HeadersClient + BodiesClient + Clone + 'static,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
@@ -449,9 +449,9 @@ impl Command {
         task_executor: &TaskExecutor,
         pool: Pool,
     ) -> Result<NetworkHandle, NetworkError>
-    where
-        C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
-        Pool: TransactionPool + Unpin + 'static,
+        where
+            C: BlockProvider + HeaderProvider + Clone + Unpin + 'static,
+            Pool: TransactionPool + Unpin + 'static,
     {
         let client = config.client.clone();
         let (handle, network, txpool, eth) = NetworkManager::builder(config)
@@ -491,7 +491,7 @@ impl Command {
                 timestamp: header.timestamp,
             })
         })?
-        .map_err(Into::into)
+            .map_err(Into::into)
     }
 
     /// Attempt to look up the block number for the tip hash in the database.
@@ -504,8 +504,8 @@ impl Command {
         client: Client,
         tip: H256,
     ) -> Result<u64, reth_interfaces::Error>
-    where
-        Client: HeadersClient,
+        where
+            Client: HeadersClient,
     {
         Ok(self.fetch_tip(db, client, BlockHashOrNumber::Hash(tip)).await?.number)
     }
@@ -519,8 +519,8 @@ impl Command {
         client: Client,
         tip: BlockHashOrNumber,
     ) -> Result<SealedHeader, reth_interfaces::Error>
-    where
-        Client: HeadersClient,
+        where
+            Client: HeadersClient,
     {
         let header = db.view(|tx| -> Result<Option<Header>, reth_db::Error> {
             let number = match tip {
@@ -585,10 +585,10 @@ impl Command {
         max_block: Option<u64>,
         continuous: bool,
     ) -> eyre::Result<Pipeline<Env<WriteMap>, U>>
-    where
-        H: HeaderDownloader + 'static,
-        B: BodyDownloader + 'static,
-        U: SyncStateUpdater + StatusUpdater + Clone + 'static,
+        where
+            H: HeaderDownloader + 'static,
+            B: BodyDownloader + 'static,
+            U: SyncStateUpdater + StatusUpdater + Clone + 'static,
     {
         let stage_conf = &config.stages;
 
@@ -632,16 +632,16 @@ impl Command {
                     updater,
                     factory.clone(),
                 )
-                .set(
-                    TotalDifficultyStage::new(consensus)
-                        .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
-                )
-                .set(SenderRecoveryStage {
-                    commit_threshold: stage_conf.sender_recovery.commit_threshold,
-                })
-                .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
-                .disable_if(MERKLE_UNWIND, || self.auto_mine)
-                .disable_if(MERKLE_EXECUTION, || self.auto_mine),
+                    .set(
+                        TotalDifficultyStage::new(consensus)
+                            .with_commit_threshold(stage_conf.total_difficulty.commit_threshold),
+                    )
+                    .set(SenderRecoveryStage {
+                        commit_threshold: stage_conf.sender_recovery.commit_threshold,
+                    })
+                    .set(ExecutionStage::new(factory, stage_conf.execution.commit_threshold))
+                    .disable_if(MERKLE_UNWIND, || self.auto_mine)
+                    .disable_if(MERKLE_EXECUTION, || self.auto_mine),
             )
             .build();
 
