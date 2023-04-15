@@ -79,7 +79,7 @@ pub struct Block {
     /// Integer the size of this block in bytes.
     pub size: Option<U256>,
     /// Withdrawals in the block
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawals: Option<Vec<Withdrawal>>,
 }
 
@@ -165,14 +165,14 @@ impl Block {
         let block_length = block.length();
         let uncles = block.ommers.into_iter().map(|h| h.hash_slow()).collect();
         let header = Header::from_primitive_with_hash(block.header.seal(block_hash));
-
+        let withdrawals = if header.withdrawals_root.is_some() { block.withdrawals } else { None };
         Self {
             header,
             uncles,
             transactions,
             total_difficulty: Some(total_difficulty),
             size: Some(U256::from(block_length)),
-            withdrawals: Some(block.withdrawals.unwrap_or_default()),
+            withdrawals,
         }
     }
 
