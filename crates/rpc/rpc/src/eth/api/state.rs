@@ -44,7 +44,7 @@ where
             // lookup transactions in pool
             let address_txs = self.pool().get_transactions_by_sender(address);
 
-            if address_txs.is_empty() {
+            if !address_txs.is_empty() {
                 // get max transaction with the highest nonce
                 let highest_nonce_tx = address_txs
                     .into_iter()
