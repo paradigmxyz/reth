@@ -4,8 +4,6 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-// TODO rm later
-#![allow(unused)]
 
 //! reth basic payload job generator
 
@@ -16,12 +14,12 @@ use reth_payload_builder::{
     PayloadJobGenerator,
 };
 use reth_primitives::{
-    bloom::logs_bloom, bytes::Bytes, constants::SLOT_DURATION, proofs, Block, ChainSpec, Hardfork,
-    Head, Header, IntoRecoveredTransaction, Receipt, SealedBlock, EMPTY_OMMER_ROOT, U256,
+    bytes::{Bytes, BytesMut},
+    constants::{RETH_CLIENT_VERSION, SLOT_DURATION},
+    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, PostState, StateProviderFactory};
+use reth_provider::{BlockProvider, PostState, StateProviderFactory};
 use reth_revm::{
-    config::{revm_spec, revm_spec_by_timestamp_after_merge},
     database::{State, SubState},
     env::tx_env_with_recovered,
     executor::{
@@ -29,6 +27,7 @@ use reth_revm::{
     },
     into_reth_log,
 };
+use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId};
@@ -192,7 +191,7 @@ impl BasicPayloadJobGeneratorConfig {
 
     /// Sets the data to include in the block's extra data field.
     ///
-    /// Defaults to the current client version.
+    /// Defaults to the current client version: `rlp(RETH_CLIENT_VERSION)`.
     pub fn extradata(mut self, extradata: Bytes) -> Self {
         self.extradata = extradata;
         self
@@ -209,9 +208,10 @@ impl BasicPayloadJobGeneratorConfig {
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
-        // TODO: use default rlp client version as extradata
+        let mut extradata = BytesMut::new();
+        RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
-            extradata: Default::default(),
+            extradata: extradata.freeze(),
             max_gas_limit: 30_000_000,
             interval: Duration::from_secs(1),
             // 12s slot time
@@ -290,8 +290,8 @@ where
                             let payload = Arc::new(payload);
                             this.best_payload = Some(payload);
                         }
-                        BuildOutcome::Aborted { .. } => {
-                            trace!("skipped payload build of worse block");
+                        BuildOutcome::Aborted { fees } => {
+                            trace!(?fees, "skipped payload build of worse block");
                         }
                         BuildOutcome::Cancelled => {
                             unreachable!("the cancel signal never fired")
