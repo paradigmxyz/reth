@@ -50,7 +50,7 @@ impl PoolError {
     }
 
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
-    /// context of the transaction pool.
+    /// context of the transaction pool and warrants peer penalization.
     ///
     /// Not all error variants are caused by the incorrect composition of the transaction (See also
     /// [InvalidPoolTransactionError]) and can be caused by the current state of the transaction
@@ -85,9 +85,9 @@ impl PoolError {
                 // valid tx but dropped due to size constraints
                 false
             }
-            PoolError::InvalidTransaction(_, _) => {
+            PoolError::InvalidTransaction(_, err) => {
                 // transaction rejected because it violates constraints
-                true
+                err.is_bad_transaction()
             }
             PoolError::Other(_, _) => {
                 // internal error unrelated to the transaction
@@ -121,4 +121,39 @@ pub enum InvalidPoolTransactionError {
     /// Thrown if the transaction's fee is below the minimum fee
     #[error("transaction underpriced")]
     Underpriced,
+}
+
+// === impl InvalidPoolTransactionError ===
+
+impl InvalidPoolTransactionError {
+    /// Returns `true` if the error was caused by a transaction that is considered bad in the
+    /// context of the transaction pool and warrants peer penalization.
+    ///
+    /// See [PoolError::is_bad_transaction].
+    #[inline]
+    fn is_bad_transaction(&self) -> bool {
+        match self {
+            InvalidPoolTransactionError::Consensus(err) => {
+                // transaction considered invalid by the consensus rules
+                // We do not consider the following errors to be erroneous transactions, since they
+                // depend on dynamic environmental conditions and should not be assumed to have been
+                // intentionally caused by the sender
+                match err {
+                    InvalidTransactionError::InsufficientFunds { .. } |
+                    InvalidTransactionError::NonceNotConsistent => {
+                        // transaction could just have arrived late/early
+                        false
+                    }
+                    _ => true,
+                }
+            }
+            InvalidPoolTransactionError::ExceedsGasLimit(_, _) => true,
+            InvalidPoolTransactionError::ExceedsMaxInitCodeSize(_, _) => true,
+            InvalidPoolTransactionError::OversizedData(_, _) => true,
+            InvalidPoolTransactionError::Underpriced => {
+                // local setting
+                false
+            }
+        }
+    }
 }
