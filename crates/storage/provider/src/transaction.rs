@@ -586,7 +586,6 @@ where
         end_block_hash: H256,
         expected_state_root: H256,
     ) -> Result<(), TransactionError> {
-        let fork_block_number = *range.start() - 1;
         // storage hashing stage
         {
             let lists = self.get_addresses_and_keys_of_changed_storages(range.clone())?;
@@ -1025,7 +1024,7 @@ where
 
             // merkle tree
             let new_state_root = StateRoot::incremental_root(self.deref(), range.clone(), None)?;
-            
+
             let parent_number = range.start().saturating_sub(1);
             let parent_state_root = self.get_header(parent_number)?.state_root;
 

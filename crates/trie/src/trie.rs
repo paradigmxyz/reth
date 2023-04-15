@@ -19,11 +19,7 @@ use reth_primitives::{
     Address, BlockNumber, StorageEntry, H256,
 };
 use reth_rlp::Encodable;
-use std::{
-    collections::HashMap,
-    ops::{Range, RangeInclusive},
-    sync::mpsc,
-};
+use std::{collections::HashMap, ops::RangeInclusive, sync::mpsc};
 
 /// The branch node update sender
 pub type BranchNodeUpdateSender = mpsc::Sender<BranchNodeUpdate>;

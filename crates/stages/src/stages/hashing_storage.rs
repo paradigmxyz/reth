@@ -20,7 +20,7 @@ pub const STORAGE_HASHING: StageId = StageId("StorageHashing");
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
 #[derive(Debug)]
 pub struct StorageHashingStage {
-    /// The threshold (in number of state transitions) for switching between incremental
+    /// The threshold (in number of blocks) for switching between incremental
     /// hashing and full storage hashing.
     pub clean_threshold: u64,
     /// The maximum number of slots to process before committing.
@@ -84,21 +84,20 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         let stage_progress = input.stage_progress.unwrap_or_default();
-        let previous_stage_progress = input.previous_stage_progress();
 
         // read storage changeset, merge it into one changeset and calculate storage hashes.
-        let from_block = input.stage_progress.unwrap_or_default() + 1;
+        let from_block = input.stage_progress.unwrap_or_default();
         let to_block = input.previous_stage_progress();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
         // account otherwise take changesets aggregate the sets and apply hashing to
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset, along with their storages.
-        if to_block - from_block > self.clean_threshold || stage_progress == 0 {
+        if to_block - from_block > self.clean_threshold || from_block == 0 {
             let mut checkpoint = self.get_checkpoint(tx)?;
 
             if checkpoint.address.is_none() ||
-                // Checkpoint is no longer valid if the range of transitions changed. 
+                // Checkpoint is no longer valid if the range of blocks changed. 
                 // An already hashed storage may have been changed with the new range, and therefore should be hashed again. 
                 checkpoint.to != to_block ||
                 checkpoint.from != from_block
@@ -183,7 +182,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
                 return Ok(ExecOutput { stage_progress, done: false })
             }
         } else {
-            // Aggregate all transition changesets and and make list of storages that have been
+            // Aggregate all changesets and and make list of storages that have been
             // changed.
             let lists = tx.get_addresses_and_keys_of_changed_storages(from_block..=to_block)?;
             // iterate over plain state and get newest storage value.
@@ -203,7 +202,7 @@ impl<DB: Database> Stage<DB> for StorageHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        let start = input.unwind_to + 1;
+        let start = input.unwind_to;
 
         tx.unwind_storage_hashing(BlockNumberAddress::range(start..=input.stage_progress))?;
 
@@ -316,11 +315,11 @@ mod tests {
             self.tx.insert_headers(blocks.iter().map(|block| &block.header))?;
 
             let iter = blocks.iter();
-            let (mut next_transition_id, mut next_tx_num) = (0, 0);
-            let mut first_transition_id = next_transition_id;
+            let mut next_tx_num = 0;
             let mut first_tx_num = next_tx_num;
             for progress in iter {
                 // Insert last progress data
+                let block_number = progress.number;
                 self.tx.commit(|tx| {
                     progress.body.iter().try_for_each(|transaction| {
                         tx.put::<tables::TxHashNumber>(transaction.hash(), next_tx_num)?;
@@ -337,14 +336,13 @@ mod tests {
                             };
                             self.insert_storage_entry(
                                 tx,
-                                (next_transition_id, *addr).into(),
+                                (block_number, *addr).into(),
                                 new_entry,
                                 progress.header.number == stage_progress,
                             )?;
                         }
 
                         next_tx_num += 1;
-                        next_transition_id += 1;
                         Ok(())
                     })?;
 
@@ -353,14 +351,13 @@ mod tests {
                     if has_reward {
                         self.insert_storage_entry(
                             tx,
-                            (next_transition_id, Address::random()).into(),
+                            (block_number, Address::random()).into(),
                             StorageEntry {
                                 key: keccak256("mining"),
                                 value: U256::from(rand::random::<u32>()),
                             },
                             progress.header.number == stage_progress,
                         )?;
-                        next_transition_id += 1;
                     }
 
                     let body = StoredBlockBodyIndices {
@@ -368,7 +365,6 @@ mod tests {
                         tx_count: progress.body.len() as u64,
                     };
 
-                    first_transition_id = next_transition_id;
                     first_tx_num = next_tx_num;
 
                     tx.put::<tables::BlockBodyIndices>(progress.number, body)
@@ -479,7 +475,7 @@ mod tests {
 
         fn unwind_storage(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             tracing::debug!("unwinding storage...");
-            let target_transition = input.unwind_to;
+            let target_block = input.unwind_to;
             self.tx.commit(|tx| {
                 let mut storage_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                 let mut changeset_cursor = tx.cursor_dup_read::<tables::StorageChangeSet>()?;
@@ -487,7 +483,7 @@ mod tests {
                 let mut rev_changeset_walker = changeset_cursor.walk_back(None)?;
 
                 while let Some((bn_address, entry)) = rev_changeset_walker.next().transpose()? {
-                    if bn_address.block_number() < target_transition {
+                    if bn_address.block_number() < target_block {
                         break
                     }
 

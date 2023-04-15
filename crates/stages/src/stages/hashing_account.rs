@@ -5,11 +5,12 @@ use reth_codecs::Compact;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
+    models::AccountBeforeTx,
     tables,
     transaction::{DbTx, DbTxMut},
     RawKey, RawTable,
 };
-use reth_primitives::{keccak256, AccountHashingCheckpoint};
+use reth_primitives::{keccak256, Account, AccountHashingCheckpoint, U256};
 use reth_provider::Transaction;
 use std::{fmt::Debug, ops::Range};
 use tokio::sync::mpsc;
@@ -72,18 +73,19 @@ impl AccountHashingStage {
     }
 }
 
-#[derive(Clone, Debug)]
+// TODO: Rewrite this
 /// `SeedOpts` provides configuration parameters for calling `AccountHashingStage::seed`
 /// in unit tests or benchmarks to generate an initial database state for running the
 /// stage.
 ///
 /// In order to check the "full hashing" mode of the stage you want to generate more
 /// transitions than `AccountHashingStage.clean_threshold`. This requires:
-/// 1. Creating enough blocks + transactions so there's enough transactions to generate
+/// 1. Creating enough blocks so there's enough transactions to generate
 /// the required transition keys in the `BlockTransitionIndex` (which depends on the
 /// `TxTransitionIndex` internally)
-/// 2. Setting `transitions > clean_threshold` so that there's enough diffs to actually
+/// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually
 /// take the 2nd codepath
+#[derive(Clone, Debug)]
 pub struct SeedOpts {
     /// The range of blocks to be generated
     pub blocks: Range<u64>,
@@ -91,8 +93,6 @@ pub struct SeedOpts {
     pub accounts: Range<u64>,
     /// The range of transactions to be generated per block.
     pub txs: Range<u8>,
-    /// The number of transitions to go back, capped at the number of total txs
-    pub transitions: u64,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -112,9 +112,7 @@ impl AccountHashingStage {
         use reth_primitives::H256;
         use reth_provider::insert_canonical_block;
 
-        let blocks = random_block_range(opts.blocks, H256::zero(), opts.txs);
-        let num_transitions = blocks.iter().map(|b| b.body.len() as u64).sum();
-        let transitions = std::cmp::min(opts.transitions, num_transitions);
+        let blocks = random_block_range(opts.blocks.clone(), H256::zero(), opts.txs);
 
         for block in blocks {
             insert_canonical_block(&**tx, block, None).unwrap();
@@ -127,20 +125,9 @@ impl AccountHashingStage {
             for (addr, acc) in accounts.iter() {
                 account_cursor.append(*addr, *acc)?;
             }
-            // TODO(block_level)
-            /*
-            // seed account changeset
-            let last_transition = tx
-                .cursor_read::<tables::BlockBodyIndices>()?
-                .last()?
-                .unwrap()
-                .1
-                .transition_after_block();
-
-            let first_transition = last_transition.checked_sub(transitions).unwrap_or_default();
 
             let mut acc_changeset_cursor = tx.cursor_write::<tables::AccountChangeSet>()?;
-            for (t, (addr, acc)) in (first_transition..last_transition).zip(&accounts) {
+            for (t, (addr, acc)) in (opts.blocks).zip(&accounts) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
                     nonce: nonce - 1,
@@ -150,7 +137,6 @@ impl AccountHashingStage {
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
                 acc_changeset_cursor.append(t, acc_before_tx)?;
             }
-             */
         }
 
         tx.commit()?;
@@ -172,7 +158,7 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
         tx: &mut Transaction<'_, DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        let from_block = input.stage_progress.unwrap_or_default() + 1;
+        let from_block = input.stage_progress.unwrap_or_default();
         let to_block = input.previous_stage_progress();
 
         // if there are more blocks then threshold it is faster to go over Plain state and hash all
@@ -438,7 +424,8 @@ mod tests {
                         blocks: 0..input.previous_stage_progress() + 1,
                         accounts: 0..2,
                         txs: 0..3,
-                        transitions: 2,
+                        // TODO: Do we port this?
+                        //transitions: 2,
                     },
                 )
                 .unwrap())
@@ -453,6 +440,7 @@ mod tests {
                     let start_block = input.stage_progress.unwrap_or_default() + 1;
                     let end_block = output.stage_progress;
                     if start_block > end_block {
+                        println!("ok");
                         return Ok(())
                     }
                 }

@@ -11,7 +11,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_metrics_derive::Metrics;
-use reth_primitives::{Address, Block, BlockNumber, BlockWithSenders, U256};
+use reth_primitives::{Block, BlockNumber, BlockWithSenders, U256};
 use reth_provider::{
     post_state::PostState, BlockExecutor, ExecutorFactory, LatestStateProviderRef, Transaction,
 };
@@ -268,8 +268,6 @@ impl<EF: ExecutorFactory, DB: Database> Stage<DB> for ExecutionStage<EF> {
     }
 }
 
-// TODO(block_level)
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,8 +309,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(tx.deref_mut(), genesis, None, true).unwrap();
-        insert_canonical_block(tx.deref_mut(), block.clone(), None, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
         tx.commit().unwrap();
 
         // insert pre state
@@ -400,8 +398,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(tx.deref_mut(), genesis, None, true).unwrap();
-        insert_canonical_block(tx.deref_mut(), block.clone(), None, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
         tx.commit().unwrap();
 
         // variables
@@ -467,8 +465,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        insert_canonical_block(tx.deref_mut(), genesis, None, true).unwrap();
-        insert_canonical_block(tx.deref_mut(), block.clone(), None, true).unwrap();
+        insert_canonical_block(tx.deref_mut(), genesis, None).unwrap();
+        insert_canonical_block(tx.deref_mut(), block.clone(), None).unwrap();
         tx.commit().unwrap();
 
         // variables
@@ -557,20 +555,26 @@ mod tests {
         assert_eq!(
             account_changesets,
             vec![
-                (1, AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) }),
-                (1, AccountBeforeTx { address: beneficiary_address, info: None }),
-                (1, AccountBeforeTx { address: caller_address, info: Some(caller_info) }),
                 (
-                    2,
+                    block.number,
+                    AccountBeforeTx { address: destroyed_address, info: Some(destroyed_info) },
+                ),
+                (block.number, AccountBeforeTx { address: beneficiary_address, info: None }),
+                (
+                    block.number,
                     AccountBeforeTx {
                         address: beneficiary_address,
                         info: Some(Account {
                             nonce: 0,
                             balance: U256::from(0x230a0),
-                            bytecode_hash: None
-                        })
-                    }
-                )
+                            bytecode_hash: None,
+                        }),
+                    },
+                ),
+                (
+                    block.number,
+                    AccountBeforeTx { address: caller_address, info: Some(caller_info) }
+                ),
             ]
         );
 
@@ -578,15 +582,14 @@ mod tests {
             storage_changesets,
             vec![
                 (
-                    (1, destroyed_address).into(),
+                    (block.number, destroyed_address).into(),
                     StorageEntry { key: H256::zero(), value: U256::ZERO }
                 ),
                 (
-                    (1, destroyed_address).into(),
+                    (block.number, destroyed_address).into(),
                     StorageEntry { key: H256::from_low_u64_be(1), value: U256::from(1u64) }
                 )
             ]
         );
     }
 }
-*/

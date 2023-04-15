@@ -8,7 +8,7 @@ use crate::{
     Error,
 };
 use reth_codecs::Compact;
-use reth_primitives::{bytes::BufMut, Account, Address, BlockNumber};
+use reth_primitives::{Account, Address, BlockNumber};
 use serde::{Deserialize, Serialize};
 
 /// Account as it is saved inside [`AccountChangeSet`][crate::tables::AccountChangeSet].

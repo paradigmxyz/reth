@@ -9,10 +9,7 @@ use reth_db::{
     Error,
 };
 use reth_primitives::{keccak256, BlockNumber, StorageEntry, H256};
-use std::{
-    collections::HashMap,
-    ops::{Range, RangeInclusive},
-};
+use std::{collections::HashMap, ops::RangeInclusive};
 
 /// A wrapper around a database transaction that loads prefix sets within a given transition range.
 #[derive(Deref)]
