@@ -4574,6 +4574,7 @@ dependencies = [
  "modular-bitfield",
  "page_size",
  "parity-scale-codec",
+ "parking_lot 0.12.1",
  "paste",
  "postcard",
  "pprof",

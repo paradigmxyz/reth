@@ -19,8 +19,11 @@ use reth_tracing::{
 pub fn run() -> eyre::Result<()> {
     let opt = Cli::parse();
 
-    let (layer, _guard) = opt.logs.layer();
-    reth_tracing::init(vec![layer, reth_tracing::stdout(opt.verbosity.directive())]);
+    let mut layers = vec![reth_tracing::stdout(opt.verbosity.directive())];
+    if let Some((layer, _guard)) = opt.logs.layer() {
+        layers.push(layer);
+    }
+    reth_tracing::init(layers);
 
     let runner = CliRunner::default();
 
@@ -117,11 +120,15 @@ pub struct Logs {
     /// The filter to use for logs written to the log file.
     #[arg(long = "log.filter", value_name = "FILTER", global = true, default_value = "debug")]
     filter: String,
+
+    /// The flag to disable persistent logs.
+    #[arg(long = "log.disable-persistent", global = true, conflicts_with = "log_directory")]
+    disable_persistent: bool,
 }
 
 impl Logs {
     /// Builds a tracing layer from the current log options.
-    pub fn layer<S>(&self) -> (BoxedLayer<S>, Option<FileWorkerGuard>)
+    pub fn layer<S>(&self) -> Option<(BoxedLayer<S>, Option<FileWorkerGuard>)>
     where
         S: Subscriber,
         for<'a> S: LookupSpan<'a>,
@@ -130,10 +137,12 @@ impl Logs {
             .unwrap_or_else(|_| Directive::from_str("debug").unwrap());
 
         if self.journald {
-            (reth_tracing::journald(directive).expect("Could not connect to journald"), None)
-        } else {
+            Some((reth_tracing::journald(directive).expect("Could not connect to journald"), None))
+        } else if !self.disable_persistent {
             let (layer, guard) = reth_tracing::file(directive, &self.log_directory, "reth.log");
-            (layer, Some(guard))
+            Some((layer, Some(guard)))
+        } else {
+            None
         }
     }
 }
