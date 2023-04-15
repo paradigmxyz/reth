@@ -104,8 +104,8 @@ struct Cli {
 #[command(next_help_heading = "Logging")]
 pub struct Logs {
     /// The flag to enable persistent logs.
-    #[arg(long = "log.enable-persistent", global = true, conflicts_with = "journald")]
-    enable_persistent: bool,
+    #[arg(long = "log.persistent", global = true, conflicts_with = "journald")]
+    persistent: bool,
 
     /// The path to put log files in.
     #[arg(
@@ -138,7 +138,7 @@ impl Logs {
 
         if self.journald {
             Some((reth_tracing::journald(directive).expect("Could not connect to journald"), None))
-        } else if self.enable_persistent {
+        } else if self.persistent {
             let (layer, guard) = reth_tracing::file(directive, &self.log_directory, "reth.log");
             Some((layer, Some(guard)))
         } else {
