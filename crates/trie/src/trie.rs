@@ -657,7 +657,7 @@ mod tests {
         let key2 = keccak256(address2);
         assert_eq!(key2[0], 0xB0);
         assert_eq!(key2[1], 0x40);
-        let account2 = Account { nonce: 0, balance: ether.clone(), ..Default::default() };
+        let account2 = Account { nonce: 0, balance: ether, ..Default::default() };
         hashed_account_cursor.upsert(key2, account2).unwrap();
         hash_builder.add_leaf(Nibbles::unpack(key2), &encode_account(account2, None));
 
@@ -1000,9 +1000,9 @@ mod tests {
 
         // read the account updates from the db
         let mut accounts_trie = tx.cursor_read::<tables::AccountsTrie>().unwrap();
-        let mut walker = accounts_trie.walk(None).unwrap();
+        let walker = accounts_trie.walk(None).unwrap();
         let mut account_updates = BTreeMap::new();
-        while let Some(item) = walker.next() {
+        for item in walker {
             let (key, node) = item.unwrap();
             account_updates.insert(Nibbles::from(key.inner.0.as_ref()), node);
         }
@@ -1111,7 +1111,7 @@ mod tests {
             hex!("3100000000000000000000000000000000000000000000000000000000000000"),
         ] {
             hashed_storage.upsert(hashed_address, StorageEntry { key: H256(key), value }).unwrap();
-            hb.add_leaf(Nibbles::unpack(&key), &reth_rlp::encode_fixed_size(&value));
+            hb.add_leaf(Nibbles::unpack(key), &reth_rlp::encode_fixed_size(&value));
         }
         let root = hb.root();
 
@@ -1143,7 +1143,7 @@ mod tests {
             hex!("3100000000000000000000000000000000000000000000000000000000000000"),
         ] {
             hashed_accounts.upsert(H256(key), a).unwrap();
-            hb.add_leaf(Nibbles::unpack(&key), &val);
+            hb.add_leaf(Nibbles::unpack(key), &val);
         }
 
         hb.root()
