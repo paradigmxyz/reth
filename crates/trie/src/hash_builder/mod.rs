@@ -392,7 +392,7 @@ mod tests {
 
         hashed.iter().for_each(|(key, val)| {
             let nibbles = Nibbles::unpack(key);
-            hb.add_leaf(nibbles, &val);
+            hb.add_leaf(nibbles, val);
         });
 
         assert_eq!(hb.root(), trie_root(&hashed));
