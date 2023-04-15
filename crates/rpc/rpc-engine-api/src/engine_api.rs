@@ -79,6 +79,9 @@ where
         Ok(rx.await??)
     }
 
+    /// Sends a message to the beacon consensus engine to update the fork choice _without_
+    /// withdrawals.
+    ///
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_forkchoiceUpdatedV1>
     ///
     /// Caution: This should not accept the `withdrawals` field
@@ -90,6 +93,31 @@ where
         if let Some(ref attrs) = payload_attrs {
             self.validate_withdrawals_presence(
                 EngineApiMessageVersion::V1,
+                attrs.timestamp.as_u64(),
+                attrs.withdrawals.is_some(),
+            )?;
+        }
+        let (tx, rx) = oneshot::channel();
+        self.to_beacon_consensus.send(BeaconEngineMessage::ForkchoiceUpdated {
+            state,
+            payload_attrs,
+            tx,
+        })?;
+        Ok(rx.await??)
+    }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
+    /// but only _after_ shanghai.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_forkchoiceupdatedv2>
+    pub async fn fork_choice_updated_v2(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        if let Some(ref attrs) = payload_attrs {
+            self.validate_withdrawals_presence(
+                EngineApiMessageVersion::V2,
                 attrs.timestamp.as_u64(),
                 attrs.withdrawals.is_some(),
             )?;
