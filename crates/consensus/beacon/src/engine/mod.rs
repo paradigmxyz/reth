@@ -1,5 +1,5 @@
+use crate::engine::metrics::Metrics;
 use futures::{Future, FutureExt, StreamExt};
-use metrics::Counter;
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
@@ -8,7 +8,6 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
     Error,
 };
-use reth_metrics_derive::Metrics;
 use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
@@ -32,20 +31,9 @@ pub use error::{BeaconEngineError, BeaconEngineResult};
 mod message;
 pub use message::BeaconEngineMessage;
 
+mod metrics;
 mod pipeline_state;
 pub use pipeline_state::PipelineState;
-
-/// Beacon consensus engine metrics.
-#[derive(Metrics)]
-#[metrics(scope = "consensus.engine.beacon")]
-struct Metrics {
-    /// The number of times the pipeline was run.
-    pipeline_runs: Counter,
-    /// The total count of forkchoice updated messages received.
-    forkchoice_updated_messages: Counter,
-    /// The total count of new payload messages received.
-    new_payload_messages: Counter,
-}
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
