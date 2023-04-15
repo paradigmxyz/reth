@@ -13,7 +13,9 @@ use reth_db::{
 };
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::insert_genesis_state};
-use reth_stages::stages::{ACCOUNT_HASHING, EXECUTION, MERKLE_EXECUTION, STORAGE_HASHING};
+use reth_stages::stages::{
+    ACCOUNT_HASHING, EXECUTION, MERKLE_EXECUTION, MERKLE_UNWIND, STORAGE_HASHING,
+};
 use std::sync::Arc;
 use tracing::info;
 
@@ -94,12 +96,8 @@ impl Command {
                 tool.db.update(|tx| {
                     tx.clear::<tables::AccountsTrie>()?;
                     tx.clear::<tables::StoragesTrie>()?;
-                    tx.put::<tables::SyncStageProgress>(
-                        // TODO: Extract to constant in `TrieLoader` in trie/mod.rs
-                        "TrieLoader".to_string(),
-                        Vec::new(),
-                    )?;
                     tx.put::<tables::SyncStage>(MERKLE_EXECUTION.0.to_string(), 0)?;
+                    tx.put::<tables::SyncStage>(MERKLE_UNWIND.0.to_string(), 0)?;
                     Ok::<_, eyre::Error>(())
                 })??;
             }
