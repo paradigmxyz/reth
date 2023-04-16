@@ -11,7 +11,7 @@ use crate::{
 use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{pin_mut, stream::select as stream_select, FutureExt, StreamExt};
+use futures::{pin_mut, stream::select as stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
@@ -317,35 +317,18 @@ impl Command {
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
-        let launch_rpc = self
+        // Start RPC servers
+        let (_rpc_server, _auth_server) = self
             .rpc
-            .start_rpc_server(
+            .start_servers(
                 shareable_db.clone(),
                 transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
                 blockchain_tree,
-            )
-            .inspect(|_| {
-                info!(target: "reth::cli", "Started RPC server");
-            });
-
-        let launch_auth = self
-            .rpc
-            .start_auth_server(
-                shareable_db.clone(),
-                transaction_pool.clone(),
-                network.clone(),
-                ctx.task_executor.clone(),
                 engine_api,
             )
-            .inspect(|_| {
-                info!(target: "reth::cli", "Started Auth server");
-            });
-
-        // launch servers
-        let (_rpc_server, _auth_server) =
-            futures::future::try_join(launch_rpc, launch_auth).await?;
+            .await?;
 
         // Run consensus engine to completion
         let (rx, tx) = oneshot::channel();
