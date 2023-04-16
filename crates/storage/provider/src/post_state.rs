@@ -141,13 +141,6 @@ impl Change {
 /// - Withdrawals
 /// - The irregular state change for the DAO hardfork
 ///
-/// [PostState::finish_transition] *must* be called after every transaction, and after every block.
-///
-/// The first transaction executed and added to the [PostState] has a transition ID of 0, the next
-/// one a transition ID of 1, and so on. If the [PostState] is for a single block, and the number of
-/// transitions ([PostState::transitions_count]) is greater than the number of transactions in the
-/// block, then the last transition is the block transition.
-///
 /// For multi-block [PostState]s it is not possible to figure out what transition ID maps on to a
 /// transaction or a block.
 ///
