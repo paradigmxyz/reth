@@ -297,21 +297,22 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
-        let beacon_consensus_engine = BeaconConsensusEngine::new(
+        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
             ctx.task_executor.clone(),
             pipeline,
             blockchain_tree.clone(),
-            consensus_engine_rx,
             self.debug.max_block,
             payload_builder.clone(),
+            consensus_engine_tx,
+            consensus_engine_rx,
         );
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let engine_api = EngineApi::new(
             ShareableDatabase::new(db, self.chain.clone()),
             self.chain.clone(),
-            consensus_engine_tx.clone(),
+            beacon_engine_handle,
             payload_builder.into(),
         );
         info!(target: "reth::cli", "Engine API handler initialized");

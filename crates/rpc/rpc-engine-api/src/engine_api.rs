@@ -1,7 +1,7 @@
 use crate::{EngineApiError, EngineApiMessageVersion, EngineApiResult};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult as Result;
-use reth_beacon_consensus::BeaconEngineMessage;
+use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_interfaces::consensus::ForkchoiceState;
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{BlockHash, BlockId, BlockNumber, ChainSpec, Hardfork, U64};
@@ -12,7 +12,7 @@ use reth_rpc_types::engine::{
     PayloadAttributes, PayloadId, PayloadStatus, TransitionConfiguration, CAPABILITIES,
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::oneshot;
 use tracing::trace;
 
 /// The Engine API response sender.
@@ -29,7 +29,7 @@ pub struct EngineApi<Client> {
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
-    to_beacon_consensus: UnboundedSender<BeaconEngineMessage>,
+    beacon_consensus: BeaconConsensusEngineHandle,
     /// The type that can communicate with the payload service to retrieve payloads.
     payload_store: PayloadStore,
 }
@@ -42,10 +42,10 @@ where
     pub fn new(
         client: Client,
         chain_spec: Arc<ChainSpec>,
-        to_beacon_consensus: UnboundedSender<BeaconEngineMessage>,
+        beacon_consensus: BeaconConsensusEngineHandle,
         payload_store: PayloadStore,
     ) -> Self {
-        Self { client, chain_spec, to_beacon_consensus, payload_store }
+        Self { client, chain_spec, beacon_consensus, payload_store }
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
@@ -59,9 +59,7 @@ where
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
         )?;
-        let (tx, rx) = oneshot::channel();
-        self.to_beacon_consensus.send(BeaconEngineMessage::NewPayload { payload, tx })?;
-        Ok(rx.await??)
+        Ok(self.beacon_consensus.new_payload(payload).await?)
     }
 
     /// See also <https://github.com/ethereum/execution-apis/blob/8db51dcd2f4bdfbd9ad6e4a7560aac97010ad063/src/engine/specification.md#engine_newpayloadv1>
@@ -74,9 +72,7 @@ where
             payload.timestamp.as_u64(),
             payload.withdrawals.is_some(),
         )?;
-        let (tx, rx) = oneshot::channel();
-        self.to_beacon_consensus.send(BeaconEngineMessage::NewPayload { payload, tx })?;
-        Ok(rx.await??)
+        Ok(self.beacon_consensus.new_payload(payload).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
@@ -97,13 +93,7 @@ where
                 attrs.withdrawals.is_some(),
             )?;
         }
-        let (tx, rx) = oneshot::channel();
-        self.to_beacon_consensus.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state,
-            payload_attrs,
-            tx,
-        })?;
-        Ok(rx.await??)
+        Ok(self.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
     /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
@@ -122,13 +112,7 @@ where
                 attrs.withdrawals.is_some(),
             )?;
         }
-        let (tx, rx) = oneshot::channel();
-        self.to_beacon_consensus.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state,
-            payload_attrs,
-            tx,
-        })?;
-        Ok(rx.await??)
+        Ok(self.beacon_consensus.fork_choice_updated(state, payload_attrs).await?)
     }
 
     /// Returns the most recent version of the payload that is available in the corresponding
@@ -424,6 +408,7 @@ impl<Client> std::fmt::Debug for EngineApi<Client> {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use reth_beacon_consensus::BeaconEngineMessage;
     use reth_interfaces::test_utils::generators::random_block;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{SealedBlock, H256, MAINNET};
@@ -435,11 +420,11 @@ mod tests {
         let chain_spec = Arc::new(MAINNET.clone());
         let client = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
-        let (to_beacon_consensus, engine_rx) = unbounded_channel();
+        let (to_engine, engine_rx) = unbounded_channel();
         let api = EngineApi::new(
             client.clone(),
             chain_spec.clone(),
-            to_beacon_consensus,
+            BeaconConsensusEngineHandle::new(to_engine),
             payload_store.into(),
         );
         let handle = EngineApiTestHandle { chain_spec, client, from_api: engine_rx };
