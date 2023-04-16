@@ -101,20 +101,21 @@ pub async fn handle_events(
 ) {
     let state = NodeState::new(network);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(30));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut info_interval = tokio::time::interval(Duration::from_secs(30));
+    info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    let handler = EventHandler { state, events, interval };
+    let handler = EventHandler { state, events, info_interval };
     handler.await
 }
 
+/// Handles events emitted by the node and logs them accordingly.
 #[pin_project::pin_project]
 struct EventHandler<St> {
     state: NodeState,
     #[pin]
     events: St,
     #[pin]
-    interval: Interval,
+    info_interval: Interval,
 }
 
 impl<St> Future for EventHandler<St>
@@ -125,7 +126,8 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        if this.interval.poll_tick(cx).is_ready() {
+
+        while this.info_interval.poll_tick(cx).is_ready() {
             let stage = this
                 .state
                 .current_stage
@@ -144,8 +146,6 @@ where
                 }
             }
         }
-
-        cx.waker().wake_by_ref();
 
         Poll::Pending
     }

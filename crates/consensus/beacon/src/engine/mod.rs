@@ -336,7 +336,7 @@ where
             trace!(target: "consensus::engine", ?tip, "Starting the pipeline");
             let (tx, rx) = oneshot::channel();
             let db = self.db.clone();
-            self.task_spawner.spawn_critical(
+            self.task_spawner.spawn_critical_blocking(
                 "pipeline",
                 Box::pin(async move {
                     let result = pipeline.run_as_fut(db, tip).await;
