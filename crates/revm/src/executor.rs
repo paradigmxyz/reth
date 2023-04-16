@@ -248,9 +248,6 @@ where
             // append gas used
             cumulative_gas_used += result.gas_used();
 
-            // cast revm logs to reth logs
-            let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
-
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
                 tx_type: transaction.tx_type(),
@@ -258,7 +255,8 @@ where
                 // receipts`.
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
             });
         }
 

@@ -1,5 +1,5 @@
 //! Common CLI utility functions.
-use crate::dirs::{DbPath, PlatformPath};
+
 use eyre::{Result, WrapErr};
 use reth_db::{
     cursor::{DbCursorRO, Walker},
@@ -16,7 +16,7 @@ use reth_interfaces::{
 };
 use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
 use reth_provider::insert_canonical_block;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 use tracing::info;
 
 /// Get a single header from network
@@ -106,8 +106,9 @@ impl<'a, DB: Database> DbTool<'a, DB> {
     }
 
     /// Drops the database at the given path.
-    pub fn drop(&mut self, path: &PlatformPath<DbPath>) -> Result<()> {
-        info!(target: "reth::cli", "Dropping db at {}", path);
+    pub fn drop(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        info!(target: "reth::cli", "Dropping db at {:?}", path);
         std::fs::remove_dir_all(path).wrap_err("Dropping the database failed")?;
         Ok(())
     }

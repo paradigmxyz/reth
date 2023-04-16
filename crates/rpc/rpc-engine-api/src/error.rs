@@ -2,6 +2,7 @@ use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_beacon_consensus::BeaconEngineError;
 use reth_primitives::{H256, U256};
 use thiserror::Error;
+use tokio::sync::{mpsc, oneshot};
 
 /// The Engine API result type
 pub type EngineApiResult<Ok> = Result<Ok, EngineApiError>;
@@ -12,11 +13,13 @@ pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
 pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 
 /// Error returned by [`EngineApi`][crate::EngineApi]
+///
+/// Note: This is a high fidelity error type which can be converted to an RPC error that adheres to the spec: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#errors>
 #[derive(Error, Debug)]
 pub enum EngineApiError {
     /// Unknown payload requested.
     #[error("Unknown payload")]
-    PayloadUnknown,
+    UnknownPayload,
     /// The payload body request length is too large.
     #[error("Payload request too large: {len}")]
     PayloadRequestTooLarge {
@@ -66,6 +69,21 @@ pub enum EngineApiError {
     /// Encountered an internal error.
     #[error(transparent)]
     Internal(Box<dyn std::error::Error + Send + Sync>),
+    /// Failed to send message due ot closed channel
+    #[error("Closed channel")]
+    ChannelClosed,
+}
+
+impl<T> From<mpsc::error::SendError<T>> for EngineApiError {
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        EngineApiError::ChannelClosed
+    }
+}
+
+impl From<oneshot::error::RecvError> for EngineApiError {
+    fn from(_: oneshot::error::RecvError) -> Self {
+        EngineApiError::ChannelClosed
+    }
 }
 
 impl From<EngineApiError> for jsonrpsee_types::error::CallError {
@@ -75,13 +93,14 @@ impl From<EngineApiError> for jsonrpsee_types::error::CallError {
             EngineApiError::WithdrawalsNotSupportedInV1 |
             EngineApiError::NoWithdrawalsPostShanghai |
             EngineApiError::HasWithdrawalsPreShanghai => INVALID_PARAMS_CODE,
-            EngineApiError::PayloadUnknown => UNKNOWN_PAYLOAD_CODE,
+            EngineApiError::UnknownPayload => UNKNOWN_PAYLOAD_CODE,
             EngineApiError::PayloadRequestTooLarge { .. } => REQUEST_TOO_LARGE_CODE,
             // Any other server error
             _ => INTERNAL_ERROR_CODE,
         };
         jsonrpsee_types::error::CallError::Custom(jsonrpsee_types::error::ErrorObject::owned(
             code,
+            // TODO properly convert to rpc error
             error.to_string(),
             None::<()>,
         ))

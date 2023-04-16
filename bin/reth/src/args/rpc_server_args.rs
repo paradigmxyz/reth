@@ -4,7 +4,7 @@ use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use jsonrpsee::server::ServerHandle;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::ChainSpec;
+
 use reth_provider::{
     BlockProvider, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
@@ -13,13 +13,12 @@ use reth_rpc_builder::{
     constants, error::RpcError, IpcServerBuilder, RethRpcModule, RpcModuleSelection,
     RpcServerConfig, RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
-use reth_rpc_engine_api::EngineApiHandle;
+use reth_rpc_engine_api::EngineApi;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::Path,
-    sync::Arc,
 };
 
 /// Parameters for configuring the rpc more granularity via CLI
@@ -156,8 +155,7 @@ impl RpcServerArgs {
         pool: Pool,
         network: Network,
         executor: Tasks,
-        chain_spec: Arc<ChainSpec>,
-        handle: EngineApiHandle,
+        engine_api: EngineApi<Client>,
     ) -> Result<ServerHandle, RpcError>
     where
         Client: BlockProvider
@@ -181,8 +179,7 @@ impl RpcServerArgs {
             pool,
             network,
             executor,
-            chain_spec,
-            handle,
+            engine_api,
             socket_address,
             secret,
         )

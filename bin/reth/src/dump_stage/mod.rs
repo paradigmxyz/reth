@@ -15,7 +15,7 @@ use merkle::dump_merkle_stage;
 use reth_primitives::ChainSpec;
 
 use crate::{
-    dirs::{DbPath, PlatformPath},
+    dirs::{DbPath, MaybePlatformPath, PlatformPath},
     utils::DbTool,
 };
 use clap::Parser;
@@ -36,7 +36,7 @@ pub struct Command {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
 
     /// The chain this node is running.
     ///
@@ -100,7 +100,7 @@ impl Command {
     /// Execute `dump-stage` command
     pub async fn execute(&self) -> eyre::Result<()> {
         // add network name to db directory
-        let db_path = self.db.with_chain(self.chain.chain);
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
         std::fs::create_dir_all(&db_path)?;
 

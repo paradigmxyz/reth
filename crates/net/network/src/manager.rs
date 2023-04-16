@@ -658,7 +658,7 @@ where
                                 this.swarm
                                     .state_mut()
                                     .peers_mut()
-                                    .on_active_inbound_session(peer_id, remote_addr);
+                                    .on_incoming_session_established(peer_id, remote_addr);
                             }
                             this.event_listeners.send(NetworkEvent::SessionEstablished {
                                 peer_id,

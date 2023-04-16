@@ -1,5 +1,5 @@
+use crate::engine::metrics::Metrics;
 use futures::{Future, FutureExt, StreamExt};
-use metrics::Counter;
 use reth_db::{database::Database, tables, transaction::DbTx};
 use reth_interfaces::{
     blockchain_tree::{BlockStatus, BlockchainTreeEngine},
@@ -8,12 +8,11 @@ use reth_interfaces::{
     sync::SyncStateUpdater,
     Error,
 };
-use reth_metrics_derive::Metrics;
-use reth_payload_builder::PayloadStore;
+use reth_payload_builder::{PayloadBuilderAttributes, PayloadBuilderHandle};
 use reth_primitives::{BlockNumber, Header, SealedBlock, H256};
 use reth_rpc_types::engine::{
-    EngineRpcError, ExecutionPayload, ExecutionPayloadEnvelope, ForkchoiceUpdated,
-    PayloadAttributes, PayloadId, PayloadStatus, PayloadStatusEnum,
+    EngineRpcError, ExecutionPayload, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum,
 };
 use reth_stages::{stages::FINISH, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -30,24 +29,11 @@ mod error;
 pub use error::{BeaconEngineError, BeaconEngineResult};
 
 mod message;
-pub use message::{BeaconEngineMessage, BeaconEngineSender};
+pub use message::BeaconEngineMessage;
 
+mod metrics;
 mod pipeline_state;
 pub use pipeline_state::PipelineState;
-
-/// Beacon consensus engine metrics.
-#[derive(Metrics)]
-#[metrics(scope = "consensus.engine.beacon")]
-struct Metrics {
-    /// The number of times the pipeline was run.
-    pipeline_runs: Counter,
-    /// The total count of forkchoice updated messages received.
-    forkchoice_updated_messages: Counter,
-    /// The total count of new payload messages received.
-    new_payload_messages: Counter,
-    /// The total count of get payload messages received.
-    get_payload_messages: Counter,
-}
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
@@ -66,13 +52,12 @@ struct Metrics {
 ///
 /// If the future is polled more than once. Leads to undefined state.
 #[must_use = "Future does nothing unless polled"]
-pub struct BeaconConsensusEngine<DB, TS, U, BT, P>
+pub struct BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database,
     TS: TaskSpawner,
     U: SyncStateUpdater,
     BT: BlockchainTreeEngine,
-    P: PayloadStore,
 {
     /// The database handle.
     db: Arc<DB>,
@@ -95,18 +80,17 @@ where
     /// purposes.
     max_block: Option<BlockNumber>,
     /// The payload store.
-    payload_store: P,
+    payload_builder: PayloadBuilderHandle,
     /// Consensus engine metrics.
     metrics: Metrics,
 }
 
-impl<DB, TS, U, BT, P> BeaconConsensusEngine<DB, TS, U, BT, P>
+impl<DB, TS, U, BT> BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner,
     U: SyncStateUpdater + 'static,
     BT: BlockchainTreeEngine + 'static,
-    P: PayloadStore + 'static,
 {
     /// Create new instance of the [BeaconConsensusEngine].
     ///
@@ -119,7 +103,7 @@ where
         blockchain_tree: BT,
         message_rx: UnboundedReceiver<BeaconEngineMessage>,
         max_block: Option<BlockNumber>,
-        payload_store: P,
+        payload_builder: PayloadBuilderHandle,
     ) -> Self {
         Self {
             db,
@@ -130,7 +114,7 @@ where
             forkchoice_state: None,
             next_action: BeaconEngineAction::None,
             max_block,
-            payload_store,
+            payload_builder,
             metrics: Metrics::default(),
         }
     }
@@ -256,7 +240,9 @@ where
         //    if payloadAttributes is not null and the forkchoice state has been
         //    updated successfully. The build process is specified in the Payload
         //    building section.
-        let payload_id = self.payload_store.new_payload(header.parent_hash, attrs)?;
+        let attributes = PayloadBuilderAttributes::new(header.parent_hash, attrs);
+        // TODO(mattsse) this needs to be handled asynchronously
+        let payload_id = self.payload_builder.send_new_payload(attributes);
 
         // Client software MUST respond to this method call in the following way:
         // {
@@ -274,23 +260,6 @@ where
             Some(state.head_block_hash),
         ))
         .with_payload_id(payload_id))
-    }
-
-    /// Called to receive the execution payload associated with a payload build process.
-    pub fn on_get_payload(
-        &self,
-        payload_id: PayloadId,
-    ) -> Result<ExecutionPayloadEnvelope, BeaconEngineError> {
-        // TODO: Client software SHOULD stop the updating process when either a call to
-        // engine_getPayload with the build process's payloadId is made or SECONDS_PER_SLOT (12s in
-        // the Mainnet configuration) have passed since the point in time identified by the
-        // timestamp parameter.
-
-        // for now just return the output from the payload store
-        match self.payload_store.get_execution_payload(payload_id) {
-            Some(payload) => Ok(payload),
-            None => Err(EngineRpcError::UnknownPayload.into()),
-        }
     }
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
@@ -432,13 +401,12 @@ where
 /// local forkchoice state, it will launch the pipeline to sync to the head hash.
 /// While the pipeline is syncing, the consensus engine will keep processing messages from the
 /// receiver and forwarding them to the blockchain tree.
-impl<DB, TS, U, BT, P> Future for BeaconConsensusEngine<DB, TS, U, BT, P>
+impl<DB, TS, U, BT> Future for BeaconConsensusEngine<DB, TS, U, BT>
 where
     DB: Database + Unpin + 'static,
     TS: TaskSpawner + Unpin,
     U: SyncStateUpdater + Unpin + 'static,
     BT: BlockchainTreeEngine + Unpin + 'static,
-    P: PayloadStore + Unpin + 'static,
 {
     type Output = Result<(), BeaconEngineError>;
 
@@ -482,24 +450,6 @@ where
                             }
                         };
                         let _ = tx.send(Ok(response));
-                    }
-                    BeaconEngineMessage::GetPayload { payload_id, tx } => {
-                        this.metrics.get_payload_messages.increment(1);
-                        match this.on_get_payload(payload_id) {
-                            Ok(response) => {
-                                // good response, send it back
-                                let _ = tx.send(Ok(response));
-                            }
-                            Err(BeaconEngineError::EngineApi(error)) => {
-                                // specific error that we should report back to the client
-                                error!(target: "consensus::engine", ?error, "Sending engine api error response");
-                                let _ = tx.send(Err(BeaconEngineError::EngineApi(error)));
-                            }
-                            Err(error) => {
-                                error!(target: "consensus::engine", ?error, "Error getting get payload response");
-                                return Poll::Ready(Err(error))
-                            }
-                        };
                     }
                 }
             }
@@ -602,7 +552,7 @@ mod tests {
         test_utils::TestExecutorFactory,
     };
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
-    use reth_payload_builder::TestPayloadStore;
+    use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
     use reth_provider::Transaction;
     use reth_stages::{test_utils::TestStages, ExecOutput, PipelineError, StageError};
@@ -619,7 +569,6 @@ mod tests {
         TokioTaskExecutor,
         NoopSyncStateUpdate,
         ShareableBlockchainTree<Arc<Env<WriteMap>>, TestConsensus, TestExecutorFactory>,
-        TestPayloadStore,
     >;
 
     struct TestEnv<DB> {
@@ -670,7 +619,8 @@ mod tests {
         reth_tracing::init_test_tracing();
         let db = create_test_rw_db();
         let consensus = TestConsensus::default();
-        let payload_store = TestPayloadStore::default();
+        let payload_builder = spawn_test_payload_service();
+
         let executor_factory = TestExecutorFactory::new(chain_spec.clone());
         executor_factory.extend(executor_results);
 
@@ -699,7 +649,7 @@ mod tests {
                 tree,
                 sync_rx,
                 None,
-                payload_store,
+                payload_builder,
             ),
             TestEnv::new(db, tip_rx, sync_tx),
         )
