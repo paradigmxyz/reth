@@ -60,9 +60,6 @@ pub struct Storage {
 ///
 /// # Transitions
 ///
-/// Each [Change] has an `id` field that marks what transition it is part of. Each transaction is
-/// its own transition, but there may be 0 or 1 transitions associated with the block.
-///
 /// The block level transition includes:
 ///
 /// - Block rewards
