@@ -147,7 +147,7 @@ mod tests {
 
             // setup changeset that are going to be applied to history index
             tx.put::<tables::StorageChangeSet>(trns(4), storage(STORAGE_KEY)).unwrap();
-            tx.put::<tables::StorageChangeSet>(trns(6), storage(STORAGE_KEY)).unwrap();
+            tx.put::<tables::StorageChangeSet>(trns(5), storage(STORAGE_KEY)).unwrap();
             Ok(())
         })
         .unwrap()
@@ -185,7 +185,7 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 6]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![4, 5]),]));
 
         // unwind
         unwind(&tx, 5, 0).await;
@@ -213,7 +213,7 @@ mod tests {
 
         // verify
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
-        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 6]),]));
+        assert_eq!(table, BTreeMap::from([(shard(u64::MAX), vec![1, 2, 3, 4, 5]),]));
 
         // unwind
         unwind(&tx, 5, 0).await;
@@ -247,7 +247,7 @@ mod tests {
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
-            BTreeMap::from([(shard(3), full_list.clone()), (shard(u64::MAX), vec![4, 6])])
+            BTreeMap::from([(shard(3), full_list.clone()), (shard(u64::MAX), vec![4, 5])])
         );
 
         // unwind
@@ -277,7 +277,7 @@ mod tests {
 
         // verify
         close_full_list.push(4);
-        close_full_list.push(6);
+        close_full_list.push(5);
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
         assert_eq!(table, BTreeMap::from([(shard(u64::MAX), close_full_list.clone()),]));
 
@@ -315,7 +315,7 @@ mod tests {
         let table = cast(tx.table::<tables::StorageHistory>().unwrap());
         assert_eq!(
             table,
-            BTreeMap::from([(shard(4), close_full_list.clone()), (shard(u64::MAX), vec![6])])
+            BTreeMap::from([(shard(4), close_full_list.clone()), (shard(u64::MAX), vec![5])])
         );
 
         // unwind
@@ -352,7 +352,7 @@ mod tests {
             BTreeMap::from([
                 (shard(1), full_list.clone()),
                 (shard(2), full_list.clone()),
-                (shard(u64::MAX), vec![2, 3, 4, 6])
+                (shard(u64::MAX), vec![2, 3, 4, 5])
             ])
         );
 

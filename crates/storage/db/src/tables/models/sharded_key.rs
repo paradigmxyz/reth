@@ -12,9 +12,9 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 100;
 /// Sometimes data can be too big to be saved for a single key. This helps out by dividing the data
 /// into different shards. Example:
 ///
-/// `Address | 200` -> data is from transition 0 to 200.
+/// `Address | 200` -> data is from block 0 to 200.
 ///
-/// `Address | 300` -> data is from transaction 201 to 300.
+/// `Address | 300` -> data is from block 201 to 300.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ShardedKey<T> {
     /// The key for this type.

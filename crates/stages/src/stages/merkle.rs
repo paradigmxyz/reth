@@ -115,10 +115,10 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             MerkleStage::Both { clean_threshold } => *clean_threshold,
         };
 
-        let stage_progress = input.stage_progress.unwrap_or_default() + 1;
+        let stage_progress = input.stage_progress.unwrap_or_default();
         let previous_stage_progress = input.previous_stage_progress();
 
-        let from_block = stage_progress + 1;
+        let from_block = stage_progress;
         let to_block = previous_stage_progress;
 
         let block_root = tx.get_header(previous_stage_progress)?.state_root;
@@ -160,7 +160,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             tx.clear::<tables::StoragesTrie>()?;
             return Ok(UnwindOutput { stage_progress: input.unwind_to })
         }
-        let range = input.unwind_to + 1..=input.stage_progress;
+        let range = input.stage_progress..=input.unwind_to;
 
         // Unwind trie only if there are transitions
         if !range.is_empty() {
