@@ -100,11 +100,11 @@ pub struct Command {
     /// - goerli
     /// - sepolia
     #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
-        value_parser = genesis_value_parser
+    long,
+    value_name = "CHAIN_OR_PATH",
+    verbatim_doc_comment,
+    default_value = "mainnet",
+    value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
 
@@ -350,7 +350,7 @@ impl Command {
         // Run consensus engine to completion
         let (rx, tx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
+        ctx.task_executor.spawn_critical("consensus engine", async move {
             let res = beacon_consensus_engine.await;
             let _ = rx.send(res);
         });

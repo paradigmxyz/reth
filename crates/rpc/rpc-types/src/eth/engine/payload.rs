@@ -268,6 +268,21 @@ impl PayloadStatus {
         self.latest_valid_hash = Some(latest_valid_hash);
         self
     }
+
+    /// Returns true if the payload status is syncing.
+    pub fn is_syncing(&self) -> bool {
+        self.status.is_syncing()
+    }
+
+    /// Returns true if the payload status is valid.
+    pub fn is_valid(&self) -> bool {
+        self.status.is_valid()
+    }
+
+    /// Returns true if the payload status is invalid.
+    pub fn is_invalid(&self) -> bool {
+        self.status.is_invalid()
+    }
 }
 
 impl Serialize for PayloadStatus {
@@ -347,6 +362,21 @@ impl PayloadStatusEnum {
             PayloadStatusEnum::Invalid { validation_error } => Some(validation_error),
             _ => None,
         }
+    }
+
+    /// Returns true if the payload status is syncing.
+    pub fn is_syncing(&self) -> bool {
+        matches!(self, PayloadStatusEnum::Syncing)
+    }
+
+    /// Returns true if the payload status is valid.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, PayloadStatusEnum::Valid)
+    }
+
+    /// Returns true if the payload status is invalid.
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, PayloadStatusEnum::Invalid { .. })
     }
 }
 

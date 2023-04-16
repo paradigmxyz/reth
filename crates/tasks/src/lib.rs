@@ -76,6 +76,13 @@ pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
 
     /// Spawns a blocking task onto the runtime.
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+
+    /// This spawns a critical blocking task onto the runtime.
+    fn spawn_critical_blocking(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()>;
 }
 
 dyn_clone::clone_trait_object!(TaskSpawner);
@@ -95,6 +102,14 @@ impl TaskSpawner for TokioTaskExecutor {
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+        tokio::task::spawn_blocking(move || tokio::runtime::Handle::current().block_on(fut))
+    }
+
+    fn spawn_critical_blocking(
+        &self,
+        _name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()> {
         tokio::task::spawn_blocking(move || tokio::runtime::Handle::current().block_on(fut))
     }
 }
@@ -352,6 +367,14 @@ impl TaskSpawner for TaskExecutor {
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
         self.spawn_blocking(fut)
+    }
+
+    fn spawn_critical_blocking(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()> {
+        TaskExecutor::spawn_critical_blocking(self, name, fut)
     }
 }
 
