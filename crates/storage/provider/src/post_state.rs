@@ -180,6 +180,7 @@ impl PostState {
     // todo: note overwrite behavior, i.e. changes in `other` take precedent
     /// Extend this [PostState] with the changes in another [PostState].
     pub fn extend(&mut self, mut other: PostState) {
+        // Update plain state
         self.accounts.extend(other.accounts);
         for (address, their_storage) in other.storage {
             let our_storage = self.storage.entry(address).or_default();
@@ -189,9 +190,20 @@ impl PostState {
             }
             our_storage.storage.extend(their_storage.storage);
         }
+
+        // Insert account change sets
         for (block_number, account_changes) in std::mem::take(&mut other.account_changes) {
-            self.account_changes.entry(block_number).or_default().extend(account_changes);
+            let block = self.account_changes.entry(block_number).or_default();
+            for (address, account) in account_changes {
+                // TODO: Note about why we skip accounts we already have
+                if block.contains_key(&address) {
+                    continue
+                }
+                block.insert(address, account);
+            }
         }
+
+        // Insert storage change sets
         for (block_number, storage_changes) in std::mem::take(&mut other.storage_changes) {
             for (address, their_storage) in storage_changes {
                 let our_storage = self
@@ -281,7 +293,7 @@ impl PostState {
         account: Account,
     ) {
         self.accounts.insert(address, Some(account));
-        self.account_changes.entry(block_number).or_default().insert(address, None);
+        self.account_changes.entry(block_number).or_default().entry(address).or_insert(None);
     }
 
     /// Add a changed account to the post-state.
@@ -296,7 +308,7 @@ impl PostState {
         new: Account,
     ) {
         self.accounts.insert(address, Some(new));
-        self.account_changes.entry(block_number).or_default().insert(address, Some(old));
+        self.account_changes.entry(block_number).or_default().entry(address).or_insert(Some(old));
     }
 
     /// Mark an account as destroyed.
@@ -307,17 +319,18 @@ impl PostState {
         account: Account,
     ) {
         self.accounts.insert(address, None);
-        self.account_changes.entry(block_number).or_default().insert(address, Some(account));
-        self.storage.entry(address).and_modify(|storage| {
-            storage.wiped = true;
-            storage.storage.clear();
-        });
-        self.storage_changes.entry(block_number).or_default().entry(address).and_modify(
-            |storage| {
-                storage.wiped = true;
-                storage.storage.clear();
-            },
-        );
+        self.account_changes
+            .entry(block_number)
+            .or_default()
+            .entry(address)
+            .or_insert(Some(account));
+        let storage = self.storage.entry(address).or_default();
+        storage.wiped = true;
+        storage.storage.clear();
+        let storage_changes =
+            self.storage_changes.entry(block_number).or_default().entry(address).or_default();
+        storage_changes.wiped = true;
+        storage_changes.storage.clear();
     }
 
     /// Add changed storage values to the post-state.
@@ -485,7 +498,7 @@ mod tests {
         // Add single transition and extend with empty poststate
         a.create_account(1, Address::zero(), Account::default());
         a.extend(PostState::new());
-        assert_eq!(a.changes.len(), 1);
+        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
     }
 
     #[test]
@@ -494,17 +507,17 @@ mod tests {
         a.create_account(1, Address::zero(), Account::default());
         a.destroy_account(1, Address::zero(), Account::default());
 
-        assert_eq!(a.changes().len(), 3);
+        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 2);
 
         let mut b = PostState::new();
         b.create_account(2, Address::repeat_byte(0xff), Account::default());
 
-        assert_eq!(b.changes.len(), 1);
+        assert_eq!(b.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
 
         let mut c = a.clone();
         c.extend(b.clone());
 
-        assert_eq!(c.changes.len(), a.changes.len() + b.changes.len());
+        assert_eq!(c.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 3);
     }
 
     #[test]
@@ -766,10 +779,15 @@ mod tests {
             Account { nonce: 2, balance: U256::from(2), bytecode_hash: None },
         );
 
-        assert_eq!(state.accounts().len(), 2);
+        assert_eq!(
+            state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
+            2
+        );
 
-        let reverted_changes = state.revert_to(revert_to);
-        assert_eq!(state.accounts().len(), 1);
-        assert_eq!(reverted_changes.len(), 1);
+        state.revert_to(revert_to);
+        assert_eq!(
+            state.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()),
+            1
+        );
     }
 }

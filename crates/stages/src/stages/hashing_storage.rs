@@ -225,7 +225,7 @@ mod tests {
     use reth_interfaces::test_utils::generators::{
         random_block_range, random_contract_account_range,
     };
-    use reth_primitives::{SealedBlock, StorageEntry, H256, U256};
+    use reth_primitives::{Address, SealedBlock, StorageEntry, H256, U256};
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
 

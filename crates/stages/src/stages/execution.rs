@@ -557,17 +557,6 @@ mod tests {
                 (block.number, AccountBeforeTx { address: beneficiary_address, info: None }),
                 (
                     block.number,
-                    AccountBeforeTx {
-                        address: beneficiary_address,
-                        info: Some(Account {
-                            nonce: 0,
-                            balance: U256::from(0x230a0),
-                            bytecode_hash: None,
-                        }),
-                    },
-                ),
-                (
-                    block.number,
                     AccountBeforeTx { address: caller_address, info: Some(caller_info) }
                 ),
             ]

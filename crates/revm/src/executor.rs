@@ -598,10 +598,7 @@ mod tests {
         constants::ETH_TO_WEI, hex_literal::hex, keccak256, Account, Address, BlockNumber,
         Bytecode, Bytes, ChainSpecBuilder, ForkCondition, StorageKey, H256, MAINNET, U256,
     };
-    use reth_provider::{
-        post_state::{Change, Storage},
-        AccountProvider, BlockHashProvider, StateProvider,
-    };
+    use reth_provider::{post_state::Storage, AccountProvider, BlockHashProvider, StateProvider};
     use reth_rlp::Decodable;
     use std::{collections::HashMap, str::FromStr};
 
@@ -795,45 +792,35 @@ mod tests {
         const BLOCK_TRANSITION_ID: u64 = 1;
 
         // Clone and sort to make the test deterministic
-        let mut changes = post_state.changes().to_vec();
-        changes.sort_by_key(|change| (change.block_number(), change.address()));
         assert_eq!(
-            changes,
-            &[
-                // Storage changes on account 1
-                Change::StorageChanged {
-                    block_number: TX_TRANSITION_ID,
-                    address: account1,
-                    changeset: [(U256::from(1), (U256::ZERO, U256::from(2)))].into()
-                },
-                // New account
-                Change::AccountCreated {
-                    block_number: TX_TRANSITION_ID,
-                    address: account2,
-                    account: account2_info
-                },
-                // Changed account
-                Change::AccountChanged {
-                    block_number: TX_TRANSITION_ID,
-                    address: account3,
-                    old: account3_old_info,
-                    new: account3_info
-                },
-                // Block reward
-                Change::AccountChanged {
-                    block_number: BLOCK_TRANSITION_ID,
-                    address: account2,
-                    old: account2_info,
-                    new: account2_info_with_block_reward
-                },
-                // Ommer reward
-                Change::AccountCreated {
-                    block_number: BLOCK_TRANSITION_ID,
-                    address: ommer_beneficiary,
-                    account: ommer_beneficiary_info
-                },
-            ],
-            "Changeset did not match"
+            post_state.account_changes(),
+            &BTreeMap::from([(
+                block.number,
+                BTreeMap::from([
+                    // New account
+                    (account2, None),
+                    // Changed account
+                    (account3, Some(account3_old_info)),
+                    // Ommer reward
+                    (ommer_beneficiary, None)
+                ])
+            ),]),
+            "Account changeset did not match"
+        );
+        assert_eq!(
+            post_state.storage_changes(),
+            &BTreeMap::from([(
+                block.number,
+                BTreeMap::from([(
+                    account1,
+                    Storage {
+                        wiped: false,
+                        // Slot 1 changed from 0 to 2
+                        storage: BTreeMap::from([(U256::from(1), U256::ZERO)])
+                    }
+                )])
+            )]),
+            "Storage changeset did not match"
         );
 
         // Check final post-state
