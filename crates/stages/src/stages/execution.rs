@@ -113,7 +113,6 @@ impl<EF: ExecutorFactory> ExecutionStage<EF> {
     ) -> Result<ExecOutput, StageError> {
         let ((start_block, end_block), capped) =
             exec_or_return!(input, self.commit_threshold, "sync::stages::execution");
-        let last_block = input.stage_progress.unwrap_or_default();
 
         // Create state provider with cached state
         let mut executor = self.executor_factory.with_sp(LatestStateProviderRef::new(&**tx));

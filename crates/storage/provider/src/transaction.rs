@@ -852,8 +852,7 @@ where
 
         let storage_changeset =
             self.get_or_take::<tables::StorageChangeSet, TAKE>(storage_range)?;
-        let account_changeset =
-            self.get_or_take::<tables::AccountChangeSet, TAKE>(range.clone())?;
+        let account_changeset = self.get_or_take::<tables::AccountChangeSet, TAKE>(range)?;
 
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and

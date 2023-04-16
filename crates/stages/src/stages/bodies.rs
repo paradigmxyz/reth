@@ -8,12 +8,11 @@ use reth_db::{
     database::Database,
     models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
 use reth_interfaces::{
     consensus::Consensus,
     p2p::bodies::{downloader::BodyDownloader, response::BlockResponse},
-    provider::ProviderError,
 };
 use reth_provider::Transaction;
 use std::sync::Arc;
@@ -28,7 +27,6 @@ pub const BODIES: StageId = StageId("Bodies");
 /// The body stage downloads block bodies for all block headers stored locally in the database.
 ///
 /// # Empty blocks
-
 ///
 /// Blocks with an ommers hash corresponding to no ommers *and* a transaction root corresponding to
 /// no transactions will not have a block body downloaded for them, since it would be meaningless to
@@ -81,9 +79,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         // Update the header range on the downloader
         self.downloader.set_download_range(start_block..end_block + 1)?;
 
-        // Cursor used to get total difficulty
-        let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
-
         // Cursors used to write bodies, ommers and transactions
         let mut block_meta_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
         let mut tx_cursor = tx.cursor_write::<tables::Transactions>()?;
@@ -106,7 +101,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
         for response in downloaded_bodies {
             // Write block
             let block_number = response.block_number();
-            let difficulty = response.difficulty();
 
             let first_tx_num = next_tx_num;
             let mut tx_count = 0;
@@ -150,15 +144,6 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
                 }
                 BlockResponse::Empty(_) => {}
             };
-
-            // The block transition marks the final state at the end of the block.
-            // Increment the transition if the block contains an addition block reward.
-            // If the block does not have a reward, the transition will be the same as the
-            // transition at the last transaction of this block.
-            let td = td_cursor
-                .seek(block_number)?
-                .ok_or(ProviderError::TotalDifficulty { number: block_number })?
-                .1;
 
             // insert block meta
             block_meta_cursor

@@ -286,7 +286,7 @@ impl PostState {
     pub fn revert_to(&mut self, block_number: BlockNumber) -> Vec<Change> {
         let mut changes_to_revert = Vec::new();
         self.changes.retain(|change| {
-            if change.block_number() > block_number as u64 {
+            if change.block_number() > block_number {
                 changes_to_revert.push(change.clone());
                 false
             } else {

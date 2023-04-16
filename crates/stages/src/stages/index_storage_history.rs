@@ -1,6 +1,5 @@
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db::{database::Database, models::BlockNumberAddress};
-use reth_primitives::Address;
 use reth_provider::Transaction;
 use std::fmt::Debug;
 use tracing::*;

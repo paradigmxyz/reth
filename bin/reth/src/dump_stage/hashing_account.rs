@@ -4,7 +4,7 @@ use crate::{
     utils::DbTool,
 };
 use eyre::Result;
-use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
+use reth_db::{database::Database, table::TableImporter, tables};
 use reth_primitives::BlockNumber;
 use reth_provider::Transaction;
 use reth_stages::{stages::AccountHashingStage, Stage, StageId, UnwindInput};
@@ -21,7 +21,6 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
     let (output_db, tip_block_number) = setup::<DB>(from, to, output_db, db_tool)?;
 
     // Import relevant AccountChangeSets
-    let tx = db_tool.db.tx()?;
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::AccountChangeSet, _>(&db_tool.db.tx()?, Some(from), to)
     })??;

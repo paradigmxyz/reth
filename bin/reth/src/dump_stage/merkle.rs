@@ -4,7 +4,7 @@ use crate::{
     utils::DbTool,
 };
 use eyre::Result;
-use reth_db::{database::Database, table::TableImporter, tables, transaction::DbTx};
+use reth_db::{database::Database, table::TableImporter, tables};
 use reth_primitives::{BlockNumber, MAINNET};
 use reth_provider::Transaction;
 use reth_stages::{
@@ -27,7 +27,6 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
         tx.import_table_with_range::<tables::Headers, _>(&db_tool.db.tx()?, Some(from), to)
     })??;
 
-    let tx = db_tool.db.tx()?;
     output_db.update(|tx| {
         tx.import_table_with_range::<tables::AccountChangeSet, _>(&db_tool.db.tx()?, Some(from), to)
     })??;

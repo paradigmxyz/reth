@@ -89,6 +89,7 @@ pub struct ExecOutput {
 }
 
 impl ExecOutput {
+    /// Mark the stage as done, checkpointing at the given block number.
     pub fn done(stage_progress: BlockNumber) -> Self {
         Self { stage_progress, done: true }
     }

@@ -8,7 +8,7 @@ use reth_db::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{keccak256, Address, StorageEntry, StorageHashingCheckpoint};
+use reth_primitives::{keccak256, StorageEntry, StorageHashingCheckpoint};
 use reth_provider::Transaction;
 use std::{collections::BTreeMap, fmt::Debug};
 use tracing::*;
