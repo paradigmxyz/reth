@@ -1,6 +1,6 @@
 use crate::{
     insert_canonical_block,
-    post_state::{Change, PostState, StorageChangeset},
+    post_state::{PostState, StorageChangeset},
 };
 use itertools::{izip, Itertools};
 use reth_db::{
@@ -299,26 +299,6 @@ where
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> Result<Vec<SealedBlockWithSenders>, TransactionError> {
         self.get_take_block_range::<true>(chain_spec, range)
-    }
-
-    /// Transverse over changesets and plain state and recreated the execution results.
-    ///
-    /// Return results from database.
-    pub fn get_block_execution_result_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<PostState>, TransactionError> {
-        self.get_take_block_execution_result_range::<false>(range)
-    }
-
-    /// Transverse over changesets and plain state and recreated the execution results.
-    ///
-    /// Get results and remove them from database
-    pub fn take_block_execution_result_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<PostState>, TransactionError> {
-        self.get_take_block_execution_result_range::<true>(range)
     }
 
     /// Get range of blocks and its execution result
@@ -858,14 +838,13 @@ where
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
         type LocalPlainState = BTreeMap<Address, (Option<Option<Account>>, BTreeMap<H256, U256>)>;
-        type Changesets = BTreeMap<BlockNumber, Vec<Change>>;
 
         let mut local_plain_state: LocalPlainState = BTreeMap::new();
 
         // iterate in reverse and get plain state.
 
         // Bundle execution changeset to its particular transaction and block
-        let mut all_changesets: Changesets = BTreeMap::new();
+        let mut block_states: BTreeMap<BlockNumber, PostState> = BTreeMap::new();
 
         let mut plain_accounts_cursor = self.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.cursor_dup_write::<tables::PlainStorageState>()?;
@@ -885,32 +864,20 @@ where
                 }
             };
 
-            let change = match (old_info, new_info) {
+            let post_state = block_states.entry(block_number).or_default();
+            match (old_info, new_info) {
                 (Some(old), Some(new)) => {
                     if new != old {
-                        Change::AccountChanged {
-                            block_number,
-                            address,
-                            old,
-                            new,
-                        }
+                        post_state.change_account(block_number, address, old, new);
                     } else {
                         unreachable!("Junk data in database: an account changeset did not represent any change");
                     }
                 }
-                (None, Some(account)) => Change::AccountCreated {
-                    block_number,
-                    address,
-                    account
-                },
-                (Some(old), None) => Change::AccountDestroyed {
-                    block_number,
-                    address,
-                    old
-                },
+                (None, Some(account)) =>  post_state.create_account(block_number, address, account),
+                (Some(old), None) =>
+                    post_state.destroy_account(block_number, address, old),
                 (None, None) => unreachable!("Junk data in database: an account changeset transitioned from no account to no account"),
             };
-            all_changesets.entry(block_number).or_default().push(change);
         }
 
         // add storage changeset changes
@@ -940,11 +907,11 @@ where
         for (BlockNumberAddress((block_number, address)), storage_changeset) in
             storage_changes.into_iter()
         {
-            all_changesets.entry(block_number).or_default().push(Change::StorageChanged {
+            block_states.entry(block_number).or_default().change_storage(
                 block_number,
                 address,
-                changeset: storage_changeset,
-            });
+                storage_changeset,
+            );
         }
 
         if TAKE {
@@ -983,28 +950,19 @@ where
         }
 
         // iterate over block body and create ExecutionResult
-        let mut block_exec_results = Vec::new();
-
         let mut receipt_iter = receipts.into_iter();
 
         // loop break if we are at the end of the blocks.
         for (block_number, block_body) in block_bodies.into_iter() {
-            let mut block_post_state = PostState::new();
-            if let Some(changes) = all_changesets.remove(&block_number) {
-                for change in changes.into_iter() {
-                    block_post_state.add_and_apply(change);
-                }
-            }
             for tx_num in block_body.tx_num_range() {
                 if let Some((receipt_tx_num, receipt)) = receipt_iter.next() {
                     if tx_num != receipt_tx_num {
-                        block_post_state.add_receipt(receipt)
+                        block_states.entry(block_number).or_default().add_receipt(receipt);
                     }
                 }
             }
-            block_exec_results.push(block_post_state)
         }
-        Ok(block_exec_results)
+        Ok(block_states.into_values().collect())
     }
 
     /// Return range of blocks and its execution result

@@ -503,6 +503,7 @@ pub fn verify_receipt<'a>(
             got: Box::new(logs_bloom),
         })
     }
+
     Ok(())
 }
 
