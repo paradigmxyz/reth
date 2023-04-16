@@ -534,6 +534,7 @@ where
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
+                        this.metrics.reported_bad_transactions.increment(1);
                         continue
                     }
                     this.on_good_import(*err.hash());
