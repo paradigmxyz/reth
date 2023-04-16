@@ -37,4 +37,19 @@ impl ForkchoiceUpdated {
         self.payload_id = Some(id);
         self
     }
+
+    /// Returns true if the payload status is syncing.
+    pub fn is_syncing(&self) -> bool {
+        self.payload_status.is_syncing()
+    }
+
+    /// Returns true if the payload status is valid.
+    pub fn is_valid(&self) -> bool {
+        self.payload_status.is_valid()
+    }
+
+    /// Returns true if the payload status is invalid.
+    pub fn is_invalid(&self) -> bool {
+        self.payload_status.is_invalid()
+    }
 }
