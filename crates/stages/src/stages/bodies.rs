@@ -594,7 +594,6 @@ mod tests {
                 self.tx.query(|tx| {
                     // Acquire cursors on body related tables
                     let mut headers_cursor = tx.cursor_read::<tables::Headers>()?;
-                    let mut td_cursor = tx.cursor_read::<tables::HeaderTD>()?;
                     let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
                     let mut ommers_cursor = tx.cursor_read::<tables::BlockOmmers>()?;
                     let mut transaction_cursor = tx.cursor_read::<tables::Transactions>()?;
@@ -606,7 +605,6 @@ mod tests {
                     };
 
                     let mut prev_number: Option<BlockNumber> = None;
-                    let mut expected_transition_id = 0;
 
                     for entry in bodies_cursor.walk(Some(first_body_key))? {
                         let (number, body) = entry?;
@@ -646,11 +644,6 @@ mod tests {
                             assert!(tx_entry.is_some(), "Transaction is missing.");
                         }
 
-                        // Increment expected id for block reward.
-                        let td = td_cursor
-                            .seek(number)?
-                            .expect("Missing TD for header")
-                            .1;
 
                         prev_number = Some(number);
                     }

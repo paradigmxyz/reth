@@ -1425,8 +1425,8 @@ mod test {
         insert_canonical_block, test_utils::blocks::*, ShareableDatabase, Transaction,
         TransactionsProvider,
     };
-    use reth_db::{mdbx::test_utils::create_test_rw_db, tables, transaction::DbTxMut};
-    use reth_primitives::{proofs::EMPTY_ROOT, ChainSpecBuilder, MAINNET};
+    use reth_db::mdbx::test_utils::create_test_rw_db;
+    use reth_primitives::{ChainSpecBuilder, MAINNET};
     use std::{ops::DerefMut, sync::Arc};
 
     #[test]

@@ -787,10 +787,6 @@ mod tests {
             "Account should not be present in post-state since it was not changed"
         );
 
-        // Check changes
-        const TX_TRANSITION_ID: u64 = 0;
-        const BLOCK_TRANSITION_ID: u64 = 1;
-
         // Clone and sort to make the test deterministic
         assert_eq!(
             post_state.account_changes(),
