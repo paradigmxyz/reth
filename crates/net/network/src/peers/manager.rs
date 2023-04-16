@@ -715,6 +715,8 @@ impl PeersManager {
             }
 
             if self.refill_slots_interval.poll_tick(cx).is_ready() {
+                // this ensures the manager will be polled periodically, see [Interval::poll_tick]
+                let _ = self.refill_slots_interval.poll_tick(cx);
                 self.fill_outbound_slots();
             }
 
