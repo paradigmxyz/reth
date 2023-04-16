@@ -262,6 +262,7 @@ where
             this.pending_block.is_none() &&
             !deadline_reached
         {
+            let _ = this.interval.poll_tick(cx);
             trace!("spawn new payload build task");
             let (tx, rx) = oneshot::channel();
             let client = this.client.clone();
