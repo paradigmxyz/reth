@@ -74,7 +74,6 @@ futures = "0.3.25"
 
 # http/rpc
 hyper = "0.14.25"
-jsonrpsee = { version = "0.16", features = ["server"] }
 
 # misc
 eyre = "0.6.8"

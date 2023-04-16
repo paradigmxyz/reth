@@ -3,16 +3,17 @@
 use crate::dirs::{JwtSecretPath, PlatformPath};
 use clap::Args;
 use futures::FutureExt;
-use jsonrpsee::server::ServerHandle;
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
     BlockProvider, CanonStateSubscriptions, EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::{JwtError, JwtSecret};
 use reth_rpc_builder::{
-    auth::AuthServerConfig, constants, error::RpcError, IpcServerBuilder, RethRpcModule,
-    RpcModuleBuilder, RpcModuleSelection, RpcServerConfig, RpcServerHandle, ServerBuilder,
-    TransportRpcModuleConfig,
+    auth::{AuthServerConfig, AuthServerHandle},
+    constants,
+    error::RpcError,
+    IpcServerBuilder, RethRpcModule, RpcModuleBuilder, RpcModuleSelection, RpcServerConfig,
+    RpcServerHandle, ServerBuilder, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{EngineApi, EngineApiServer};
 use reth_tasks::TaskSpawner;
@@ -129,7 +130,7 @@ impl RpcServerArgs {
         executor: Tasks,
         events: Events,
         engine_api: Engine,
-    ) -> Result<(RpcServerHandle, ServerHandle), RpcError>
+    ) -> Result<(RpcServerHandle, AuthServerHandle), RpcError>
     where
         Client: BlockProvider
             + HeaderProvider
@@ -212,7 +213,7 @@ impl RpcServerArgs {
         network: Network,
         executor: Tasks,
         engine_api: EngineApi<Client>,
-    ) -> Result<ServerHandle, RpcError>
+    ) -> Result<AuthServerHandle, RpcError>
     where
         Client: BlockProvider
             + HeaderProvider

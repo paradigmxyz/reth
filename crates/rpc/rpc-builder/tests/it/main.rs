@@ -1,3 +1,4 @@
+mod auth;
 mod http;
 mod serde;
 mod startup;

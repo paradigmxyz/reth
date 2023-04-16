@@ -2,17 +2,24 @@ use crate::{
     constants,
     error::{RpcError, ServerKind},
 };
+use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
-use jsonrpsee::server::{RpcModule, ServerHandle};
+use jsonrpsee::{
+    http_client::HeaderMap,
+    server::{RpcModule, ServerHandle},
+};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{
-    eth::cache::EthStateCache, AuthLayer, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
+    eth::cache::EthStateCache, AuthLayer, Claims, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 /// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
@@ -24,7 +31,7 @@ pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
     engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
-) -> Result<ServerHandle, RpcError>
+) -> Result<AuthServerHandle, RpcError>
 where
     Client: BlockProvider
         + HeaderProvider
@@ -52,7 +59,7 @@ pub async fn launch_with_eth_api<Client, Pool, Network, EngineApi>(
     engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
-) -> Result<ServerHandle, RpcError>
+) -> Result<AuthServerHandle, RpcError>
 where
     Client: BlockProvider
         + HeaderProvider
@@ -73,7 +80,7 @@ where
 
     // Create auth middleware.
     let middleware =
-        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
+        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
 
     // By default, both http and ws are enabled.
     let server = ServerBuilder::new()
@@ -82,7 +89,10 @@ where
         .await
         .map_err(|err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)))?;
 
-    Ok(server.start(module)?)
+    let local_addr = server.local_addr()?;
+
+    let handle = server.start(module)?;
+    Ok(AuthServerHandle { handle, local_addr, secret })
 }
 
 /// Server configuration for the auth server.
@@ -103,12 +113,12 @@ impl AuthServerConfig {
     }
 
     /// Convenience function to start a server in one step.
-    pub async fn start(self, module: AuthRpcModule) -> Result<ServerHandle, RpcError> {
+    pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
         let Self { socket_addr, secret } = self;
 
         // Create auth middleware.
-        let middleware =
-            tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
+        let middleware = tower::ServiceBuilder::new()
+            .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
 
         // By default, both http and ws are enabled.
         let server =
@@ -116,7 +126,10 @@ impl AuthServerConfig {
                 |err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)),
             )?;
 
-        Ok(server.start(module.inner)?)
+        let local_addr = server.local_addr()?;
+
+        let handle = server.start(module.inner)?;
+        Ok(AuthServerHandle { handle, local_addr, secret })
     }
 }
 
@@ -172,8 +185,93 @@ pub struct AuthRpcModule {
 // === impl TransportRpcModules ===
 
 impl AuthRpcModule {
+    /// Create a new `AuthRpcModule` with the given `engine_api`.
+    pub fn new<EngineApi>(engine: EngineApi) -> Self
+    where
+        EngineApi: EngineApiServer,
+    {
+        let mut module = RpcModule::new(());
+        module.merge(engine.into_rpc()).expect("No conflicting methods");
+        Self { inner: module }
+    }
+
+    /// Get a reference to the inner `RpcModule`.
+    pub fn module_mut(&mut self) -> &mut RpcModule<()> {
+        &mut self.inner
+    }
+
     /// Convenience function for starting a server
-    pub async fn start_server(self, config: AuthServerConfig) -> Result<ServerHandle, RpcError> {
+    pub async fn start_server(
+        self,
+        config: AuthServerConfig,
+    ) -> Result<AuthServerHandle, RpcError> {
         config.start(self).await
+    }
+}
+
+/// A handle to the spawned auth server.
+///
+/// When this type is dropped or [AuthServerHandle::stop] has been called the server will be
+/// stopped.
+#[derive(Clone, Debug)]
+#[must_use = "Server stops if dropped"]
+pub struct AuthServerHandle {
+    local_addr: SocketAddr,
+    handle: ServerHandle,
+    secret: JwtSecret,
+}
+
+// === impl AuthServerHandle ===
+
+impl AuthServerHandle {
+    /// Returns the [`SocketAddr`] of the http server if started.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    /// Tell the server to stop without waiting for the server to stop.
+    pub fn stop(self) -> Result<(), RpcError> {
+        Ok(self.handle.stop()?)
+    }
+
+    /// Returns the url to the http server
+    pub fn http_url(&self) -> String {
+        format!("http://{}", self.local_addr)
+    }
+
+    /// Returns the url to the ws server
+    pub fn ws_url(&self) -> String {
+        format!("ws://{}", self.local_addr)
+    }
+
+    fn bearer(&self) -> String {
+        format!(
+            "Bearer {}",
+            self.secret
+                .encode(&Claims {
+                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
+                        Duration::from_secs(60))
+                    .as_secs(),
+                    exp: None,
+                })
+                .unwrap()
+        )
+    }
+
+    /// Returns a http client connected to the server.
+    pub fn http_client(&self) -> jsonrpsee::http_client::HttpClient {
+        jsonrpsee::http_client::HttpClientBuilder::default()
+            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .build(self.http_url())
+            .expect("Failed to create http client")
+    }
+
+    /// Returns a ws client connected to the server.
+    pub async fn ws_client(&self) -> jsonrpsee::ws_client::WsClient {
+        jsonrpsee::ws_client::WsClientBuilder::default()
+            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .build(self.ws_url())
+            .await
+            .expect("Failed to create ws client")
     }
 }
