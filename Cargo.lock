@@ -4481,11 +4481,11 @@ dependencies = [
  "hex",
  "human_bytes",
  "hyper",
- "jsonrpsee",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
  "num_cpus",
+ "pin-project",
  "proptest",
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
@@ -4963,6 +4963,7 @@ dependencies = [
  "reth-provider",
  "reth-rlp",
  "reth-rlp-derive",
+ "reth-rpc-types",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -4985,6 +4986,7 @@ dependencies = [
  "async-trait",
  "reth-eth-wire",
  "reth-primitives",
+ "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
@@ -5188,9 +5190,11 @@ version = "0.1.0"
 dependencies = [
  "hyper",
  "jsonrpsee",
+ "reth-beacon-consensus",
  "reth-interfaces",
  "reth-ipc",
  "reth-network-api",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
  "reth-rpc",
@@ -5239,7 +5243,6 @@ dependencies = [
  "lru 0.9.0",
  "rand 0.8.5",
  "reth-interfaces",
- "reth-network-api",
  "reth-primitives",
  "reth-rlp",
  "serde",
@@ -6567,13 +6570,14 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.27.0"
+version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0de47a4eecbe11f498978a9b29d792f0d2692d1dd003650c24c76510e3bc001"
+checksum = "03201d01c3c27a29c8a5cee5b55a93ddae1ccf6f08f65365c2c918f8c1b76f64"
 dependencies = [
  "autocfg",
  "bytes",
  "libc",
+ "memchr",
  "mio",
  "num_cpus",
  "parking_lot 0.12.1",
@@ -6586,13 +6590,13 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.0.0"
+version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61a573bdc87985e9d6ddeed1b3d864e8a302c847e40d647746df2f1de209d1ce"
+checksum = "d266c00fde287f55d3f1c3e96c500c362a2b8c695076ec180f27918820bc6df8"
 dependencies = [
  "proc-macro2 1.0.56",
  "quote 1.0.26",
- "syn 2.0.15",
+ "syn 1.0.109",
 ]
 
 [[package]]

@@ -143,12 +143,24 @@ impl JwtSecret {
         JwtSecret::from_hex(secret).unwrap()
     }
 
-    #[cfg(test)]
-    pub(crate) fn encode(&self, claims: &Claims) -> Result<String, Box<dyn std::error::Error>> {
+    /// Encode the header and claims given and sign the payload using the algorithm from the header
+    /// and the key.
+    ///
+    /// ```rust
+    /// use reth_rpc::{Claims, JwtSecret};
+    ///
+    /// let my_claims = Claims {
+    ///     iat: 0,
+    ///     exp: None
+    /// };
+    /// let secret = JwtSecret::random();
+    /// let token = secret.encode(&my_claims).unwrap();
+    /// ```
+    pub fn encode(&self, claims: &Claims) -> Result<String, jsonwebtoken::errors::Error> {
         let bytes = &self.0;
         let key = jsonwebtoken::EncodingKey::from_secret(bytes);
         let algo = jsonwebtoken::Header::new(Algorithm::HS256);
-        Ok(jsonwebtoken::encode(&algo, claims, &key)?)
+        jsonwebtoken::encode(&algo, claims, &key)
     }
 }
 
@@ -160,14 +172,15 @@ impl JwtSecret {
 /// The Engine API spec requires that just the `iat` (issued-at) claim is provided.
 /// It ignores claims that are optional or additional for this specification.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct Claims {
+pub struct Claims {
     /// The "iat" value MUST be a number containing a NumericDate value.
     /// According to the RFC A NumericDate represents the number of seconds since
     /// the UNIX_EPOCH.
     /// - [`RFC-7519 - Spec`](https://www.rfc-editor.org/rfc/rfc7519#section-4.1.6)
     /// - [`RFC-7519 - Notations`](https://www.rfc-editor.org/rfc/rfc7519#section-2)
-    pub(crate) iat: u64,
-    pub(crate) exp: Option<u64>,
+    pub iat: u64,
+    /// Expiration, if any
+    pub exp: Option<u64>,
 }
 
 impl Claims {

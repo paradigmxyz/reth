@@ -11,7 +11,7 @@ use crate::{
 use clap::{crate_version, Parser};
 use eyre::Context;
 use fdlimit::raise_fd_limit;
-use futures::{pin_mut, stream::select as stream_select, FutureExt, StreamExt};
+use futures::{pin_mut, stream::select as stream_select, StreamExt};
 use reth_auto_seal_consensus::{AutoSealBuilder, AutoSealConsensus};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::{BeaconConsensus, BeaconConsensusEngine, BeaconEngineMessage};
@@ -100,11 +100,11 @@ pub struct Command {
     /// - goerli
     /// - sepolia
     #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        verbatim_doc_comment,
-        default_value = "mainnet",
-        value_parser = genesis_value_parser
+    long,
+    value_name = "CHAIN_OR_PATH",
+    verbatim_doc_comment,
+    default_value = "mainnet",
+    value_parser = genesis_value_parser
     )]
     chain: Arc<ChainSpec>,
 
@@ -297,59 +297,43 @@ impl Command {
         debug!(target: "reth::cli", "Spawning payload builder service");
         ctx.task_executor.spawn_critical("payload builder service", payload_service);
 
-        let beacon_consensus_engine = BeaconConsensusEngine::new(
+        let (beacon_consensus_engine, beacon_engine_handle) = BeaconConsensusEngine::with_channel(
             Arc::clone(&db),
             ctx.task_executor.clone(),
             pipeline,
             blockchain_tree.clone(),
-            consensus_engine_rx,
             self.debug.max_block,
             payload_builder.clone(),
+            consensus_engine_tx,
+            consensus_engine_rx,
         );
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let engine_api = EngineApi::new(
             ShareableDatabase::new(db, self.chain.clone()),
             self.chain.clone(),
-            consensus_engine_tx.clone(),
+            beacon_engine_handle,
             payload_builder.into(),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
-        let launch_rpc = self
+        // Start RPC servers
+        let (_rpc_server, _auth_server) = self
             .rpc
-            .start_rpc_server(
+            .start_servers(
                 shareable_db.clone(),
                 transaction_pool.clone(),
                 network.clone(),
                 ctx.task_executor.clone(),
                 blockchain_tree,
-            )
-            .inspect(|_| {
-                info!(target: "reth::cli", "Started RPC server");
-            });
-
-        let launch_auth = self
-            .rpc
-            .start_auth_server(
-                shareable_db.clone(),
-                transaction_pool.clone(),
-                network.clone(),
-                ctx.task_executor.clone(),
                 engine_api,
             )
-            .inspect(|_| {
-                info!(target: "reth::cli", "Started Auth server");
-            });
-
-        // launch servers
-        let (_rpc_server, _auth_server) =
-            futures::future::try_join(launch_rpc, launch_auth).await?;
+            .await?;
 
         // Run consensus engine to completion
         let (rx, tx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor.spawn_critical_blocking("consensus engine", async move {
+        ctx.task_executor.spawn_critical("consensus engine", async move {
             let res = beacon_consensus_engine.await;
             let _ = rx.send(res);
         });

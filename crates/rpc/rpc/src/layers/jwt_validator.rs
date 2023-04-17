@@ -68,9 +68,8 @@ fn err_response(err: JwtError) -> Response<hyper::Body> {
 
 #[cfg(test)]
 mod tests {
-    use http::{header, HeaderMap};
-
     use crate::layers::jwt_validator::get_bearer;
+    use http::{header, HeaderMap};
 
     #[test]
     fn auth_header_available() {
