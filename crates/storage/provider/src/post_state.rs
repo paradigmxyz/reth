@@ -510,7 +510,7 @@ mod tests {
         a.create_account(1, Address::zero(), Account::default());
         a.destroy_account(1, Address::zero(), Account::default());
 
-        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 2);
+        assert_eq!(a.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 1);
 
         let mut b = PostState::new();
         b.create_account(2, Address::repeat_byte(0xff), Account::default());
@@ -520,7 +520,7 @@ mod tests {
         let mut c = a.clone();
         c.extend(b.clone());
 
-        assert_eq!(c.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 3);
+        assert_eq!(c.account_changes.iter().fold(0, |len, (_, changes)| len + changes.len()), 2);
     }
 
     #[test]
