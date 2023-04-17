@@ -175,8 +175,10 @@ where
             }
         }
 
+        // TODO: remove unwraps
         let oldest_block_hash = self.inner.client.block_hash(start_block)?.unwrap();
 
+        // TODO: remove unwraps
         fee_history_cache_items.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
         fee_history_cache.get_mut(&start_block).unwrap().hash = Some(oldest_block_hash);
 
@@ -186,10 +188,9 @@ where
         let mut gas_used_ratio: Vec<f64> =
             fee_history_cache_items.values().map(|item| item.gas_used_ratio).collect();
 
-        let rewards: Option<Vec<Vec<U256>>> =
-            fee_history_cache_items.values().map(|item| item.reward.clone()).collect();
+        let mut rewards: Vec<Vec<U256>> =
+            fee_history_cache_items.values().filter_map(|item| item.reward.clone()).collect();
 
-        let mut rewards = rewards.unwrap();
         // gasUsedRatio doesn't has data for next block in this case the last block
         gas_used_ratio.pop();
         rewards.pop();
