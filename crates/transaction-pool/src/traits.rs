@@ -352,7 +352,7 @@ impl PooledTransaction {
 impl PoolTransaction for PooledTransaction {
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
-        &self.transaction.hash
+        self.transaction.hash_ref()
     }
 
     /// Returns the Sender of the transaction.

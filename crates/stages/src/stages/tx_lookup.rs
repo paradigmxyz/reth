@@ -132,7 +132,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
                 if let Some((_, transaction)) = transaction_cursor.seek_exact(tx_id)? {
-                    if tx_hash_number_cursor.seek_exact(transaction.hash)?.is_some() {
+                    if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
                 }

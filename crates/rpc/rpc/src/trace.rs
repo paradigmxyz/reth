@@ -230,10 +230,11 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut db = SubState::new(State::new(state));
 
-                for (idx, tx) in transactions.into_iter().enumerate() {
+                for (idx, mut tx) in transactions.into_iter().enumerate() {
+                    let hash = tx.hash_mut();
                     let tx = tx.into_ecrecovered().ok_or(BlockError::InvalidSignature)?;
                     let tx_info = TransactionInfo {
-                        hash: Some(tx.hash),
+                        hash: Some(hash),
                         index: Some(idx as u64),
                         block_hash: Some(block_hash),
                         block_number: Some(block_env.number.try_into().unwrap_or(u64::MAX)),

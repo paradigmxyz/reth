@@ -132,7 +132,7 @@ impl Transaction {
         };
 
         Self {
-            hash: signed_tx.hash,
+            hash: signed_tx.hash(),
             nonce: U256::from(signed_tx.nonce()),
             block_hash: None,
             block_number: None,

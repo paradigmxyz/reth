@@ -176,7 +176,7 @@ where
                             let Block { mut header, body, .. } = block;
 
                             // clear all transactions from pool
-                            pool.remove_transactions(body.iter().map(|tx| tx.hash));
+                            pool.remove_transactions(body.iter().map(|tx| tx.hash()));
 
                             header.receipts_root = if post_state.receipts().is_empty() {
                                 EMPTY_RECEIPTS

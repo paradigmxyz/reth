@@ -625,7 +625,7 @@ impl Decodable for TransactionKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
-    pub hash: TxHash,
+    pub hash: Option<TxHash>,
     /// The transaction signature values
     pub signature: Signature,
     /// Raw transaction info
@@ -659,12 +659,7 @@ impl Compact for TransactionSigned {
         let (signature, buf) = Signature::from_compact(buf, prefix & 1);
         let (transaction, buf) = Transaction::from_compact(buf, prefix >> 1);
 
-        let mut tx = TransactionSigned { signature, transaction, hash: TxHash::default() };
-
-        // Could skip it and do it on the first `hash()` call.
-        tx.hash = tx.recalculate_hash();
-
-        (tx, buf)
+        (TransactionSigned { signature, transaction, hash: None }, buf)
     }
 }
 impl AsRef<Self> for TransactionSigned {
@@ -681,9 +676,28 @@ impl TransactionSigned {
         &self.signature
     }
 
-    /// Transaction hash. Used to identify transaction.
+    /// Transaction hash. Used to identify transaction. Calculates it if it's not present, but does
+    /// not store it.
     pub fn hash(&self) -> TxHash {
-        self.hash
+        if let Some(hash) = self.hash {
+            return hash
+        }
+        self.recalculate_hash()
+    }
+
+    /// Transaction hash. Used to identify transaction. Calculates it if it's not present and stores
+    /// it for future use.
+    pub fn hash_mut(&mut self) -> TxHash {
+        if let Some(hash) = self.hash {
+            return hash
+        }
+        self.hash = Some(self.recalculate_hash());
+        self.hash.expect("qed")
+    }
+
+    /// Transaction hash. Used to identify transaction. Will panic if transaction is not preset.
+    pub fn hash_ref(&self) -> &TxHash {
+        self.hash.as_ref().expect("transaction hash hasn't been calculated yet.")
     }
 
     /// Recover signer from signature and hash.
@@ -789,7 +803,7 @@ impl TransactionSigned {
     /// This will also calculate the transaction hash using its encoding.
     pub fn from_transaction_and_signature(transaction: Transaction, signature: Signature) -> Self {
         let mut initial_tx = Self { transaction, hash: Default::default(), signature };
-        initial_tx.hash = initial_tx.recalculate_hash();
+        initial_tx.hash = Some(initial_tx.recalculate_hash());
         initial_tx
     }
 
@@ -817,7 +831,7 @@ impl TransactionSigned {
         }
 
         let tx_length = header.payload_length + header.length();
-        let hash = keccak256(&original_encoding[..tx_length]);
+        let hash = Some(keccak256(&original_encoding[..tx_length]));
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
@@ -870,7 +884,7 @@ impl TransactionSigned {
 
         let signature = Signature::decode(data)?;
 
-        let hash = keccak256(&original_encoding[..tx_length]);
+        let hash = Some(keccak256(&original_encoding[..tx_length]));
         let signed = TransactionSigned { transaction, hash, signature };
         Ok(signed)
     }
@@ -952,7 +966,7 @@ impl proptest::arbitrary::Arbitrary for TransactionSigned {
                 }
                 let mut tx =
                     TransactionSigned { hash: Default::default(), signature: sig, transaction };
-                tx.hash = tx.recalculate_hash();
+                tx.hash = Some(tx.recalculate_hash());
                 tx
             })
             .boxed()
@@ -975,7 +989,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
             signature: Signature::arbitrary(u)?,
             transaction,
         };
-        tx.hash = tx.recalculate_hash();
+        tx.hash = Some(tx.recalculate_hash());
 
         Ok(tx)
     }
