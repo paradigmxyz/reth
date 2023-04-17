@@ -155,7 +155,7 @@ Once the transaction signer has been recovered, the signer is then added to the 
 
 ## ExecutionStage
 
-Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database. For every new block header added to the database, the corresponding transactions have their signers attached to them and `reth_executor::executor::execute_and_verify_receipt()` is called, pushing the state changes resulting from the execution to a `Vec`.
+Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database. For every new block header added to the database, the corresponding transactions have their signers attached to them and `reth_blockchain_tree::executor::execute_and_verify_receipt()` is called, pushing the state changes resulting from the execution to a `Vec`.
 
 [File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs)
 ```rust,ignore

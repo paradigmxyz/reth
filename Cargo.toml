@@ -4,7 +4,7 @@ members = [
     "crates/consensus/auto-seal",
     "crates/consensus/beacon",
     "crates/consensus/common",
-    "crates/executor",
+    "crates/blockchain-tree",
     "crates/interfaces",
     "crates/payload/builder",
     "crates/metrics/metrics-derive",
