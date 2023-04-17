@@ -83,6 +83,11 @@ pub trait StateProviderFactory: Send + Sync {
     /// Returns a [StateProvider] indexed by the given block hash.
     fn history_by_block_hash(&self, block: BlockHash) -> Result<StateProviderBox<'_>>;
 
+    /// Storage provider for pending state.
+    fn pending2(&self) -> Result<StateProviderBox<'_>> {
+        todo!()
+    }
+
     /// Return a [StateProvider] that contains post state data provider.
     /// Used to inspect or execute transaction on the pending state.
     fn pending(
@@ -105,7 +110,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 }
 
 /// Post state data needs for execution on it.
-/// This trait is used to create state provider over pending state.
+/// This trait is used to create a state provider over pending state.
 ///
 /// Pending state contains:
 /// * [`PostState`] contains all changed of accounts and storage of pending chain

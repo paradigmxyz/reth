@@ -16,7 +16,6 @@ use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
 };
-
 use super::BlockchainTree;
 
 /// Shareable blockchain tree that is behind tokio::RwLock
