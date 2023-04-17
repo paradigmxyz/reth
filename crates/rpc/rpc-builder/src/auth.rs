@@ -1,30 +1,37 @@
-use crate::error::{RpcError, ServerKind};
+use crate::{
+    constants,
+    error::{RpcError, ServerKind},
+};
+use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
-use jsonrpsee::server::{RpcModule, ServerHandle};
+use jsonrpsee::{
+    http_client::HeaderMap,
+    server::{RpcModule, ServerHandle},
+};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives::ChainSpec;
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::{
-    eth::cache::EthStateCache, AuthLayer, EngineApi, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
+    eth::cache::EthStateCache, AuthLayer, Claims, EthApi, EthFilter, JwtAuthValidator, JwtSecret,
 };
-use reth_rpc_api::servers::*;
-use reth_rpc_engine_api::EngineApiHandle;
+use reth_rpc_api::{servers::*, EngineApiServer};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
-/// Configure and launch an auth server with `engine` and a _new_ `eth` namespace.
+/// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Client, Pool, Network, Tasks>(
+pub async fn launch<Client, Pool, Network, Tasks, EngineApi>(
     client: Client,
     pool: Pool,
     network: Network,
     executor: Tasks,
-    chain_spec: Arc<ChainSpec>,
-    handle: EngineApiHandle,
+    engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
-) -> Result<ServerHandle, RpcError>
+) -> Result<AuthServerHandle, RpcError>
 where
     Client: BlockProvider
         + HeaderProvider
@@ -36,23 +43,23 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
+    EngineApi: EngineApiServer,
 {
     // spawn a new cache task
     let eth_cache = EthStateCache::spawn_with(client.clone(), Default::default(), executor);
     let eth_api = EthApi::new(client.clone(), pool.clone(), network, eth_cache);
     let eth_filter = EthFilter::new(client, pool);
-    launch_with_eth_api(eth_api, chain_spec, eth_filter, handle, socket_addr, secret).await
+    launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 
-/// Configure and launch an auth server with existing EthApi implementation.
-pub async fn launch_with_eth_api<Client, Pool, Network>(
+/// Configure and launch a _standalone_ auth server with existing EthApi implementation.
+pub async fn launch_with_eth_api<Client, Pool, Network, EngineApi>(
     eth_api: EthApi<Client, Pool, Network>,
-    chain_spec: Arc<ChainSpec>,
     eth_filter: EthFilter<Client, Pool>,
-    handle: EngineApiHandle,
+    engine_api: EngineApi,
     socket_addr: SocketAddr,
     secret: JwtSecret,
-) -> Result<ServerHandle, RpcError>
+) -> Result<AuthServerHandle, RpcError>
 where
     Client: BlockProvider
         + HeaderProvider
@@ -63,16 +70,17 @@ where
         + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
+    EngineApi: EngineApiServer,
 {
     // Configure the module and start the server.
     let mut module = RpcModule::new(());
-    module.merge(EngineApi::new(chain_spec, handle).into_rpc()).expect("No conflicting methods");
+    module.merge(engine_api.into_rpc()).expect("No conflicting methods");
     module.merge(eth_api.into_rpc()).expect("No conflicting methods");
     module.merge(eth_filter.into_rpc()).expect("No conflicting methods");
 
     // Create auth middleware.
     let middleware =
-        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
+        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
 
     // By default, both http and ws are enabled.
     let server = ServerBuilder::new()
@@ -81,5 +89,189 @@ where
         .await
         .map_err(|err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)))?;
 
-    Ok(server.start(module)?)
+    let local_addr = server.local_addr()?;
+
+    let handle = server.start(module)?;
+    Ok(AuthServerHandle { handle, local_addr, secret })
+}
+
+/// Server configuration for the auth server.
+#[derive(Clone, Debug)]
+pub struct AuthServerConfig {
+    /// Where the server should listen.
+    pub(crate) socket_addr: SocketAddr,
+    /// The secrete for the auth layer of the server.
+    pub(crate) secret: JwtSecret,
+}
+
+// === impl AuthServerConfig ===
+
+impl AuthServerConfig {
+    /// Convenience function to create a new `AuthServerConfig`.
+    pub fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
+        AuthServerConfigBuilder::new(secret)
+    }
+
+    /// Convenience function to start a server in one step.
+    pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
+        let Self { socket_addr, secret } = self;
+
+        // Create auth middleware.
+        let middleware = tower::ServiceBuilder::new()
+            .layer(AuthLayer::new(JwtAuthValidator::new(secret.clone())));
+
+        // By default, both http and ws are enabled.
+        let server =
+            ServerBuilder::new().set_middleware(middleware).build(socket_addr).await.map_err(
+                |err| RpcError::from_jsonrpsee_error(err, ServerKind::Auth(socket_addr)),
+            )?;
+
+        let local_addr = server.local_addr()?;
+
+        let handle = server.start(module.inner)?;
+        Ok(AuthServerHandle { handle, local_addr, secret })
+    }
+}
+
+/// Builder type for configuring an `AuthServerConfig`.
+#[derive(Clone, Debug)]
+pub struct AuthServerConfigBuilder {
+    socket_addr: Option<SocketAddr>,
+    secret: JwtSecret,
+}
+
+// === impl AuthServerConfigBuilder ===
+
+impl AuthServerConfigBuilder {
+    /// Create a new `AuthServerConfigBuilder` with the given `secret`.
+    pub fn new(secret: JwtSecret) -> Self {
+        Self { socket_addr: None, secret }
+    }
+
+    /// Set the socket address for the server.
+    pub fn socket_addr(mut self, socket_addr: SocketAddr) -> Self {
+        self.socket_addr = Some(socket_addr);
+        self
+    }
+
+    /// Set the socket address for the server.
+    pub fn maybe_socket_addr(mut self, socket_addr: Option<SocketAddr>) -> Self {
+        self.socket_addr = socket_addr;
+        self
+    }
+
+    /// Set the secret for the server.
+    pub fn secret(mut self, secret: JwtSecret) -> Self {
+        self.secret = secret;
+        self
+    }
+    /// Build the `AuthServerConfig`.
+    pub fn build(self) -> AuthServerConfig {
+        AuthServerConfig {
+            socket_addr: self.socket_addr.unwrap_or_else(|| {
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), constants::DEFAULT_AUTH_PORT)
+            }),
+            secret: self.secret,
+        }
+    }
+}
+
+/// Holds installed modules for the auth server.
+#[derive(Debug)]
+pub struct AuthRpcModule {
+    pub(crate) inner: RpcModule<()>,
+}
+
+// === impl TransportRpcModules ===
+
+impl AuthRpcModule {
+    /// Create a new `AuthRpcModule` with the given `engine_api`.
+    pub fn new<EngineApi>(engine: EngineApi) -> Self
+    where
+        EngineApi: EngineApiServer,
+    {
+        let mut module = RpcModule::new(());
+        module.merge(engine.into_rpc()).expect("No conflicting methods");
+        Self { inner: module }
+    }
+
+    /// Get a reference to the inner `RpcModule`.
+    pub fn module_mut(&mut self) -> &mut RpcModule<()> {
+        &mut self.inner
+    }
+
+    /// Convenience function for starting a server
+    pub async fn start_server(
+        self,
+        config: AuthServerConfig,
+    ) -> Result<AuthServerHandle, RpcError> {
+        config.start(self).await
+    }
+}
+
+/// A handle to the spawned auth server.
+///
+/// When this type is dropped or [AuthServerHandle::stop] has been called the server will be
+/// stopped.
+#[derive(Clone, Debug)]
+#[must_use = "Server stops if dropped"]
+pub struct AuthServerHandle {
+    local_addr: SocketAddr,
+    handle: ServerHandle,
+    secret: JwtSecret,
+}
+
+// === impl AuthServerHandle ===
+
+impl AuthServerHandle {
+    /// Returns the [`SocketAddr`] of the http server if started.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    /// Tell the server to stop without waiting for the server to stop.
+    pub fn stop(self) -> Result<(), RpcError> {
+        Ok(self.handle.stop()?)
+    }
+
+    /// Returns the url to the http server
+    pub fn http_url(&self) -> String {
+        format!("http://{}", self.local_addr)
+    }
+
+    /// Returns the url to the ws server
+    pub fn ws_url(&self) -> String {
+        format!("ws://{}", self.local_addr)
+    }
+
+    fn bearer(&self) -> String {
+        format!(
+            "Bearer {}",
+            self.secret
+                .encode(&Claims {
+                    iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
+                        Duration::from_secs(60))
+                    .as_secs(),
+                    exp: None,
+                })
+                .unwrap()
+        )
+    }
+
+    /// Returns a http client connected to the server.
+    pub fn http_client(&self) -> jsonrpsee::http_client::HttpClient {
+        jsonrpsee::http_client::HttpClientBuilder::default()
+            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .build(self.http_url())
+            .expect("Failed to create http client")
+    }
+
+    /// Returns a ws client connected to the server.
+    pub async fn ws_client(&self) -> jsonrpsee::ws_client::WsClient {
+        jsonrpsee::ws_client::WsClientBuilder::default()
+            .set_headers(HeaderMap::from_iter([(AUTHORIZATION, self.bearer().parse().unwrap())]))
+            .build(self.ws_url())
+            .await
+            .expect("Failed to create ws client")
+    }
 }

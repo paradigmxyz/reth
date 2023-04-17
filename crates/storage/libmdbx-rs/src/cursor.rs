@@ -1,5 +1,4 @@
 use crate::{
-    database::Database,
     error::{mdbx_result, Error, Result},
     flags::*,
     mdbx_try_optional,
@@ -32,15 +31,13 @@ where
 {
     pub(crate) fn new<E: EnvironmentKind>(
         txn: &'txn Transaction<K, E>,
-        db: &Database<'txn>,
+        dbi: ffi::MDBX_dbi,
     ) -> Result<Self> {
         let mut cursor: *mut ffi::MDBX_cursor = ptr::null_mut();
 
         let txn = txn.txn_mutex();
         unsafe {
-            mdbx_result(txn_execute(&txn, |txn| {
-                ffi::mdbx_cursor_open(txn, db.dbi(), &mut cursor)
-            }))?;
+            mdbx_result(txn_execute(&txn, |txn| ffi::mdbx_cursor_open(txn, dbi, &mut cursor)))?;
         }
         Ok(Self { txn, cursor, _marker: PhantomData })
     }

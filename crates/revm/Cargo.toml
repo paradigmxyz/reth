@@ -13,7 +13,7 @@ reth-interfaces = { path = "../interfaces" }
 reth-provider = { path = "../storage/provider" }
 reth-revm-primitives = { path = "./revm-primitives" }
 reth-revm-inspectors = { path = "./revm-inspectors" }
-reth-executor = { path = "../executor" }
+reth-blockchain-tree = { path = "../blockchain-tree" }
 reth-consensus-common = { path = "../consensus/common" }
 
 # revm

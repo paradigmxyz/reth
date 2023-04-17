@@ -17,6 +17,9 @@ mod message;
 /// Engine API error.
 mod error;
 
-pub use engine_api::{EngineApi, EngineApiHandle, EngineApiSender};
+pub use engine_api::{EngineApi, EngineApiSender};
 pub use error::*;
-pub use message::{EngineApiMessage, EngineApiMessageVersion};
+pub use message::EngineApiMessageVersion;
+
+// re-export server trait for convenience
+pub use reth_rpc_api::EngineApiServer;

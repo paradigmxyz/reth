@@ -10,7 +10,6 @@ description = "A basic payload builder for reth that uses the txpool API to buil
 [dependencies]
 ## reth
 reth-primitives = { path = "../../primitives" }
-reth-consensus-common = { path = "../../consensus/common" }
 reth-revm = { path = "../../revm" }
 reth-transaction-pool = { path = "../../transaction-pool" }
 reth-rlp = { path = "../../rlp" }

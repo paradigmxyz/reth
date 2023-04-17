@@ -39,6 +39,8 @@ reth-transaction-pool = { path = "../../transaction-pool", features = ["test-uti
 reth-provider = { path = "../../storage/provider", features = ["test-utils"] }
 reth-network-api = { path = "../../net/network-api", features = ["test-utils"] }
 reth-interfaces = { path = "../../interfaces", features = ["test-utils"] }
+reth-beacon-consensus = { path = "../../consensus/beacon" }
+reth-payload-builder = { path = "../../payload/builder", features = ["test-utils"] }
 
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 serde_json = "1.0.94"

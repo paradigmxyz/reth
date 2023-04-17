@@ -48,7 +48,7 @@ reth-db = { path = "../storage/db", features = ["test-utils", "mdbx"] }
 reth-interfaces = { path = "../interfaces", features = ["test-utils"] }
 reth-downloaders = { path = "../net/downloaders" }
 reth-eth-wire = { path = "../net/eth-wire" }                            # TODO(onbjerg): We only need this for [BlockBody]
-reth-executor = { path = "../executor" }
+reth-blockchain-tree = { path = "../blockchain-tree" }
 reth-rlp = { path = "../rlp" }
 reth-revm = { path = "../revm" }
 reth-trie = { path = "../trie", features = ["test-utils"] }

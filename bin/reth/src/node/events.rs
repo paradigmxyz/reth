@@ -1,11 +1,17 @@
 //! Support for handling events emitted by node components.
 
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::BlockNumber;
 use reth_stages::{PipelineEvent, StageId};
-use std::time::Duration;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
+use tokio::time::Interval;
 use tracing::{info, warn};
 
 /// The current high-level state of the node.
@@ -28,7 +34,7 @@ impl NodeState {
     }
 
     /// Processes an event emitted by the pipeline
-    async fn handle_pipeline_event(&mut self, event: PipelineEvent) {
+    fn handle_pipeline_event(&mut self, event: PipelineEvent) {
         match event {
             PipelineEvent::Running { stage_id, stage_progress } => {
                 let notable = self.current_stage.is_none();
@@ -53,7 +59,7 @@ impl NodeState {
         }
     }
 
-    async fn handle_network_event(&mut self, event: NetworkEvent) {
+    fn handle_network_event(&mut self, event: NetworkEvent) {
         match event {
             NetworkEvent::SessionEstablished { peer_id, status, .. } => {
                 info!(target: "reth::cli", connected_peers = self.num_connected_peers(), peer_id = %peer_id, best_block = %status.blockhash, "Peer connected");
@@ -68,6 +74,7 @@ impl NodeState {
 }
 
 /// A node event.
+#[derive(Debug)]
 pub enum NodeEvent {
     /// A network event.
     Network(NetworkEvent),
@@ -86,33 +93,60 @@ impl From<PipelineEvent> for NodeEvent {
         NodeEvent::Pipeline(evt)
     }
 }
-
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
 pub async fn handle_events(
     network: Option<NetworkHandle>,
-    mut events: impl Stream<Item = NodeEvent> + Unpin,
+    events: impl Stream<Item = NodeEvent> + Unpin,
 ) {
-    let mut state = NodeState::new(network);
+    let state = NodeState::new(network);
 
-    let mut interval = tokio::time::interval(Duration::from_secs(30));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        tokio::select! {
-            Some(event) = events.next() => {
-                match event {
-                    NodeEvent::Network(event) => {
-                        state.handle_network_event(event).await;
-                    },
-                    NodeEvent::Pipeline(event) => {
-                        state.handle_pipeline_event(event).await;
-                    }
+    let mut info_interval = tokio::time::interval(Duration::from_secs(30));
+    info_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let handler = EventHandler { state, events, info_interval };
+    handler.await
+}
+
+/// Handles events emitted by the node and logs them accordingly.
+#[pin_project::pin_project]
+struct EventHandler<St> {
+    state: NodeState,
+    #[pin]
+    events: St,
+    #[pin]
+    info_interval: Interval,
+}
+
+impl<St> Future for EventHandler<St>
+where
+    St: Stream<Item = NodeEvent> + Unpin,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        while this.info_interval.poll_tick(cx).is_ready() {
+            let stage = this
+                .state
+                .current_stage
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "None".to_string());
+            info!(target: "reth::cli", connected_peers = this.state.num_connected_peers(), %stage, checkpoint = this.state.current_checkpoint, "Status");
+        }
+
+        while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {
+            match event {
+                NodeEvent::Network(event) => {
+                    this.state.handle_network_event(event);
                 }
-            },
-            _ = interval.tick() => {
-                let stage = state.current_stage.map(|id| id.to_string()).unwrap_or_else(|| "None".to_string());
-                info!(target: "reth::cli", connected_peers = state.num_connected_peers(), %stage, checkpoint = state.current_checkpoint, "Status");
+                NodeEvent::Pipeline(event) => {
+                    this.state.handle_pipeline_event(event);
+                }
             }
         }
+
+        Poll::Pending
     }
 }

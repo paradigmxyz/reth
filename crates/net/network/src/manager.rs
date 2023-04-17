@@ -39,9 +39,10 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_net_common::bandwidth_meter::BandwidthMeter;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
+use reth_network_api::ReputationChangeKind;
 use reth_primitives::{NodeRecord, PeerId, H256};
 use reth_provider::BlockProvider;
+use reth_rpc_types::{EthProtocolInfo, NetworkStatus};
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -658,7 +659,7 @@ where
                                 this.swarm
                                     .state_mut()
                                     .peers_mut()
-                                    .on_active_inbound_session(peer_id, remote_addr);
+                                    .on_incoming_session_established(peer_id, remote_addr);
                             }
                             this.event_listeners.send(NetworkEvent::SessionEstablished {
                                 peer_id,

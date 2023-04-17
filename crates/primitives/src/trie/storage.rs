@@ -15,7 +15,10 @@ pub struct StorageTrieEntry {
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for StorageTrieEntry {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         let nibbles_len = self.nibbles.to_compact(buf);
         let node_len = self.node.to_compact(buf);
         nibbles_len + node_len

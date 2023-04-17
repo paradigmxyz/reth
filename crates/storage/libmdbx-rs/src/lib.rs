@@ -13,6 +13,7 @@ pub use crate::{
     flags::*,
     transaction::{Transaction, TransactionKind, RO, RW},
 };
+pub use ffi::MDBX_dbi as DBI;
 
 mod codec;
 mod cursor;
@@ -52,7 +53,7 @@ mod test_utils {
             LittleEndian::write_u64(&mut value, height);
             let tx = env.begin_rw_txn().expect("begin_rw_txn");
             let index = tx.create_db(None, DatabaseFlags::DUP_SORT).expect("open index db");
-            tx.put(&index, HEIGHT_KEY, value, WriteFlags::empty()).expect("tx.put");
+            tx.put(index.dbi(), HEIGHT_KEY, value, WriteFlags::empty()).expect("tx.put");
             tx.commit().expect("tx.commit");
         }
     }

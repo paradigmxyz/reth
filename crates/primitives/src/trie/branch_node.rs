@@ -63,7 +63,10 @@ impl BranchNodeCompact {
 }
 
 impl Compact for BranchNodeCompact {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         let BranchNodeCompact { state_mask, tree_mask, hash_mask, root_hash, hashes } = self;
 
         let mut buf_size = 0;

@@ -101,7 +101,8 @@ fn test_stat() {
         let mut value = [0u8; 8];
         LittleEndian::write_u64(&mut value, i);
         let tx = env.begin_rw_txn().expect("begin_rw_txn");
-        tx.put(&tx.open_db(None).unwrap(), value, value, WriteFlags::default()).expect("tx.put");
+        tx.put(tx.open_db(None).unwrap().dbi(), value, value, WriteFlags::default())
+            .expect("tx.put");
         tx.commit().expect("tx.commit");
     }
 
@@ -143,11 +144,12 @@ fn test_freelist() {
         let mut value = [0u8; 8];
         LittleEndian::write_u64(&mut value, i);
         let tx = env.begin_rw_txn().expect("begin_rw_txn");
-        tx.put(&tx.open_db(None).unwrap(), value, value, WriteFlags::default()).expect("tx.put");
+        tx.put(tx.open_db(None).unwrap().dbi(), value, value, WriteFlags::default())
+            .expect("tx.put");
         tx.commit().expect("tx.commit");
     }
     let tx = env.begin_rw_txn().expect("begin_rw_txn");
-    tx.clear_db(&tx.open_db(None).unwrap()).expect("clear");
+    tx.clear_db(tx.open_db(None).unwrap().dbi()).expect("clear");
     tx.commit().expect("tx.commit");
 
     // Freelist should not be empty after clear_db.

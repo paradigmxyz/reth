@@ -37,6 +37,10 @@ where
             .map(|header| Block::uncle_block_from_header(header).into());
         Ok(uncle)
     }
+
+    /// Returns the number transactions in the given block.
+    ///
+    /// Returns `None` if the block does not exist
     pub(crate) async fn block_transaction_count(
         &self,
         block_id: impl Into<BlockId>,
@@ -44,13 +48,18 @@ where
         let block_id = block_id.into();
         // TODO support pending block
 
-        if let Some(txs) = self.client().transactions_by_block(block_id)? {
-            Ok(Some(txs.len()))
-        } else {
-            Ok(None)
-        }
+        let block_hash = match self.client().block_hash_for_id(block_id)? {
+            Some(block_hash) => block_hash,
+            None => return Ok(None),
+        };
+
+        Ok(self.cache().get_block_transactions(block_hash).await?.map(|txs| txs.len()))
     }
 
+    /// Returns the rpc block object for the given block id.
+    ///
+    /// If `full` is true, the block object will contain all transaction objects, otherwise it will
+    /// only contain the transaction hashes.
     pub(crate) async fn block(
         &self,
         block_id: impl Into<BlockId>,
@@ -58,18 +67,19 @@ where
     ) -> EthResult<Option<RichBlock>> {
         let block_id = block_id.into();
         // TODO support pending block
+        let block_hash = match self.client().block_hash_for_id(block_id)? {
+            Some(block_hash) => block_hash,
+            None => return Ok(None),
+        };
 
-        if let Some(block) = self.client().block(block_id)? {
-            let block_hash = self
-                .client()
-                .block_hash_for_id(block_id)?
-                .ok_or(EthApiError::UnknownBlockNumber)?;
-            let total_difficulty =
-                self.client().header_td(&block_hash)?.ok_or(EthApiError::UnknownBlockNumber)?;
-            let block = Block::from_block(block, total_difficulty, full.into(), Some(block_hash))?;
-            Ok(Some(block.into()))
-        } else {
-            Ok(None)
-        }
+        let block = match self.cache().get_block(block_hash).await? {
+            Some(block) => block,
+            None => return Ok(None),
+        };
+
+        let total_difficulty =
+            self.client().header_td(&block_hash)?.ok_or(EthApiError::UnknownBlockNumber)?;
+        let block = Block::from_block(block, total_difficulty, full.into(), Some(block_hash))?;
+        Ok(Some(block.into()))
     }
 }

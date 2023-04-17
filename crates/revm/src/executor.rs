@@ -5,11 +5,11 @@ use crate::{
     stack::{InspectorStack, InspectorStackConfig},
     to_reth_acc,
 };
+use reth_blockchain_tree::post_state::PostState;
 use reth_consensus_common::calc;
-use reth_executor::post_state::PostState;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
-    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Log, Receipt,
+    Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
     ReceiptWithBloom, TransactionSigned, Withdrawal, H256, U256,
 };
 use reth_provider::{BlockExecutor, StateProvider};
@@ -135,7 +135,7 @@ where
         let mut drained_balance = U256::ZERO;
 
         // drain all accounts ether
-        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
+        for address in reth_blockchain_tree::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS {
             let db_account = db.load_account(address).map_err(|_| Error::ProviderError)?;
             let old = to_reth_acc(&db_account.info);
             // drain balance
@@ -146,7 +146,7 @@ where
         }
 
         // add drained ether to beneficiary.
-        let beneficiary = reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
+        let beneficiary = reth_blockchain_tree::eth_dao_fork::DAO_HARDFORK_BENEFICIARY;
         self.increment_account_balance(beneficiary, drained_balance, post_state)?;
 
         Ok(())
@@ -241,9 +241,6 @@ where
             // append gas used
             cumulative_gas_used += result.gas_used();
 
-            // cast revm logs to reth logs
-            let logs: Vec<Log> = result.logs().into_iter().map(into_reth_log).collect();
-
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
                 tx_type: transaction.tx_type(),
@@ -251,7 +248,8 @@ where
                 // receipts`.
                 success: result.is_success(),
                 cumulative_gas_used,
-                logs,
+                // convert to reth log
+                logs: result.into_logs().into_iter().map(into_reth_log).collect(),
             });
             post_state.finish_transition();
         }
@@ -877,7 +875,7 @@ mod tests {
 
         let mut beneficiary_balance = 0;
         for (i, dao_address) in
-            reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate()
+            reth_blockchain_tree::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter().enumerate()
         {
             db.insert_account(
                 *dao_address,
@@ -915,10 +913,10 @@ mod tests {
         // beneficiary
         let db = executor.db();
         let dao_beneficiary =
-            db.accounts.get(&reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
+            db.accounts.get(&reth_blockchain_tree::eth_dao_fork::DAO_HARDFORK_BENEFICIARY).unwrap();
 
         assert_eq!(dao_beneficiary.info.balance, U256::from(beneficiary_balance));
-        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+        for address in reth_blockchain_tree::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
             let account = db.accounts.get(address).unwrap();
             assert_eq!(account.info.balance, U256::ZERO);
         }
@@ -926,14 +924,14 @@ mod tests {
         // check changesets
         let beneficiary_state = out
             .accounts()
-            .get(&reth_executor::eth_dao_fork::DAO_HARDFORK_BENEFICIARY)
+            .get(&reth_blockchain_tree::eth_dao_fork::DAO_HARDFORK_BENEFICIARY)
             .unwrap()
             .unwrap();
         assert_eq!(
             beneficiary_state,
             Account { balance: U256::from(beneficiary_balance), ..Default::default() },
         );
-        for address in reth_executor::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
+        for address in reth_blockchain_tree::eth_dao_fork::DAO_HARDKFORK_ACCOUNTS.iter() {
             let updated_account = out.accounts().get(address).unwrap().unwrap();
             assert_eq!(updated_account, Account { balance: U256::ZERO, ..Default::default() });
         }
