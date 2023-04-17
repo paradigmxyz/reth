@@ -787,11 +787,9 @@ mod tests {
 
     #[tokio::test]
     async fn sanity_path() {
-        let data = BlockChainTestData::default();
-        let (mut block1, exec1) = data.blocks[0].clone();
-        block1.number = 11;
-        let (mut block2, exec2) = data.blocks[1].clone();
-        block2.number = 12;
+        let data = BlockChainTestData::default_with_numbers(11, 12);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
 
         // test pops execution results from vector, so order is from last to first.
         let externals = setup_externals(vec![exec2.clone(), exec1.clone(), exec2, exec1]);

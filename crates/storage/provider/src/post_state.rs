@@ -227,29 +227,35 @@ impl PostState {
     /// Reverts each change up to and including any change that is part of `block_number`.
     ///
     /// The reverted changes are removed from this post-state, and their effects are reverted.
-    pub fn revert_to(&mut self, block_number: BlockNumber) {
-        let highest_account_block = self.account_changes.keys().last().copied();
-        let highest_storage_block = self.storage_changes.keys().last().copied();
-        let highest_block = highest_account_block
-            .unwrap_or_default()
-            .max(highest_storage_block.unwrap_or_default());
-
-        // todo: use retain?
-
-        for block_number in highest_block..=block_number {
-            // Revert account state
-            if let Some(accounts) = self.account_changes.remove(&block_number) {
-                self.accounts.extend(accounts);
+    pub fn revert_to(&mut self, target_block_number: BlockNumber) {
+        let mut account_changes_to_revert = BTreeMap::new();
+        self.account_changes.retain(|block_number, accounts| {
+            if *block_number > target_block_number {
+                account_changes_to_revert.insert(*block_number, accounts.clone());
+                false
+            } else {
+                true
             }
+        });
+        for (_, accounts) in account_changes_to_revert.into_iter().rev() {
+            self.accounts.extend(accounts);
+        }
 
-            // Revert storage state
-            if let Some(storages) = self.storage_changes.remove(&block_number) {
-                for (address, storage) in storages {
-                    self.storage.entry(address).and_modify(|head_storage| {
-                        head_storage.wiped = storage.wiped;
-                        head_storage.storage.extend(storage.storage);
-                    });
-                }
+        let mut storage_changes_to_revert = BTreeMap::new();
+        self.storage_changes.retain(|block_number, storages| {
+            if *block_number > target_block_number {
+                storage_changes_to_revert.insert(*block_number, storages.clone());
+                false
+            } else {
+                true
+            }
+        });
+        for (_, storages) in storage_changes_to_revert.into_iter().rev() {
+            for (address, storage) in storages {
+                self.storage.entry(address).and_modify(|head_storage| {
+                    head_storage.wiped = storage.wiped;
+                    head_storage.storage.extend(storage.clone().storage);
+                });
             }
         }
     }
@@ -389,7 +395,6 @@ impl PostState {
         for (block_number, storage_changes) in self.storage_changes.into_iter() {
             for (address, storage) in storage_changes.into_iter() {
                 let storage_id = BlockNumberAddress((block_number, address));
-
                 if storage.wiped {
                     if let Some((_, entry)) = storages_cursor.seek_exact(address)? {
                         tracing::trace!(target: "provider::post_state", ?storage_id, key = ?entry.key, "Storage wiped");
