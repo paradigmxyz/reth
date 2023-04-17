@@ -1,10 +1,11 @@
-use reth_network_api::{EthProtocolInfo, NetworkStatus};
 use reth_primitives::{NodeRecord, PeerId};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     net::{IpAddr, SocketAddr},
 };
+
+use crate::{EthProtocolInfo, NetworkStatus};
 
 /// Represents the `admin_nodeInfo` response, which can be queried for all the information
 /// known about the running node at the networking granularity.
