@@ -44,18 +44,19 @@ where
             start_block = previous_to_end_block;
         }
 
-        let reward_percentiles_unwrapped = reward_percentiles.unwrap_or(vec![]);
+        // if not provided the percentiles are []
+        let reward_percentiles = reward_percentiles.unwrap_or_default();
 
         // checks for rewardPercentile's sorted-ness
         // check if any of rewardPercentile is greater than 100
         // pre 1559 blocks, return 0 for baseFeePerGas
-        for i in 1..reward_percentiles_unwrapped.len() {
-            if reward_percentiles_unwrapped[i] <= reward_percentiles_unwrapped[i - 1] {
-                return Err(EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]))
+        for window in reward_percentiles.windows(2) {
+            if window[0] >= window[1] {
+                return Err(EthApiError::InvalidRewardPercentile(window[1]))
             }
 
-            if reward_percentiles_unwrapped[i] < 0.0 && reward_percentiles_unwrapped[i] > 100.0 {
-                return Err(EthApiError::InvalidRewardPercentile(reward_percentiles_unwrapped[i]))
+            if window[0] < 0.0 || window[0] > 100.0 {
+                return Err(EthApiError::InvalidRewardPercentile(window[0]))
             }
         }
 
@@ -145,7 +146,7 @@ where
                         let mut sum_gas_used = sorter[0].gas_used;
                         let mut tx_index = 0;
 
-                        for i in &reward_percentiles_unwrapped {
+                        for i in reward_percentiles.iter() {
                             let threshold_gas_used = (header.gas_used as f64) * i / 100_f64;
                             while sum_gas_used < threshold_gas_used as u128 &&
                                 tx_index < transactions.len()
