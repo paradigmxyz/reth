@@ -13,19 +13,16 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     serde_helper::JsonStorageKey, AccessListWithGasUsed, Address, BlockId, BlockNumberOrTag, Bytes,
-    Header, H256, H64, U256, U64,
+    H256, H64, U256, U64,
 };
 use reth_provider::{BlockProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory,
-    FeeHistoryCacheItem, Index, RichBlock, SyncStatus, TransactionReceipt, TransactionRequest,
-    TxGasAndReward, Work,
+    state::StateOverride, CallRequest, EIP1186AccountProofResponse, FeeHistory, Index, RichBlock,
+    SyncStatus, TransactionReceipt, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
-use revm::primitives::ruint::Uint;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use tracing::trace;
 
 #[async_trait::async_trait]
@@ -375,7 +372,13 @@ mod tests {
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
-        let response = eth_api.fee_history(1.into(), BlockNumberOrTag::Latest.into(), None).await;
+        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+            &eth_api,
+            1.into(),
+            BlockNumberOrTag::Latest.into(),
+            None,
+        )
+        .await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
@@ -453,9 +456,13 @@ mod tests {
             EthStateCache::spawn(NoopProvider::default(), Default::default()),
         );
 
-        let response = eth_api
-            .fee_history((newest_block + 1).into(), newest_block.into(), Some(vec![10.0]))
-            .await;
+        let response = <EthApi<_, _, _> as EthApiServer>::fee_history(
+            &eth_api,
+            (newest_block + 1).into(),
+            newest_block.into(),
+            Some(vec![10.0]),
+        )
+        .await;
         assert!(matches!(response, RpcResult::Err(RpcError::Call(CallError::Custom(_)))));
         let Err(RpcError::Call(CallError::Custom(error_object))) = response else { unreachable!() };
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
