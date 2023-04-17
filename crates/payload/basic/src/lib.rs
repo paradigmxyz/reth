@@ -477,9 +477,13 @@ fn build_payload<Pool, Client>(
             // TODO skip invalid transactions
             let ResultAndState { result, state } =
                 evm.transact().map_err(PayloadBuilderError::EvmExecutionError)?;
+            let gas_used = result.gas_used();
 
             // commit changes
             commit_state_changes(&mut db, &mut post_state, state, true);
+
+            // add gas used by the transaction to cumulative gas used, before creating the receipt
+            cumulative_gas_used += gas_used;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             post_state.add_receipt(Receipt {
@@ -489,16 +493,11 @@ fn build_payload<Pool, Client>(
                 logs: result.logs().into_iter().map(into_reth_log).collect(),
             });
 
-            let gas_used = result.gas_used();
-
             // update add to total fees
             let miner_fee = tx
                 .effective_tip_per_gas(base_fee)
                 .expect("fee is always valid; execution succeeded");
             total_fees += U256::from(miner_fee) * U256::from(gas_used);
-
-            // append gas used
-            cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
