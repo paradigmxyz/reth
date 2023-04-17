@@ -1,5 +1,4 @@
-use reth_network_api::{EthProtocolInfo, NetworkStatus};
-use reth_primitives::{NodeRecord, PeerId};
+use reth_primitives::{NodeRecord, PeerId, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -62,6 +61,31 @@ pub struct Ports {
     pub discovery: u16,
     /// Port exposed for listening.
     pub listener: u16,
+}
+
+/// The status of the network being ran by the local node.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkStatus {
+    /// The local node client version.
+    pub client_version: String,
+    /// The current ethereum protocol version
+    pub protocol_version: u64,
+    /// Information about the Ethereum Wire Protocol.
+    pub eth_protocol_info: EthProtocolInfo,
+}
+
+/// Information about the Ethereum Wire Protocol (ETH)
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EthProtocolInfo {
+    /// The current difficulty at the head of the chain.
+    #[serde(deserialize_with = "reth_primitives::serde_helper::deserialize_json_u256")]
+    pub difficulty: U256,
+    /// The block hash of the head of the chain.
+    pub head: H256,
+    /// Network ID in base 10.
+    pub network: u64,
+    /// Genesis block of the current chain.
+    pub genesis: H256,
 }
 
 #[cfg(test)]

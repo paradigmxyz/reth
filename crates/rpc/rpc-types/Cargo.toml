@@ -13,7 +13,6 @@ Reth RPC types
 # reth
 reth-primitives = { path = "../../primitives" }
 reth-rlp = { path = "../../rlp" }
-reth-network-api = { path = "../../net/network-api"}
 
 # errors
 thiserror = "1.0"

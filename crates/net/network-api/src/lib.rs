@@ -11,11 +11,9 @@
 
 use async_trait::async_trait;
 use reth_eth_wire::DisconnectReason;
-use reth_primitives::{NodeRecord, PeerId, H256, U256};
+use reth_primitives::{NodeRecord, PeerId};
+use reth_rpc_types::NetworkStatus;
 use std::net::SocketAddr;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
@@ -92,33 +90,4 @@ pub enum PeerKind {
     Basic,
     /// Trusted peer.
     Trusted,
-}
-
-/// The status of the network being ran by the local node.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NetworkStatus {
-    /// The local node client version.
-    pub client_version: String,
-    /// The current ethereum protocol version
-    pub protocol_version: u64,
-    /// Information about the Ethereum Wire Protocol.
-    pub eth_protocol_info: EthProtocolInfo,
-}
-/// Information about the Ethereum Wire Protocol (ETH)
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct EthProtocolInfo {
-    /// The current difficulty at the head of the chain.
-    #[cfg_attr(
-        feature = "serde",
-        serde(deserialize_with = "reth_primitives::serde_helper::deserialize_json_u256")
-    )]
-    pub difficulty: U256,
-    /// The block hash of the head of the chain.
-    pub head: H256,
-    /// Network ID in base 10.
-    pub network: u64,
-    /// Genesis block of the current chain.
-    pub genesis: H256,
 }
