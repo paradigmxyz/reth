@@ -4468,10 +4468,10 @@ dependencies = [
  "reth-auto-seal-consensus",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
+ "reth-blockchain-tree",
  "reth-db",
  "reth-discv4",
  "reth-downloaders",
- "reth-executor",
  "reth-interfaces",
  "reth-net-nat",
  "reth-network",
@@ -4544,9 +4544,9 @@ dependencies = [
  "assert_matches",
  "futures",
  "metrics",
+ "reth-blockchain-tree",
  "reth-consensus-common",
  "reth-db",
- "reth-executor",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-payload-builder",
@@ -4560,6 +4560,20 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-blockchain-tree"
+version = "0.1.0"
+dependencies = [
+ "aquamarine",
+ "assert_matches",
+ "parking_lot 0.12.1",
+ "reth-db",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "tokio",
 ]
 
 [[package]]
@@ -4760,29 +4774,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util 0.7.7",
  "tracing",
-]
-
-[[package]]
-name = "reth-executor"
-version = "0.1.0"
-dependencies = [
- "aquamarine",
- "assert_matches",
- "auto_impl",
- "hash-db",
- "parking_lot 0.12.1",
- "plain_hasher",
- "reth-db",
- "reth-interfaces",
- "reth-primitives",
- "reth-provider",
- "reth-rlp",
- "rlp",
- "sha3",
- "thiserror",
- "tokio",
- "tracing",
- "triehash",
 ]
 
 [[package]]
@@ -5053,8 +5044,8 @@ dependencies = [
 name = "reth-revm"
 version = "0.1.0"
 dependencies = [
+ "reth-blockchain-tree",
  "reth-consensus-common",
- "reth-executor",
  "reth-interfaces",
  "reth-primitives",
  "reth-provider",
@@ -5282,11 +5273,11 @@ dependencies = [
  "pprof",
  "rand 0.8.5",
  "rayon",
+ "reth-blockchain-tree",
  "reth-codecs",
  "reth-db",
  "reth-downloaders",
  "reth-eth-wire",
- "reth-executor",
  "reth-interfaces",
  "reth-metrics-derive",
  "reth-primitives",
@@ -6548,14 +6539,13 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.26.0"
+version = "1.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03201d01c3c27a29c8a5cee5b55a93ddae1ccf6f08f65365c2c918f8c1b76f64"
+checksum = "d0de47a4eecbe11f498978a9b29d792f0d2692d1dd003650c24c76510e3bc001"
 dependencies = [
  "autocfg",
  "bytes",
  "libc",
- "memchr",
  "mio",
  "num_cpus",
  "parking_lot 0.12.1",
@@ -6568,13 +6558,13 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "1.8.2"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d266c00fde287f55d3f1c3e96c500c362a2b8c695076ec180f27918820bc6df8"
+checksum = "61a573bdc87985e9d6ddeed1b3d864e8a302c847e40d647746df2f1de209d1ce"
 dependencies = [
  "proc-macro2 1.0.56",
  "quote 1.0.26",
- "syn 1.0.109",
+ "syn 2.0.15",
 ]
 
 [[package]]

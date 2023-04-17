@@ -641,8 +641,7 @@ enum PipelineTarget {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
-    use reth_executor::{
+    use reth_blockchain_tree::{
         blockchain_tree::{
             config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree,
             ShareableBlockchainTree,
@@ -650,6 +649,7 @@ mod tests {
         post_state::PostState,
         test_utils::TestExecutorFactory,
     };
+    use reth_db::mdbx::{test_utils::create_test_rw_db, Env, WriteMap};
     use reth_interfaces::{sync::NoopSyncStateUpdate, test_utils::TestConsensus};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_primitives::{ChainSpec, ChainSpecBuilder, SealedBlockWithSenders, H256, MAINNET};
