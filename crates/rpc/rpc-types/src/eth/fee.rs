@@ -5,7 +5,7 @@ use std::{num::NonZeroUsize, sync::Arc};
 use tokio::sync::Mutex;
 
 /// Internal struct to calculate reward percentiles
-#[derive(Clone, Debug, PartialEq, Eq, std::cmp::PartialOrd, std::cmp::Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TxGasAndReward {
     /// gas used by a block
     pub gas_used: u128,

@@ -5,7 +5,7 @@ use crate::{
     EthApi,
 };
 use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, Header, U256, U64};
+use reth_primitives::{BlockId, Header, Transaction, U256, U64};
 use reth_provider::{BlockProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{FeeHistory, FeeHistoryCacheItem, TxGasAndReward};
 use reth_transaction_pool::TransactionPool;
@@ -90,7 +90,6 @@ where
             let header_range = start_block..=end_block;
 
             let headers: Vec<Header> = self.inner.client.headers_range(header_range.clone())?;
-
             let transactions = self.inner.client.transactions_by_block_range(header_range)?;
 
             let header_tx = headers.iter().zip(&transactions);
@@ -111,24 +110,12 @@ where
                         try_into().unwrap(); // u64 -> U256 won't fail
                 let gas_used_ratio = header.gas_used as f64 / header.gas_limit as f64;
 
-                let mut reward: Vec<U256> = vec![];
-
+                let mut rewards: Vec<U256> = vec![];
                 let mut sorter: Vec<TxGasAndReward> = vec![];
                 for transaction in transactions.iter() {
-                    let max_priority_fee_per_gas = transaction.max_priority_fee_per_gas();
-                    let max_fee_per_gas = transaction.max_fee_per_gas();
-                    let base_fee = header.base_fee_per_gas;
+                    let reward = transaction.effective_gas_price(header.base_fee_per_gas);
 
-                    if let Some(max_priority_fee_per_gas) = max_priority_fee_per_gas {}
-
-                    // todo: get gas fees for tx and also gas price
-                    // sorter.push(TxGasAndReward {
-                    //     gas_used: header.gas_used as u128,
-                    //     reward: std::cmp::min(
-                    //         max_priority_fee_per_gas,
-                    //         max_fee_per_gas - base_fee as u128,
-                    //     ),
-                    // })
+                    sorter.push(TxGasAndReward { gas_used: header.gas_used as u128, reward })
                 }
 
                 sorter.sort();
@@ -136,22 +123,26 @@ where
                 let mut sum_gas_used = sorter[0].gas_used;
                 let mut tx_index = 0;
 
-                for i in reward_percentiles.iter() {
-                    let threshold_gas_used = (header.gas_used as f64) * i / 100_f64;
+                for percentile in reward_percentiles.iter() {
+                    let threshold_gas_used = (header.gas_used as f64) * percentile / 100_f64;
                     while sum_gas_used < threshold_gas_used as u128 && tx_index < transactions.len()
                     {
                         tx_index += 1;
                         sum_gas_used += sorter[tx_index].reward;
                     }
 
-                    reward.push(U256::from(sorter[tx_index].reward));
+                    // we need to make sure to push zeros for empty blocks
+                    // match sorter.get(tx_index) {
+                    //     Some(reward) => rewards.push(U256::from(reward)),
+                    //     None => rewards.push(U256::ZERO),
+                    // }
                 }
 
                 let fee_history_cache_item = FeeHistoryCacheItem {
                     hash: None,
                     base_fee_per_gas,
                     gas_used_ratio,
-                    reward: Some(reward), // TODO: calculate rewards per transaction
+                    reward: Some(rewards), // TODO: calculate rewards per transaction
                 };
 
                 // Insert missing cache entries in the map for further response composition from
