@@ -639,12 +639,18 @@ impl Compact for TransactionSigned {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut tmp = vec![];
-        let sig_bit = self.signature.to_compact(&mut tmp) as u8;
-        let tx_bit = self.transaction.to_compact(&mut tmp) as u8;
-        buf.put_u8(sig_bit | (tx_bit << 1));
-        buf.put_slice(&tmp);
-        1 + tmp.len()
+        let before = buf.as_mut().len();
+
+        // placeholder for bitflags
+        buf.put_u8(0);
+
+        let sig_bit = self.signature.to_compact(buf) as u8;
+        let tx_bit = self.transaction.to_compact(buf) as u8;
+
+        // replace with actual flags
+        buf.as_mut()[before] = sig_bit | (tx_bit << 1);
+
+        buf.as_mut().len() - before
     }
 
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
