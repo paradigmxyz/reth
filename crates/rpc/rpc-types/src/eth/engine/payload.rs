@@ -7,6 +7,9 @@ use reth_primitives::{
 use reth_rlp::{Decodable, Encodable};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
+/// The execution payload body response that allows for `null` values.
+pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
+
 /// And 8-byte identifier for an execution payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct PayloadId(H64);
@@ -228,9 +231,6 @@ impl From<Block> for ExecutionPayloadBody {
     }
 }
 
-/// The execution payload body response that allows for `null` values.
-pub type ExecutionPayloadBodies = Vec<Option<ExecutionPayloadBody>>;
-
 /// This structure contains the attributes required to initiate a payload build process in the
 /// context of an `engine_forkchoiceUpdated` call.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +267,21 @@ impl PayloadStatus {
     pub fn with_latest_valid_hash(mut self, latest_valid_hash: H256) -> Self {
         self.latest_valid_hash = Some(latest_valid_hash);
         self
+    }
+
+    /// Returns true if the payload status is syncing.
+    pub fn is_syncing(&self) -> bool {
+        self.status.is_syncing()
+    }
+
+    /// Returns true if the payload status is valid.
+    pub fn is_valid(&self) -> bool {
+        self.status.is_valid()
+    }
+
+    /// Returns true if the payload status is invalid.
+    pub fn is_invalid(&self) -> bool {
+        self.status.is_invalid()
     }
 }
 
@@ -347,6 +362,21 @@ impl PayloadStatusEnum {
             PayloadStatusEnum::Invalid { validation_error } => Some(validation_error),
             _ => None,
         }
+    }
+
+    /// Returns true if the payload status is syncing.
+    pub fn is_syncing(&self) -> bool {
+        matches!(self, PayloadStatusEnum::Syncing)
+    }
+
+    /// Returns true if the payload status is valid.
+    pub fn is_valid(&self) -> bool {
+        matches!(self, PayloadStatusEnum::Valid)
+    }
+
+    /// Returns true if the payload status is invalid.
+    pub fn is_invalid(&self) -> bool {
+        matches!(self, PayloadStatusEnum::Invalid { .. })
     }
 }
 

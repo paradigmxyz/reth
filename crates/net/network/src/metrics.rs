@@ -40,6 +40,8 @@ pub struct NetworkMetrics {
 pub struct TransactionsManagerMetrics {
     /// Total number of propagated transactions
     pub(crate) propagated_transactions: Counter,
+    /// Total number of reported bad transactions
+    pub(crate) reported_bad_transactions: Counter,
 }
 
 /// Metrics for Disconnection types

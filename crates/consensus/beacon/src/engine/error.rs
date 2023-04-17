@@ -30,6 +30,9 @@ pub enum BeaconEngineError {
     /// Common error. Wrapper around [reth_interfaces::Error].
     #[error(transparent)]
     Common(#[from] reth_interfaces::Error),
+    /// Thrown when the engine task stopped
+    #[error("beacon consensus engine task stopped")]
+    EngineUnavailable,
 }
 
 // box the pipeline error as it is a large enum.

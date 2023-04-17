@@ -35,7 +35,10 @@ impl From<TxType> for u8 {
 }
 
 impl Compact for TxType {
-    fn to_compact(self, _: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, _: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         match self {
             TxType::Legacy => 0,
             TxType::EIP2930 => 1,

@@ -87,6 +87,6 @@ mod tests {
         let value = BranchNodeCompact::new(1, 1, 1, vec![H256::random()], None);
 
         cursor.upsert(key.clone().into(), value.clone()).unwrap();
-        assert_eq!(cursor.seek(key.clone().into()).unwrap().unwrap().1, value);
+        assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
     }
 }

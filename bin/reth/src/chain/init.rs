@@ -1,4 +1,4 @@
-use crate::dirs::{DbPath, PlatformPath};
+use crate::dirs::{DbPath, MaybePlatformPath};
 use clap::Parser;
 use reth_primitives::ChainSpec;
 use reth_staged_sync::utils::{
@@ -19,7 +19,7 @@ pub struct InitCommand {
     /// - Windows: `{FOLDERID_RoamingAppData}/reth/db`
     /// - macOS: `$HOME/Library/Application Support/reth/db`
     #[arg(long, value_name = "PATH", verbatim_doc_comment, default_value_t)]
-    db: PlatformPath<DbPath>,
+    db: MaybePlatformPath<DbPath>,
 
     /// The chain this node is running.
     ///
@@ -45,7 +45,7 @@ impl InitCommand {
         info!(target: "reth::cli", "reth init starting");
 
         // add network name to db directory
-        let db_path = self.db.with_chain(self.chain.chain);
+        let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
         info!(target: "reth::cli", path = %db_path, "Opening database");
         let db = Arc::new(init_db(&db_path)?);

@@ -181,12 +181,18 @@ pub trait XdgPath {
 ///
 /// assert_ne!(default.as_ref(), custom.as_ref());
 /// ```
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct PlatformPath<D>(PathBuf, std::marker::PhantomData<D>);
 
 impl<D> Display for PlatformPath<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.display())
+    }
+}
+
+impl<D> Clone for PlatformPath<D> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), std::marker::PhantomData)
     }
 }
 
@@ -246,6 +252,55 @@ impl<D> PlatformPath<D> {
     }
 }
 
+/// An Optional wrapper type around [PlatformPath].
+///
+/// This is useful for when a path is optional, such as the `--db-path` flag.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
+
+// === impl MaybePlatformPath ===
+
+impl<D: XdgPath> MaybePlatformPath<D> {
+    /// Returns the path if it is set, otherwise returns the default path for the given chain.
+    pub fn unwrap_or_chain_default(&self, chain: Chain) -> PlatformPath<D> {
+        self.0.clone().unwrap_or_else(|| PlatformPath::default().with_chain(chain).0)
+    }
+}
+
+impl<D: XdgPath> Display for MaybePlatformPath<D> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(path) = &self.0 {
+            path.fmt(f)
+        } else {
+            // NOTE: this is a workaround for making it work with clap's `default_value_t` which
+            // computes the default value via `Default -> Display -> FromStr`
+            write!(f, "default")
+        }
+    }
+}
+
+impl<D> Default for MaybePlatformPath<D> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<D> FromStr for MaybePlatformPath<D> {
+    type Err = shellexpand::LookupError<VarError>;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let p = match s {
+            "default" => {
+                // NOTE: this is a workaround for making it work with clap's `default_value_t` which
+                // computes the default value via `Default -> Display -> FromStr`
+                None
+            }
+            _ => Some(PlatformPath::from_str(s)?),
+        };
+        Ok(Self(p))
+    }
+}
+
 /// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
 /// different networks.
 ///
@@ -280,5 +335,32 @@ impl<D> Display for ChainPath<D> {
 impl<D> From<ChainPath<D>> for PathBuf {
     fn from(value: ChainPath<D>) -> Self {
         value.0.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_maybe_db_platform_path() {
+        let path = MaybePlatformPath::<DbPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("reth/mainnet/db"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DbPath>::from_str("my/path/to/db").unwrap();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("my/path/to/db"), "{:?}", path);
+    }
+
+    #[test]
+    fn test_maybe_config_platform_path() {
+        let path = MaybePlatformPath::<ConfigPath>::default();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("reth/mainnet/reth.toml"), "{:?}", path);
+
+        let path = MaybePlatformPath::<DbPath>::from_str("my/path/to/reth.toml").unwrap();
+        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        assert!(path.as_ref().ends_with("my/path/to/reth.toml"), "{:?}", path);
     }
 }

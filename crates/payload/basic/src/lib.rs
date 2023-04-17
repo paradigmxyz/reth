@@ -4,25 +4,22 @@
     no_crate_inject,
     attr(deny(warnings, rust_2018_idioms), allow(dead_code, unused_variables))
 ))]
-// TODO rm later
-#![allow(unused)]
 
 //! reth basic payload job generator
 
 use futures_core::{ready, Stream};
 use futures_util::FutureExt;
-use reth_consensus_common::validation::calculate_next_block_base_fee;
 use reth_payload_builder::{
     error::PayloadBuilderError, BuiltPayload, PayloadBuilderAttributes, PayloadJob,
     PayloadJobGenerator,
 };
 use reth_primitives::{
-    bloom::logs_bloom, bytes::Bytes, proofs, Block, ChainSpec, Hardfork, Head, Header,
-    IntoRecoveredTransaction, Receipt, SealedBlock, EMPTY_OMMER_ROOT, U256,
+    bytes::{Bytes, BytesMut},
+    constants::{RETH_CLIENT_VERSION, SLOT_DURATION},
+    proofs, Block, ChainSpec, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT, U256,
 };
-use reth_provider::{BlockProvider, EvmEnvProvider, PostState, StateProviderFactory};
+use reth_provider::{BlockProvider, PostState, StateProviderFactory};
 use reth_revm::{
-    config::{revm_spec, revm_spec_by_timestamp_after_merge},
     database::{State, SubState},
     env::tx_env_with_recovered,
     executor::{
@@ -30,6 +27,7 @@ use reth_revm::{
     },
     into_reth_log,
 };
+use reth_rlp::Encodable;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::primitives::{BlockEnv, CfgEnv, Env, ResultAndState, SpecId};
@@ -46,17 +44,6 @@ use tokio::{
 };
 use tracing::trace;
 
-// TODO move to common since commonly used
-
-/// Settings for how to generate a block
-#[derive(Debug, Clone)]
-pub struct BlockConfig {
-    /// Data to include in the block's extra data field.
-    extradata: Bytes,
-    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
-    max_gas_limit: u64,
-}
-
 /// The [PayloadJobGenerator] that creates [BasicPayloadJob]s.
 pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     /// The client that can interact with the chain.
@@ -67,8 +54,6 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks> {
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
-    /// The configuration for how to create a block.
-    block_config: BlockConfig,
     /// Restricts how many generator tasks can be executed at once.
     payload_task_guard: PayloadTaskGuard,
     /// The chain spec.
@@ -84,7 +69,6 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
         pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
-        block_config: BlockConfig,
         chain_spec: Arc<ChainSpec>,
     ) -> Self {
         Self {
@@ -93,7 +77,6 @@ impl<Client, Pool, Tasks> BasicPayloadJobGenerator<Client, Pool, Tasks> {
             executor,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
-            block_config,
             chain_spec,
         }
     }
@@ -122,33 +105,14 @@ where
             .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent))?;
 
         // configure evm env based on parent block
-        let initialized_cfg = CfgEnv {
-            chain_id: U256::from(self.chain_spec.chain().id()),
-            // ensure we're not missing any timestamp based hardforks
-            spec_id: revm_spec_by_timestamp_after_merge(&self.chain_spec, attributes.timestamp),
-            ..Default::default()
-        };
-
-        let initialized_block_env = BlockEnv {
-            number: U256::from(parent_block.number + 1),
-            coinbase: attributes.suggested_fee_recipient,
-            timestamp: U256::from(attributes.timestamp),
-            difficulty: U256::ZERO,
-            prevrandao: Some(attributes.prev_randao),
-            gas_limit: U256::from(parent_block.gas_limit),
-            // calculate basefee based on parent block's gas usage
-            basefee: U256::from(calculate_next_block_base_fee(
-                parent_block.gas_used,
-                parent_block.gas_limit,
-                parent_block.base_fee_per_gas.unwrap_or_default(),
-            )),
-        };
+        let (initialized_cfg, initialized_block_env) =
+            attributes.cfg_and_block_env(&self.chain_spec, &parent_block);
 
         let config = PayloadConfig {
             initialized_block_env,
             initialized_cfg,
             parent_block: Arc::new(parent_block),
-            extra_data: self.block_config.extradata.clone(),
+            extra_data: self.config.extradata.clone(),
             attributes,
             chain_spec: Arc::clone(&self.chain_spec),
         };
@@ -187,6 +151,10 @@ impl PayloadTaskGuard {
 /// Settings for the [BasicPayloadJobGenerator].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
+    /// Data to include in the block's extra data field.
+    extradata: Bytes,
+    /// Target gas ceiling for mined blocks, defaults to 30_000_000 gas.
+    max_gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline when this job should resolve.
@@ -220,14 +188,34 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
+
+    /// Sets the data to include in the block's extra data field.
+    ///
+    /// Defaults to the current client version: `rlp(RETH_CLIENT_VERSION)`.
+    pub fn extradata(mut self, extradata: Bytes) -> Self {
+        self.extradata = extradata;
+        self
+    }
+
+    /// Sets the target gas ceiling for mined blocks.
+    ///
+    /// Defaults to 30_000_000 gas.
+    pub fn max_gas_limit(mut self, max_gas_limit: u64) -> Self {
+        self.max_gas_limit = max_gas_limit;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
+        let mut extradata = BytesMut::new();
+        RETH_CLIENT_VERSION.as_bytes().encode(&mut extradata);
         Self {
+            extradata: extradata.freeze(),
+            max_gas_limit: 30_000_000,
             interval: Duration::from_secs(1),
             // 12s slot time
-            deadline: Duration::from_secs(12),
+            deadline: SLOT_DURATION,
             max_payload_tasks: 3,
         }
     }
@@ -255,21 +243,6 @@ pub struct BasicPayloadJob<Client, Pool, Tasks> {
     payload_task_guard: PayloadTaskGuard,
 }
 
-// === impl BasicPayloadJob ===
-
-impl<Client, Pool, Tasks> BasicPayloadJob<Client, Pool, Tasks> {
-    /// Checks if the new payload is better than the current best.
-    ///
-    /// This compares the total fees of the blocks, higher is better.
-    fn is_better(&self, new_payload: &BuiltPayload) -> bool {
-        if let Some(best_payload) = &self.best_payload {
-            new_payload.fees() > best_payload.fees()
-        } else {
-            true
-        }
-    }
-}
-
 impl<Client, Pool, Tasks> Stream for BasicPayloadJob<Client, Pool, Tasks>
 where
     Client: StateProviderFactory + Clone + Unpin + 'static,
@@ -289,6 +262,7 @@ where
             this.pending_block.is_none() &&
             !deadline_reached
         {
+            let _ = this.interval.poll_tick(cx);
             trace!("spawn new payload build task");
             let (tx, rx) = oneshot::channel();
             let client = this.client.clone();
@@ -297,10 +271,11 @@ where
             let _cancel = cancel.clone();
             let guard = this.payload_task_guard.clone();
             let payload_config = this.config.clone();
+            let best_payload = this.best_payload.clone();
             this.executor.spawn_blocking(Box::pin(async move {
                 // acquire the permit for executing the task
                 let _permit = guard.0.acquire().await;
-                build_payload(client, pool, payload_config, cancel, tx)
+                build_payload(client, pool, payload_config, cancel, best_payload, tx)
             }));
             this.pending_block = Some(PendingPayload { _cancel, payload: rx });
         }
@@ -308,12 +283,20 @@ where
         // poll the pending block
         if let Some(mut fut) = this.pending_block.take() {
             match fut.poll_unpin(cx) {
-                Poll::Ready(Ok(payload)) => {
+                Poll::Ready(Ok(outcome)) => {
                     this.interval.reset();
-                    if this.is_better(&payload) {
-                        let payload = Arc::new(payload);
-                        this.best_payload = Some(payload.clone());
-                        return Poll::Ready(Some(Ok(payload)))
+                    match outcome {
+                        BuildOutcome::Better(payload) => {
+                            trace!("built better payload");
+                            let payload = Arc::new(payload);
+                            this.best_payload = Some(payload);
+                        }
+                        BuildOutcome::Aborted { fees } => {
+                            trace!(?fees, "skipped payload build of worse block");
+                        }
+                        BuildOutcome::Cancelled => {
+                            unreachable!("the cancel signal never fired")
+                        }
                     }
                 }
                 Poll::Ready(Err(err)) => {
@@ -352,11 +335,11 @@ struct PendingPayload {
     /// The marker to cancel the job on drop
     _cancel: Cancelled,
     /// The channel to send the result to.
-    payload: oneshot::Receiver<Result<BuiltPayload, PayloadBuilderError>>,
+    payload: oneshot::Receiver<Result<BuildOutcome, PayloadBuilderError>>,
 }
 
 impl Future for PendingPayload {
-    type Output = Result<BuiltPayload, PayloadBuilderError>;
+    type Output = Result<BuildOutcome, PayloadBuilderError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let res = ready!(self.payload.poll_unpin(cx));
@@ -400,13 +383,23 @@ struct PayloadConfig {
     chain_spec: Arc<ChainSpec>,
 }
 
+enum BuildOutcome {
+    /// Successfully built a better block.
+    Better(BuiltPayload),
+    /// Aborted payload building because resulted in worse block wrt. fees.
+    Aborted { fees: U256 },
+    /// Build job was cancelled
+    Cancelled,
+}
+
 /// Builds the payload and sends the result to the given channel.
 fn build_payload<Pool, Client>(
     client: Client,
     pool: Pool,
     config: PayloadConfig,
     cancel: Cancelled,
-    to_job: oneshot::Sender<Result<BuiltPayload, PayloadBuilderError>>,
+    best_payload: Option<Arc<BuiltPayload>>,
+    to_job: oneshot::Sender<Result<BuildOutcome, PayloadBuilderError>>,
 ) where
     Client: StateProviderFactory,
     Pool: TransactionPool,
@@ -417,7 +410,8 @@ fn build_payload<Pool, Client>(
         pool: Pool,
         config: PayloadConfig,
         cancel: Cancelled,
-    ) -> Result<BuiltPayload, PayloadBuilderError>
+        best_payload: Option<Arc<BuiltPayload>>,
+    ) -> Result<BuildOutcome, PayloadBuilderError>
     where
         Client: StateProviderFactory,
         Pool: TransactionPool,
@@ -455,7 +449,7 @@ fn build_payload<Pool, Client>(
 
             // check if the job was cancelled, if so we can exit early
             if cancel.is_cancelled() {
-                return Err(PayloadBuilderError::BuildJobCancelled)
+                return Ok(BuildOutcome::Cancelled)
             }
 
             // convert tx to a signed transaction
@@ -499,6 +493,12 @@ fn build_payload<Pool, Client>(
 
             // append transaction to the list of executed transactions
             executed_txs.push(tx.into_signed());
+        }
+
+        // check if we have a better block
+        if !is_better_payload(best_payload.as_deref(), total_fees) {
+            // can skip building the block
+            return Ok(BuildOutcome::Aborted { fees: total_fees })
         }
 
         let mut withdrawals_root = None;
@@ -555,7 +555,19 @@ fn build_payload<Pool, Client>(
         };
 
         let sealed_block = block.seal_slow();
-        Ok(BuiltPayload::new(attributes.id, sealed_block, total_fees))
+        Ok(BuildOutcome::Better(BuiltPayload::new(attributes.id, sealed_block, total_fees)))
     }
-    let _ = to_job.send(try_build(client, pool, config, cancel));
+    let _ = to_job.send(try_build(client, pool, config, cancel, best_payload));
+}
+
+/// Checks if the new payload is better than the current best.
+///
+/// This compares the total fees of the blocks, higher is better.
+#[inline(always)]
+fn is_better_payload(best_payload: Option<&BuiltPayload>, new_fees: U256) -> bool {
+    if let Some(best_payload) = best_payload {
+        new_fees > best_payload.fees()
+    } else {
+        true
+    }
 }

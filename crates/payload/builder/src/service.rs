@@ -34,6 +34,12 @@ impl PayloadStore {
     }
 }
 
+impl From<PayloadBuilderHandle> for PayloadStore {
+    fn from(inner: PayloadBuilderHandle) -> Self {
+        Self { inner }
+    }
+}
+
 /// A communication channel to the [PayloadBuilderService].
 ///
 /// This is the API used to create new payloads and to get the current state of existing ones.
@@ -51,6 +57,16 @@ impl PayloadBuilderHandle {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::GetPayload(id, tx)).ok()?;
         rx.await.ok()?
+    }
+
+    /// Sends a message to the service to start building a new payload for the given payload.
+    ///
+    /// This is the same as [PayloadBuilderHandle::new_payload] but does not wait for the result.
+    pub fn send_new_payload(&self, attr: PayloadBuilderAttributes) -> PayloadId {
+        let id = attr.payload_id();
+        let (tx, _) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::BuildNewPayload(attr, tx));
+        id
     }
 
     /// Starts building a new payload for the given payload attributes.

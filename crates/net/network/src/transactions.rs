@@ -534,6 +534,7 @@ where
                     if err.is_bad_transaction() && !this.network.is_syncing() {
                         trace!(target: "net::tx", ?err, "Bad transaction import");
                         this.on_bad_import(*err.hash());
+                        this.metrics.reported_bad_transactions.increment(1);
                         continue
                     }
                     this.on_good_import(*err.hash());
@@ -742,7 +743,7 @@ mod tests {
 
         tokio::task::spawn(network);
 
-        handle.update_sync_state(SyncState::Downloading { target_block: 100 });
+        handle.update_sync_state(SyncState::Syncing);
         assert!(NetworkInfo::is_syncing(&handle));
 
         let peer_id = PeerId::random();

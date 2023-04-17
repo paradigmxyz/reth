@@ -22,7 +22,10 @@ impl From<(H256, U256)> for StorageEntry {
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for StorageEntry {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         // for now put full bytes and later compress it.
         buf.put_slice(&self.key.to_fixed_bytes()[..]);
         self.value.to_compact(buf) + 32

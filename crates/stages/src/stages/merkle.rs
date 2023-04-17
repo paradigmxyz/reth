@@ -332,12 +332,16 @@ mod tests {
                 let mut storage_cursor = tx.cursor_dup_read::<tables::HashedStorage>()?;
                 for entry in accounts_cursor.walk_range(..)? {
                     let (key, account) = entry?;
-                    let storage_entries =
-                        storage_cursor.walk_dup(Some(key), None)?.collect::<Result<Vec<_>, _>>()?;
+                    let mut storage_entries = Vec::new();
+                    let mut entry = storage_cursor.seek_exact(key)?;
+                    while let Some((_, storage)) = entry {
+                        storage_entries.push(storage);
+                        entry = storage_cursor.next_dup()?;
+                    }
                     let storage = storage_entries
                         .into_iter()
-                        .filter(|(_, v)| v.value != U256::ZERO)
-                        .map(|(_, v)| (v.key, v.value))
+                        .filter(|v| v.value != U256::ZERO)
+                        .map(|v| (v.key, v.value))
                         .collect::<Vec<_>>();
                     accounts.insert(key, (account, storage));
                 }

@@ -249,7 +249,7 @@ mod tests {
                 fuzz_test_test_struct(TestStruct::default())
             }
             impl Compact for TestStruct {
-                fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+                fn to_compact<B>(self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
                     let mut total_len = 0;
                     let mut buffer = bytes::BytesMut::new();

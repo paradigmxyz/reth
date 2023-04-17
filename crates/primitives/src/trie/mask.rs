@@ -62,7 +62,10 @@ impl std::fmt::Debug for TrieMask {
 }
 
 impl Compact for TrieMask {
-    fn to_compact(self, buf: &mut impl bytes::BufMut) -> usize {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
         buf.put_slice(self.to_be_bytes().as_slice());
         2
     }
