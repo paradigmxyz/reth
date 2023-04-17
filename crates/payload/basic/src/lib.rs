@@ -511,6 +511,7 @@ fn build_payload<Pool, Client>(
         }
 
         let mut withdrawals_root = None;
+        let mut withdrawals = None;
 
         // get balance changes from withdrawals
         if initialized_cfg.spec_id >= SpecId::SHANGHAI {
@@ -526,6 +527,9 @@ fn build_payload<Pool, Client>(
             // calculate withdrawals root
             withdrawals_root =
                 Some(proofs::calculate_withdrawals_root(attributes.withdrawals.iter()));
+
+            // set withdrawals
+            withdrawals = Some(attributes.withdrawals);
         }
 
         // create the block header
@@ -556,12 +560,7 @@ fn build_payload<Pool, Client>(
         };
 
         // seal the block
-        let block = Block {
-            header,
-            body: executed_txs,
-            ommers: vec![],
-            withdrawals: Some(attributes.withdrawals),
-        };
+        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
 
         let sealed_block = block.seal_slow();
         Ok(BuildOutcome::Better(BuiltPayload::new(attributes.id, sealed_block, total_fees)))
