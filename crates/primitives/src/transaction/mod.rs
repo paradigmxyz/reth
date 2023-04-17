@@ -274,6 +274,45 @@ impl Transaction {
         }
     }
 
+    /// Determine the effective gas limit for the given transaction and base fee.
+    /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
+    /// transactions is returned.
+    ///
+    /// If the `max_fee_per_gas` is less than the base fee, an error is returned.
+    pub fn effective_gas_price(
+        &self,
+        base_fee: Option<u64>,
+    ) -> Result<u128, InvalidTransactionError> {
+        if let Some(base_fee) = base_fee {
+            let max_fee_per_gas = self.max_fee_per_gas();
+            if max_fee_per_gas < base_fee {
+                Err(InvalidTransactionError::MaxFeeLessThenBaseFee)
+            } else {
+                let effective_max_fee = max_fee_per_gas - base_fee;
+                Ok(std::cmp::min(effective_max_fee, self.priority_fee_or_price()))
+            }
+        } else {
+            Ok(self.priority_fee_or_price())
+        }
+    }
+
+    /// Return the max priority fee per gas if the transaction is an EIP-1559 transaction, and
+    /// otherwise return the gas price.
+    ///
+    /// # Warning
+    ///
+    /// This is different than the `max_priority_fee_per_gas` method, which returns `None` for
+    /// non-EIP-1559 transactions.
+    pub(crate) fn priority_fee_or_price(&self) -> u128 {
+        match self {
+            Transaction::Legacy(TxLegacy { gas_price, .. }) |
+            Transaction::Eip2930(TxEip2930 { gas_price, .. }) => *gas_price,
+            Transaction::Eip1559(TxEip1559 { max_priority_fee_per_gas, .. }) => {
+                *max_priority_fee_per_gas
+            }
+        }
+    }
+
     /// Get the transaction's input field.
     pub fn input(&self) -> &Bytes {
         match self {
