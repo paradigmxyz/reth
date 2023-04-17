@@ -5,8 +5,8 @@ use crate::{
     stack::{InspectorStack, InspectorStackConfig},
     to_reth_acc,
 };
-use reth_consensus_common::calc;
 use reth_blockchain_tree::post_state::PostState;
+use reth_consensus_common::calc;
 use reth_interfaces::executor::Error;
 use reth_primitives::{
     Account, Address, Block, Bloom, Bytecode, ChainSpec, Hardfork, Header, Receipt,
