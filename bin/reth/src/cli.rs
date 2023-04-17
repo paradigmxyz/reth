@@ -1,6 +1,4 @@
 //! CLI definition and entrypoint to executable
-use std::str::FromStr;
-
 use crate::{
     chain, config, db,
     dirs::{LogsDir, PlatformPath},
@@ -14,6 +12,7 @@ use reth_tracing::{
     tracing_subscriber::{filter::Directive, registry::LookupSpan},
     BoxedLayer, FileWorkerGuard,
 };
+use std::str::FromStr;
 
 /// Parse CLI options, set up logging and run the chosen command.
 pub fn run() -> eyre::Result<()> {
@@ -29,12 +28,16 @@ pub fn run() -> eyre::Result<()> {
 
     match opt.command {
         Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
-        Commands::Init(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Import(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::Stage(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::DumpStage(command) => runner.run_until_ctrl_c(command.execute()),
-        Commands::DropStage(command) => runner.run_until_ctrl_c(command.execute()),
+        Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::Stage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+        Commands::DumpStage(command) => {
+            // TODO: This should be run_blocking_until_ctrl_c as well, but fails to compile due to
+            // weird compiler GAT issues.
+            runner.run_until_ctrl_c(command.execute())
+        }
+        Commands::DropStage(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::TestEthChain(command) => runner.run_until_ctrl_c(command.execute()),

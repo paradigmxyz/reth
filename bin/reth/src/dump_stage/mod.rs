@@ -1,7 +1,18 @@
 //! Database debugging tool
-mod hashing_storage;
+use crate::{
+    dirs::{DbPath, MaybePlatformPath, PlatformPath},
+    utils::DbTool,
+};
+use clap::Parser;
+use reth_db::{
+    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
+};
+use reth_primitives::ChainSpec;
+use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
 use std::sync::Arc;
+use tracing::info;
 
+mod hashing_storage;
 use hashing_storage::dump_hashing_storage_stage;
 
 mod hashing_account;
@@ -12,18 +23,6 @@ use execution::dump_execution_stage;
 
 mod merkle;
 use merkle::dump_merkle_stage;
-use reth_primitives::ChainSpec;
-
-use crate::{
-    dirs::{DbPath, MaybePlatformPath, PlatformPath},
-    utils::DbTool,
-};
-use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
-};
-use reth_staged_sync::utils::{chainspec::genesis_value_parser, init::init_db};
-use tracing::info;
 
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
@@ -98,7 +97,7 @@ pub struct StageCommand {
 
 impl Command {
     /// Execute `dump-stage` command
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         // add network name to db directory
         let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 

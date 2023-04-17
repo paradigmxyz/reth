@@ -54,7 +54,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db` command
-    pub async fn execute(&self) -> eyre::Result<()> {
+    pub async fn execute(self) -> eyre::Result<()> {
         // add network name to db directory
         let db_path = self.db.unwrap_or_chain_default(self.chain.chain);
 
